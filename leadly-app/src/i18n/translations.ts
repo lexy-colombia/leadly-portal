@@ -44,8 +44,11 @@ export const translations = {
     'inbox.assignee.unassigned': 'Sin asignar',
     'inbox.status.open': 'Abierta',
     'inbox.status.closed': 'Cerrada',
+    'inbox.status.closeAction': 'Cerrar conversación',
+    'inbox.status.reopenAction': 'Reabrir conversación',
     'inbox.chat.aiRespondingHint': 'La IA está respondiendo esta conversación. Activa el modo humano para escribir directamente.',
     'inbox.chat.messagePlaceholder': 'Escribe un mensaje...',
+    'inbox.chat.closedHint': 'Esta conversación está cerrada. Reábrela para escribirle de nuevo -- la IA empezará sin el historial anterior.',
   },
   en: {
     'inbox.title': 'Conversations',
@@ -85,8 +88,11 @@ export const translations = {
     'inbox.assignee.unassigned': 'Unassigned',
     'inbox.status.open': 'Open',
     'inbox.status.closed': 'Closed',
+    'inbox.status.closeAction': 'Close conversation',
+    'inbox.status.reopenAction': 'Reopen conversation',
     'inbox.chat.aiRespondingHint': 'The AI is replying in this conversation. Switch to human mode to type directly.',
     'inbox.chat.messagePlaceholder': 'Type a message...',
+    'inbox.chat.closedHint': 'This conversation is closed. Reopen it to write again -- the AI will start without the previous history.',
   },
 } as const satisfies Record<Language, Record<string, string>>
 

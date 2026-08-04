@@ -38,7 +38,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: conversation } = await adminClient
     .from("whatsapp_conversations")
-    .select("id, tenant_id, whatsapp_line_id, contact_phone, mode")
+    .select("id, tenant_id, whatsapp_line_id, contact_phone, mode, context_reset_at")
     .eq("id", body.conversation_id)
     .maybeSingle();
 
@@ -66,12 +66,22 @@ Deno.serve(async (req: Request) => {
     return json({ skipped: true, reason: "assistant_inactive" }, 200);
   }
 
-  const { data: recentMessages } = await adminClient
+  // A closed-then-reopened conversation gets context_reset_at stamped (see
+  // whatsapp-webhook / ChatPanel's "Reabrir conversación") -- everything said
+  // before that point is still visible to the tenant in the CRM, but the AI
+  // shouldn't see it: it's meant to feel like a genuinely new conversation,
+  // not a resumed one. No reset ever happened -> context_reset_at is null ->
+  // the query below is unfiltered, same as before this feature existed.
+  let contextQuery = adminClient
     .from("whatsapp_messages")
     .select("direction, sender_type, content, created_at")
     .eq("conversation_id", conversation.id)
     .order("created_at", { ascending: false })
     .limit(CONTEXT_MESSAGE_LIMIT);
+  if (conversation.context_reset_at) {
+    contextQuery = contextQuery.gte("created_at", conversation.context_reset_at);
+  }
+  const { data: recentMessages } = await contextQuery;
 
   const history = (recentMessages ?? []).slice().reverse();
   const lastInbound = [...history].reverse().find((m) => m.direction === "inbound");
@@ -79,7 +89,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: accessToken } = await adminClient.rpc("get_whatsapp_line_access_token", { p_line_id: line.id });
   if (!accessToken) {
-    await insertOutbound(adminClient, conversation.id, "", "No hay access token configurado para esta línea.");
+    console.error(`No access token configured for whatsapp_line ${line.id}`);
     return json({ error: "No access token configured for this line" }, 200);
   }
 
@@ -88,8 +98,12 @@ Deno.serve(async (req: Request) => {
   if (lastInbound && requestsHumanHandoff(lastInbound.content)) {
     await adminClient.from("whatsapp_conversations").update({ mode: "humano" }).eq("id", conversation.id);
     const sendResult = await sendWhatsappText(line.phone_number_id, accessToken, conversation.contact_phone, HUMAN_HANDOFF_REPLY);
-    await insertOutbound(adminClient, conversation.id, HUMAN_HANDOFF_REPLY, sendResult.errorMessage, sendResult.wamid);
-    return json({ handoff: true }, 200);
+    if (sendResult.ok) {
+      await insertOutbound(adminClient, conversation.id, HUMAN_HANDOFF_REPLY, sendResult.wamid);
+    } else {
+      console.error("Failed to send human handoff reply", sendResult.errorMessage);
+    }
+    return json({ handoff: true, sent: sendResult.ok }, 200);
   }
 
   let replyText: string;
@@ -101,14 +115,16 @@ Deno.serve(async (req: Request) => {
   } catch (err) {
     console.error("AI provider call failed", err);
     const sendResult = await sendWhatsappText(line.phone_number_id, accessToken, conversation.contact_phone, AI_ERROR_FALLBACK_REPLY);
-    await insertOutbound(
-      adminClient,
-      conversation.id,
-      AI_ERROR_FALLBACK_REPLY,
-      `AI provider error: ${err instanceof Error ? err.message : "unknown"}${sendResult.errorMessage ? ` / send error: ${sendResult.errorMessage}` : ""}`,
-      sendResult.wamid,
-    );
-    return json({ error: "AI provider call failed" }, 200);
+    // Only record the fallback message in the customer's history if it
+    // actually reached them -- see "Bug: mensajes fantasma" in CLAUDE.md.
+    // A failed send left no trace for the contact, so it shouldn't appear
+    // as if Leadly said something in the conversation.
+    if (sendResult.ok) {
+      await insertOutbound(adminClient, conversation.id, AI_ERROR_FALLBACK_REPLY, sendResult.wamid);
+    } else {
+      console.error("Failed to send AI error fallback reply", sendResult.errorMessage);
+    }
+    return json({ error: "AI provider call failed", sent: sendResult.ok }, 200);
   }
 
   // Meta AI-Assisted Business Messaging policy (see CLAUDE.md section 6):
@@ -118,21 +134,24 @@ Deno.serve(async (req: Request) => {
   }
 
   const sendResult = await sendWhatsappText(line.phone_number_id, accessToken, conversation.contact_phone, replyText);
-  await insertOutbound(adminClient, conversation.id, replyText, sendResult.errorMessage, sendResult.wamid, tokensUsed);
+  if (sendResult.ok) {
+    await insertOutbound(adminClient, conversation.id, replyText, sendResult.wamid, tokensUsed);
+  } else {
+    console.error("Failed to send AI reply", sendResult.errorMessage);
+  }
 
   return json({ sent: sendResult.ok }, 200);
 });
 
 // deno-lint-ignore no-explicit-any
-async function insertOutbound(adminClient: any, conversationId: string, content: string, errorMessage: string | null, wamid: string | null = null, tokensUsed: number | null = null) {
+async function insertOutbound(adminClient: any, conversationId: string, content: string, wamid: string | null, tokensUsed: number | null = null) {
   await adminClient.from("whatsapp_messages").insert({
     conversation_id: conversationId,
     direction: "outbound",
     sender_type: "ia",
-    content: content || "(sin contenido)",
+    content,
     wamid,
     tokens_used: tokensUsed,
-    error_message: errorMessage,
   });
 }
 

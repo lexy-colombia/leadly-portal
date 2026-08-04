@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button, InitialsAvatar, PageSpinner, Select, Switch } from '../../../components/ui'
-import { ChevronLeftIcon, SendIcon } from '../../../components/icons'
+import { ChevronLeftIcon, LockClosedIcon, SendIcon } from '../../../components/icons'
 import {
   conversationDisplayName,
   listMessages,
@@ -8,6 +8,7 @@ import {
   setConversationAssignee,
   setConversationCategory,
   setConversationMode,
+  setConversationStatus,
   subscribeToMessages,
 } from '../../../lib/api/conversations'
 import type { ConversationWithLine } from '../../../lib/api/conversations'
@@ -37,6 +38,7 @@ export function ChatPanel({
   const [modeUpdating, setModeUpdating] = useState(false)
   const [categoryUpdating, setCategoryUpdating] = useState(false)
   const [assigneeUpdating, setAssigneeUpdating] = useState(false)
+  const [statusUpdating, setStatusUpdating] = useState(false)
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -96,6 +98,19 @@ export function ChatPanel({
       setError(err instanceof Error ? err.message : 'No se pudo asignar la conversación.')
     } finally {
       setAssigneeUpdating(false)
+    }
+  }
+
+  async function handleStatusToggle() {
+    const nextStatus = conversation.status === 'open' ? 'closed' : 'open'
+    setStatusUpdating(true)
+    setError(null)
+    try {
+      await setConversationStatus(conversation.id, nextStatus)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo cambiar el estado de la conversación.')
+    } finally {
+      setStatusUpdating(false)
     }
   }
 
@@ -169,6 +184,15 @@ export function ChatPanel({
               </option>
             ))}
           </Select>
+          <Button
+            variant={conversation.status === 'open' ? 'ghost' : 'secondary'}
+            onClick={handleStatusToggle}
+            disabled={statusUpdating}
+            className="!ml-auto !px-3 !py-1.5 !text-xs"
+          >
+            <LockClosedIcon width={13} height={13} />
+            {conversation.status === 'open' ? t('inbox.status.closeAction') : t('inbox.status.reopenAction')}
+          </Button>
         </div>
       </div>
 
@@ -183,7 +207,9 @@ export function ChatPanel({
       </div>
 
       <div className="border-t border-brand-100 bg-white p-3">
-        {isHumano ? (
+        {conversation.status === 'closed' ? (
+          <p className="rounded-xl bg-brand-50 px-3.5 py-2.5 text-center text-xs text-brand-400">{t('inbox.chat.closedHint')}</p>
+        ) : isHumano ? (
           <div className="flex items-end gap-2">
             <textarea
               value={draft}

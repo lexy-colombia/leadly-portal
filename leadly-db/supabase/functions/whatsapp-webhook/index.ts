@@ -115,6 +115,20 @@ Deno.serve(async (req: Request) => {
           await adminClient.from("whatsapp_conversations").update({ contact_name: contactName }).eq("id", conversation.id);
         }
 
+        // A contact writing back into a *closed* conversation is treated as
+        // starting fresh: reopen it, reset the AI's context boundary (see
+        // whatsapp-ai-respond), and hand it back to the AI by default -- the
+        // full history still stays visible in the CRM, this only affects
+        // what the AI sees and how the conversation behaves going forward.
+        if (conversation.status === "closed") {
+          await adminClient
+            .from("whatsapp_conversations")
+            .update({ status: "open", context_reset_at: new Date().toISOString(), mode: "ia" })
+            .eq("id", conversation.id);
+          conversation.status = "open";
+          conversation.mode = "ia";
+        }
+
         await adminClient.from("whatsapp_messages").insert({
           conversation_id: conversation.id,
           direction: "inbound",

@@ -87,6 +87,7 @@ export interface WhatsappConversation {
   status: ConversationStatus
   category: ConversationCategory | null
   assigned_agent_id: string | null
+  context_reset_at: string | null
   last_message_at: string | null
   created_at: string
   updated_at: string

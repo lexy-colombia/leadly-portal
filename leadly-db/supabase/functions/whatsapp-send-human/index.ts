@@ -79,6 +79,13 @@ Deno.serve(async (req: Request) => {
 
   const sendResult = await sendWhatsappText(line.phone_number_id, accessToken, conversation.contact_phone, content.trim());
 
+  // A message that never reached the contact shouldn't show up in the chat
+  // as if it had -- surface the failure to the agent instead so they know to
+  // retry (the draft stays in their input box, see leadly-app ChatPanel).
+  if (!sendResult.ok) {
+    return json({ error: sendResult.errorMessage ?? "No se pudo enviar el mensaje." }, 400);
+  }
+
   const { data: message, error: insertError } = await callerClient
     .from("whatsapp_messages")
     .insert({
@@ -88,7 +95,6 @@ Deno.serve(async (req: Request) => {
       sender_profile_id: caller.id,
       content: content.trim(),
       wamid: sendResult.wamid,
-      error_message: sendResult.errorMessage,
     })
     .select()
     .single();
@@ -97,5 +103,5 @@ Deno.serve(async (req: Request) => {
     return json({ error: insertError.message }, 400);
   }
 
-  return json({ message, sent: sendResult.ok }, 200);
+  return json({ message, sent: true }, 200);
 });

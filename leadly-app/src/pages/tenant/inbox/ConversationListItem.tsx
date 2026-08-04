@@ -50,6 +50,11 @@ export function ConversationListItem({
                 {CATEGORY_LABEL[conversation.category]}
               </span>
             )}
+            {conversation.status === 'closed' && (
+              <span className="shrink-0 rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-600">
+                {t('inbox.status.closed')}
+              </span>
+            )}
           </span>
           <span className="shrink-0 text-[11px] text-brand-400">{formatTime(conversation.last_message_at)}</span>
         </span>

@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient'
-import type { ConversationCategory, ConversationMode, WhatsappConversation, WhatsappMessage } from '../../types/domain'
+import type { ConversationCategory, ConversationMode, ConversationStatus, WhatsappConversation, WhatsappMessage } from '../../types/domain'
 
 // `contact_name` on the conversation itself is whatever WhatsApp reports as
 // the contact's own profile name, and whatsapp-webhook keeps refreshing it on
@@ -29,6 +29,20 @@ export async function listConversations(tenantId: string): Promise<ConversationW
 
 export async function setConversationAssignee(conversationId: string, agentId: string | null): Promise<void> {
   const { error } = await supabase.from('whatsapp_conversations').update({ assigned_agent_id: agentId }).eq('id', conversationId)
+  if (error) throw error
+}
+
+/** Closing just marks status='closed', nothing else changes -- the chat
+ * history stays exactly as it is. Reopening (whether the tenant does it
+ * manually to write to the contact again, or whatsapp-webhook does it
+ * automatically when the contact writes in) also resets the AI's context
+ * boundary and hands the conversation back to the AI by default, so it
+ * feels like a genuinely fresh conversation instead of resuming a closed
+ * one mid-thread. */
+export async function setConversationStatus(conversationId: string, status: ConversationStatus): Promise<void> {
+  const update: { status: ConversationStatus; context_reset_at?: string; mode?: ConversationMode } =
+    status === 'open' ? { status, context_reset_at: new Date().toISOString(), mode: 'ia' } : { status }
+  const { error } = await supabase.from('whatsapp_conversations').update(update).eq('id', conversationId)
   if (error) throw error
 }
 

@@ -96,3 +96,34 @@ export async function whatsappLineHasAccessToken(id: string): Promise<boolean> {
   if (error) throw error
   return !!data
 }
+
+/** Finishes WhatsApp Embedded Signup server-side (code exchange needs the
+ * Meta App Secret, which never reaches the browser) -- see
+ * lib/metaEmbeddedSignup.ts for the client-side popup step that produces
+ * these values. */
+export async function connectWhatsappLineViaEmbeddedSignup(
+  code: string,
+  wabaId: string,
+  phoneNumberId: string,
+  displayName: string,
+): Promise<WhatsappLine> {
+  const { data, error } = await supabase.functions.invoke('whatsapp-embedded-signup', {
+    body: { code, waba_id: wabaId, phone_number_id: phoneNumberId, display_name: displayName },
+  })
+  if (error) {
+    const context = (error as { context?: Response }).context
+    if (context && typeof context.json === 'function') {
+      let specificMessage: string | undefined
+      try {
+        const body = await context.json()
+        specificMessage = body?.error
+      } catch {
+        /* fall through to generic error */
+      }
+      if (specificMessage) throw new Error(specificMessage)
+    }
+    throw error
+  }
+  if (data?.error) throw new Error(data.error)
+  return data.line
+}

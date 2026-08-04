@@ -90,19 +90,26 @@ Deno.serve(async (req: Request) => {
       .eq("whatsapp_line_id", lineId)
       .maybeSingle();
 
-    if (conv) {
+    // Only record the reminder in the conversation's history if it actually
+    // reached the contact -- a failed send left no trace for them, so it
+    // shouldn't look like Leadly said something. reminder_sent_at is still
+    // stamped either way (success or failure) so a broken line doesn't get
+    // retried every 5 minutes -- that's a separate concern from what shows
+    // up in the chat.
+    if (conv && result.ok) {
       await adminClient.from("whatsapp_messages").insert({
         conversation_id: conv.id,
         direction: "outbound",
         sender_type: "ia",
         content: message,
         wamid: result.wamid,
-        error_message: result.errorMessage,
       });
+    } else if (!result.ok) {
+      console.error(`Failed to send appointment reminder for ${appt.id}`, result.errorMessage);
     }
 
     await adminClient.from("crm_appointments").update({ reminder_sent_at: new Date().toISOString() }).eq("id", appt.id);
-    sent++;
+    if (result.ok) sent++;
   }
 
   return json({ scanned: appointments?.length ?? 0, sent }, 200);
