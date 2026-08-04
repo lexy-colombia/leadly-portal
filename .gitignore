@@ -1,0 +1,11 @@
+# OS / editor
+.DS_Store
+*.swp
+
+# Local session/agent state -- not project source
+.remember/
+.claude/settings.local.json
+
+# Supabase CLI local cache (per-machine, includes local pooler/project state)
+leadly-db/supabase/.temp/
+leadly-db/supabase/.branches/
