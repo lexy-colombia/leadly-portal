@@ -35,9 +35,12 @@ export async function getWhatsappLine(id: string): Promise<WhatsappLineWithTenan
   return data as unknown as WhatsappLineWithTenant | null
 }
 
-/** Creates the line and a default (inactive) AI assistant config for it in
- * the same step -- ai_assistants is 1:1 with whatsapp_lines, so a line should
- * never exist without a config row to edit on the "Asistente de IA" screen.
+/** Creates the line and a default (inactive) AI agent for it in the same
+ * step -- a line should never exist without something to edit on the
+ * "IA & Agentes" screen. Agents are no longer owned 1:1 by a line (an agent
+ * can be reassigned to other lines, or shared across several), so this just
+ * seeds a private starting point and links it back via the line's own
+ * `ai_assistant_id` -- the tenant can swap it for a shared agent later.
  * Rolls back the line if the assistant insert fails, mirroring Bedly's
  * admin-create-user rollback-on-partial-failure pattern. */
 export async function createWhatsappLine(input: WhatsappLineInput): Promise<WhatsappLine> {
@@ -58,20 +61,28 @@ export async function createWhatsappLine(input: WhatsappLineInput): Promise<What
     throw modelError ?? new Error('No hay un modelo de IA activo por defecto configurado.')
   }
 
-  const { error: assistantError } = await supabase.from('ai_assistants').insert({
-    whatsapp_line_id: line.id,
-    provider: defaultModel.provider,
-    model: defaultModel.model_code,
-    system_prompt: '',
-    is_active: false,
-  })
+  const { data: assistant, error: assistantError } = await supabase
+    .from('ai_assistants')
+    .insert({
+      tenant_id: input.tenant_id,
+      name: `Asistente de ${input.display_name}`,
+      provider: defaultModel.provider,
+      model: defaultModel.model_code,
+      system_prompt: '',
+      is_active: false,
+    })
+    .select('id')
+    .single()
 
   if (assistantError) {
     await supabase.from('whatsapp_lines').delete().eq('id', line.id)
     throw assistantError
   }
 
-  return line
+  const { error: linkError } = await supabase.from('whatsapp_lines').update({ ai_assistant_id: assistant.id }).eq('id', line.id)
+  if (linkError) throw linkError
+
+  return { ...line, ai_assistant_id: assistant.id }
 }
 
 export async function updateWhatsappLine(id: string, input: WhatsappLineInput): Promise<WhatsappLine> {
@@ -84,6 +95,16 @@ export async function setWhatsappLineStatus(id: string, status: WhatsappLineStat
   const { data, error } = await supabase.from('whatsapp_lines').update({ status }).eq('id', id).select().single()
   if (error) throw error
   return data
+}
+
+/** Disconnects a line: hard-deletes it (row + Vault-stored access token) if
+ * it has no conversations yet, or -- if it does -- keeps the row and its
+ * conversation history but flips it to status 'disconnected' and drops the
+ * access token, so it can never send/receive again. See delete_whatsapp_line
+ * RPC (20260809180000_whatsapp_line_disconnect_keeps_history.sql). */
+export async function deleteWhatsappLine(id: string): Promise<void> {
+  const { error } = await supabase.rpc('delete_whatsapp_line', { p_line_id: id })
+  if (error) throw new Error(error.message)
 }
 
 export async function setWhatsappLineAccessToken(id: string, accessToken: string): Promise<void> {

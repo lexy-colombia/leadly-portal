@@ -27,6 +27,28 @@ export async function listConversations(tenantId: string): Promise<ConversationW
   return data as unknown as ConversationWithLine[]
 }
 
+/** "Último contacto" per CRM contact, used by the Clientes list -- derived
+ * from the most recent WhatsApp message across all of a contact's linked
+ * conversations rather than a stored column, since it's cheap to compute
+ * from data that already exists (whatsapp_conversations is indexed on
+ * contact_id) and never needs its own migration/trigger to stay in sync. */
+export async function listLastContactTimesByTenant(tenantId: string): Promise<Map<string, string>> {
+  const { data, error } = await supabase
+    .from('whatsapp_conversations')
+    .select('contact_id, last_message_at')
+    .eq('tenant_id', tenantId)
+    .not('contact_id', 'is', null)
+    .not('last_message_at', 'is', null)
+  if (error) throw error
+
+  const result = new Map<string, string>()
+  for (const row of data as { contact_id: string; last_message_at: string }[]) {
+    const current = result.get(row.contact_id)
+    if (!current || row.last_message_at > current) result.set(row.contact_id, row.last_message_at)
+  }
+  return result
+}
+
 export async function setConversationAssignee(conversationId: string, agentId: string | null): Promise<void> {
   const { error } = await supabase.from('whatsapp_conversations').update({ assigned_agent_id: agentId }).eq('id', conversationId)
   if (error) throw error
@@ -56,6 +78,28 @@ export async function listMessages(conversationId: string): Promise<WhatsappMess
   return data
 }
 
+export interface MessageTiming {
+  conversation_id: string
+  direction: WhatsappMessage['direction']
+  created_at: string
+}
+
+/** Bulk, lightweight message fetch (3 columns, no content) across many
+ * conversations at once -- used by the Dashboard to compute a real "tiempo
+ * promedio de respuesta" (average gap between an inbound message and the
+ * next outbound one in the same conversation) instead of fabricating it.
+ * Empty array short-circuits instead of running `.in('conversation_id', [])`. */
+export async function listMessageTimingsForConversations(conversationIds: string[]): Promise<MessageTiming[]> {
+  if (conversationIds.length === 0) return []
+  const { data, error } = await supabase
+    .from('whatsapp_messages')
+    .select('conversation_id, direction, created_at')
+    .in('conversation_id', conversationIds)
+    .order('created_at', { ascending: true })
+  if (error) throw error
+  return data
+}
+
 export async function setConversationMode(conversationId: string, mode: ConversationMode): Promise<void> {
   const { error } = await supabase.from('whatsapp_conversations').update({ mode }).eq('id', conversationId)
   if (error) throw error
@@ -66,11 +110,38 @@ export async function setConversationCategory(conversationId: string, category: 
   if (error) throw error
 }
 
+/** Archiving is purely about Inbox visibility -- a separate axis from
+ * `status` (who's currently responding) -- so it never touches mode/status/
+ * context, unlike closing a conversation. */
+export async function setConversationArchived(conversationId: string, archived: boolean): Promise<void> {
+  const { error } = await supabase
+    .from('whatsapp_conversations')
+    .update({ archived_at: archived ? new Date().toISOString() : null })
+    .eq('id', conversationId)
+  if (error) throw error
+}
+
 export async function listConversationsForContact(contactId: string): Promise<ConversationWithLine[]> {
   const { data, error } = await supabase
     .from('whatsapp_conversations')
     .select('*, whatsapp_line:whatsapp_lines(display_name), contact:crm_contacts(full_name), agent:profiles!assigned_agent_id(full_name)')
     .eq('contact_id', contactId)
+    .order('last_message_at', { ascending: false, nullsFirst: false })
+  if (error) throw error
+  return data as unknown as ConversationWithLine[]
+}
+
+/** Same as listConversationsForContact but for every contact linked to an
+ * account -- "Conversaciones" tab on the Empresa detail screen. Empty array
+ * short-circuits (an account with no contacts yet) instead of running a
+ * `.in('contact_id', [])` query, which Postgres would happily run but always
+ * return nothing for anyway. */
+export async function listConversationsForContacts(contactIds: string[]): Promise<ConversationWithLine[]> {
+  if (contactIds.length === 0) return []
+  const { data, error } = await supabase
+    .from('whatsapp_conversations')
+    .select('*, whatsapp_line:whatsapp_lines(display_name), contact:crm_contacts(full_name), agent:profiles!assigned_agent_id(full_name)')
+    .in('contact_id', contactIds)
     .order('last_message_at', { ascending: false, nullsFirst: false })
   if (error) throw error
   return data as unknown as ConversationWithLine[]
@@ -150,9 +221,13 @@ export function subscribeToConversations(tenantId: string, onChange: () => void)
   }
 }
 
-export async function sendHumanMessage(conversationId: string, content: string): Promise<WhatsappMessage> {
+export async function sendHumanMessage(
+  conversationId: string,
+  content: string,
+  media?: { storage_path: string; mime_type: string; size_bytes: number },
+): Promise<WhatsappMessage> {
   const { data, error } = await supabase.functions.invoke('whatsapp-send-human', {
-    body: { conversation_id: conversationId, content },
+    body: { conversation_id: conversationId, content, media },
   })
   if (error) {
     const context = (error as { context?: Response }).context
@@ -170,4 +245,30 @@ export async function sendHumanMessage(conversationId: string, content: string):
   }
   if (data?.error) throw new Error(data.error)
   return data.message
+}
+
+/** Manually re-triggers the AI for a conversation that got stuck with no
+ * reply -- see whatsapp-retry-ai-response. Same purpose as the automatic
+ * retry now built into whatsapp-webhook, but for cases that need a human to
+ * notice and act (the automatic retries were also exhausted, or the
+ * assistant was inactive at the time and got turned back on since). */
+export async function retryAiResponse(conversationId: string): Promise<void> {
+  const { data, error } = await supabase.functions.invoke('whatsapp-retry-ai-response', {
+    body: { conversation_id: conversationId },
+  })
+  if (error) {
+    const context = (error as { context?: Response }).context
+    if (context && typeof context.json === 'function') {
+      let specificMessage: string | undefined
+      try {
+        const body = await context.json()
+        specificMessage = body?.error
+      } catch {
+        /* fall through to generic error */
+      }
+      if (specificMessage) throw new Error(specificMessage)
+    }
+    throw error
+  }
+  if (data?.error) throw new Error(data.error)
 }

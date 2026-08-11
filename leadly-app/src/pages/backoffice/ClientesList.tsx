@@ -21,8 +21,7 @@ export function ClientesList() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="text-xl font-bold text-brand-800 sm:text-2xl">Clientes</h1>
+      <div className="flex items-center justify-end gap-3">
         <Button variant="secondary" onClick={() => setDrawerOpen(true)}>
           <PlusIcon width={16} height={16} /> Nuevo cliente
         </Button>

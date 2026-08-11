@@ -1,5 +1,23 @@
 import { supabase } from '../supabaseClient'
-import type { AppointmentStatus, CrmAppointment } from '../../types/domain'
+import type { AppointmentStatus, AppointmentWithContact, CrmAppointment } from '../../types/domain'
+
+/** Tenant-wide appointments in a date range (calendar month view) -- unlike
+ * listAppointmentsForContact, this isn't scoped to one contact, so it joins
+ * crm_contacts for the display name. `rangeEnd` is exclusive. */
+export async function listAppointmentsForTenantRange(tenantId: string, rangeStart: string, rangeEnd: string): Promise<AppointmentWithContact[]> {
+  const { data, error } = await supabase
+    .from('crm_appointments')
+    .select('*, crm_contacts(full_name)')
+    .eq('tenant_id', tenantId)
+    .gte('scheduled_at', rangeStart)
+    .lt('scheduled_at', rangeEnd)
+    .order('scheduled_at', { ascending: true })
+  if (error) throw error
+  return data.map(({ crm_contacts, ...appointment }) => ({
+    ...appointment,
+    contact_full_name: (crm_contacts as { full_name: string } | null)?.full_name ?? null,
+  }))
+}
 
 export async function listAppointmentsForContact(contactId: string): Promise<CrmAppointment[]> {
   const { data, error } = await supabase

@@ -35,3 +35,11 @@ export const LANGUAGES: { value: TenantLanguage; label: string }[] = [
 
 export const TENANT_LOGO_MAX_BYTES = 5 * 1024 * 1024
 export const TENANT_LOGO_ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml']
+
+export const PQR_ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024
+export const PQR_ATTACHMENT_ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp']
+
+// Task attachments allow PDF too (a task attachment is very likely a
+// proposal/quote sent to a client), unlike PQR evidence photos.
+export const TASK_ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024
+export const TASK_ATTACHMENT_ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'application/pdf']

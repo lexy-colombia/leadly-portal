@@ -9,7 +9,6 @@ export function Changelog() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-bold text-brand-800 sm:text-2xl">Novedades</h1>
       {sections.map((section) => (
         <Card key={section.heading}>
           <h2 className="mb-2 font-semibold text-brand-700">{section.heading}</h2>

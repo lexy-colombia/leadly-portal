@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import { LanguageProvider } from './contexts/LanguageContext'
 import { RequireAuth, RequireRole } from './routes/guards'
@@ -10,18 +10,28 @@ import { CreateCompany } from './pages/auth/CreateCompany'
 import { BackofficeLayout } from './layouts/BackofficeLayout'
 import { TenantLayout } from './layouts/TenantLayout'
 import { Changelog } from './pages/Changelog'
-import { ComingSoon } from './pages/ComingSoon'
 import { ClientesList } from './pages/backoffice/ClientesList'
 import { ClienteDetalle } from './pages/backoffice/ClienteDetalle'
 import { Configuracion } from './pages/backoffice/Configuracion'
-import { Asistente } from './pages/tenant/Asistente'
-import { Usuarios } from './pages/tenant/Usuarios'
+import { Facturacion } from './pages/backoffice/Facturacion'
+import { Dashboard as BackofficeDashboard } from './pages/backoffice/Dashboard'
+import { Configuracion as TenantConfiguracion } from './pages/tenant/Configuracion'
+import { Dashboard as TenantDashboard } from './pages/tenant/Dashboard'
 import { Inbox } from './pages/tenant/Inbox'
 import { Contactos } from './pages/tenant/Contactos'
 import { ContactoDetalle } from './pages/tenant/ContactoDetalle'
+import { Oportunidades } from './pages/tenant/Oportunidades'
+import { Productos } from './pages/tenant/Productos'
+import { ProductoDetalle } from './pages/tenant/ProductoDetalle'
+import { Ventas } from './pages/tenant/Ventas'
+import { VentaDetalle } from './pages/tenant/VentaDetalle'
+import { Tareas } from './pages/tenant/Tareas'
+import { Calendario } from './pages/tenant/Calendario'
+import { Facturacion as TenantFacturacion } from './pages/tenant/Facturacion'
+import { IaAgentes } from './pages/tenant/IaAgentes'
 import { LockedFeature } from './pages/tenant/LockedFeature'
 import { MiCuenta } from './pages/shared/MiCuenta'
-import { CatalogIcon, MegaphoneIcon } from './components/icons'
+import { BarChartIcon, MegaphoneIcon, RefreshIcon } from './components/icons'
 
 export default function App() {
   return (
@@ -48,10 +58,11 @@ export default function App() {
               </RequireAuth>
             }
           >
-            <Route index element={<ComingSoon title="Dashboard" />} />
+            <Route index element={<BackofficeDashboard />} />
             <Route path="clientes" element={<ClientesList />} />
             {/* Líneas de WhatsApp lives inside ClienteDetalle, not as its own route. */}
             <Route path="clientes/:id" element={<ClienteDetalle />} />
+            <Route path="facturacion" element={<Facturacion />} />
             <Route path="configuracion" element={<Configuracion />} />
             <Route path="novedades" element={<Changelog />} />
             <Route path="perfil" element={<MiCuenta />} />
@@ -68,30 +79,52 @@ export default function App() {
             }
           >
             <Route index element={<Inbox />} />
+            <Route path="dashboard" element={<TenantDashboard />} />
             <Route path="clientes" element={<Contactos />} />
             <Route path="clientes/:id" element={<ContactoDetalle />} />
+            {/* Empresas se fusionó dentro de Contactos (crm_accounts fue
+                eliminada) -- este redirect solo cubre links/bookmarks viejos. */}
+            <Route path="empresas" element={<Navigate to="/app/clientes" replace />} />
+            <Route path="oportunidades" element={<Oportunidades />} />
+            <Route path="productos" element={<Productos />} />
+            <Route path="productos/:id" element={<ProductoDetalle />} />
+            <Route path="ventas" element={<Ventas />} />
+            <Route path="ventas/:id" element={<VentaDetalle />} />
+            <Route path="tareas" element={<Tareas />} />
+            <Route path="calendario" element={<Calendario />} />
+            <Route
+              path="reportes"
+              element={
+                <LockedFeature
+                  icon={BarChartIcon}
+                  description="Reportes de conversión, actividad y desempeño llegarán próximamente. Estamos trabajando en esta función."
+                />
+              }
+            />
+            <Route
+              path="automatizaciones"
+              element={
+                <LockedFeature
+                  icon={RefreshIcon}
+                  description="Automatizaciones de seguimiento y flujos de trabajo llegarán próximamente. Estamos trabajando en esta función."
+                />
+              }
+            />
+            <Route path="ia-agentes" element={<IaAgentes />} />
+            <Route path="facturacion" element={<TenantFacturacion />} />
             <Route
               path="campanas"
               element={
                 <LockedFeature
                   icon={MegaphoneIcon}
-                  title="Campañas"
                   description="Pausas publicitarias y campañas masivas de WhatsApp llegarán próximamente. Estamos trabajando en esta función."
                 />
               }
             />
-            <Route
-              path="catalogo"
-              element={
-                <LockedFeature
-                  icon={CatalogIcon}
-                  title="Catálogo"
-                  description="Muestra tu catálogo de productos directamente en WhatsApp. Esta función estará disponible próximamente."
-                />
-              }
-            />
-            <Route path="asistente" element={<Asistente />} />
-            <Route path="usuarios" element={<Usuarios />} />
+            {/* Catálogo se fusionó dentro de Productos (mismo catálogo, no dos
+                pantallas separadas) -- este redirect solo cubre links/bookmarks viejos. */}
+            <Route path="catalogo" element={<Navigate to="/app/productos" replace />} />
+            <Route path="configuracion" element={<TenantConfiguracion />} />
             <Route path="novedades" element={<Changelog />} />
             <Route path="perfil" element={<MiCuenta />} />
           </Route>

@@ -1,21 +1,38 @@
 import { AppShell, type NavItem } from '../components/layout/AppShell'
-import { useAuth } from '../contexts/AuthContext'
-import { AiSparkleIcon, BellIcon, BuildingIcon, CatalogIcon, ChatBubbleIcon, MegaphoneIcon, UsersIcon } from '../components/icons'
+import {
+  AiSparkleIcon,
+  BarChartIcon,
+  BoxIcon,
+  BuildingIcon,
+  CalendarIcon,
+  ChatBubbleIcon,
+  CheckIcon,
+  CreditCardIcon,
+  DashboardIcon,
+  MegaphoneIcon,
+  ReceiptIcon,
+  RefreshIcon,
+  SettingsIcon,
+  TargetIcon,
+} from '../components/icons'
 
-const BASE_NAV_ITEMS: NavItem[] = [
+const NAV_ITEMS: NavItem[] = [
+  { to: '/app/dashboard', label: 'Dashboard', icon: DashboardIcon },
   { to: '/app', label: 'Conversaciones', icon: ChatBubbleIcon },
-  { to: '/app/clientes', label: 'Clientes', icon: BuildingIcon },
+  { to: '/app/clientes', label: 'Contactos', icon: BuildingIcon },
+  { to: '/app/oportunidades', label: 'Pipeline', icon: TargetIcon },
+  { to: '/app/productos', label: 'Productos', icon: BoxIcon },
+  { to: '/app/ventas', label: 'Cotizaciones y Ventas', icon: ReceiptIcon },
+  { to: '/app/tareas', label: 'Tareas', icon: CheckIcon },
+  { to: '/app/calendario', label: 'Calendario', icon: CalendarIcon },
   { to: '/app/campanas', label: 'Campañas', icon: MegaphoneIcon, badge: 'Beta' },
-  { to: '/app/catalogo', label: 'Catálogo', icon: CatalogIcon, badge: 'Beta' },
-  { to: '/app/asistente', label: 'Asistente de IA', icon: AiSparkleIcon },
-  { to: '/app/novedades', label: 'Novedades', icon: BellIcon },
+  { to: '/app/reportes', label: 'Reportes', icon: BarChartIcon },
+  { to: '/app/automatizaciones', label: 'Automatizaciones', icon: RefreshIcon },
+  { to: '/app/ia-agentes', label: 'IA & Agentes', icon: AiSparkleIcon },
+  { to: '/app/facturacion', label: 'Facturación', icon: CreditCardIcon },
+  { to: '/app/configuracion', label: 'Configuración', icon: SettingsIcon },
 ]
 
-const ADMIN_NAV_ITEMS: NavItem[] = [{ to: '/app/usuarios', label: 'Usuarios', icon: UsersIcon }]
-
 export function TenantLayout() {
-  const { profile } = useAuth()
-  const navItems = profile?.role === 'tenant_admin' ? [...BASE_NAV_ITEMS, ...ADMIN_NAV_ITEMS] : BASE_NAV_ITEMS
-
-  return <AppShell subtitle="Panel del cliente · Leadly" navItems={navItems} theme="light" />
+  return <AppShell subtitle="Panel del cliente · Leadly" navItems={NAV_ITEMS} theme="light" showUpsell />
 }

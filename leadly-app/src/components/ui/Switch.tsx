@@ -20,7 +20,7 @@ export function Switch({
         className={`relative h-6 w-11 shrink-0 rounded-full transition-colors duration-150 ${checked ? 'bg-accent-500' : 'bg-brand-200'}`}
       >
         <span
-          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-150 ${
+          className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-150 ${
             checked ? 'translate-x-[22px]' : 'translate-x-0.5'
           }`}
         />

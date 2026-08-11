@@ -1,5 +1,5 @@
-@import "tailwindcss";
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap');
+@import "tailwindcss";
 
 /*
  * Leadly design tokens, pinned to the brand book: azul principal #101A35,
@@ -70,4 +70,17 @@ h1, h2, h3, h4, h5, h6 {
 
 .animate-sidebar-item-in {
   animation: sidebar-item-in 0.15s ease-out both;
+}
+
+/* Softens switching between tabs on a detail page (e.g. EmpresaDetalle) --
+   without this, swapping the whole content block for a different one reads
+   as an instant, jarring cut. Paired with `key={tab}` on the wrapper so
+   React remounts it (and re-triggers the animation) on every tab change. */
+@keyframes tab-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-tab-fade-in {
+  animation: tab-fade-in 0.18s ease-out;
 }

@@ -302,6 +302,15 @@ export function KeyIcon(props: IconProps) {
   )
 }
 
+export function CreditCardIcon(props: IconProps) {
+  return (
+    <svg {...DEFAULTS} {...props}>
+      <rect x="3" y="5.5" width="18" height="13" rx="2" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M3 9.5h18M6.5 14.5h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 export function CalendarIcon(props: IconProps) {
   return (
     <svg {...DEFAULTS} {...props}>
@@ -328,11 +337,134 @@ export function FilterIcon(props: IconProps) {
   )
 }
 
+export function RefreshIcon(props: IconProps) {
+  return (
+    <svg {...DEFAULTS} {...props}>
+      <path
+        d="M4 12a8 8 0 0 1 13.66-5.66M20 12a8 8 0 0 1-13.66 5.66"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+      <path d="M17 3v4h-4M7 21v-4h4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 export function UserIcon(props: IconProps) {
   return (
     <svg {...DEFAULTS} {...props}>
       <circle cx="12" cy="8.5" r="3.5" stroke="currentColor" strokeWidth="1.6" />
       <path d="M4.5 20c1.3-3.6 4.2-5.5 7.5-5.5s6.2 1.9 7.5 5.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function TagIcon(props: IconProps) {
+  return (
+    <svg {...DEFAULTS} {...props}>
+      <path
+        d="M11.6 4H6.5A2.5 2.5 0 0 0 4 6.5v5.1c0 .53.21 1.04.59 1.41l7.4 7.4a2 2 0 0 0 2.82 0l5.1-5.1a2 2 0 0 0 0-2.82l-7.4-7.4A2 2 0 0 0 11.6 4Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <circle cx="8.2" cy="8.2" r="1.2" fill="currentColor" />
+    </svg>
+  )
+}
+
+export function TrashIcon(props: IconProps) {
+  return (
+    <svg {...DEFAULTS} {...props}>
+      <path d="M4.5 7h15M9.5 7V5.5a1.5 1.5 0 0 1 1.5-1.5h2a1.5 1.5 0 0 1 1.5 1.5V7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M6.5 7v12a1.5 1.5 0 0 0 1.5 1.5h8a1.5 1.5 0 0 0 1.5-1.5V7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M10 11v6M14 11v6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function AlertIcon(props: IconProps) {
+  return (
+    <svg {...DEFAULTS} {...props}>
+      <path
+        d="M12 4.5 3.5 19h17L12 4.5Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path d="M12 10v3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx="12" cy="16" r="1" fill="currentColor" />
+    </svg>
+  )
+}
+
+export function ClockIcon(props: IconProps) {
+  return (
+    <svg {...DEFAULTS} {...props}>
+      <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M12 7.5V12l3 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+export function ArchiveIcon(props: IconProps) {
+  return (
+    <svg {...DEFAULTS} {...props}>
+      <rect x="4" y="4.5" width="16" height="4" rx="1.2" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M5 8.5v9.3a1.7 1.7 0 0 0 1.7 1.7h10.6a1.7 1.7 0 0 0 1.7-1.7V8.5" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M10 12.5h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function ImageIcon(props: IconProps) {
+  return (
+    <svg {...DEFAULTS} {...props}>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="8.5" cy="9.5" r="1.5" stroke="currentColor" strokeWidth="1.6" />
+      <path d="m5 17 4.5-4.5a1.5 1.5 0 0 1 2.1 0l1.4 1.4M14 13.5l1.4-1.4a1.5 1.5 0 0 1 2.1 0L20 14.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+export function PaperclipIcon(props: IconProps) {
+  return (
+    <svg {...DEFAULTS} {...props}>
+      <path
+        d="M8 12.5V7a4 4 0 1 1 8 0v9a2.5 2.5 0 0 1-5 0V8.5a1 1 0 1 1 2 0V15"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+export function FileIcon(props: IconProps) {
+  return (
+    <svg {...DEFAULTS} {...props}>
+      <path d="M6.5 3.5h8l4 4v12.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M14 3.5V8h4.5" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+export function BoxIcon(props: IconProps) {
+  return (
+    <svg {...DEFAULTS} {...props}>
+      <path d="M3.5 8 12 3.5 20.5 8 12 12.5 3.5 8Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M3.5 8v9l8.5 4.5M20.5 8v9L12 21.5M12 12.5V21.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+export function ReceiptIcon(props: IconProps) {
+  return (
+    <svg {...DEFAULTS} {...props}>
+      <path d="M6 3.5h12v17l-2.5-1.5-2 1.5-2-1.5-2 1.5-2-1.5L6 20.5v-17Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M9 8h6M9 11.5h6M9 15h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   )
 }

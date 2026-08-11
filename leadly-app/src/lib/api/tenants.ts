@@ -77,7 +77,7 @@ export async function uploadTenantLogo(tenantId: string, file: File): Promise<Te
   // a cached response for the same path after an upsert.
   const logoUrl = `${publicUrlData.publicUrl}?v=${Date.now()}`
 
-  const { data, error } = await supabase.from('tenants').update({ logo_url: logoUrl }).eq('id', tenantId).select().single()
+  const { data, error } = await supabase.rpc('set_tenant_logo', { p_tenant_id: tenantId, p_logo_url: logoUrl })
   if (error) throw error
   return data
 }

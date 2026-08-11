@@ -16,21 +16,14 @@ export function MiCuenta() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-bold text-brand-800 sm:text-2xl">Mi cuenta</h1>
-        <p className="text-sm text-brand-400">Tu información personal y acceso.</p>
-      </div>
-
       {profile && (
-        <Card padded={false}>
+        <Card padded={false} className="max-w-xl">
           <CardSection title="Perfil">
-            <div className="mb-5 flex items-center gap-3">
-              <InitialsAvatar name={profile.full_name} size="lg" />
+            <div className="mb-4 flex items-center gap-3">
+              <InitialsAvatar name={profile.full_name} size="md" />
               <div>
-                <p className="font-semibold text-brand-800">{profile.full_name}</p>
-                <div className="mt-1 flex items-center gap-2">
-                  <Badge tone="neutral">{ROLE_LABEL[profile.role] ?? profile.role}</Badge>
-                </div>
+                <p className="text-sm font-semibold text-brand-800">{profile.full_name}</p>
+                <Badge tone="neutral">{ROLE_LABEL[profile.role] ?? profile.role}</Badge>
               </div>
             </div>
             <ProfileForm profileId={profile.id} fullName={profile.full_name} email={profile.email} phone={profile.phone} onSaved={refreshProfile} />
@@ -93,22 +86,24 @@ function ProfileForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} noValidate className="space-y-4">
+    <form onSubmit={handleSubmit} noValidate className="space-y-3.5">
       <div>
         <Label htmlFor="account-name">Nombre completo</Label>
         <Input id="account-name" value={name} invalid={!!nameError} onChange={(e) => setName(e.target.value)} />
         <FieldError message={nameError} />
       </div>
 
-      <div>
-        <Label htmlFor="account-email">Correo</Label>
-        <Input id="account-email" value={email} disabled />
-      </div>
+      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+        <div>
+          <Label htmlFor="account-email">Correo</Label>
+          <Input id="account-email" value={email} disabled />
+        </div>
 
-      <div>
-        <Label htmlFor="account-phone">Teléfono</Label>
-        <Input id="account-phone" value={phoneValue} invalid={!!phoneError} onChange={(e) => setPhoneValue(e.target.value)} placeholder="+573001234567" />
-        <FieldError message={phoneError} />
+        <div>
+          <Label htmlFor="account-phone">Teléfono</Label>
+          <Input id="account-phone" value={phoneValue} invalid={!!phoneError} onChange={(e) => setPhoneValue(e.target.value)} placeholder="+573001234567" />
+          <FieldError message={phoneError} />
+        </div>
       </div>
 
       {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
@@ -154,17 +149,19 @@ function PasswordForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} noValidate className="space-y-4">
-      <div>
-        <Label htmlFor="account-new-password">Nueva contraseña</Label>
-        <Input id="account-new-password" type="password" value={newPassword} invalid={!!passwordError} onChange={(e) => setNewPassword(e.target.value)} />
-        <FieldError message={passwordError} />
-      </div>
+    <form onSubmit={handleSubmit} noValidate className="space-y-3.5">
+      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+        <div>
+          <Label htmlFor="account-new-password">Nueva contraseña</Label>
+          <Input id="account-new-password" type="password" value={newPassword} invalid={!!passwordError} onChange={(e) => setNewPassword(e.target.value)} />
+          <FieldError message={passwordError} />
+        </div>
 
-      <div>
-        <Label htmlFor="account-confirm-password">Confirmar contraseña</Label>
-        <Input id="account-confirm-password" type="password" value={confirmPassword} invalid={!!confirmError} onChange={(e) => setConfirmPassword(e.target.value)} />
-        <FieldError message={confirmError} />
+        <div>
+          <Label htmlFor="account-confirm-password">Confirmar contraseña</Label>
+          <Input id="account-confirm-password" type="password" value={confirmPassword} invalid={!!confirmError} onChange={(e) => setConfirmPassword(e.target.value)} />
+          <FieldError message={confirmError} />
+        </div>
       </div>
 
       {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}

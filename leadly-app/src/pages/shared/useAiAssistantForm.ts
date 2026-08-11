@@ -4,6 +4,7 @@ import type { AiAssistant, AiModel, AiProvider } from '../../types/domain'
 import { isNotBlank, isValidMaxTokens, isValidTemperature } from '../../lib/validation'
 
 export function useAiAssistantForm(initial: AiAssistant | null | undefined, models: AiModel[]) {
+  const [name, setName] = useState(initial?.name ?? '')
   const [provider, setProviderRaw] = useState<AiProvider>(initial?.provider ?? 'openai')
   const [model, setModel] = useState(initial?.model ?? '')
   const [systemPrompt, setSystemPrompt] = useState(initial?.system_prompt ?? '')
@@ -23,6 +24,7 @@ export function useAiAssistantForm(initial: AiAssistant | null | undefined, mode
     setModel(firstForProvider?.model_code ?? '')
   }
 
+  const nameError = touched && !isNotBlank(name) ? 'Ponle un nombre al agente.' : undefined
   const modelError = touched && !model ? 'Selecciona un modelo.' : undefined
   const systemPromptError =
     touched && isActive && !isNotBlank(systemPrompt) ? 'El system prompt es obligatorio para activar el asistente.' : undefined
@@ -30,11 +32,12 @@ export function useAiAssistantForm(initial: AiAssistant | null | undefined, mode
   const maxTokensError = touched && !isValidMaxTokens(maxTokens) ? 'Debe ser un número entero entre 1 y 8192.' : undefined
 
   function isValid() {
-    return !!model && (!isActive || isNotBlank(systemPrompt)) && isValidTemperature(temperature) && isValidMaxTokens(maxTokens)
+    return isNotBlank(name) && !!model && (!isActive || isNotBlank(systemPrompt)) && isValidTemperature(temperature) && isValidMaxTokens(maxTokens)
   }
 
   function toInput(): AiAssistantInput {
     return {
+      name: name.trim(),
       provider,
       model,
       system_prompt: systemPrompt.trim(),
@@ -45,6 +48,9 @@ export function useAiAssistantForm(initial: AiAssistant | null | undefined, mode
   }
 
   return {
+    name,
+    setName,
+    nameError,
     provider,
     setProvider,
     model,

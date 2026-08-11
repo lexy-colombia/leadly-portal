@@ -32,12 +32,12 @@ export function SidebarNavItem({
       onClick={onClick}
       title={collapsed ? label : undefined}
       className={({ isActive }) =>
-        `group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150 ${
+        `group flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-all duration-150 ${
           collapsed ? 'lg:justify-center' : ''
         } ${isActive ? 'bg-accent-500 text-white shadow-sm shadow-accent-900/20' : inactiveClasses}`
       }
     >
-      <Icon width={18} height={18} />
+      <Icon width={16} height={16} />
       <span className={`flex min-w-0 flex-1 items-center gap-1.5 ${collapsed ? 'lg:hidden' : ''}`}>
         <span className="truncate">{label}</span>
         {badge && (

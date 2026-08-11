@@ -36,35 +36,36 @@ export function ConversationListItem({
     <button
       type="button"
       onClick={onClick}
-      className={`flex w-full items-center gap-3 border-b border-brand-100/70 px-4 py-3 text-left transition-colors ${
+      className={`flex w-full items-center gap-2.5 border-b border-brand-100/70 px-3.5 py-2.5 text-left transition-colors ${
         active ? 'bg-accent-50' : 'hover:bg-brand-50'
       }`}
     >
-      <InitialsAvatar name={name} />
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center justify-between gap-2">
-          <span className="flex min-w-0 items-center gap-1.5">
-            <span className="truncate text-sm font-semibold text-brand-800">{name}</span>
+      <span
+        className={`h-1.5 w-1.5 shrink-0 rounded-full ${conversation.mode === 'ia' ? 'bg-accent-500' : 'bg-amber-500'}`}
+      />
+      <InitialsAvatar name={name} size="md" />
+      <span className="flex min-w-0 flex-1 items-center gap-2">
+        <span className="min-w-0 flex-1 space-y-0.5">
+          <span className="block truncate text-sm font-medium text-brand-800">{name}</span>
+          <span className="block truncate text-xs text-brand-400">
+            {conversation.mode === 'ia' ? t('inbox.mode.ia') : t('inbox.mode.humano')}
+            {conversation.agent && <> · {conversation.agent.full_name}</>}
+            {conversation.whatsapp_line && <> · {conversation.whatsapp_line.display_name}</>}
+          </span>
+        </span>
+        <span className="flex shrink-0 flex-col items-end gap-1">
+          <span className="text-[11px] text-brand-400">{formatTime(conversation.last_message_at)}</span>
+          <span className="flex items-center gap-1">
             {conversation.category && (
-              <span className="shrink-0 rounded-full bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium text-brand-500">
+              <span className="rounded-full bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-brand-500">
                 {CATEGORY_LABEL[conversation.category]}
               </span>
             )}
             {conversation.status === 'closed' && (
-              <span className="shrink-0 rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-600">
+              <span className="rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-red-600">
                 {t('inbox.status.closed')}
               </span>
             )}
-          </span>
-          <span className="shrink-0 text-[11px] text-brand-400">{formatTime(conversation.last_message_at)}</span>
-        </span>
-        <span className="mt-0.5 flex items-center gap-1.5">
-          <span
-            className={`h-1.5 w-1.5 shrink-0 rounded-full ${conversation.mode === 'ia' ? 'bg-accent-500' : 'bg-amber-500'}`}
-          />
-          <span className="truncate text-xs text-brand-400">
-            {conversation.mode === 'ia' ? t('inbox.mode.ia') : t('inbox.mode.humano')} · {conversation.whatsapp_line?.display_name ?? 'Línea'}
-            {conversation.agent && <> · {conversation.agent.full_name}</>}
           </span>
         </span>
       </span>

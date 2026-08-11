@@ -17,6 +17,7 @@ const STATUS_LABEL: Record<WhatsappLineStatus, string> = {
   pending_verification: 'Pendiente de verificación',
   active: 'Activa',
   suspended: 'Suspendida',
+  disconnected: 'Desconectada',
 }
 
 /** One drawer for both "nueva línea" and "editar línea" -- always scoped to a

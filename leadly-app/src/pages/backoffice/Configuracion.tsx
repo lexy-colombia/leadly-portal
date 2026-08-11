@@ -1,7 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { hasPlatformAiKey, setPlatformAiKey, type AiKeyProvider } from '../../lib/api/platformAiKeys'
 import { Badge, Button, Card, CardSection, Input, Label } from '../../components/ui'
-import { KeyIcon } from '../../components/icons'
 
 const PROVIDER_LABEL: Record<AiKeyProvider, string> = { openai: 'OpenAI', gemini: 'Google Gemini' }
 const PROVIDER_HINT: Record<AiKeyProvider, string> = {
@@ -77,16 +76,6 @@ function ProviderKeyCard({ provider }: { provider: AiKeyProvider }) {
 export function Configuracion() {
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent-50 text-accent-600">
-          <KeyIcon width={18} height={18} />
-        </span>
-        <div>
-          <h1 className="text-xl font-bold text-brand-800 sm:text-2xl">Configuración de IA</h1>
-          <p className="text-sm text-brand-400">API keys usadas por todos los asistentes de todos los clientes.</p>
-        </div>
-      </div>
-
       <Card padded={false}>
         <ProviderKeyCard provider="openai" />
         <ProviderKeyCard provider="gemini" />

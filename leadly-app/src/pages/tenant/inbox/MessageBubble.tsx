@@ -1,9 +1,15 @@
 import { AiSparkleIcon, UserIcon } from '../../../components/icons'
+import { SignedImage } from '../../../components/AttachmentImage'
 import type { WhatsappMessage } from '../../../types/domain'
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })
 }
+
+// Placeholder content the webhook stores when a customer sends a photo with
+// no caption (see whatsapp-webhook/index.ts) -- shown as just the image,
+// without also echoing this generic text underneath it.
+const IMAGE_PLACEHOLDER_CONTENT = '[Imagen adjunta]'
 
 const SENDER_LABEL: Record<WhatsappMessage['sender_type'], string> = {
   contact: 'Contacto',
@@ -33,11 +39,11 @@ export function MessageBubble({ message }: { message: WhatsappMessage }) {
             {SENDER_LABEL[message.sender_type]}
           </span>
         )}
-        <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.content}</p>
-        {message.error_message && (
-          <p className={`mt-1.5 text-[11px] ${isOutbound && !isIa ? 'text-red-200' : 'text-red-600'}`}>
-            No se pudo entregar: {message.error_message}
-          </p>
+        {message.media_storage_path && (
+          <SignedImage storagePath={message.media_storage_path} alt="Imagen enviada por el contacto" className="mb-1.5 max-h-64 w-full" />
+        )}
+        {!(message.media_storage_path && message.content === IMAGE_PLACEHOLDER_CONTENT) && (
+          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.content}</p>
         )}
         <span className={`mt-1 block text-right text-[10px] ${isOutbound && !isIa ? 'text-brand-300' : 'text-brand-400'}`}>
           {formatTime(message.created_at)}

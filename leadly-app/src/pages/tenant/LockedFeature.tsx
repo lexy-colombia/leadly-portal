@@ -8,20 +8,13 @@ import { LockClosedIcon } from '../../components/icons'
  * problem, it's "coming soon". */
 export function LockedFeature({
   icon: Icon,
-  title,
   description,
 }: {
   icon: ComponentType<{ width?: number; height?: number }>
-  title: string
   description: ReactNode
 }) {
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <h1 className="text-xl font-bold text-brand-800 sm:text-2xl">{title}</h1>
-        <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-700">Beta</span>
-      </div>
-
       <Card>
         <div className="flex flex-col items-center gap-3 px-4 py-14 text-center">
           <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-50 text-brand-300">
