@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
+import { useLanguage } from '../../contexts/LanguageContext'
 import { Button, type ButtonVariant } from './Button'
 
 /** Centered modal for a single destructive/important confirmation (delete,
@@ -14,8 +15,8 @@ export function ConfirmDialog({
   onConfirm,
   title,
   description,
-  confirmLabel = 'Confirmar',
-  cancelLabel = 'Cancelar',
+  confirmLabel,
+  cancelLabel,
   confirmVariant = 'danger',
   loading = false,
   error,
@@ -31,6 +32,10 @@ export function ConfirmDialog({
   loading?: boolean
   error?: string | null
 }) {
+  const { t } = useLanguage()
+  const resolvedConfirmLabel = confirmLabel ?? t('common.actions.confirm')
+  const resolvedCancelLabel = cancelLabel ?? t('common.actions.cancel')
+
   useEffect(() => {
     if (!open) return
     function handleKey(e: KeyboardEvent) {
@@ -56,10 +61,10 @@ export function ConfirmDialog({
         {error && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
         <div className="mt-6 flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose} disabled={loading} className="!px-3.5 !py-2 text-sm">
-            {cancelLabel}
+            {resolvedCancelLabel}
           </Button>
           <Button type="button" variant={confirmVariant} onClick={onConfirm} disabled={loading} className="!px-3.5 !py-2 text-sm">
-            {loading ? 'Procesando…' : confirmLabel}
+            {loading ? t('common.status.processing') : resolvedConfirmLabel}
           </Button>
         </div>
       </div>

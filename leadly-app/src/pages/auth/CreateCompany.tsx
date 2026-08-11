@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
+import { useLanguage } from '../../contexts/LanguageContext'
 import { supabase } from '../../lib/supabaseClient'
 import { AuthSplitLayout } from '../../components/layout/AuthSplitLayout'
 import { Button, FieldError, Input, Label } from '../../components/ui'
@@ -13,6 +14,7 @@ import { roleHome } from '../../routes/guards'
  * entirely (self-delete-account Edge Function) to wait for a real invite. */
 export function CreateCompany() {
   const { session, loading, unprovisioned, user, refreshProfile, signOut } = useAuth()
+  const { t } = useLanguage()
   const navigate = useNavigate()
 
   const metadataName = (user?.user_metadata?.full_name as string | undefined) ?? (user?.user_metadata?.name as string | undefined) ?? ''
@@ -33,8 +35,8 @@ export function CreateCompany() {
     return <Navigate to="/login" replace />
   }
 
-  const tenantNameError = touched && !isNotBlank(tenantName) ? 'Ingresa el nombre de tu empresa.' : undefined
-  const fullNameError = touched && !isNotBlank(fullName) ? 'Ingresa tu nombre.' : undefined
+  const tenantNameError = touched && !isNotBlank(tenantName) ? t('auth.createCompany.errors.tenantNameRequired') : undefined
+  const fullNameError = touched && !isNotBlank(fullName) ? t('auth.errors.nameRequired') : undefined
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -65,7 +67,7 @@ export function CreateCompany() {
     setDeleting(false)
 
     if (error) {
-      setDeleteError('No pudimos eliminar tu cuenta. Intenta de nuevo o escríbenos.')
+      setDeleteError(t('auth.createCompany.deleteError'))
       return
     }
     await signOut()
@@ -75,32 +77,30 @@ export function CreateCompany() {
   return (
     <AuthSplitLayout>
       <div className="animate-fade-in">
-        <h1 className="text-2xl font-extrabold text-brand-800 sm:text-3xl">Crea tu empresa</h1>
-        <p className="mt-1 text-brand-400">
-          Estás a un paso de usar Leadly. Cuéntanos el nombre de tu empresa para configurar tu panel.
-        </p>
+        <h1 className="text-2xl font-extrabold text-brand-800 sm:text-3xl">{t('auth.createCompany.title')}</h1>
+        <p className="mt-1 text-brand-400">{t('auth.createCompany.subtitle')}</p>
 
         <form onSubmit={handleSubmit} noValidate className="mt-6 space-y-4">
           <div>
-            <Label htmlFor="tenantName">Nombre de tu empresa</Label>
+            <Label htmlFor="tenantName">{t('auth.createCompany.tenantName')}</Label>
             <Input
               id="tenantName"
               value={tenantName}
               invalid={!!tenantNameError}
               onChange={(e) => setTenantName(e.target.value)}
-              placeholder="Ej. Panadería Los Andes"
+              placeholder={t('auth.createCompany.tenantNamePlaceholder')}
             />
             <FieldError message={tenantNameError} />
           </div>
 
           <div>
-            <Label htmlFor="fullName">Tu nombre</Label>
+            <Label htmlFor="fullName">{t('auth.signup.yourName')}</Label>
             <Input
               id="fullName"
               value={fullName}
               invalid={!!fullNameError}
               onChange={(e) => setFullName(e.target.value)}
-              placeholder="Nombre y apellido"
+              placeholder={t('auth.namePlaceholder')}
             />
             <FieldError message={fullNameError} />
           </div>
@@ -108,30 +108,27 @@ export function CreateCompany() {
           {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
 
           <Button type="submit" variant="secondary" className="w-full" disabled={submitting}>
-            {submitting ? 'Creando tu empresa…' : 'Crear mi empresa'}
+            {submitting ? t('auth.createCompany.submitting') : t('auth.createCompany.submit')}
           </Button>
         </form>
 
         <div className="mt-8 rounded-xl border border-brand-100 bg-brand-50/50 p-4">
-          <p className="text-sm text-brand-500">
-            ¿Entraste por error? Si en realidad esperas que alguien te invite a una empresa ya existente en Leadly, puedes eliminar esta
-            cuenta y volver a intentarlo cuando tengas la invitación.
-          </p>
+          <p className="text-sm text-brand-500">{t('auth.createCompany.wrongAccount')}</p>
 
           {deleteError && <p className="mt-2 text-xs text-red-600">{deleteError}</p>}
 
           {confirmingDelete ? (
             <div className="mt-3 flex flex-wrap gap-2">
               <Button type="button" variant="danger" onClick={handleDelete} disabled={deleting}>
-                {deleting ? 'Eliminando…' : 'Sí, eliminar mi cuenta'}
+                {deleting ? t('auth.createCompany.deleting') : t('auth.createCompany.confirmDelete')}
               </Button>
               <Button type="button" variant="ghost" onClick={() => setConfirmingDelete(false)} disabled={deleting}>
-                Cancelar
+                {t('common.actions.cancel')}
               </Button>
             </div>
           ) : (
             <Button type="button" variant="ghost" className="mt-3" onClick={() => setConfirmingDelete(true)}>
-              No fue mi intención, eliminar mi cuenta
+              {t('auth.createCompany.deleteAccount')}
             </Button>
           )}
         </div>

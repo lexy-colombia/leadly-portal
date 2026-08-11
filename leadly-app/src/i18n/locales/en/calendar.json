@@ -1,0 +1,42 @@
+{
+  "calendar.weekday.mon": "Mon",
+  "calendar.weekday.tue": "Tue",
+  "calendar.weekday.wed": "Wed",
+  "calendar.weekday.thu": "Thu",
+  "calendar.weekday.fri": "Fri",
+  "calendar.weekday.sat": "Sat",
+  "calendar.weekday.sun": "Sun",
+
+  "calendar.today": "Today",
+  "calendar.aria.prevMonth": "Previous month",
+  "calendar.aria.nextMonth": "Next month",
+  "calendar.actions.new": "New appointment",
+  "calendar.moreCount": "+{count} more",
+
+  "calendar.errors.loadFailed": "Couldn't load appointments.",
+  "calendar.errors.updateFailed": "Couldn't update the appointment.",
+  "calendar.errors.createFailed": "Couldn't schedule the appointment.",
+
+  "calendar.status.activa": "Scheduled",
+  "calendar.status.completada": "Completed",
+  "calendar.status.cancelada": "Cancelled",
+
+  "calendar.detail.title": "Appointment details",
+  "calendar.detail.contactFallback": "Contact",
+  "calendar.detail.markCompleted": "Mark completed",
+  "calendar.detail.cancelAppointment": "Cancel appointment",
+
+  "calendar.form.title": "New appointment",
+  "calendar.form.description": "We'll send a WhatsApp reminder an hour before.",
+  "calendar.form.contact": "Contact",
+  "calendar.form.change": "Change",
+  "calendar.form.searchPlaceholder": "Search by name or phone…",
+  "calendar.form.contactRequired": "Choose a contact.",
+  "calendar.form.dateTime": "Date and time",
+  "calendar.form.dateRequired": "Choose a date and time.",
+  "calendar.form.pastWarning": "That date already passed -- no reminder will be sent.",
+  "calendar.form.notes": "Notes (optional)",
+  "calendar.form.notesPlaceholder": "Reason for the appointment, topics to cover...",
+  "calendar.form.submitting": "Scheduling…",
+  "calendar.form.submit": "Schedule appointment"
+}

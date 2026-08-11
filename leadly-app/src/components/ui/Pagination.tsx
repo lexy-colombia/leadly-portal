@@ -1,3 +1,4 @@
+import { useLanguage } from '../../contexts/LanguageContext'
 import { ChevronLeftIcon } from '../icons'
 
 /** Simple prev/next pager -- used to cap every list in the app at a fixed
@@ -6,6 +7,7 @@ import { ChevronLeftIcon } from '../icons'
  * need to scroll). No numbered page list: at the scale these lists run at
  * (a single tenant's own contacts/PQR/etc.), "Página X de Y" is enough. */
 export function Pagination({ page, totalPages, onChange }: { page: number; totalPages: number; onChange: (page: number) => void }) {
+  const { t } = useLanguage()
   if (totalPages <= 1) return null
 
   return (
@@ -16,18 +18,16 @@ export function Pagination({ page, totalPages, onChange }: { page: number; total
         disabled={page <= 1}
         className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-brand-500 transition-colors hover:bg-brand-50 hover:text-brand-800 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
       >
-        <ChevronLeftIcon width={14} height={14} /> Anterior
+        <ChevronLeftIcon width={14} height={14} /> {t('common.pagination.previous')}
       </button>
-      <span className="text-xs text-brand-400">
-        Página {page} de {totalPages}
-      </span>
+      <span className="text-xs text-brand-400">{t('common.pagination.page', { page, total: totalPages })}</span>
       <button
         type="button"
         onClick={() => onChange(page + 1)}
         disabled={page >= totalPages}
         className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-brand-500 transition-colors hover:bg-brand-50 hover:text-brand-800 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
       >
-        Siguiente <ChevronLeftIcon width={14} height={14} className="rotate-180" />
+        {t('common.pagination.next')} <ChevronLeftIcon width={14} height={14} className="rotate-180" />
       </button>
     </div>
   )

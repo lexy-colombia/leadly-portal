@@ -1,5 +1,15 @@
 import { supabase } from '../supabaseClient'
 import type { CrmOrderPayment, OrderPaymentMethod } from '../../types/domain'
+import type { TranslationKey } from '../../i18n/translations'
+
+// Shared between VentaDetalle.tsx (payment list) and PaymentDrawer.tsx (method
+// select) so the wording never drifts between screens.
+export const PAYMENT_METHOD_LABEL_KEY: Record<OrderPaymentMethod, TranslationKey> = {
+  efectivo: 'orders.paymentMethod.cash',
+  transferencia: 'orders.paymentMethod.transfer',
+  tarjeta: 'orders.paymentMethod.card',
+  otro: 'orders.paymentMethod.other',
+}
 
 export interface OrderPaymentInput {
   tenant_id: string

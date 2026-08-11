@@ -32,10 +32,12 @@ export interface SendTextMessageResult {
   errorMessage: string | null;
 }
 
-/** Sends a plain text message via the Graph API using the line's own
- * (already-decrypted) access token. Never throws -- callers persist success
- * or failure into whatsapp_messages.error_message either way. */
-export async function sendWhatsappText(phoneNumberId: string, accessToken: string, to: string, body: string): Promise<SendTextMessageResult> {
+/** Shared POST to the line's /messages endpoint -- sendWhatsappText and
+ * sendWhatsappImage only differ in the `type`/payload shape, everything
+ * about calling the Graph API and interpreting its response is identical.
+ * Never throws -- callers persist success or failure into
+ * whatsapp_messages.error_message either way. */
+async function postGraphMessage(phoneNumberId: string, accessToken: string, payload: Record<string, unknown>): Promise<SendTextMessageResult> {
   try {
     const resp = await fetch(`https://graph.facebook.com/${GRAPH_API_VERSION}/${phoneNumberId}/messages`, {
       method: "POST",
@@ -43,12 +45,7 @@ export async function sendWhatsappText(phoneNumberId: string, accessToken: strin
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        to,
-        type: "text",
-        text: { body },
-      }),
+      body: JSON.stringify({ messaging_product: "whatsapp", ...payload }),
     });
 
     const json = await resp.json().catch(() => null);
@@ -60,6 +57,52 @@ export async function sendWhatsappText(phoneNumberId: string, accessToken: strin
   } catch (err) {
     return { ok: false, wamid: null, errorMessage: err instanceof Error ? err.message : "Unknown error calling Graph API" };
   }
+}
+
+/** Sends a plain text message via the Graph API using the line's own
+ * (already-decrypted) access token. */
+export async function sendWhatsappText(phoneNumberId: string, accessToken: string, to: string, body: string): Promise<SendTextMessageResult> {
+  return postGraphMessage(phoneNumberId, accessToken, { to, type: "text", text: { body } });
+}
+
+/** Sends an image by link -- Meta fetches `link` itself, so it must be
+ * reachable without any auth of ours (a short-lived signed URL into the
+ * private crm-attachments bucket, see whatsapp-ai-tools::send_attachment and
+ * whatsapp-send-human). */
+export async function sendWhatsappImage(
+  phoneNumberId: string,
+  accessToken: string,
+  to: string,
+  link: string,
+  caption?: string,
+): Promise<SendTextMessageResult> {
+  return postGraphMessage(phoneNumberId, accessToken, { to, type: "image", image: caption ? { link, caption } : { link } });
+}
+
+export interface DownloadedMedia {
+  bytes: Uint8Array;
+  mimeType: string;
+}
+
+/** Downloads a media attachment (e.g. an inbound photo) from the Graph API.
+ * Two-step dance per Meta's docs: GET /{media-id} resolves a short-lived,
+ * authenticated `url` + the mime type, then a second GET against that url
+ * (same bearer token) returns the raw bytes. Throws on any failure -- the
+ * caller decides how to degrade (e.g. still save the message, just without
+ * the image). */
+export async function downloadWhatsappMedia(mediaId: string, accessToken: string): Promise<DownloadedMedia> {
+  const metaResp = await fetch(`https://graph.facebook.com/${GRAPH_API_VERSION}/${mediaId}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!metaResp.ok) throw new Error(`Failed to resolve media ${mediaId} (${metaResp.status})`);
+  const meta = await metaResp.json();
+  if (!meta?.url) throw new Error(`Media ${mediaId} response had no url`);
+
+  const fileResp = await fetch(meta.url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!fileResp.ok) throw new Error(`Failed to download media ${mediaId} bytes (${fileResp.status})`);
+  const bytes = new Uint8Array(await fileResp.arrayBuffer());
+
+  return { bytes, mimeType: meta.mime_type ?? fileResp.headers.get("content-type") ?? "application/octet-stream" };
 }
 
 /** Meta's 2026 AI-Assisted Business Messaging policy requires disclosing AI

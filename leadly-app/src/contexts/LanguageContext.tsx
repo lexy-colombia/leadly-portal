@@ -6,7 +6,11 @@ const STORAGE_KEY = 'leadly:language'
 interface LanguageContextValue {
   language: Language
   setLanguage: (lang: Language) => void
-  t: (key: TranslationKey) => string
+  /** `params` fills `{placeholder}` tokens in the translation string, e.g.
+   * `t('common.pagination.page', { page: 2, total: 5 })` against
+   * `"Página {page} de {total}"` -- keeps word order natural per language
+   * instead of concatenating translated fragments around a number. */
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string
 }
 
 const LanguageContext = createContext<LanguageContextValue | undefined>(undefined)
@@ -34,8 +38,10 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     setLanguageState(lang)
   }
 
-  function t(key: TranslationKey): string {
-    return translations[language][key] ?? key
+  function t(key: TranslationKey, params?: Record<string, string | number>): string {
+    const template = translations[language][key] ?? key
+    if (!params) return template
+    return template.replace(/\{(\w+)\}/g, (match, token: string) => (token in params ? String(params[token]) : match))
   }
 
   return <LanguageContext.Provider value={{ language, setLanguage, t }}>{children}</LanguageContext.Provider>

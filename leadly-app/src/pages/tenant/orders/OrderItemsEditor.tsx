@@ -1,3 +1,4 @@
+import { useLanguage } from '../../../contexts/LanguageContext'
 import { Button, CurrencyInput, Input, Select } from '../../../components/ui'
 import { PlusIcon, TrashIcon } from '../../../components/icons'
 import type { OrderItemInput } from '../../../lib/api/orders'
@@ -18,6 +19,8 @@ export function OrderItemsEditor({
   products: ProductWithImages[]
   onChange: (items: OrderItemInput[]) => void
 }) {
+  const { t } = useLanguage()
+
   function addItem() {
     onChange([...items, { product_id: null, product_name: '', sku: null, quantity: 1, unit_price: 0, discount_percentage: 0 }])
   }
@@ -43,13 +46,13 @@ export function OrderItemsEditor({
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs font-medium text-brand-500">Productos</span>
+        <span className="text-xs font-medium text-brand-500">{t('orders.itemsEditor.title')}</span>
         <Button type="button" variant="ghost" onClick={addItem} className="!px-2 !py-1 text-xs">
-          <PlusIcon width={13} height={13} /> Agregar línea
+          <PlusIcon width={13} height={13} /> {t('orders.itemsEditor.addLine')}
         </Button>
       </div>
 
-      {items.length === 0 && <p className="text-xs text-brand-400">Sin líneas todavía. Agregá al menos un producto.</p>}
+      {items.length === 0 && <p className="text-xs text-brand-400">{t('orders.itemsEditor.empty')}</p>}
 
       {items.length > 0 && (
         <div className="space-y-2">
@@ -57,14 +60,20 @@ export function OrderItemsEditor({
             <div key={index} className="rounded-lg border border-brand-100 p-2.5">
               <div className="flex items-start gap-2">
                 <Select value={item.product_id ?? CUSTOM_LINE_VALUE} onChange={(e) => handleProductSelect(index, e.target.value)} className="!flex-1 !py-1.5 text-xs">
-                  <option value={CUSTOM_LINE_VALUE}>Línea personalizada…</option>
+                  <option value={CUSTOM_LINE_VALUE}>{t('orders.itemsEditor.customLine')}</option>
                   {products.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name}
                     </option>
                   ))}
                 </Select>
-                <Button type="button" variant="ghost" onClick={() => removeItem(index)} className="!shrink-0 !px-2 !py-1.5 !text-red-600 hover:!bg-red-50">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => removeItem(index)}
+                  aria-label={t('orders.itemsEditor.removeAria')}
+                  className="!shrink-0 !px-2 !py-1.5 !text-red-600 hover:!bg-red-50"
+                >
                   <TrashIcon width={13} height={13} />
                 </Button>
               </div>
@@ -73,14 +82,14 @@ export function OrderItemsEditor({
                 <Input
                   value={item.product_name}
                   onChange={(e) => updateItem(index, { product_name: e.target.value })}
-                  placeholder="Nombre de la línea"
+                  placeholder={t('orders.itemsEditor.lineNamePlaceholder')}
                   className="!mt-2 !py-1.5 text-xs"
                 />
               )}
 
               <div className="mt-2 grid grid-cols-3 gap-2">
                 <div>
-                  <span className="mb-1 block text-[11px] font-medium text-brand-500">Cantidad</span>
+                  <span className="mb-1 block text-[11px] font-medium text-brand-500">{t('orders.itemsEditor.quantity')}</span>
                   <Input
                     type="number"
                     min="0"
@@ -91,7 +100,7 @@ export function OrderItemsEditor({
                   />
                 </div>
                 <div>
-                  <span className="mb-1 block text-[11px] font-medium text-brand-500">Precio unitario</span>
+                  <span className="mb-1 block text-[11px] font-medium text-brand-500">{t('orders.itemsEditor.unitPrice')}</span>
                   <CurrencyInput
                     value={item.unit_price}
                     onChange={(e) => updateItem(index, { unit_price: Number(e.target.value) || 0 })}
@@ -99,7 +108,7 @@ export function OrderItemsEditor({
                   />
                 </div>
                 <div>
-                  <span className="mb-1 block text-[11px] font-medium text-brand-500">Descuento %</span>
+                  <span className="mb-1 block text-[11px] font-medium text-brand-500">{t('orders.itemsEditor.discountPercent')}</span>
                   <Input
                     type="number"
                     min="0"

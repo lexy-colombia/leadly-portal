@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useLanguage } from '../../contexts/LanguageContext'
+import type { Language, TranslationKey } from '../../i18n/translations'
 import { getContact, createNote, listNotes } from '../../lib/api/contacts'
 import { listAppointmentsForContact, updateAppointmentStatus } from '../../lib/api/appointments'
 import { listConversationsForContact } from '../../lib/api/conversations'
@@ -56,12 +58,12 @@ import { OpportunityDrawer } from './opportunities/OpportunityDrawer'
 import { OrderDrawer } from './orders/OrderDrawer'
 import type { AppointmentStatus, ContactStage, PqrType } from '../../types/domain'
 
-const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
-  cotizacion: 'Cotización',
-  confirmada: 'Confirmada',
-  en_proceso: 'En proceso',
-  entregada: 'Entregada',
-  cancelada: 'Cancelada',
+const ORDER_STATUS_LABEL: Record<OrderStatus, TranslationKey> = {
+  cotizacion: 'contacts.order.status.cotizacion',
+  confirmada: 'contacts.order.status.confirmada',
+  en_proceso: 'contacts.order.status.en_proceso',
+  entregada: 'contacts.order.status.entregada',
+  cancelada: 'contacts.order.status.cancelada',
 }
 
 const ORDER_STATUS_TONE: Record<OrderStatus, 'neutral' | 'success' | 'warning' | 'danger'> = {
@@ -72,6 +74,8 @@ const ORDER_STATUS_TONE: Record<OrderStatus, 'neutral' | 'success' | 'warning' |
   cancelada: 'danger',
 }
 
+// Currency stays Colombian-peso-formatted regardless of the active UI
+// language -- it's the real business currency, not a language preference.
 function formatCurrency(value: number, currency = 'COP'): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 }
@@ -84,10 +88,10 @@ const STAGE_TONE: Record<ContactStage, 'neutral' | 'success' | 'warning' | 'dang
   perdido: 'danger',
 }
 
-const APPOINTMENT_STATUS_LABEL: Record<AppointmentStatus, string> = {
-  activa: 'Programada',
-  completada: 'Completada',
-  cancelada: 'Cancelada',
+const APPOINTMENT_STATUS_LABEL: Record<AppointmentStatus, TranslationKey> = {
+  activa: 'contacts.appointment.status.activa',
+  completada: 'contacts.appointment.status.completada',
+  cancelada: 'contacts.appointment.status.cancelada',
 }
 
 const APPOINTMENT_STATUS_TONE: Record<AppointmentStatus, 'neutral' | 'success' | 'warning' | 'danger'> = {
@@ -102,11 +106,11 @@ const PQR_TYPE_TONE: Record<PqrType, 'neutral' | 'success' | 'warning' | 'danger
   reclamo: 'danger',
 }
 
-const PQR_STATUS_LABEL: Record<PqrStatus, string> = {
-  abierto: 'Abierto',
-  en_proceso: 'En proceso',
-  resuelto: 'Resuelto',
-  cerrado: 'Cerrado',
+const PQR_STATUS_LABEL: Record<PqrStatus, TranslationKey> = {
+  abierto: 'contacts.pqr.status.abierto',
+  en_proceso: 'contacts.pqr.status.en_proceso',
+  resuelto: 'contacts.pqr.status.resuelto',
+  cerrado: 'contacts.pqr.status.cerrado',
 }
 
 const PAGE_SIZE = 8
@@ -116,12 +120,14 @@ function paginate<T>(items: T[], page: number): { items: T[]; totalPages: number
   return { items: items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), totalPages }
 }
 
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString('es-CO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+function formatDateTime(iso: string, language: Language): string {
+  const locale = language === 'en' ? 'en-US' : 'es-CO'
+  return new Date(iso).toLocaleString(locale, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
 }
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' })
+function formatDate(iso: string, language: Language): string {
+  const locale = language === 'en' ? 'en-US' : 'es-CO'
+  return new Date(iso).toLocaleDateString(locale, { day: '2-digit', month: 'long', year: 'numeric' })
 }
 
 /** Label-above-value field, used throughout the sidebar's data sheet -- one
@@ -190,6 +196,7 @@ function AttachmentThumbnails({ attachments }: { attachments: CrmAttachment[] | 
 }
 
 export function ContactoDetalle() {
+  const { t } = useLanguage()
   const { id } = useParams<{ id: string }>()
   const [contact, setContact] = useState<CrmContact | null | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
@@ -199,10 +206,11 @@ export function ContactoDetalle() {
     let active = true
     getContact(id)
       .then((data) => active && setContact(data))
-      .catch((err) => active && setError(err.message ?? 'No se pudo cargar el cliente.'))
+      .catch((err) => active && setError(err.message ?? t('contacts.detail.errors.load')))
     return () => {
       active = false
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
   if (error) return <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
@@ -210,9 +218,9 @@ export function ContactoDetalle() {
   if (contact === null) {
     return (
       <div className="space-y-4">
-        <p className="text-brand-500">No encontramos este cliente.</p>
+        <p className="text-brand-500">{t('contacts.detail.notFound')}</p>
         <Link to="/app/clientes" className="text-sm font-medium text-accent-600 hover:text-accent-700">
-          Volver a Clientes
+          {t('contacts.detail.backToContacts')}
         </Link>
       </div>
     )
@@ -233,6 +241,7 @@ function ContactoDetalleContent({
   onContactChange: (c: CrmContact) => void
 }) {
   const { profile } = useAuth()
+  const { t, language } = useLanguage()
   const navigate = useNavigate()
   const [tab, setTab] = useState<'resumen' | 'actividad' | 'oportunidades' | 'ventas' | 'pqr' | 'conversaciones' | 'direcciones'>('resumen')
   const [page, setPage] = useState(1)
@@ -364,7 +373,7 @@ function ContactoDetalleContent({
     try {
       await updatePqrStatus(id, status)
       if (profile?.tenant_id) {
-        const update = await createPqrUpdate(profile.tenant_id, id, `Estado cambiado a "${PQR_STATUS_LABEL[status]}".`)
+        const update = await createPqrUpdate(profile.tenant_id, id, t('contacts.detail.pqr.statusChanged', { status: t(PQR_STATUS_LABEL[status]) }))
         setPqrUpdatesById((prev) => (prev[id] ? { ...prev, [id]: [update, ...prev[id]] } : prev))
       }
     } catch {
@@ -482,36 +491,40 @@ function ContactoDetalleContent({
               <InitialsAvatar name={contact.full_name} size="md" />
               <div className="min-w-0">
                 <p className="truncate text-sm font-bold text-brand-800">{contact.full_name}</p>
-                <Badge tone={STAGE_TONE[contact.stage]}>{STAGE_LABEL[contact.stage]}</Badge>
+                <Badge tone={STAGE_TONE[contact.stage]}>{t(STAGE_LABEL[contact.stage])}</Badge>
               </div>
             </div>
             <button
               type="button"
               onClick={() => setEditOpen(true)}
               className="shrink-0 rounded-lg p-1.5 text-brand-400 transition-colors hover:bg-brand-50 hover:text-brand-700"
-              aria-label="Editar cliente"
+              aria-label={t('contacts.detail.aria.edit')}
             >
               <PencilIcon width={15} height={15} />
             </button>
           </div>
 
           <dl className="space-y-3 border-t border-brand-100 py-4 text-sm">
-            <Field icon={<CalendarIcon width={14} height={14} />} label="Fecha de creación" value={formatDate(contact.created_at)} />
+            <Field icon={<CalendarIcon width={14} height={14} />} label={t('contacts.detail.fields.createdAt')} value={formatDate(contact.created_at, language)} />
             <Field
               icon={<ClockIcon width={14} height={14} />}
-              label="Último contacto"
-              value={lastContactAt ? formatDateTime(lastContactAt) : 'Sin contacto todavía'}
+              label={t('contacts.detail.fields.lastContact')}
+              value={lastContactAt ? formatDateTime(lastContactAt, language) : t('contacts.detail.fields.lastContact.none')}
             />
-            <Field icon={<PhoneIcon width={14} height={14} />} label="Teléfono" value={contact.phone} />
-            {contact.email && <Field icon={<MailIcon width={14} height={14} />} label="Email" value={contact.email} />}
-            {contact.company && <Field icon={<BuildingIcon width={14} height={14} />} label="Empresa" value={contact.company} />}
-            {contact.city && <Field icon={<MapPinIcon width={14} height={14} />} label="Ciudad" value={contact.city} />}
-            <Field icon={<UserIcon width={14} height={14} />} label="Agente asignado" value={assignedAgentName ?? 'Sin asignar'} />
+            <Field icon={<PhoneIcon width={14} height={14} />} label={t('contacts.detail.fields.phone')} value={contact.phone} />
+            {contact.email && <Field icon={<MailIcon width={14} height={14} />} label={t('contacts.detail.fields.email')} value={contact.email} />}
+            {contact.company && <Field icon={<BuildingIcon width={14} height={14} />} label={t('contacts.detail.fields.company')} value={contact.company} />}
+            {contact.city && <Field icon={<MapPinIcon width={14} height={14} />} label={t('contacts.detail.fields.city')} value={contact.city} />}
+            <Field
+              icon={<UserIcon width={14} height={14} />}
+              label={t('contacts.detail.fields.assignedAgent')}
+              value={assignedAgentName ?? t('contacts.detail.fields.unassigned')}
+            />
           </dl>
 
           {contact.tags.length > 0 && (
             <div className="border-t border-brand-100 py-4">
-              <p className="mb-2 text-xs font-medium text-brand-400">Etiquetas</p>
+              <p className="mb-2 text-xs font-medium text-brand-400">{t('contacts.detail.tags.label')}</p>
               <div className="flex flex-wrap gap-1.5">
                 {contact.tags.map((tag) => (
                   <span key={tag} className="rounded-full bg-brand-50 px-2.5 py-1 text-xs text-brand-500">
@@ -523,9 +536,9 @@ function ContactoDetalleContent({
           )}
 
           <div className="grid grid-cols-3 gap-2 border-t border-brand-100 pt-4">
-            <QuickAction icon={<PencilIcon width={16} height={16} />} label="Nota" onClick={() => setTab('actividad')} />
-            <QuickAction icon={<CalendarIcon width={16} height={16} />} label="Cita" onClick={() => setApptDrawerOpen(true)} />
-            <QuickAction icon={<AlertIcon width={16} height={16} />} label="PQR" onClick={() => setPqrDrawerOpen(true)} />
+            <QuickAction icon={<PencilIcon width={16} height={16} />} label={t('contacts.detail.quickActions.note')} onClick={() => setTab('actividad')} />
+            <QuickAction icon={<CalendarIcon width={16} height={16} />} label={t('contacts.detail.quickActions.appointment')} onClick={() => setApptDrawerOpen(true)} />
+            <QuickAction icon={<AlertIcon width={16} height={16} />} label={t('contacts.detail.quickActions.pqr')} onClick={() => setPqrDrawerOpen(true)} />
           </div>
         </Card>
 
@@ -538,19 +551,23 @@ function ContactoDetalleContent({
                     <CalendarIcon width={18} height={18} />
                   </span>
                   <div>
-                    <p className="text-sm font-semibold text-brand-800">Próxima cita: {formatDateTime(nextAppointment.scheduled_at)}</p>
+                    <p className="text-sm font-semibold text-brand-800">
+                      {t('contacts.detail.nextAppointment.title', { date: formatDateTime(nextAppointment.scheduled_at, language) })}
+                    </p>
                     {nextAppointment.notes && <p className="text-xs text-brand-500">{nextAppointment.notes}</p>}
                     <p className="text-xs text-accent-700">
-                      {nextAppointment.reminder_sent_at ? 'Recordatorio enviado por WhatsApp' : 'Le avisaremos por WhatsApp una hora antes'}
+                      {nextAppointment.reminder_sent_at
+                        ? t('contacts.detail.nextAppointment.reminderSent')
+                        : t('contacts.detail.nextAppointment.reminderPending')}
                     </p>
                   </div>
                 </div>
                 <div className="flex gap-2">
                   <Button variant="ghost" onClick={() => handleAppointmentStatus(nextAppointment.id, 'completada')} className="!px-3 !py-1.5 text-xs">
-                    <CheckIcon width={13} height={13} /> Completada
+                    <CheckIcon width={13} height={13} /> {t('contacts.detail.nextAppointment.complete')}
                   </Button>
                   <Button variant="ghost" onClick={() => handleAppointmentStatus(nextAppointment.id, 'cancelada')} className="!px-3 !py-1.5 text-xs">
-                    <XCircleIcon width={13} height={13} /> Cancelar
+                    <XCircleIcon width={13} height={13} /> {t('contacts.detail.nextAppointment.cancel')}
                   </Button>
                 </div>
               </div>
@@ -560,13 +577,13 @@ function ContactoDetalleContent({
           <div className="flex flex-wrap gap-1 border-b border-brand-100">
             {(
               [
-                ['resumen', 'Resumen'],
-                ['actividad', 'Actividad'],
-                ['oportunidades', `Oportunidades${opportunities ? ` (${opportunities.length})` : ''}`],
-                ['ventas', `Ventas${orders ? ` (${orders.length})` : ''}`],
-                ['pqr', 'PQR'],
-                ['conversaciones', 'Conversaciones'],
-                ['direcciones', `Direcciones${addresses ? ` (${addresses.length})` : ''}`],
+                ['resumen', t('contacts.detail.tabs.summary')],
+                ['actividad', t('contacts.detail.tabs.activity')],
+                ['oportunidades', `${t('contacts.detail.tabs.opportunities')}${opportunities ? ` (${opportunities.length})` : ''}`],
+                ['ventas', `${t('contacts.detail.tabs.sales')}${orders ? ` (${orders.length})` : ''}`],
+                ['pqr', t('contacts.detail.tabs.pqr')],
+                ['conversaciones', t('contacts.detail.tabs.conversations')],
+                ['direcciones', `${t('contacts.detail.tabs.addresses')}${addresses ? ` (${addresses.length})` : ''}`],
               ] as const
             ).map(([value, label]) => (
               <button
@@ -584,29 +601,29 @@ function ContactoDetalleContent({
           {tab === 'resumen' && (
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
               <Card className="!p-4">
-                <p className="text-xs text-brand-400">Oportunidades abiertas</p>
+                <p className="text-xs text-brand-400">{t('contacts.detail.summary.openOpportunities')}</p>
                 <p className="mt-1 text-lg font-bold text-brand-800">{opportunities ? openOpportunities.length : '—'}</p>
                 {opportunities && openOpportunities.length > 0 && (
                   <p className="text-xs text-brand-500">{formatCurrency(openOpportunitiesValue)}</p>
                 )}
               </Card>
               <Card className="!p-4">
-                <p className="text-xs text-brand-400">Ventas confirmadas</p>
+                <p className="text-xs text-brand-400">{t('contacts.detail.summary.confirmedSales')}</p>
                 <p className="mt-1 text-lg font-bold text-brand-800">{orders ? formatCurrency(confirmedOrdersValue) : '—'}</p>
-                {orders && <p className="text-xs text-brand-500">{confirmedOrders.length} venta(s)</p>}
+                {orders && <p className="text-xs text-brand-500">{t('contacts.detail.summary.salesCount', { count: confirmedOrders.length })}</p>}
               </Card>
               <Card className="!p-4">
-                <p className="text-xs text-brand-400">Cotizaciones pendientes</p>
+                <p className="text-xs text-brand-400">{t('contacts.detail.summary.pendingQuotes')}</p>
                 <p className="mt-1 text-lg font-bold text-brand-800">{orders ? pendingQuotes.length : '—'}</p>
               </Card>
               <Card className="!p-4">
-                <p className="text-xs text-brand-400">Tareas pendientes</p>
+                <p className="text-xs text-brand-400">{t('contacts.detail.summary.pendingTasks')}</p>
                 <p className="mt-1 text-lg font-bold text-brand-800">{tasks ? pendingTasks.length : '—'}</p>
               </Card>
               {nextAppointment && (
                 <Card className="col-span-2 !p-4 lg:col-span-4">
-                  <p className="text-xs text-brand-400">Próxima cita</p>
-                  <p className="mt-1 text-sm font-semibold text-brand-800">{formatDateTime(nextAppointment.scheduled_at)}</p>
+                  <p className="text-xs text-brand-400">{t('contacts.detail.summary.nextAppointment')}</p>
+                  <p className="mt-1 text-sm font-semibold text-brand-800">{formatDateTime(nextAppointment.scheduled_at, language)}</p>
                 </Card>
               )}
             </div>
@@ -618,19 +635,19 @@ function ContactoDetalleContent({
                 <Textarea
                   value={noteDraft}
                   onChange={(e) => setNoteDraft(e.target.value)}
-                  placeholder="Agrega una nota sobre este cliente (una llamada, un acuerdo, un recordatorio...)"
+                  placeholder={t('contacts.detail.activity.notePlaceholder')}
                   rows={2}
                   className="!resize-none !border-0 !bg-transparent !p-0 !shadow-none focus:!ring-0"
                 />
                 <div className="mt-2 flex justify-end">
                   <Button type="submit" variant="secondary" disabled={savingNote || !noteDraft.trim()} className="!px-3.5 !py-1.5 text-xs">
-                    <PlusIcon width={13} height={13} /> {savingNote ? 'Guardando…' : 'Agregar nota'}
+                    <PlusIcon width={13} height={13} /> {savingNote ? t('common.actions.saving') : t('contacts.detail.activity.addNote')}
                   </Button>
                 </div>
               </form>
 
               {(!notes || !appointments) && <PageSpinner />}
-              {notes && appointments && timeline.length === 0 && <EmptyState>Sin actividad todavía.</EmptyState>}
+              {notes && appointments && timeline.length === 0 && <EmptyState>{t('contacts.detail.activity.empty')}</EmptyState>}
               {notes && appointments && timeline.length > 0 && (
                 <ul>
                   {timelinePage.items.map((item, idx) => (
@@ -651,9 +668,11 @@ function ContactoDetalleContent({
                       <div className="min-w-0 flex-1 rounded-xl bg-brand-50 px-4 py-3">
                         {item.kind === 'appointment' ? (
                           <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-sm font-medium text-brand-700">Cita: {formatDateTime(item.appointment.scheduled_at)}</p>
+                            <p className="text-sm font-medium text-brand-700">
+                              {t('contacts.detail.activity.appointmentLabel', { date: formatDateTime(item.appointment.scheduled_at, language) })}
+                            </p>
                             <Badge tone={APPOINTMENT_STATUS_TONE[item.appointment.status]}>
-                              {APPOINTMENT_STATUS_LABEL[item.appointment.status]}
+                              {t(APPOINTMENT_STATUS_LABEL[item.appointment.status])}
                             </Badge>
                           </div>
                         ) : (
@@ -665,7 +684,7 @@ function ContactoDetalleContent({
                         {item.kind === 'appointment' && item.appointment.notes && (
                           <p className="mt-0.5 text-sm text-brand-500">{item.appointment.notes}</p>
                         )}
-                        <p className="mt-1.5 text-xs text-brand-400">{formatDateTime(item.date)}</p>
+                        <p className="mt-1.5 text-xs text-brand-400">{formatDateTime(item.date, language)}</p>
                       </div>
                     </li>
                   ))}
@@ -678,7 +697,7 @@ function ContactoDetalleContent({
           {tab === 'oportunidades' && (
             <Card>
               {!opportunities && <PageSpinner />}
-              {opportunities && opportunities.length === 0 && <EmptyState>Sin oportunidades todavía.</EmptyState>}
+              {opportunities && opportunities.length === 0 && <EmptyState>{t('contacts.detail.opportunities.empty')}</EmptyState>}
               {opportunities && opportunities.length > 0 && (
                 <ul className="space-y-2">
                   {opportunitiesPage.items.map((o) => (
@@ -704,13 +723,13 @@ function ContactoDetalleContent({
           {tab === 'ventas' && (
             <Card>
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <p className="text-sm text-brand-400">Cotizaciones y ventas registradas para este cliente.</p>
+                <p className="text-sm text-brand-400">{t('contacts.detail.sales.description')}</p>
                 <Button variant="secondary" onClick={() => setOrderDrawer({ open: true, order: null })} className="!px-3 !py-1.5 text-xs">
-                  <PlusIcon width={13} height={13} /> Nueva cotización
+                  <PlusIcon width={13} height={13} /> {t('contacts.detail.sales.new')}
                 </Button>
               </div>
               {!orders && <PageSpinner />}
-              {orders && orders.length === 0 && <EmptyState>Sin cotizaciones ni ventas todavía.</EmptyState>}
+              {orders && orders.length === 0 && <EmptyState>{t('contacts.detail.sales.empty')}</EmptyState>}
               {orders && orders.length > 0 && (
                 <ul className="space-y-2">
                   {ordersPage.items.map((o) => (
@@ -724,7 +743,7 @@ function ContactoDetalleContent({
                           {o.opportunity && <span className="ml-2 truncate text-xs text-brand-400">{o.opportunity.title}</span>}
                         </span>
                         <span className="flex shrink-0 items-center gap-2">
-                          <Badge tone={ORDER_STATUS_TONE[o.status]}>{ORDER_STATUS_LABEL[o.status]}</Badge>
+                          <Badge tone={ORDER_STATUS_TONE[o.status]}>{t(ORDER_STATUS_LABEL[o.status])}</Badge>
                           <span className="text-sm font-semibold text-brand-700">{formatCurrency(o.total, o.currency)}</span>
                         </span>
                       </button>
@@ -739,14 +758,14 @@ function ContactoDetalleContent({
           {tab === 'pqr' && (
             <Card>
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <p className="text-sm text-brand-400">Peticiones, quejas y reclamos registrados para este cliente.</p>
+                <p className="text-sm text-brand-400">{t('contacts.detail.pqr.description')}</p>
                 <Button variant="secondary" onClick={() => setPqrDrawerOpen(true)} className="!px-3 !py-1.5 text-xs">
-                  <PlusIcon width={13} height={13} /> Nuevo PQR
+                  <PlusIcon width={13} height={13} /> {t('contacts.detail.pqr.new')}
                 </Button>
               </div>
 
               {!pqrs && <PageSpinner />}
-              {pqrs && pqrs.length === 0 && <EmptyState>Sin PQR registrados.</EmptyState>}
+              {pqrs && pqrs.length === 0 && <EmptyState>{t('contacts.detail.pqr.empty')}</EmptyState>}
               {pqrs && pqrs.length > 0 && (
                 <ul className="space-y-3">
                   {pqrsPage.items.map((p) => {
@@ -758,16 +777,16 @@ function ContactoDetalleContent({
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="font-mono text-xs font-semibold text-brand-400">PQR-{p.code}</span>
-                              <Badge tone={PQR_TYPE_TONE[p.type]}>{PQR_TYPE_LABEL[p.type]}</Badge>
+                              <Badge tone={PQR_TYPE_TONE[p.type]}>{t(PQR_TYPE_LABEL[p.type])}</Badge>
                               <p className="text-sm font-semibold text-brand-800">{p.subject}</p>
                               {p.created_by_ai && <AiBadge />}
                             </div>
                             {p.description && <p className="mt-1.5 text-sm text-brand-500">{p.description}</p>}
                             <AttachmentThumbnails attachments={attachmentsByParent[p.id]} />
-                            <p className="mt-1.5 text-xs text-brand-400">{formatDateTime(p.created_at)}</p>
+                            <p className="mt-1.5 text-xs text-brand-400">{formatDateTime(p.created_at, language)}</p>
                           </div>
                           <label className="flex shrink-0 items-center gap-1.5 text-xs text-brand-400">
-                            Estado
+                            {t('contacts.detail.pqr.statusLabel')}
                             <Select
                               value={p.status}
                               onChange={(e) => handlePqrStatus(p.id, e.target.value as PqrStatus)}
@@ -775,7 +794,7 @@ function ContactoDetalleContent({
                             >
                               {(Object.keys(PQR_STATUS_LABEL) as PqrStatus[]).map((s) => (
                                 <option key={s} value={s}>
-                                  {PQR_STATUS_LABEL[s]}
+                                  {t(PQR_STATUS_LABEL[s])}
                                 </option>
                               ))}
                             </Select>
@@ -785,7 +804,11 @@ function ContactoDetalleContent({
                         <div className="mt-3 border-t border-brand-100 pt-3">
                           <Button type="button" variant="ghost" onClick={() => toggleExpandPqr(p.id)} className="!px-3 !py-1.5 text-xs">
                             <ClockIcon width={13} height={13} />
-                            {isExpanded ? 'Ocultar seguimientos' : updates ? `Ver seguimientos (${updates.length})` : 'Ver seguimientos'}
+                            {isExpanded
+                              ? t('contacts.detail.pqr.hideUpdates')
+                              : updates
+                                ? t('contacts.detail.pqr.viewUpdatesCount', { count: updates.length })
+                                : t('contacts.detail.pqr.viewUpdates')}
                             <ChevronLeftIcon width={13} height={13} className={`transition-transform ${isExpanded ? '-rotate-90' : '-rotate-180'}`} />
                           </Button>
                         </div>
@@ -799,20 +822,22 @@ function ContactoDetalleContent({
                               <Textarea
                                 value={pqrUpdateDraft}
                                 onChange={(e) => setPqrUpdateDraft(e.target.value)}
-                                placeholder="Agregar un seguimiento a este caso..."
+                                placeholder={t('contacts.detail.pqr.updatePlaceholder')}
                                 rows={2}
                                 className="!resize-none !border-0 !bg-transparent !p-0 !shadow-none focus:!ring-0"
                               />
                               <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                                 <ImageAttachmentPicker file={pqrUpdateAttachment} onChange={setPqrUpdateAttachment} />
                                 <Button type="submit" variant="secondary" disabled={savingPqrUpdate || !pqrUpdateDraft.trim()} className="!px-3.5 !py-1.5 text-xs">
-                                  <PlusIcon width={13} height={13} /> {savingPqrUpdate ? 'Guardando…' : 'Agregar seguimiento'}
+                                  <PlusIcon width={13} height={13} /> {savingPqrUpdate ? t('common.actions.saving') : t('contacts.detail.pqr.addUpdate')}
                                 </Button>
                               </div>
                             </form>
 
                             {!updates && <PageSpinner />}
-                            {updates && updates.length === 0 && <p className="py-2 text-center text-xs text-brand-400">Sin seguimientos todavía.</p>}
+                            {updates && updates.length === 0 && (
+                              <p className="py-2 text-center text-xs text-brand-400">{t('contacts.detail.pqr.noUpdates')}</p>
+                            )}
                             {updates && updates.length > 0 && (
                               <ul className="space-y-2">
                                 {updates.map((u) => (
@@ -825,7 +850,7 @@ function ContactoDetalleContent({
                                     </div>
                                     <p className="mt-1 whitespace-pre-wrap text-sm text-brand-700">{u.content}</p>
                                     <AttachmentThumbnails attachments={attachmentsByParent[u.id]} />
-                                    <p className="mt-1 text-xs text-brand-400">{formatDateTime(u.created_at)}</p>
+                                    <p className="mt-1 text-xs text-brand-400">{formatDateTime(u.created_at, language)}</p>
                                   </li>
                                 ))}
                               </ul>
@@ -844,7 +869,7 @@ function ContactoDetalleContent({
           {tab === 'conversaciones' && (
             <Card>
               {!conversations && <PageSpinner />}
-              {conversations && conversations.length === 0 && <EmptyState>Todavía no hay conversaciones con este cliente.</EmptyState>}
+              {conversations && conversations.length === 0 && <EmptyState>{t('contacts.detail.conversations.empty')}</EmptyState>}
               {conversations && conversations.length > 0 && (
                 <div className="space-y-2">
                   {conversationsPage.items.map((conv) => (
@@ -860,13 +885,17 @@ function ContactoDetalleContent({
                         <span className="min-w-0">
                           <span className="flex items-center gap-1.5">
                             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${conv.mode === 'ia' ? 'bg-accent-500' : 'bg-amber-500'}`} />
-                            <span className="text-sm font-medium text-brand-800">{conv.mode === 'ia' ? 'Modo IA' : 'Modo humano'}</span>
-                            {conv.status === 'closed' && <Badge tone="danger">Cerrada</Badge>}
+                            <span className="text-sm font-medium text-brand-800">
+                              {conv.mode === 'ia' ? t('contacts.detail.conversations.modeIa') : t('contacts.detail.conversations.modeHuman')}
+                            </span>
+                            {conv.status === 'closed' && <Badge tone="danger">{t('contacts.detail.conversations.closed')}</Badge>}
                           </span>
-                          <span className="block truncate text-xs text-brand-400">{conv.whatsapp_line?.display_name ?? 'Línea'}</span>
+                          <span className="block truncate text-xs text-brand-400">
+                            {conv.whatsapp_line?.display_name ?? t('contacts.detail.conversations.line')}
+                          </span>
                         </span>
                       </span>
-                      {conv.last_message_at && <span className="text-xs text-brand-300">{formatDateTime(conv.last_message_at)}</span>}
+                      {conv.last_message_at && <span className="text-xs text-brand-300">{formatDateTime(conv.last_message_at, language)}</span>}
                     </button>
                   ))}
                 </div>
@@ -878,13 +907,13 @@ function ContactoDetalleContent({
           {tab === 'direcciones' && (
             <Card>
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <p className="text-sm text-brand-400">Direcciones de envío y datos de facturación de este cliente.</p>
+                <p className="text-sm text-brand-400">{t('contacts.detail.addresses.description')}</p>
                 <Button variant="secondary" onClick={() => setAddressDrawer({ open: true, address: null })} className="!px-3 !py-1.5 text-xs">
-                  <PlusIcon width={13} height={13} /> Nueva dirección
+                  <PlusIcon width={13} height={13} /> {t('contacts.detail.addresses.new')}
                 </Button>
               </div>
               {!addresses && <PageSpinner />}
-              {addresses && addresses.length === 0 && <EmptyState>Sin direcciones guardadas todavía.</EmptyState>}
+              {addresses && addresses.length === 0 && <EmptyState>{t('contacts.detail.addresses.empty')}</EmptyState>}
               {addresses && addresses.length > 0 && (
                 <ul className="space-y-2">
                   {addressesPage.items.map((a) => (
@@ -892,9 +921,9 @@ function ContactoDetalleContent({
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-1.5">
                           {a.label && <p className="text-sm font-semibold text-brand-800">{a.label}</p>}
-                          {a.is_default && <Badge tone="success">Predeterminada</Badge>}
-                          {a.is_shipping && <Badge tone="neutral">Envío</Badge>}
-                          {a.is_billing && <Badge tone="neutral">Facturación</Badge>}
+                          {a.is_default && <Badge tone="success">{t('contacts.detail.addresses.default')}</Badge>}
+                          {a.is_shipping && <Badge tone="neutral">{t('contacts.detail.addresses.shipping')}</Badge>}
+                          {a.is_billing && <Badge tone="neutral">{t('contacts.detail.addresses.billing')}</Badge>}
                         </div>
                         <p className="mt-1 text-sm text-brand-700">
                           {a.line1}
@@ -908,7 +937,7 @@ function ContactoDetalleContent({
                           type="button"
                           onClick={() => setAddressDrawer({ open: true, address: a })}
                           className="rounded-lg p-1.5 text-brand-400 transition-colors hover:bg-brand-50 hover:text-brand-700"
-                          aria-label="Editar dirección"
+                          aria-label={t('contacts.detail.addresses.aria.edit')}
                         >
                           <PencilIcon width={14} height={14} />
                         </button>
@@ -916,7 +945,7 @@ function ContactoDetalleContent({
                           type="button"
                           onClick={() => setDeleteAddressId(a.id)}
                           className="rounded-lg p-1.5 text-brand-400 transition-colors hover:bg-red-50 hover:text-red-600"
-                          aria-label="Eliminar dirección"
+                          aria-label={t('contacts.detail.addresses.aria.delete')}
                         >
                           <TrashIcon width={14} height={14} />
                         </button>
@@ -946,8 +975,8 @@ function ContactoDetalleContent({
             open={!!deleteAddressId}
             onClose={() => setDeleteAddressId(null)}
             onConfirm={handleDeleteAddress}
-            title="Eliminar dirección"
-            description="¿Eliminar esta dirección? Podés recuperarla más tarde con soporte."
+            title={t('contacts.detail.addresses.deleteConfirm.title')}
+            description={t('contacts.detail.addresses.deleteConfirm.description')}
           />
           <OrderDrawer
             open={orderDrawer.open}

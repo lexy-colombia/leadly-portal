@@ -1,24 +1,17 @@
 import { InitialsAvatar } from '../../../components/ui'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { conversationDisplayName, type ConversationWithLine } from '../../../lib/api/conversations'
-import type { ConversationCategory } from '../../../types/domain'
+import type { Language } from '../../../i18n/translations'
+import { CONVERSATION_CATEGORY_KEY, conversationDisplayName, type ConversationWithLine } from '../../../lib/api/conversations'
 
-const CATEGORY_LABEL: Record<ConversationCategory, string> = {
-  venta: 'Venta',
-  soporte: 'Soporte',
-  consulta: 'Consulta',
-  reclamo: 'Reclamo',
-  otro: 'Otro',
-}
-
-function formatTime(iso: string | null): string {
+function formatTime(iso: string | null, language: Language): string {
   if (!iso) return ''
   const date = new Date(iso)
   const now = new Date()
   const sameDay = date.toDateString() === now.toDateString()
+  const locale = language === 'en' ? 'en-US' : 'es-CO'
   return sameDay
-    ? date.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })
-    : date.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })
+    ? date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
+    : date.toLocaleDateString(locale, { day: '2-digit', month: 'short' })
 }
 
 export function ConversationListItem({
@@ -30,7 +23,7 @@ export function ConversationListItem({
   active: boolean
   onClick: () => void
 }) {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const name = conversationDisplayName(conversation)
   return (
     <button
@@ -54,11 +47,11 @@ export function ConversationListItem({
           </span>
         </span>
         <span className="flex shrink-0 flex-col items-end gap-1">
-          <span className="text-[11px] text-brand-400">{formatTime(conversation.last_message_at)}</span>
+          <span className="text-[11px] text-brand-400">{formatTime(conversation.last_message_at, language)}</span>
           <span className="flex items-center gap-1">
             {conversation.category && (
               <span className="rounded-full bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-brand-500">
-                {CATEGORY_LABEL[conversation.category]}
+                {t(CONVERSATION_CATEGORY_KEY[conversation.category])}
               </span>
             )}
             {conversation.status === 'closed' && (

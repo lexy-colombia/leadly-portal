@@ -1,0 +1,21 @@
+{
+  "dashboard.errors.loadConversations": "Couldn't load the conversations.",
+  "dashboard.vsPreviousPeriod": "vs previous period",
+  "dashboard.pipeline.title": "Pipeline by stage",
+  "dashboard.pipeline.metric.value": "Total value",
+  "dashboard.pipeline.metric.count": "Count",
+  "dashboard.pipeline.notConfigured": "You don't have a pipeline configured yet.",
+  "dashboard.pipeline.conversion": "Overall conversion",
+  "dashboard.pipeline.opportunityCount": "{count} opp.",
+  "dashboard.conversations.title": "Conversations · last {days} days",
+  "dashboard.conversations.range.7": "Last 7 days",
+  "dashboard.conversations.range.14": "Last 14 days",
+  "dashboard.conversations.range.30": "Last 30 days",
+  "dashboard.conversations.total": "Total conversations",
+  "dashboard.conversations.avgResponseTime": "Avg. response time",
+  "dashboard.upcomingTasks.title": "Upcoming tasks",
+  "dashboard.upcomingTasks.empty": "You have no pending tasks. 🎉",
+  "dashboard.upcomingTasks.generalTask": "General task",
+  "dashboard.recentConversations.title": "Recent conversations",
+  "dashboard.recentConversations.empty": "You don't have any conversations yet."
+}

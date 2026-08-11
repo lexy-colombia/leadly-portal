@@ -5,11 +5,13 @@ import type { CrmPqr, PqrType } from '../../../types/domain'
 import { Button, Drawer, FieldError, Input, Label, Select, Textarea } from '../../../components/ui'
 import { ImageAttachmentPicker } from '../../../components/ImageAttachmentPicker'
 import { isNotBlank } from '../../../lib/validation'
+import { useLanguage } from '../../../contexts/LanguageContext'
+import type { TranslationKey } from '../../../i18n/translations'
 
-export const PQR_TYPE_LABEL: Record<PqrType, string> = {
-  peticion: 'Petición',
-  queja: 'Queja',
-  reclamo: 'Reclamo',
+export const PQR_TYPE_LABEL: Record<PqrType, TranslationKey> = {
+  peticion: 'contacts.pqr.type.peticion',
+  queja: 'contacts.pqr.type.queja',
+  reclamo: 'contacts.pqr.type.reclamo',
 }
 
 export function PqrDrawer({
@@ -25,6 +27,7 @@ export function PqrDrawer({
   contactId: string
   onCreated: (pqr: CrmPqr) => void
 }) {
+  const { t } = useLanguage()
   const [type, setType] = useState<PqrType>('peticion')
   const [subject, setSubject] = useState('')
   const [description, setDescription] = useState('')
@@ -43,7 +46,7 @@ export function PqrDrawer({
     setFormError(null)
   }, [open])
 
-  const subjectError = touched && !isNotBlank(subject) ? 'El asunto es obligatorio.' : undefined
+  const subjectError = touched && !isNotBlank(subject) ? t('contacts.pqrDrawer.errors.subjectRequired') : undefined
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -67,35 +70,47 @@ export function PqrDrawer({
       onCreated(pqr)
       onClose()
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'No se pudo crear el PQR.')
+      setFormError(err instanceof Error ? err.message : t('contacts.pqrDrawer.errors.createFailed'))
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <Drawer open={open} onClose={onClose} title="Nuevo PQR" description="Petición, queja o reclamo del cliente.">
+    <Drawer open={open} onClose={onClose} title={t('contacts.pqrDrawer.title')} description={t('contacts.pqrDrawer.description')}>
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <div>
-          <Label htmlFor="pqr-type">Tipo</Label>
+          <Label htmlFor="pqr-type">{t('contacts.pqrDrawer.fields.type')}</Label>
           <Select id="pqr-type" value={type} onChange={(e) => setType(e.target.value as PqrType)}>
-            {(Object.keys(PQR_TYPE_LABEL) as PqrType[]).map((t) => (
-              <option key={t} value={t}>
-                {PQR_TYPE_LABEL[t]}
+            {(Object.keys(PQR_TYPE_LABEL) as PqrType[]).map((pt) => (
+              <option key={pt} value={pt}>
+                {t(PQR_TYPE_LABEL[pt])}
               </option>
             ))}
           </Select>
         </div>
 
         <div>
-          <Label htmlFor="pqr-subject">Asunto</Label>
-          <Input id="pqr-subject" value={subject} invalid={!!subjectError} onChange={(e) => setSubject(e.target.value)} placeholder="Resumen breve del caso" />
+          <Label htmlFor="pqr-subject">{t('contacts.pqrDrawer.fields.subject')}</Label>
+          <Input
+            id="pqr-subject"
+            value={subject}
+            invalid={!!subjectError}
+            onChange={(e) => setSubject(e.target.value)}
+            placeholder={t('contacts.pqrDrawer.fields.subjectPlaceholder')}
+          />
           <FieldError message={subjectError} />
         </div>
 
         <div>
-          <Label htmlFor="pqr-description">Descripción (opcional)</Label>
-          <Textarea id="pqr-description" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Detalle de la petición, queja o reclamo..." rows={4} />
+          <Label htmlFor="pqr-description">{t('contacts.pqrDrawer.fields.description')}</Label>
+          <Textarea
+            id="pqr-description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder={t('contacts.pqrDrawer.fields.descriptionPlaceholder')}
+            rows={4}
+          />
         </div>
 
         <ImageAttachmentPicker file={attachment} onChange={setAttachment} />
@@ -104,10 +119,10 @@ export function PqrDrawer({
 
         <div className="flex gap-2 border-t border-brand-100 pt-5">
           <Button type="submit" variant="secondary" disabled={submitting}>
-            {submitting ? 'Guardando…' : 'Crear PQR'}
+            {submitting ? t('common.actions.saving') : t('contacts.pqrDrawer.submit')}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>
-            Cancelar
+            {t('common.actions.cancel')}
           </Button>
         </div>
       </form>

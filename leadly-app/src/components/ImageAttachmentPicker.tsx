@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { validatePqrAttachmentFile } from '../lib/api/attachments'
+import { useLanguage } from '../contexts/LanguageContext'
 import { ImageIcon, XCircleIcon } from './icons'
 import { Button } from './ui'
 
@@ -9,6 +10,7 @@ import { Button } from './ui'
  * parent uploads it only after the PQR/seguimiento row itself is created,
  * since crm_attachments needs that row's id first. */
 export function ImageAttachmentPicker({ file, onChange }: { file: File | null; onChange: (file: File | null) => void }) {
+  const { t } = useLanguage()
   const inputRef = useRef<HTMLInputElement>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -29,7 +31,7 @@ export function ImageAttachmentPicker({ file, onChange }: { file: File | null; o
     if (!selected) return
     const validationError = validatePqrAttachmentFile(selected)
     if (validationError) {
-      setError(validationError)
+      setError(t(validationError))
       return
     }
     setError(null)
@@ -46,7 +48,7 @@ export function ImageAttachmentPicker({ file, onChange }: { file: File | null; o
       <div className="flex items-center gap-3">
         <img src={previewUrl} alt={file.name} className="h-14 w-14 rounded-lg object-cover" />
         <div className="min-w-0 flex-1 text-sm text-brand-600 truncate">{file.name}</div>
-        <button type="button" onClick={handleClear} className="text-brand-400 hover:text-brand-600" aria-label="Quitar imagen">
+        <button type="button" onClick={handleClear} className="text-brand-400 hover:text-brand-600" aria-label={t('common.attachment.remove')}>
           <XCircleIcon width={20} height={20} />
         </button>
       </div>
@@ -58,7 +60,7 @@ export function ImageAttachmentPicker({ file, onChange }: { file: File | null; o
       <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={handleSelect} />
       <Button type="button" variant="ghost" onClick={() => inputRef.current?.click()}>
         <ImageIcon width={16} height={16} />
-        Adjuntar imagen (opcional)
+        {t('common.attachment.optional')}
       </Button>
       {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
     </div>

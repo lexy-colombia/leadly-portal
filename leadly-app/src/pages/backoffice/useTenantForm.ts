@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { TenantInput } from '../../lib/api/tenants'
 import type { TenantDocumentType, TenantEntityType, TenantLanguage } from '../../types/domain'
 import { isNotBlank, isValidE164Phone, isValidEmail } from '../../lib/validation'
+import { useLanguage } from '../../contexts/LanguageContext'
 
 /** Shared form state + validation for both "Nuevo cliente" and the edit form
  * on the client detail page -- one place to change validation rules instead
@@ -16,6 +17,7 @@ import { isNotBlank, isValidE164Phone, isValidEmail } from '../../lib/validation
  * - notes and the logo stay optional.
  */
 export function useTenantForm(initial?: Partial<TenantInput>) {
+  const { t } = useLanguage()
   const [name, setName] = useState(initial?.name ?? '')
   const [entityType, setEntityType] = useState<TenantEntityType>(initial?.entity_type ?? 'empresa')
   const [legalName, setLegalName] = useState(initial?.legal_name ?? '')
@@ -29,15 +31,15 @@ export function useTenantForm(initial?: Partial<TenantInput>) {
   const [notes, setNotes] = useState(initial?.notes ?? '')
   const [touched, setTouched] = useState(false)
 
-  const nameError = touched && !isNotBlank(name) ? 'El nombre comercial es obligatorio.' : undefined
+  const nameError = touched && !isNotBlank(name) ? t('backoffice.tenantForm.errors.name') : undefined
   const legalNameError =
-    touched && entityType === 'empresa' && !isNotBlank(legalName) ? 'La razón social es obligatoria para una empresa.' : undefined
-  const documentTypeError = touched && !documentType ? 'Selecciona el tipo de documento.' : undefined
-  const documentNumberError = touched && !isNotBlank(documentNumber) ? 'El número de documento es obligatorio.' : undefined
-  const emailError = touched && !isValidEmail(contactEmail) ? 'Ingresa un correo válido.' : undefined
-  const phoneError = touched && !isValidE164Phone(contactPhone) ? 'Ingresa un teléfono válido (formato internacional).' : undefined
-  const countryError = touched && !country ? 'Selecciona un país.' : undefined
-  const stateProvinceError = touched && !isNotBlank(stateProvince) ? 'El departamento/estado es obligatorio.' : undefined
+    touched && entityType === 'empresa' && !isNotBlank(legalName) ? t('backoffice.tenantForm.errors.legalName') : undefined
+  const documentTypeError = touched && !documentType ? t('backoffice.tenantForm.errors.documentType') : undefined
+  const documentNumberError = touched && !isNotBlank(documentNumber) ? t('backoffice.tenantForm.errors.documentNumber') : undefined
+  const emailError = touched && !isValidEmail(contactEmail) ? t('auth.errors.invalidEmail') : undefined
+  const phoneError = touched && !isValidE164Phone(contactPhone) ? t('backoffice.tenantForm.errors.phone') : undefined
+  const countryError = touched && !country ? t('backoffice.tenantForm.errors.country') : undefined
+  const stateProvinceError = touched && !isNotBlank(stateProvince) ? t('backoffice.tenantForm.errors.stateProvince') : undefined
 
   function isValid() {
     return (

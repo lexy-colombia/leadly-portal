@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
+import { useLanguage } from '../../contexts/LanguageContext'
 import { deleteProduct, getProductImageUrl, listProducts } from '../../lib/api/products'
 import type { ProductWithImages } from '../../lib/api/products'
 import { Badge, Button, Card, EmptyState, IconInput, PageSpinner, Pagination, Select, Table, TBody, TD, TH, THead, TRow } from '../../components/ui'
@@ -28,6 +29,7 @@ function isLowStock(product: ProductWithImages): boolean {
 }
 
 function ProductsTab({ tenantId }: { tenantId: string }) {
+  const { t } = useLanguage()
   const [products, setProducts] = useState<ProductWithImages[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
@@ -48,7 +50,7 @@ function ProductsTab({ tenantId }: { tenantId: string }) {
         // this list, so a plain reload alone wouldn't reach it.
         setDrawer((prev) => (prev.product ? { ...prev, product: data.find((p) => p.id === prev.product!.id) ?? prev.product } : prev))
       })
-      .catch((err) => setError(err.message ?? 'No se pudieron cargar los productos.'))
+      .catch((err) => setError(err.message ?? t('products.errors.load')))
   }
 
   useEffect(reload, [tenantId])
@@ -88,7 +90,7 @@ function ProductsTab({ tenantId }: { tenantId: string }) {
       setProducts((prev) => (prev ? prev.filter((p) => p.id !== id) : prev))
       setDeletingId(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo eliminar el producto.')
+      setError(err instanceof Error ? err.message : t('products.errors.delete'))
     } finally {
       setDeleting(false)
     }
@@ -97,10 +99,16 @@ function ProductsTab({ tenantId }: { tenantId: string }) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <IconInput icon={<SearchIcon width={14} height={14} />} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar por nombre o SKU" className="!w-56 !py-1 text-xs" />
+        <IconInput
+          icon={<SearchIcon width={14} height={14} />}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder={t('products.list.searchPlaceholder')}
+          className="!w-56 !py-1 text-xs"
+        />
 
         <Select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="!w-auto !py-1 text-xs">
-          <option value="">Todas las categorías</option>
+          <option value="">{t('products.list.allCategories')}</option>
           {categories.map(([id, name]) => (
             <option key={id} value={id}>
               {name}
@@ -116,15 +124,15 @@ function ProductsTab({ tenantId }: { tenantId: string }) {
           }`}
         >
           <AlertIcon width={13} height={13} />
-          Stock bajo {lowStockCount > 0 && `(${lowStockCount})`}
+          {t('products.list.lowStockFilter')} {lowStockCount > 0 && `(${lowStockCount})`}
         </button>
 
         <span className="shrink-0 text-xs text-brand-400">
-          {filtered?.length ?? 0} {(filtered?.length ?? 0) === 1 ? 'producto' : 'productos'}
+          {filtered?.length ?? 0} {t((filtered?.length ?? 0) === 1 ? 'products.count.singular' : 'products.count.plural')}
         </span>
 
         <Button variant="secondary" onClick={() => setDrawer({ open: true, product: null })} className="!ml-auto !py-1 !text-xs">
-          <PlusIcon width={14} height={14} /> Nuevo producto
+          <PlusIcon width={14} height={14} /> {t('products.actions.new')}
         </Button>
       </div>
 
@@ -133,7 +141,7 @@ function ProductsTab({ tenantId }: { tenantId: string }) {
 
       {filtered && filtered.length === 0 && (
         <Card>
-          <EmptyState>{products && products.length > 0 ? 'Ningún producto coincide con el filtro.' : 'Todavía no tenés productos en tu catálogo.'}</EmptyState>
+          <EmptyState>{products && products.length > 0 ? t('products.empty.noMatch') : t('products.empty.none')}</EmptyState>
         </Card>
       )}
 
@@ -143,13 +151,13 @@ function ProductsTab({ tenantId }: { tenantId: string }) {
             <THead>
               <tr>
                 <TH></TH>
-                <TH>Producto</TH>
-                <TH>Categoría</TH>
-                <TH>Proveedor</TH>
-                <TH>Precio venta</TH>
-                <TH>Stock</TH>
-                <TH>Estado</TH>
-                <TH className="text-right">Acciones</TH>
+                <TH>{t('products.table.product')}</TH>
+                <TH>{t('products.table.category')}</TH>
+                <TH>{t('products.table.supplier')}</TH>
+                <TH>{t('products.table.price')}</TH>
+                <TH>{t('products.table.stock')}</TH>
+                <TH>{t('products.table.status')}</TH>
+                <TH className="text-right">{t('products.table.actions')}</TH>
               </tr>
             </THead>
             <TBody>
@@ -167,7 +175,7 @@ function ProductsTab({ tenantId }: { tenantId: string }) {
                       <Link to={`/app/productos/${product.id}`} className="hover:text-accent-600 hover:underline">
                         {product.name}
                       </Link>
-                      {product.sku && <span className="block text-[11px] font-normal text-brand-400">SKU: {product.sku}</span>}
+                      {product.sku && <span className="block text-[11px] font-normal text-brand-400">{t('products.table.sku', { sku: product.sku })}</span>}
                     </TD>
                     <TD className="text-xs text-brand-500">
                       {product.category ? (
@@ -184,24 +192,26 @@ function ProductsTab({ tenantId }: { tenantId: string }) {
                     <TD>
                       {product.track_inventory ? (
                         <Badge tone={lowStock ? 'danger' : 'neutral'}>
-                          {availableStock(product)} disp. {lowStock && '· bajo'}
+                          {t('products.table.available', { count: availableStock(product) })} {lowStock && t('products.table.low')}
                         </Badge>
                       ) : (
-                        <span className="text-xs text-brand-400">Sin control</span>
+                        <span className="text-xs text-brand-400">{t('products.table.noControl')}</span>
                       )}
-                      {product.reserved_stock > 0 && <span className="ml-1.5 text-[11px] text-brand-400">({product.reserved_stock} reservado)</span>}
+                      {product.reserved_stock > 0 && (
+                        <span className="ml-1.5 text-[11px] text-brand-400">{t('products.table.reserved', { count: product.reserved_stock })}</span>
+                      )}
                     </TD>
                     <TD>
-                      <Badge tone={product.is_active ? 'success' : 'neutral'}>{product.is_active ? 'Activo' : 'Inactivo'}</Badge>
+                      <Badge tone={product.is_active ? 'success' : 'neutral'}>{t(product.is_active ? 'common.status.active' : 'common.status.inactive')}</Badge>
                     </TD>
                     <TD className="text-right">
                       {deletingId === product.id ? (
                         <span className="inline-flex items-center gap-1.5">
                           <Button variant="danger" onClick={() => handleDelete(product.id)} disabled={deleting} className="!px-2 !py-1 text-xs">
-                            {deleting ? 'Eliminando…' : 'Confirmar'}
+                            {deleting ? t('common.actions.deleting') : t('common.actions.confirm')}
                           </Button>
                           <Button variant="ghost" onClick={() => setDeletingId(null)} disabled={deleting} className="!px-2 !py-1 text-xs">
-                            Cancelar
+                            {t('common.actions.cancel')}
                           </Button>
                         </span>
                       ) : (
@@ -231,6 +241,7 @@ function ProductsTab({ tenantId }: { tenantId: string }) {
 
 export function Productos() {
   const { profile } = useAuth()
+  const { t } = useLanguage()
   const [tab, setTab] = useState<'productos' | 'categorias' | 'proveedores'>('productos')
 
   if (!profile?.tenant_id) return <PageSpinner />
@@ -240,9 +251,9 @@ export function Productos() {
       <div className="flex flex-wrap gap-1 border-b border-brand-100">
         {(
           [
-            ['productos', 'Productos'],
-            ['categorias', 'Categorías'],
-            ['proveedores', 'Proveedores'],
+            ['productos', t('products.tabs.products')],
+            ['categorias', t('products.tabs.categories')],
+            ['proveedores', t('products.tabs.suppliers')],
           ] as const
         ).map(([value, label]) => (
           <button

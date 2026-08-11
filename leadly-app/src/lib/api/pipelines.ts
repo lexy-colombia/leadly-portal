@@ -18,11 +18,17 @@ const DEFAULT_STAGES = [
 /** Postgres FK error code for a restricted delete (crm_opportunities.pipeline_id/
  * stage_id and crm_opportunity_stage_history.to_stage_id are all `on delete
  * restrict`) -- translated here into a message an agent can actually act on,
- * instead of the raw constraint-violation text bubbling up to the UI. */
-function friendlyDeleteError(err: unknown, whatInUse: string): Error {
+ * instead of the raw constraint-violation text bubbling up to the UI.
+ *
+ * The thrown `Error`'s `message` is a translation key (under
+ * `opportunities.settings.errors.*` in the i18n JSON), not literal text --
+ * this file has no access to the language context, so callers resolve it
+ * with `t()`. `t()` passes through any string that isn't a known key
+ * unchanged, so this is safe even for the raw Postgres error case below. */
+function friendlyDeleteError(err: unknown, inUseKey: 'opportunities.settings.errors.pipelineInUse' | 'opportunities.settings.errors.stageInUse'): Error {
   const message = err instanceof Error ? err.message : String(err)
   if (message.includes('foreign key constraint') || message.includes('violates')) {
-    return new Error(`No se puede eliminar: ${whatInUse} ya tiene oportunidades o historial asociado.`)
+    return new Error(inUseKey)
   }
   return err instanceof Error ? err : new Error(message)
 }
@@ -66,10 +72,10 @@ export async function updatePipeline(id: string, input: PipelineUpdateInput): Pr
 export async function deletePipeline(tenantId: string, id: string): Promise<void> {
   const remaining = await listPipelinesByTenant(tenantId)
   if (remaining.length <= 1) {
-    throw new Error('No podés eliminar el único pipeline del equipo.')
+    throw new Error('opportunities.settings.errors.onlyPipeline')
   }
   const { error } = await supabase.from('crm_pipelines').delete().eq('id', id)
-  if (error) throw friendlyDeleteError(error, 'este pipeline')
+  if (error) throw friendlyDeleteError(error, 'opportunities.settings.errors.pipelineInUse')
 }
 
 export interface StageInput {
@@ -116,8 +122,8 @@ export async function deleteStage(pipelineId: string, id: string): Promise<void>
   const { data: existing, error: existingError } = await supabase.from('crm_pipeline_stages').select('id').eq('pipeline_id', pipelineId)
   if (existingError) throw existingError
   if ((existing?.length ?? 0) <= 1) {
-    throw new Error('No podés eliminar la última etapa de un pipeline.')
+    throw new Error('opportunities.settings.errors.onlyStage')
   }
   const { error } = await supabase.from('crm_pipeline_stages').delete().eq('id', id)
-  if (error) throw friendlyDeleteError(error, 'esta etapa')
+  if (error) throw friendlyDeleteError(error, 'opportunities.settings.errors.stageInUse')
 }

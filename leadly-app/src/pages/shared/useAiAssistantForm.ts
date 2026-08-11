@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { AiAssistantInput } from '../../lib/api/aiAssistants'
 import type { AiAssistant, AiModel, AiProvider } from '../../types/domain'
 import { isNotBlank, isValidMaxTokens, isValidTemperature } from '../../lib/validation'
+import type { TranslationKey } from '../../i18n/translations'
 
 export function useAiAssistantForm(initial: AiAssistant | null | undefined, models: AiModel[]) {
   const [name, setName] = useState(initial?.name ?? '')
@@ -24,12 +25,14 @@ export function useAiAssistantForm(initial: AiAssistant | null | undefined, mode
     setModel(firstForProvider?.model_code ?? '')
   }
 
-  const nameError = touched && !isNotBlank(name) ? 'Ponle un nombre al agente.' : undefined
-  const modelError = touched && !model ? 'Selecciona un modelo.' : undefined
-  const systemPromptError =
-    touched && isActive && !isNotBlank(systemPrompt) ? 'El system prompt es obligatorio para activar el asistente.' : undefined
-  const temperatureError = touched && !isValidTemperature(temperature) ? 'Debe estar entre 0 y 2.' : undefined
-  const maxTokensError = touched && !isValidMaxTokens(maxTokens) ? 'Debe ser un número entero entre 1 y 8192.' : undefined
+  // Returns translation keys (under settings.assistant.form.errors.*) instead of literal
+  // messages -- AiAssistantDrawer.tsx resolves them with t() before rendering.
+  const nameError: TranslationKey | undefined = touched && !isNotBlank(name) ? 'settings.assistant.form.errors.nameRequired' : undefined
+  const modelError: TranslationKey | undefined = touched && !model ? 'settings.assistant.form.errors.modelRequired' : undefined
+  const systemPromptError: TranslationKey | undefined =
+    touched && isActive && !isNotBlank(systemPrompt) ? 'settings.assistant.form.errors.systemPromptRequired' : undefined
+  const temperatureError: TranslationKey | undefined = touched && !isValidTemperature(temperature) ? 'settings.assistant.form.errors.temperatureRange' : undefined
+  const maxTokensError: TranslationKey | undefined = touched && !isValidMaxTokens(maxTokens) ? 'settings.assistant.form.errors.maxTokensRange' : undefined
 
   function isValid() {
     return isNotBlank(name) && !!model && (!isActive || isNotBlank(systemPrompt)) && isValidTemperature(temperature) && isValidMaxTokens(maxTokens)

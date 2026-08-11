@@ -1,20 +1,22 @@
 import { useState } from 'react'
 import type { WhatsappLineInput } from '../../lib/api/whatsappLines'
 import { isNotBlank, isValidMetaNumericId } from '../../lib/validation'
+import { useLanguage } from '../../contexts/LanguageContext'
 
 export function useWhatsappLineForm(initial?: Partial<WhatsappLineInput>) {
+  const { t } = useLanguage()
   const [tenantId, setTenantId] = useState(initial?.tenant_id ?? '')
   const [displayName, setDisplayName] = useState(initial?.display_name ?? '')
   const [phoneNumberId, setPhoneNumberId] = useState(initial?.phone_number_id ?? '')
   const [businessAccountId, setBusinessAccountId] = useState(initial?.business_account_id ?? '')
   const [touched, setTouched] = useState(false)
 
-  const tenantIdError = touched && !isNotBlank(tenantId) ? 'Selecciona un cliente.' : undefined
-  const displayNameError = touched && !isNotBlank(displayName) ? 'El nombre es obligatorio.' : undefined
+  const tenantIdError = touched && !isNotBlank(tenantId) ? t('backoffice.whatsappLineForm.errors.tenant') : undefined
+  const displayNameError = touched && !isNotBlank(displayName) ? t('backoffice.whatsappLineForm.errors.name') : undefined
   const phoneNumberIdError =
-    touched && !isValidMetaNumericId(phoneNumberId) ? 'Debe ser el phone_number_id numérico que da Meta.' : undefined
+    touched && !isValidMetaNumericId(phoneNumberId) ? t('backoffice.whatsappLineForm.errors.phoneNumberId') : undefined
   const businessAccountIdError =
-    touched && !isValidMetaNumericId(businessAccountId) ? 'Debe ser el business_account_id numérico que da Meta.' : undefined
+    touched && !isValidMetaNumericId(businessAccountId) ? t('backoffice.whatsappLineForm.errors.businessAccountId') : undefined
 
   function isValid() {
     return (

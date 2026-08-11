@@ -1,5 +1,6 @@
 import { supabase } from '../supabaseClient'
 import type { CrmProduct, CrmProductImage } from '../../types/domain'
+import type { TranslationKey } from '../../i18n/translations'
 
 export interface ProductInput {
   tenant_id: string
@@ -92,9 +93,12 @@ const PRODUCT_IMAGE_MAX_BYTES = 5 * 1024 * 1024
 const PRODUCT_IMAGE_MAX_DIMENSION = 1200
 const PRODUCT_IMAGE_QUALITY = 0.82
 
-export function validateProductImageFile(file: File): string | null {
-  if (!PRODUCT_IMAGE_ALLOWED_TYPES.includes(file.type)) return 'La imagen debe ser PNG, JPG o WEBP.'
-  if (file.size > PRODUCT_IMAGE_MAX_BYTES) return 'La imagen no puede pesar más de 5MB.'
+/** Returns a translation key (not a display string) -- same convention as
+ * validatePqrAttachmentFile/validateTaskAttachmentFile in lib/api/attachments.ts,
+ * the caller runs it through t() before showing it. */
+export function validateProductImageFile(file: File): TranslationKey | null {
+  if (!PRODUCT_IMAGE_ALLOWED_TYPES.includes(file.type)) return 'common.attachment.error.invalidImageType'
+  if (file.size > PRODUCT_IMAGE_MAX_BYTES) return 'products.drawer.images.tooLarge'
   return null
 }
 

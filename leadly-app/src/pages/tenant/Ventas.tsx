@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
-import { deleteOrder, listOrders, updateOrderStatus } from '../../lib/api/orders'
+import { useLanguage } from '../../contexts/LanguageContext'
+import type { Language } from '../../i18n/translations'
+import { deleteOrder, listOrders, updateOrderStatus, ORDER_STATUS_LABEL_KEY } from '../../lib/api/orders'
 import type { OrderWithRelations } from '../../lib/api/orders'
 import type { OrderStatus } from '../../types/domain'
 import { Badge, Button, Card, EmptyState, PageSpinner, Pagination, Table, TBody, TD, TH, THead, TRow } from '../../components/ui'
@@ -9,14 +11,6 @@ import { PencilIcon, PlusIcon, TrashIcon } from '../../components/icons'
 import { OrderDrawer } from './orders/OrderDrawer'
 
 const PAGE_SIZE = 10
-
-const STATUS_LABEL: Record<OrderStatus, string> = {
-  cotizacion: 'Cotización',
-  confirmada: 'Confirmada',
-  en_proceso: 'En proceso',
-  entregada: 'Entregada',
-  cancelada: 'Cancelada',
-}
 
 const STATUS_TONE: Record<OrderStatus, 'neutral' | 'success' | 'warning' | 'danger'> = {
   cotizacion: 'neutral',
@@ -30,8 +24,14 @@ function formatCurrency(value: number, currency: string): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 }
 
+function formatDate(iso: string, language: Language): string {
+  const locale = language === 'en' ? 'en-US' : 'es-CO'
+  return new Date(iso).toLocaleDateString(locale, { day: '2-digit', month: 'short' })
+}
+
 export function Ventas() {
   const { profile } = useAuth()
+  const { t, language } = useLanguage()
   const navigate = useNavigate()
   const [orders, setOrders] = useState<OrderWithRelations[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -49,7 +49,7 @@ export function Ventas() {
     if (!profile?.tenant_id) return
     listOrders(profile.tenant_id)
       .then(setOrders)
-      .catch((err) => setError(err.message ?? 'No se pudieron cargar las cotizaciones/ventas.'))
+      .catch((err) => setError(err.message ?? t('orders.errors.load')))
   }
 
   useEffect(reload, [profile?.tenant_id])
@@ -74,7 +74,7 @@ export function Ventas() {
       await updateOrderStatus(id, 'confirmada')
       reload()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo confirmar la venta.')
+      setError(err instanceof Error ? err.message : t('orders.errors.confirm'))
     } finally {
       setConfirmingId(null)
     }
@@ -91,7 +91,7 @@ export function Ventas() {
       setOrders((prev) => (prev ? prev.filter((o) => o.id !== id) : prev))
       setPendingId(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo cancelar la cotización.')
+      setError(err instanceof Error ? err.message : t('orders.errors.cancelQuote'))
     } finally {
       setPending(false)
     }
@@ -109,7 +109,7 @@ export function Ventas() {
       reload()
       setPendingId(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo anular la venta.')
+      setError(err instanceof Error ? err.message : t('orders.errors.void'))
     } finally {
       setPending(false)
     }
@@ -119,7 +119,7 @@ export function Ventas() {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex flex-wrap gap-1">
-          {(['all', ...Object.keys(STATUS_LABEL)] as (OrderStatus | 'all')[]).map((s) => (
+          {(['all', ...Object.keys(ORDER_STATUS_LABEL_KEY)] as (OrderStatus | 'all')[]).map((s) => (
             <button
               key={s}
               onClick={() => setStatusFilter(s)}
@@ -127,17 +127,17 @@ export function Ventas() {
                 statusFilter === s ? 'border-accent-400 bg-accent-50 text-accent-700' : 'border-brand-200 text-brand-500 hover:bg-brand-50'
               }`}
             >
-              {s === 'all' ? 'Todas' : STATUS_LABEL[s]}
+              {s === 'all' ? t('orders.filters.all') : t(ORDER_STATUS_LABEL_KEY[s])}
             </button>
           ))}
         </div>
 
         <span className="shrink-0 text-xs text-brand-400">
-          {filtered?.length ?? 0} {(filtered?.length ?? 0) === 1 ? 'resultado' : 'resultados'}
+          {filtered?.length ?? 0} {t((filtered?.length ?? 0) === 1 ? 'orders.count.singular' : 'orders.count.plural')}
         </span>
 
         <Button variant="secondary" onClick={() => setDrawer({ open: true, order: null })} className="!ml-auto !py-1 !text-xs">
-          <PlusIcon width={14} height={14} /> Nueva cotización
+          <PlusIcon width={14} height={14} /> {t('orders.actions.newQuote')}
         </Button>
       </div>
 
@@ -146,7 +146,7 @@ export function Ventas() {
 
       {filtered && filtered.length === 0 && (
         <Card>
-          <EmptyState>{orders && orders.length > 0 ? 'Ninguna coincide con el filtro.' : 'Todavía no tenés cotizaciones ni ventas.'}</EmptyState>
+          <EmptyState>{orders && orders.length > 0 ? t('orders.empty.noMatch') : t('orders.empty.none')}</EmptyState>
         </Card>
       )}
 
@@ -155,12 +155,12 @@ export function Ventas() {
           <Table>
             <THead>
               <tr>
-                <TH>N°</TH>
-                <TH>Contacto</TH>
-                <TH>Estado</TH>
-                <TH>Total</TH>
-                <TH>Fecha</TH>
-                <TH className="text-right">Acciones</TH>
+                <TH>{t('orders.table.number')}</TH>
+                <TH>{t('orders.table.contact')}</TH>
+                <TH>{t('orders.table.status')}</TH>
+                <TH>{t('orders.table.total')}</TH>
+                <TH>{t('orders.table.date')}</TH>
+                <TH className="text-right">{t('orders.table.actions')}</TH>
               </tr>
             </THead>
             <TBody>
@@ -174,10 +174,10 @@ export function Ventas() {
                     {order.opportunity && <span className="block text-[11px] font-normal text-brand-400">{order.opportunity.title}</span>}
                   </TD>
                   <TD>
-                    <Badge tone={STATUS_TONE[order.status]}>{STATUS_LABEL[order.status]}</Badge>
+                    <Badge tone={STATUS_TONE[order.status]}>{t(ORDER_STATUS_LABEL_KEY[order.status])}</Badge>
                   </TD>
                   <TD className="text-xs text-brand-700">{formatCurrency(order.total, order.currency)}</TD>
-                  <TD className="text-xs text-brand-500">{new Date(order.created_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })}</TD>
+                  <TD className="text-xs text-brand-500">{formatDate(order.created_at, language)}</TD>
                   <TD className="text-right">
                     {pendingId === order.id ? (
                       <span className="inline-flex items-center gap-1.5">
@@ -187,17 +187,17 @@ export function Ventas() {
                           disabled={pending}
                           className="!px-2 !py-1 text-xs"
                         >
-                          {pending ? 'Procesando…' : order.status === 'cotizacion' ? 'Cancelar cotización' : 'Anular venta'}
+                          {pending ? t('common.status.processing') : order.status === 'cotizacion' ? t('orders.actions.cancelQuote') : t('orders.actions.voidSale')}
                         </Button>
                         <Button variant="ghost" onClick={() => setPendingId(null)} disabled={pending} className="!px-2 !py-1 text-xs">
-                          Volver
+                          {t('common.actions.back')}
                         </Button>
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1">
                         {order.status === 'cotizacion' && (
                           <Button variant="ghost" onClick={() => handleConfirm(order.id)} disabled={confirmingId === order.id} className="!px-2 !py-1 text-xs !text-accent-700">
-                            {confirmingId === order.id ? 'Confirmando…' : 'Convertir en venta'}
+                            {confirmingId === order.id ? t('orders.actions.confirming') : t('orders.actions.convert')}
                           </Button>
                         )}
                         <Button variant="ghost" onClick={() => setDrawer({ open: true, order })} className="!px-2 !py-1 text-xs">
@@ -210,7 +210,7 @@ export function Ventas() {
                         )}
                         {(order.status === 'confirmada' || order.status === 'en_proceso' || order.status === 'entregada') && (
                           <Button variant="ghost" onClick={() => setPendingId(order.id)} className="!px-2 !py-1 text-xs !text-red-600 hover:!bg-red-50">
-                            Anular
+                            {t('orders.actions.voidShort')}
                           </Button>
                         )}
                       </span>

@@ -95,19 +95,13 @@ export default function App() {
             <Route
               path="reportes"
               element={
-                <LockedFeature
-                  icon={BarChartIcon}
-                  description="Reportes de conversión, actividad y desempeño llegarán próximamente. Estamos trabajando en esta función."
-                />
+                <LockedFeature icon={BarChartIcon} descriptionKey="account.locked.reports" />
               }
             />
             <Route
               path="automatizaciones"
               element={
-                <LockedFeature
-                  icon={RefreshIcon}
-                  description="Automatizaciones de seguimiento y flujos de trabajo llegarán próximamente. Estamos trabajando en esta función."
-                />
+                <LockedFeature icon={RefreshIcon} descriptionKey="account.locked.automations" />
               }
             />
             <Route path="ia-agentes" element={<IaAgentes />} />
@@ -115,10 +109,7 @@ export default function App() {
             <Route
               path="campanas"
               element={
-                <LockedFeature
-                  icon={MegaphoneIcon}
-                  description="Pausas publicitarias y campañas masivas de WhatsApp llegarán próximamente. Estamos trabajando en esta función."
-                />
+                <LockedFeature icon={MegaphoneIcon} descriptionKey="account.locked.campaigns" />
               }
             />
             {/* Catálogo se fusionó dentro de Productos (mismo catálogo, no dos

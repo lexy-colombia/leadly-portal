@@ -1,0 +1,58 @@
+{
+  "tasks.priority.low": "Baja",
+  "tasks.priority.medium": "Media",
+  "tasks.priority.high": "Alta",
+
+  "tasks.status.pendiente": "Pendiente",
+  "tasks.status.en_proceso": "En proceso",
+  "tasks.status.completada": "Completada",
+  "tasks.status.cancelada": "Cancelada",
+
+  "tasks.filter.all": "Todas",
+  "tasks.count.singular": "{count} tarea",
+  "tasks.count.plural": "{count} tareas",
+  "tasks.actions.new": "Nueva tarea",
+
+  "tasks.dueDate.none": "Sin fecha",
+  "tasks.dueDate.overdueSuffix": "{date} (vencida)",
+
+  "tasks.empty.noneInStatus": "Ninguna tarea en este estado.",
+  "tasks.empty.noTasks": "Todavía no tenés tareas registradas.",
+
+  "tasks.errors.loadFailed": "No se pudieron cargar las tareas.",
+  "tasks.errors.updateFailed": "No se pudo actualizar la tarea.",
+  "tasks.errors.deleteFailed": "No se pudo eliminar la tarea.",
+  "tasks.errors.saveFailed": "No se pudo guardar la tarea.",
+  "tasks.errors.uploadFailed": "No se pudo subir el archivo.",
+  "tasks.errors.openAttachmentFailed": "No se pudo abrir el archivo.",
+
+  "tasks.table.task": "Tarea",
+  "tasks.table.priority": "Prioridad",
+  "tasks.table.due": "Vence",
+  "tasks.table.assignedTo": "Asignada a",
+  "tasks.table.actions": "Acciones",
+
+  "tasks.aria.markPending": "Marcar como pendiente",
+  "tasks.aria.markCompleted": "Marcar como completada",
+
+  "tasks.drawer.editTitle": "Editar tarea",
+  "tasks.drawer.newTitle": "Nueva tarea",
+  "tasks.drawer.description": "Seguimiento o recordatorio para un agente.",
+
+  "tasks.field.title": "Título",
+  "tasks.field.titlePlaceholder": "Ej. Llamar para confirmar propuesta",
+  "tasks.field.titleRequired": "El título es obligatorio.",
+  "tasks.field.description": "Descripción (opcional)",
+  "tasks.field.priority": "Prioridad",
+  "tasks.field.dueDate": "Fecha límite (opcional)",
+  "tasks.field.contact": "Contacto (opcional)",
+  "tasks.field.noContact": "Sin contacto",
+  "tasks.field.assignedTo": "Asignada a (opcional)",
+  "tasks.field.unassigned": "Sin asignar",
+
+  "tasks.attachments.label": "Archivos adjuntos",
+  "tasks.attachments.empty": "Sin archivos todavía -- ej. una propuesta enviada.",
+  "tasks.attachments.uploading": "Subiendo…",
+  "tasks.attachments.attach": "Adjuntar archivo",
+  "tasks.attachments.defaultName": "Archivo"
+}

@@ -4,8 +4,14 @@ import { listContacts } from '../../../lib/api/contacts'
 import type { CrmContact, CrmPipelineStage, OpportunityPriority } from '../../../types/domain'
 import { Button, CurrencyInput, Drawer, FieldError, Input, Label, Select, Textarea } from '../../../components/ui'
 import { isNotBlank } from '../../../lib/validation'
+import { useLanguage } from '../../../contexts/LanguageContext'
+import type { TranslationKey } from '../../../i18n/translations'
 
-const PRIORITY_LABEL: Record<OpportunityPriority, string> = { baja: 'Baja', media: 'Media', alta: 'Alta' }
+const PRIORITY_LABEL: Record<OpportunityPriority, TranslationKey> = {
+  baja: 'opportunities.priority.low',
+  media: 'opportunities.priority.medium',
+  alta: 'opportunities.priority.high',
+}
 
 export function OpportunityDrawer({
   open,
@@ -23,6 +29,7 @@ export function OpportunityDrawer({
   opportunity?: OpportunityWithRelations | null
   onSaved: (opportunity: OpportunityWithRelations) => void
 }) {
+  const { t } = useLanguage()
   const [title, setTitle] = useState('')
   const [contactId, setContactId] = useState('')
   const [stageId, setStageId] = useState('')
@@ -64,8 +71,8 @@ export function OpportunityDrawer({
       .catch(() => {})
   }, [open, pipelineId])
 
-  const titleError = touched && !isNotBlank(title) ? 'El título es obligatorio.' : undefined
-  const contactError = touched && !contactId ? 'Elegí un contacto.' : undefined
+  const titleError = touched && !isNotBlank(title) ? t('opportunities.drawer.errors.titleRequired') : undefined
+  const contactError = touched && !contactId ? t('opportunities.drawer.errors.contactRequired') : undefined
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -90,25 +97,36 @@ export function OpportunityDrawer({
       onSaved(saved as OpportunityWithRelations)
       onClose()
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'No se pudo guardar la oportunidad.')
+      setFormError(err instanceof Error ? err.message : t('opportunities.drawer.errors.saveFailed'))
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <Drawer open={open} onClose={onClose} title={opportunity ? 'Editar oportunidad' : 'Nueva oportunidad'} description="Negociación en curso con un contacto.">
+    <Drawer
+      open={open}
+      onClose={onClose}
+      title={opportunity ? t('opportunities.drawer.editTitle') : t('opportunities.drawer.newTitle')}
+      description={t('opportunities.drawer.description')}
+    >
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <div>
-          <Label htmlFor="opp-title">Título</Label>
-          <Input id="opp-title" value={title} invalid={!!titleError} onChange={(e) => setTitle(e.target.value)} placeholder="Ej. Implementación CRM - 20 usuarios" />
+          <Label htmlFor="opp-title">{t('opportunities.drawer.fields.title')}</Label>
+          <Input
+            id="opp-title"
+            value={title}
+            invalid={!!titleError}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder={t('opportunities.drawer.fields.titlePlaceholder')}
+          />
           <FieldError message={titleError} />
         </div>
 
         <div>
-          <Label htmlFor="opp-contact">Contacto</Label>
+          <Label htmlFor="opp-contact">{t('opportunities.drawer.fields.contact')}</Label>
           <Select id="opp-contact" value={contactId} invalid={!!contactError} onChange={(e) => setContactId(e.target.value)}>
-            <option value="">Selecciona…</option>
+            <option value="">{t('opportunities.drawer.fields.contactPlaceholder')}</option>
             {contacts.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.full_name}
@@ -119,7 +137,7 @@ export function OpportunityDrawer({
         </div>
 
         <div>
-          <Label htmlFor="opp-stage">Etapa</Label>
+          <Label htmlFor="opp-stage">{t('opportunities.drawer.fields.stage')}</Label>
           <Select id="opp-stage" value={stageId} onChange={(e) => setStageId(e.target.value)}>
             {stages.map((s) => (
               <option key={s.id} value={s.id}>
@@ -131,15 +149,15 @@ export function OpportunityDrawer({
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <Label htmlFor="opp-value">Valor (COP)</Label>
+            <Label htmlFor="opp-value">{t('opportunities.drawer.fields.value')}</Label>
             <CurrencyInput id="opp-value" step={1} value={value} onChange={(e) => setValue(e.target.value)} />
           </div>
           <div>
-            <Label htmlFor="opp-priority">Prioridad</Label>
+            <Label htmlFor="opp-priority">{t('opportunities.drawer.fields.priority')}</Label>
             <Select id="opp-priority" value={priority} onChange={(e) => setPriority(e.target.value as OpportunityPriority)}>
               {(Object.keys(PRIORITY_LABEL) as OpportunityPriority[]).map((p) => (
                 <option key={p} value={p}>
-                  {PRIORITY_LABEL[p]}
+                  {t(PRIORITY_LABEL[p])}
                 </option>
               ))}
             </Select>
@@ -147,12 +165,12 @@ export function OpportunityDrawer({
         </div>
 
         <div>
-          <Label htmlFor="opp-close-date">Fecha estimada de cierre (opcional)</Label>
+          <Label htmlFor="opp-close-date">{t('opportunities.drawer.fields.closeDate')}</Label>
           <Input id="opp-close-date" type="date" value={expectedCloseDate} onChange={(e) => setExpectedCloseDate(e.target.value)} />
         </div>
 
         <div>
-          <Label htmlFor="opp-description">Descripción (opcional)</Label>
+          <Label htmlFor="opp-description">{t('opportunities.drawer.fields.description')}</Label>
           <Textarea id="opp-description" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
         </div>
 
@@ -160,10 +178,10 @@ export function OpportunityDrawer({
 
         <div className="flex gap-2 border-t border-brand-100 pt-5">
           <Button type="submit" variant="secondary" disabled={submitting}>
-            {submitting ? 'Guardando…' : 'Guardar'}
+            {submitting ? t('common.actions.saving') : t('common.actions.save')}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>
-            Cancelar
+            {t('common.actions.cancel')}
           </Button>
         </div>
       </form>

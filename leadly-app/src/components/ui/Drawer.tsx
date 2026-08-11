@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { useLanguage } from '../../contexts/LanguageContext'
 
 /** Reusable right-side sliding panel -- the app's one "modal" pattern, used for
  * every create/edit form (Cliente, Línea de WhatsApp, ...) instead of either a
@@ -21,6 +22,8 @@ export function Drawer({
   children: ReactNode
   footer?: ReactNode
 }) {
+  const { t } = useLanguage()
+
   useEffect(() => {
     if (!open) return
     function handleKey(e: KeyboardEvent) {
@@ -49,7 +52,7 @@ export function Drawer({
           <button
             type="button"
             onClick={onClose}
-            aria-label="Cerrar"
+            aria-label={t('common.actions.close')}
             className="-mr-2 -mt-1 rounded-lg p-2 text-brand-300 hover:bg-brand-50 hover:text-brand-600"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">

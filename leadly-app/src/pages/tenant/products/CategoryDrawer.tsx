@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { createProductCategory, updateProductCategory } from '../../../lib/api/productCategories'
 import type { CrmProductCategory } from '../../../types/domain'
+import { useLanguage } from '../../../contexts/LanguageContext'
 import { Button, Drawer, FieldError, Input, Label, Textarea } from '../../../components/ui'
 import { isNotBlank } from '../../../lib/validation'
 
@@ -19,6 +20,7 @@ export function CategoryDrawer({
   category?: CrmProductCategory | null
   onSaved: () => void
 }) {
+  const { t } = useLanguage()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [color, setColor] = useState(DEFAULT_COLOR)
@@ -35,7 +37,7 @@ export function CategoryDrawer({
     setFormError(null)
   }, [open, category])
 
-  const nameError = touched && !isNotBlank(name) ? 'El nombre es obligatorio.' : undefined
+  const nameError = touched && !isNotBlank(name) ? t('products.categories.errors.nameRequired') : undefined
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -51,23 +53,34 @@ export function CategoryDrawer({
       onSaved()
       onClose()
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'No se pudo guardar la categoría.')
+      setFormError(err instanceof Error ? err.message : t('products.categories.errors.save'))
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <Drawer open={open} onClose={onClose} title={category ? 'Editar categoría' : 'Nueva categoría'} description="Agrupa tus productos por tipo.">
+    <Drawer
+      open={open}
+      onClose={onClose}
+      title={category ? t('products.categories.drawer.editTitle') : t('products.categories.drawer.newTitle')}
+      description={t('products.categories.drawer.description')}
+    >
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <div className="flex gap-3">
           <div className="flex-1">
-            <Label htmlFor="category-name">Nombre</Label>
-            <Input id="category-name" value={name} invalid={!!nameError} onChange={(e) => setName(e.target.value)} placeholder="Ej. Ropa" />
+            <Label htmlFor="category-name">{t('products.categories.fields.name')}</Label>
+            <Input
+              id="category-name"
+              value={name}
+              invalid={!!nameError}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={t('products.categories.fields.namePlaceholder')}
+            />
             <FieldError message={nameError} />
           </div>
           <div>
-            <Label htmlFor="category-color">Color</Label>
+            <Label htmlFor="category-color">{t('products.categories.fields.color')}</Label>
             <input
               id="category-color"
               type="color"
@@ -79,7 +92,7 @@ export function CategoryDrawer({
         </div>
 
         <div>
-          <Label htmlFor="category-description">Descripción (opcional)</Label>
+          <Label htmlFor="category-description">{t('products.categories.fields.description')}</Label>
           <Textarea id="category-description" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
         </div>
 
@@ -87,10 +100,10 @@ export function CategoryDrawer({
 
         <div className="flex gap-2 border-t border-brand-100 pt-5">
           <Button type="submit" variant="secondary" disabled={submitting}>
-            {submitting ? 'Guardando…' : 'Guardar'}
+            {submitting ? t('common.actions.saving') : t('common.actions.save')}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>
-            Cancelar
+            {t('common.actions.cancel')}
           </Button>
         </div>
       </form>

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Button, IconSelect, InitialsAvatar, PageSpinner } from '../../../components/ui'
 import { ArchiveIcon, ChevronLeftIcon, ImageIcon, LockClosedIcon, RefreshIcon, SendIcon, TagIcon, UserIcon, XCircleIcon } from '../../../components/icons'
 import {
+  CONVERSATION_CATEGORY_KEY,
   conversationDisplayName,
   listMessages,
   retryAiResponse,
@@ -20,14 +21,6 @@ import type { ConversationCategory, ConversationTag, Profile, WhatsappMessage } 
 import { MessageBubble } from './MessageBubble'
 import { useLanguage } from '../../../contexts/LanguageContext'
 
-const CATEGORY_LABEL: Record<ConversationCategory, string> = {
-  venta: 'Venta',
-  soporte: 'Soporte',
-  consulta: 'Consulta',
-  reclamo: 'Reclamo',
-  otro: 'Otro',
-}
-
 export function ChatPanel({
   conversation,
   agents,
@@ -37,6 +30,7 @@ export function ChatPanel({
   agents: Profile[]
   onBack: () => void
 }) {
+  const { t } = useLanguage()
   const [messages, setMessages] = useState<WhatsappMessage[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [modeUpdating, setModeUpdating] = useState(false)
@@ -78,7 +72,7 @@ export function ChatPanel({
     setError(null)
     listMessages(conversation.id)
       .then(setMessages)
-      .catch((err) => setError(err.message ?? 'No se pudieron cargar los mensajes.'))
+      .catch((err) => setError(err.message ?? t('inbox.errors.loadMessages')))
 
     const unsubscribe = subscribeToMessages(conversation.id, (message) => {
       setMessages((prev) => {
@@ -115,7 +109,7 @@ export function ChatPanel({
     try {
       await setConversationMode(conversation.id, newMode)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo cambiar el modo de la conversación.')
+      setError(err instanceof Error ? err.message : t('inbox.errors.changeMode'))
     } finally {
       setModeUpdating(false)
     }
@@ -131,7 +125,7 @@ export function ChatPanel({
       await retryAiResponse(conversation.id)
       setRetrySuccess(true)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo reintentar la respuesta de la IA.')
+      setError(err instanceof Error ? err.message : t('inbox.errors.retryAi'))
     } finally {
       setRetrying(false)
     }
@@ -143,7 +137,7 @@ export function ChatPanel({
     try {
       await setConversationCategory(conversation.id, (value || null) as ConversationCategory | null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo cambiar el tipo de conversación.')
+      setError(err instanceof Error ? err.message : t('inbox.errors.changeCategory'))
     } finally {
       setCategoryUpdating(false)
     }
@@ -155,7 +149,7 @@ export function ChatPanel({
     try {
       await setConversationAssignee(conversation.id, value || null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo asignar la conversación.')
+      setError(err instanceof Error ? err.message : t('inbox.errors.assign'))
     } finally {
       setAssigneeUpdating(false)
     }
@@ -168,7 +162,7 @@ export function ChatPanel({
     try {
       await setConversationStatus(conversation.id, nextStatus)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo cambiar el estado de la conversación.')
+      setError(err instanceof Error ? err.message : t('inbox.errors.changeStatus'))
     } finally {
       setStatusUpdating(false)
     }
@@ -181,7 +175,7 @@ export function ChatPanel({
     try {
       await setConversationArchived(conversation.id, nextArchived)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo archivar la conversación.')
+      setError(err instanceof Error ? err.message : t('inbox.errors.archive'))
     } finally {
       setArchivedUpdating(false)
     }
@@ -195,7 +189,7 @@ export function ChatPanel({
     try {
       await setConversationTags(conversation.id, nextTagIds)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudieron actualizar las tags.')
+      setError(err instanceof Error ? err.message : t('inbox.errors.updateTags'))
       listTagIdsForConversation(conversation.id).then(setAssignedTagIds).catch(() => {})
     } finally {
       setTagsUpdating(false)
@@ -208,7 +202,7 @@ export function ChatPanel({
     if (!file) return
     const validationError = validatePqrAttachmentFile(file)
     if (validationError) {
-      setAttachmentError(validationError)
+      setAttachmentError(t(validationError))
       return
     }
     setAttachmentError(null)
@@ -231,13 +225,12 @@ export function ChatPanel({
       setDraft('')
       setAttachment(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo enviar el mensaje.')
+      setError(err instanceof Error ? err.message : t('inbox.errors.sendMessage'))
     } finally {
       setSending(false)
     }
   }
 
-  const { t } = useLanguage()
   const name = conversationDisplayName(conversation)
   const isHumano = conversation.mode === 'humano'
 
@@ -289,9 +282,9 @@ export function ChatPanel({
             className="!w-auto !rounded-full !border-brand-200 !py-1.5 !pr-7 !text-xs hover:!border-brand-300"
           >
             <option value="">{t('inbox.category.unclassified')}</option>
-            {(Object.keys(CATEGORY_LABEL) as ConversationCategory[]).map((c) => (
+            {(Object.keys(CONVERSATION_CATEGORY_KEY) as ConversationCategory[]).map((c) => (
               <option key={c} value={c}>
-                {CATEGORY_LABEL[c]}
+                {t(CONVERSATION_CATEGORY_KEY[c])}
               </option>
             ))}
           </IconSelect>
@@ -393,7 +386,7 @@ export function ChatPanel({
               <div className="flex items-center gap-2 rounded-xl border border-brand-100 bg-brand-50/60 px-3 py-2">
                 <img src={attachmentPreviewUrl} alt={attachment.name} className="h-12 w-12 rounded-lg object-cover" />
                 <span className="min-w-0 flex-1 truncate text-xs text-brand-500">{attachment.name}</span>
-                <button type="button" onClick={() => setAttachment(null)} className="text-brand-400 hover:text-brand-600" aria-label="Quitar imagen">
+                <button type="button" onClick={() => setAttachment(null)} className="text-brand-400 hover:text-brand-600" aria-label={t('common.attachment.remove')}>
                   <XCircleIcon width={18} height={18} />
                 </button>
               </div>
@@ -404,7 +397,7 @@ export function ChatPanel({
                 type="button"
                 onClick={() => attachmentInputRef.current?.click()}
                 className="flex shrink-0 items-center justify-center rounded-xl border border-brand-200 p-2.5 text-brand-500 transition-colors hover:border-brand-300 hover:bg-brand-50"
-                aria-label="Adjuntar imagen"
+                aria-label={t('common.attachment.attach')}
               >
                 <ImageIcon width={18} height={18} />
               </button>

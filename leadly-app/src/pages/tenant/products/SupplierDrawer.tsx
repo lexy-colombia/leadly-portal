@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { createSupplier, updateSupplier } from '../../../lib/api/suppliers'
 import type { CrmSupplier } from '../../../types/domain'
+import { useLanguage } from '../../../contexts/LanguageContext'
 import { Button, Drawer, FieldError, Input, Label, Switch, Textarea } from '../../../components/ui'
 import { isNotBlank } from '../../../lib/validation'
 
@@ -17,6 +18,7 @@ export function SupplierDrawer({
   supplier?: CrmSupplier | null
   onSaved: () => void
 }) {
+  const { t } = useLanguage()
   const [name, setName] = useState('')
   const [contactName, setContactName] = useState('')
   const [phone, setPhone] = useState('')
@@ -39,7 +41,7 @@ export function SupplierDrawer({
     setFormError(null)
   }, [open, supplier])
 
-  const nameError = touched && !isNotBlank(name) ? 'El nombre es obligatorio.' : undefined
+  const nameError = touched && !isNotBlank(name) ? t('products.suppliers.errors.nameRequired') : undefined
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -63,44 +65,49 @@ export function SupplierDrawer({
       onSaved()
       onClose()
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'No se pudo guardar el proveedor.')
+      setFormError(err instanceof Error ? err.message : t('products.suppliers.errors.save'))
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <Drawer open={open} onClose={onClose} title={supplier ? 'Editar proveedor' : 'Nuevo proveedor'} description="A quién le comprás tus productos.">
+    <Drawer
+      open={open}
+      onClose={onClose}
+      title={supplier ? t('products.suppliers.drawer.editTitle') : t('products.suppliers.drawer.newTitle')}
+      description={t('products.suppliers.drawer.description')}
+    >
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <div>
-          <Label htmlFor="supplier-name">Nombre</Label>
-          <Input id="supplier-name" value={name} invalid={!!nameError} onChange={(e) => setName(e.target.value)} placeholder="Ej. Textiles del Valle" />
+          <Label htmlFor="supplier-name">{t('products.suppliers.fields.name')}</Label>
+          <Input id="supplier-name" value={name} invalid={!!nameError} onChange={(e) => setName(e.target.value)} placeholder={t('products.suppliers.fields.namePlaceholder')} />
           <FieldError message={nameError} />
         </div>
 
         <div>
-          <Label htmlFor="supplier-contact">Persona de contacto (opcional)</Label>
+          <Label htmlFor="supplier-contact">{t('products.suppliers.fields.contactPerson')}</Label>
           <Input id="supplier-contact" value={contactName} onChange={(e) => setContactName(e.target.value)} />
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <Label htmlFor="supplier-phone">Teléfono (opcional)</Label>
+            <Label htmlFor="supplier-phone">{t('products.suppliers.fields.phone')}</Label>
             <Input id="supplier-phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
           </div>
           <div>
-            <Label htmlFor="supplier-email">Correo (opcional)</Label>
+            <Label htmlFor="supplier-email">{t('products.suppliers.fields.email')}</Label>
             <Input id="supplier-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
           </div>
         </div>
 
         <div>
-          <Label htmlFor="supplier-notes">Notas (opcional)</Label>
+          <Label htmlFor="supplier-notes">{t('products.suppliers.fields.notes')}</Label>
           <Textarea id="supplier-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </div>
 
         <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
-          <span className="text-sm text-brand-700">Proveedor activo</span>
+          <span className="text-sm text-brand-700">{t('products.suppliers.fields.active')}</span>
           <Switch checked={isActive} onChange={setIsActive} />
         </div>
 
@@ -108,10 +115,10 @@ export function SupplierDrawer({
 
         <div className="flex gap-2 border-t border-brand-100 pt-5">
           <Button type="submit" variant="secondary" disabled={submitting}>
-            {submitting ? 'Guardando…' : 'Guardar'}
+            {submitting ? t('common.actions.saving') : t('common.actions.save')}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>
-            Cancelar
+            {t('common.actions.cancel')}
           </Button>
         </div>
       </form>

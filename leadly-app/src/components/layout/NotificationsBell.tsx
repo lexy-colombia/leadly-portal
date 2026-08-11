@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useLanguage } from '../../contexts/LanguageContext'
 import { BellIcon, CalendarIcon, ChatBubbleIcon, UserIcon } from '../icons'
 
 interface FakeNotification {
@@ -10,22 +11,51 @@ interface FakeNotification {
   unread: boolean
 }
 
-// Placeholder feed -- there's no notifications backend yet (no table, no
-// realtime push), this is UI-only so the shell doesn't feel empty. Swap for
-// a real `notifications` table + subscription when that's built.
-const FAKE_NOTIFICATIONS: FakeNotification[] = [
-  { id: '1', icon: 'message', title: 'Nuevo mensaje de Camila Dussan', detail: '"¿Cuánto cuesta el plan mensual?"', time: 'Hace 5 min', unread: true },
-  { id: '2', icon: 'appointment', title: 'Cita en 1 hora', detail: 'Sebastian Avendaño (Dueño Lexy)', time: 'Hace 20 min', unread: true },
-  { id: '3', icon: 'contact', title: 'Nuevo cliente creado', detail: 'María Fernanda López se agregó a tu CRM', time: 'Hace 2 h', unread: false },
-  { id: '4', icon: 'message', title: 'Conversación pasó a modo humano', detail: 'Carlos Ramirez pidió hablar con un asesor', time: 'Ayer', unread: false },
-]
-
 const ICON_BY_TYPE = { message: ChatBubbleIcon, appointment: CalendarIcon, contact: UserIcon }
 
 export function NotificationsBell({ theme = 'dark' }: { theme?: 'dark' | 'light' }) {
+  const { t } = useLanguage()
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const isLight = theme === 'light'
+
+  // Placeholder feed -- there's no notifications backend yet (no table, no
+  // realtime push), this is UI-only so the shell doesn't feel empty. Swap for
+  // a real `notifications` table + subscription when that's built.
+  const FAKE_NOTIFICATIONS: FakeNotification[] = [
+    {
+      id: '1',
+      icon: 'message',
+      title: t('common.notifications.demo.newMessage', { name: 'Camila Dussan' }),
+      detail: t('common.notifications.demo.newMessageDetail'),
+      time: t('common.notifications.demo.time.fiveMin'),
+      unread: true,
+    },
+    {
+      id: '2',
+      icon: 'appointment',
+      title: t('common.notifications.demo.appointmentTitle'),
+      detail: 'Sebastian Avendaño (Dueño Lexy)',
+      time: t('common.notifications.demo.time.twentyMin'),
+      unread: true,
+    },
+    {
+      id: '3',
+      icon: 'contact',
+      title: t('common.notifications.demo.newContact'),
+      detail: t('common.notifications.demo.newContactDetail', { name: 'María Fernanda López' }),
+      time: t('common.notifications.demo.time.twoHours'),
+      unread: false,
+    },
+    {
+      id: '4',
+      icon: 'message',
+      title: t('common.notifications.demo.humanMode'),
+      detail: t('common.notifications.demo.humanModeDetail', { name: 'Carlos Ramirez' }),
+      time: t('common.notifications.demo.time.yesterday'),
+      unread: false,
+    },
+  ]
   const unreadCount = FAKE_NOTIFICATIONS.filter((n) => n.unread).length
 
   useEffect(() => {
@@ -42,7 +72,7 @@ export function NotificationsBell({ theme = 'dark' }: { theme?: 'dark' | 'light'
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        aria-label="Notificaciones"
+        aria-label={t('common.notifications.title')}
         className={`relative rounded-full p-2 transition-colors ${
           isLight ? 'text-brand-500 hover:bg-brand-50 hover:text-brand-800' : 'text-brand-200 hover:bg-white/10 hover:text-white'
         }`}
@@ -56,8 +86,10 @@ export function NotificationsBell({ theme = 'dark' }: { theme?: 'dark' | 'light'
       {open && (
         <div className="absolute right-0 top-full z-50 mt-2 w-80 overflow-hidden rounded-2xl border border-brand-100 bg-white shadow-lg">
           <div className="flex items-center justify-between border-b border-brand-100 px-4 py-3">
-            <p className="text-sm font-semibold text-brand-800">Notificaciones</p>
-            {unreadCount > 0 && <span className="text-xs font-medium text-accent-600">{unreadCount} sin leer</span>}
+            <p className="text-sm font-semibold text-brand-800">{t('common.notifications.title')}</p>
+            {unreadCount > 0 && (
+              <span className="text-xs font-medium text-accent-600">{t('common.notifications.unreadCount', { count: unreadCount })}</span>
+            )}
           </div>
           <div className="max-h-80 overflow-y-auto">
             {FAKE_NOTIFICATIONS.map((n) => {

@@ -1,48 +1,38 @@
+import { useLanguage } from '../../contexts/LanguageContext'
 import { Logo } from '../brand/Logo'
 import { BarChartIcon, ChatBubbleIcon, TargetIcon } from '../icons'
 
 const FEATURES = [
-  {
-    icon: ChatBubbleIcon,
-    title: 'Captura más leads',
-    description: 'Conecta WhatsApp, Instagram, Web y más canales en un solo lugar.',
-  },
-  {
-    icon: TargetIcon,
-    title: 'Gestiona y convierte',
-    description: 'Organiza tus oportunidades y avanza cada venta sin perder nada.',
-  },
-  {
-    icon: BarChartIcon,
-    title: 'Cierra más negocios',
-    description: 'Automatiza seguimientos, tareas y recordatorios para vender más.',
-  },
-]
+  { icon: ChatBubbleIcon, titleKey: 'auth.marketing.feature1.title', descriptionKey: 'auth.marketing.feature1.description' },
+  { icon: TargetIcon, titleKey: 'auth.marketing.feature2.title', descriptionKey: 'auth.marketing.feature2.description' },
+  { icon: BarChartIcon, titleKey: 'auth.marketing.feature3.title', descriptionKey: 'auth.marketing.feature3.description' },
+] as const
 
 /** Left-hand marketing panel shared by every auth screen (login, forgot
  * password, etc.). The trend line is an inline SVG placeholder standing in
  * for a real illustration/photo -- swap the <TrendGraphic /> body for a
  * designed asset when one exists, the layout around it does not need to change. */
 export function AuthMarketingPanel() {
+  const { t } = useLanguage()
+
   return (
     <div className="relative hidden flex-col justify-between overflow-hidden bg-brand-800 p-10 text-white lg:flex lg:w-[46%] xl:p-14">
       <div>
         <Logo size="lg" onDark />
         <p className="mt-6 max-w-sm text-lg text-brand-100">
-          El CRM inteligente que convierte conversaciones en{' '}
-          <span className="font-semibold text-accent-400">oportunidades.</span>
+          {t('auth.marketing.heroPrefix')} <span className="font-semibold text-accent-400">{t('auth.marketing.heroHighlight')}</span>
         </p>
       </div>
 
       <ul className="space-y-6">
-        {FEATURES.map(({ icon: Icon, title, description }) => (
-          <li key={title} className="flex gap-4">
+        {FEATURES.map(({ icon: Icon, titleKey, descriptionKey }) => (
+          <li key={titleKey} className="flex gap-4">
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10 text-accent-400">
               <Icon width={20} height={20} />
             </span>
             <div>
-              <p className="font-semibold text-white">{title}</p>
-              <p className="text-sm text-brand-200">{description}</p>
+              <p className="font-semibold text-white">{t(titleKey)}</p>
+              <p className="text-sm text-brand-200">{t(descriptionKey)}</p>
             </div>
           </li>
         ))}
@@ -54,6 +44,7 @@ export function AuthMarketingPanel() {
 }
 
 function TrendGraphic() {
+  const { t } = useLanguage()
   return (
     <div className="relative h-40">
       <svg viewBox="0 0 400 140" fill="none" className="h-full w-full" aria-hidden="true">
@@ -74,8 +65,8 @@ function TrendGraphic() {
       </svg>
       <div className="absolute bottom-0 right-0 max-w-[13rem] rounded-xl border border-white/10 bg-brand-900/80 p-4 backdrop-blur">
         <p className="text-xl font-extrabold text-accent-400">+37%</p>
-        <p className="text-sm font-medium text-white">Más oportunidades convertidas</p>
-        <p className="text-xs text-brand-300">vs. el mes anterior</p>
+        <p className="text-sm font-medium text-white">{t('auth.marketing.trendLabel')}</p>
+        <p className="text-xs text-brand-300">{t('auth.marketing.trendPeriod')}</p>
       </div>
     </div>
   )

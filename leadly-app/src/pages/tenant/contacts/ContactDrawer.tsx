@@ -4,13 +4,15 @@ import { listProfilesByTenant } from '../../../lib/api/users'
 import type { ContactStage, CrmContact, Profile } from '../../../types/domain'
 import { Button, Drawer, FieldError, Input, Label, Select, Switch, TagInput, Textarea } from '../../../components/ui'
 import { isNotBlank, isValidE164Phone, isValidEmail } from '../../../lib/validation'
+import { useLanguage } from '../../../contexts/LanguageContext'
+import type { TranslationKey } from '../../../i18n/translations'
 
-export const STAGE_LABEL: Record<ContactStage, string> = {
-  lead: 'Lead',
-  contactado: 'Contactado',
-  negociacion: 'Negociación',
-  cliente: 'Cliente',
-  perdido: 'Perdido',
+export const STAGE_LABEL: Record<ContactStage, TranslationKey> = {
+  lead: 'contacts.stage.lead',
+  contactado: 'contacts.stage.contactado',
+  negociacion: 'contacts.stage.negociacion',
+  cliente: 'contacts.stage.cliente',
+  perdido: 'contacts.stage.perdido',
 }
 
 export function ContactDrawer({
@@ -27,6 +29,7 @@ export function ContactDrawer({
   contact?: CrmContact | null
   onSaved: (contact: CrmContact) => void
 }) {
+  const { t } = useLanguage()
   const [fullName, setFullName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
@@ -73,9 +76,9 @@ export function ContactDrawer({
     listProfilesByTenant(tenantId).then(setAgents).catch(() => {})
   }, [open, tenantId])
 
-  const nameError = touched && !isNotBlank(fullName) ? 'El nombre es obligatorio.' : undefined
-  const phoneError = touched && !isValidE164Phone(phone) ? 'Teléfono inválido (formato internacional, ej. +573001234567).' : undefined
-  const emailError = touched && isNotBlank(email) && !isValidEmail(email) ? 'Correo inválido.' : undefined
+  const nameError = touched && !isNotBlank(fullName) ? t('contacts.drawer.errors.nameRequired') : undefined
+  const phoneError = touched && !isValidE164Phone(phone) ? t('contacts.drawer.errors.invalidPhone') : undefined
+  const emailError = touched && isNotBlank(email) && !isValidEmail(email) ? t('contacts.drawer.errors.invalidEmail') : undefined
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -106,7 +109,7 @@ export function ContactDrawer({
       onSaved(saved)
       onClose()
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'No se pudo guardar el contacto.')
+      setFormError(err instanceof Error ? err.message : t('contacts.drawer.errors.saveFailed'))
     } finally {
       setSubmitting(false)
     }
@@ -116,53 +119,71 @@ export function ContactDrawer({
     <Drawer
       open={open}
       onClose={onClose}
-      title={contact ? 'Editar contacto' : 'Nuevo contacto'}
-      description="Información de contacto para tu CRM."
+      title={contact ? t('contacts.drawer.editTitle') : t('contacts.drawer.newTitle')}
+      description={t('contacts.drawer.description')}
     >
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <div>
-          <Label htmlFor="contact-name">Nombre completo</Label>
-          <Input id="contact-name" value={fullName} invalid={!!nameError} onChange={(e) => setFullName(e.target.value)} placeholder="Nombre y apellido" />
+          <Label htmlFor="contact-name">{t('contacts.drawer.fields.fullName')}</Label>
+          <Input
+            id="contact-name"
+            value={fullName}
+            invalid={!!nameError}
+            onChange={(e) => setFullName(e.target.value)}
+            placeholder={t('contacts.drawer.fields.fullNamePlaceholder')}
+          />
           <FieldError message={nameError} />
         </div>
 
         <div>
-          <Label htmlFor="contact-phone">Teléfono (WhatsApp)</Label>
+          <Label htmlFor="contact-phone">{t('contacts.drawer.fields.phone')}</Label>
           <Input id="contact-phone" value={phone} invalid={!!phoneError} onChange={(e) => setPhone(e.target.value)} placeholder="+573001234567" />
           <FieldError message={phoneError} />
         </div>
 
         <div>
-          <Label htmlFor="contact-email">Correo (opcional)</Label>
-          <Input id="contact-email" type="email" value={email} invalid={!!emailError} onChange={(e) => setEmail(e.target.value)} placeholder="cliente@empresa.com" />
+          <Label htmlFor="contact-email">{t('contacts.drawer.fields.email')}</Label>
+          <Input
+            id="contact-email"
+            type="email"
+            value={email}
+            invalid={!!emailError}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder={t('contacts.drawer.fields.emailPlaceholder')}
+          />
           <FieldError message={emailError} />
         </div>
 
         <div>
-          <Label htmlFor="contact-company">Empresa (opcional)</Label>
-          <Input id="contact-company" value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Nombre de la empresa que representa" />
+          <Label htmlFor="contact-company">{t('contacts.drawer.fields.company')}</Label>
+          <Input
+            id="contact-company"
+            value={company}
+            onChange={(e) => setCompany(e.target.value)}
+            placeholder={t('contacts.drawer.fields.companyPlaceholder')}
+          />
         </div>
 
         <div>
-          <Label htmlFor="contact-stage">Etapa</Label>
+          <Label htmlFor="contact-stage">{t('contacts.drawer.fields.stage')}</Label>
           <Select id="contact-stage" value={stage} onChange={(e) => setStage(e.target.value as ContactStage)}>
             {(Object.keys(STAGE_LABEL) as ContactStage[]).map((s) => (
               <option key={s} value={s}>
-                {STAGE_LABEL[s]}
+                {t(STAGE_LABEL[s])}
               </option>
             ))}
           </Select>
         </div>
 
         <div>
-          <Label htmlFor="contact-tags">Etiquetas</Label>
-          <TagInput value={tags} onChange={setTags} placeholder="Escribe y presiona Enter..." />
+          <Label htmlFor="contact-tags">{t('contacts.drawer.fields.tags')}</Label>
+          <TagInput value={tags} onChange={setTags} placeholder={t('contacts.drawer.fields.tagsPlaceholder')} />
         </div>
 
         <div>
-          <Label htmlFor="contact-assigned">Agente asignado (opcional)</Label>
+          <Label htmlFor="contact-assigned">{t('contacts.drawer.fields.assignedAgent')}</Label>
           <Select id="contact-assigned" value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)}>
-            <option value="">Sin asignar</option>
+            <option value="">{t('contacts.drawer.fields.unassigned')}</option>
             {agents.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.full_name}
@@ -173,7 +194,7 @@ export function ContactDrawer({
 
         <div className="border-t border-brand-100 pt-4">
           <button type="button" onClick={() => setDetailsOpen((o) => !o)} className="text-xs font-medium text-accent-600 hover:underline">
-            {detailsOpen ? 'Ocultar detalles adicionales' : 'Mostrar detalles adicionales (NIT, industria, dirección...)'}
+            {detailsOpen ? t('contacts.drawer.hideDetails') : t('contacts.drawer.showDetails')}
           </button>
         </div>
 
@@ -181,38 +202,38 @@ export function ContactDrawer({
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="contact-nit">NIT / documento (opcional)</Label>
+                <Label htmlFor="contact-nit">{t('contacts.drawer.fields.nit')}</Label>
                 <Input id="contact-nit" value={nit} onChange={(e) => setNit(e.target.value)} />
               </div>
               <div>
-                <Label htmlFor="contact-industry">Industria (opcional)</Label>
+                <Label htmlFor="contact-industry">{t('contacts.drawer.fields.industry')}</Label>
                 <Input id="contact-industry" value={industry} onChange={(e) => setIndustry(e.target.value)} />
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="contact-city">Ciudad (opcional)</Label>
+                <Label htmlFor="contact-city">{t('contacts.drawer.fields.city')}</Label>
                 <Input id="contact-city" value={city} onChange={(e) => setCity(e.target.value)} />
               </div>
               <div>
-                <Label htmlFor="contact-website">Sitio web (opcional)</Label>
+                <Label htmlFor="contact-website">{t('contacts.drawer.fields.website')}</Label>
                 <Input id="contact-website" value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="https://" />
               </div>
             </div>
 
             <div>
-              <Label htmlFor="contact-address">Dirección (opcional)</Label>
+              <Label htmlFor="contact-address">{t('contacts.drawer.fields.address')}</Label>
               <Input id="contact-address" value={address} onChange={(e) => setAddress(e.target.value)} />
             </div>
 
             <div>
-              <Label htmlFor="contact-notes">Notas internas (opcional)</Label>
+              <Label htmlFor="contact-notes">{t('contacts.drawer.fields.notes')}</Label>
               <Textarea id="contact-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
             </div>
 
             <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
-              <span className="text-sm text-brand-700">Contacto activo</span>
+              <span className="text-sm text-brand-700">{t('contacts.drawer.fields.active')}</span>
               <Switch checked={isActive} onChange={setIsActive} />
             </div>
           </div>
@@ -222,10 +243,10 @@ export function ContactDrawer({
 
         <div className="flex gap-2 border-t border-brand-100 pt-5">
           <Button type="submit" variant="secondary" disabled={submitting}>
-            {submitting ? 'Guardando…' : 'Guardar'}
+            {submitting ? t('common.actions.saving') : t('common.actions.save')}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>
-            Cancelar
+            {t('common.actions.cancel')}
           </Button>
         </div>
       </form>

@@ -12,12 +12,14 @@ import { Button, Drawer, FieldError, Input, Label, Select } from '../../componen
 import { useWhatsappLineForm } from './useWhatsappLineForm'
 import { WhatsappLineFormFields } from './WhatsappLineFormFields'
 import { isNotBlank } from '../../lib/validation'
+import { useLanguage } from '../../contexts/LanguageContext'
+import type { TranslationKey } from '../../i18n/translations'
 
-const STATUS_LABEL: Record<WhatsappLineStatus, string> = {
-  pending_verification: 'Pendiente de verificación',
-  active: 'Activa',
-  suspended: 'Suspendida',
-  disconnected: 'Desconectada',
+const STATUS_LABEL_KEY: Record<WhatsappLineStatus, TranslationKey> = {
+  pending_verification: 'backoffice.whatsappLineDrawer.status.pendingVerification',
+  active: 'backoffice.whatsappLineDrawer.status.active',
+  suspended: 'backoffice.whatsappLineDrawer.status.suspended',
+  disconnected: 'backoffice.whatsappLineDrawer.status.disconnected',
 }
 
 /** One drawer for both "nueva línea" and "editar línea" -- always scoped to a
@@ -36,6 +38,7 @@ export function WhatsappLineDrawer({
   line?: WhatsappLine | null
   onSaved: (line: WhatsappLine) => void
 }) {
+  const { t } = useLanguage()
   const isEdit = !!line
   const form = useWhatsappLineForm({ tenant_id: tenantId, ...line })
   const [submitting, setSubmitting] = useState(false)
@@ -93,7 +96,7 @@ export function WhatsappLineDrawer({
       }
       onClose()
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'No se pudo guardar la línea.')
+      setFormError(err instanceof Error ? err.message : t('backoffice.whatsappLineDrawer.errors.save'))
     } finally {
       setSubmitting(false)
     }
@@ -107,7 +110,7 @@ export function WhatsappLineDrawer({
       const updated = await setWhatsappLineStatus(line.id, next)
       onSaved(updated)
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'No se pudo actualizar el estado.')
+      setFormError(err instanceof Error ? err.message : t('backoffice.whatsappLineDrawer.errors.status'))
       setStatus(line.status)
     } finally {
       setStatusSaving(false)
@@ -129,7 +132,7 @@ export function WhatsappLineDrawer({
       setTokenTouched(false)
       setTokenSaved(true)
     } catch (err) {
-      setTokenError(err instanceof Error ? err.message : 'No se pudo guardar el access token.')
+      setTokenError(err instanceof Error ? err.message : t('backoffice.whatsappLineDrawer.errors.token'))
     } finally {
       setTokenSaving(false)
     }
@@ -139,15 +142,15 @@ export function WhatsappLineDrawer({
     <Drawer
       open={open}
       onClose={onClose}
-      title={isEdit ? 'Editar línea de WhatsApp' : 'Nueva línea de WhatsApp'}
-      description={isEdit ? line?.display_name : 'Se asigna automáticamente a este cliente.'}
+      title={isEdit ? t('backoffice.whatsappLineDrawer.titleEdit') : t('backoffice.whatsappLineDrawer.titleNew')}
+      description={isEdit ? line?.display_name : t('backoffice.whatsappLineDrawer.newDescription')}
       footer={
         <div className="flex gap-2">
           <Button type="submit" form="whatsapp-line-form" variant="secondary" disabled={submitting}>
-            {submitting ? 'Guardando…' : isEdit ? 'Guardar cambios' : 'Crear línea'}
+            {submitting ? t('common.actions.saving') : isEdit ? t('common.actions.saveChanges') : t('backoffice.whatsappLineDrawer.create')}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>
-            Cancelar
+            {t('common.actions.cancel')}
           </Button>
         </div>
       }
@@ -155,16 +158,16 @@ export function WhatsappLineDrawer({
       <div className="space-y-6">
         {isEdit && line && (
           <div>
-            <Label htmlFor="line-status">Estado de verificación</Label>
+            <Label htmlFor="line-status">{t('backoffice.whatsappLineDrawer.verificationStatus')}</Label>
             <Select
               id="line-status"
               value={status}
               disabled={statusSaving}
               onChange={(e) => handleStatusChange(e.target.value as WhatsappLineStatus)}
             >
-              {Object.entries(STATUS_LABEL).map(([value, statusLabel]) => (
+              {Object.entries(STATUS_LABEL_KEY).map(([value, labelKey]) => (
                 <option key={value} value={value}>
-                  {statusLabel}
+                  {t(labelKey)}
                 </option>
               ))}
             </Select>
@@ -176,7 +179,7 @@ export function WhatsappLineDrawer({
 
           {!isEdit && (
             <div>
-              <Label htmlFor="line-token">Access token de Meta</Label>
+              <Label htmlFor="line-token">{t('backoffice.whatsappLineDrawer.accessToken')}</Label>
               <Input
                 id="line-token"
                 type="password"
@@ -186,8 +189,8 @@ export function WhatsappLineDrawer({
                 placeholder="EAAG..."
                 autoComplete="off"
               />
-              <FieldError message={tokenTouched && !isNotBlank(tokenValue) ? 'El access token es obligatorio.' : undefined} />
-              <p className="mt-1 text-xs text-brand-400">Se guarda cifrado (Supabase Vault); nunca se vuelve a mostrar.</p>
+              <FieldError message={tokenTouched && !isNotBlank(tokenValue) ? t('backoffice.whatsappLineDrawer.accessToken.required') : undefined} />
+              <p className="mt-1 text-xs text-brand-400">{t('backoffice.whatsappLineDrawer.accessToken.hint')}</p>
             </div>
           )}
 
@@ -196,9 +199,15 @@ export function WhatsappLineDrawer({
 
         {isEdit && (
           <div className="border-t border-brand-100 pt-5">
-            <Label htmlFor="rotate-token">{hasToken ? 'Reemplazar access token' : 'Configurar access token'}</Label>
+            <Label htmlFor="rotate-token">
+              {hasToken ? t('backoffice.whatsappLineDrawer.rotateToken.replace') : t('backoffice.whatsappLineDrawer.rotateToken.configure')}
+            </Label>
             <p className="mb-2 text-xs text-brand-400">
-              {hasToken === null ? 'Verificando…' : hasToken ? 'Ya hay un token configurado (cifrado, no se muestra).' : 'Todavía no se ha configurado un token.'}
+              {hasToken === null
+                ? t('backoffice.whatsappLineDrawer.rotateToken.checking')
+                : hasToken
+                  ? t('backoffice.whatsappLineDrawer.rotateToken.hasToken')
+                  : t('backoffice.whatsappLineDrawer.rotateToken.noToken')}
             </p>
             <div className="flex flex-wrap gap-2">
               <Input
@@ -212,12 +221,12 @@ export function WhatsappLineDrawer({
                 autoComplete="off"
               />
               <Button type="button" variant="ghost" onClick={handleTokenSave} disabled={tokenSaving}>
-                {tokenSaving ? 'Guardando…' : 'Guardar'}
+                {tokenSaving ? t('common.actions.saving') : t('common.actions.save')}
               </Button>
             </div>
-            <FieldError message={tokenTouched && !isNotBlank(tokenValue) ? 'Ingresa un access token.' : undefined} />
+            <FieldError message={tokenTouched && !isNotBlank(tokenValue) ? t('backoffice.whatsappLineDrawer.rotateToken.required') : undefined} />
             {tokenError && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{tokenError}</p>}
-            {tokenSaved && <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">Token actualizado.</p>}
+            {tokenSaved && <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{t('backoffice.whatsappLineDrawer.rotateToken.saved')}</p>}
           </div>
         )}
       </div>

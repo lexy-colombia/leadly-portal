@@ -4,10 +4,15 @@ import { listAiModels } from '../../lib/api/aiModels'
 import { listAiSkills, listEnabledSkillKeys, setSkillEnabled } from '../../lib/api/aiSkills'
 import type { AiAssistant, AiModel, AiProvider, AiSkill } from '../../types/domain'
 import { useAuth } from '../../contexts/AuthContext'
+import { useLanguage } from '../../contexts/LanguageContext'
+import type { TranslationKey } from '../../i18n/translations'
 import { Badge, Button, Drawer, FieldError, Input, Label, PageSpinner, Select, Switch, Textarea } from '../../components/ui'
 import { useAiAssistantForm } from './useAiAssistantForm'
 
-const PROVIDER_LABEL: Record<AiProvider, string> = { openai: 'OpenAI (ChatGPT)', gemini: 'Google (Gemini)' }
+const PROVIDER_KEY: Record<AiProvider, TranslationKey> = {
+  openai: 'settings.assistant.provider.openai',
+  gemini: 'settings.assistant.provider.gemini',
+}
 
 const FORM_ID = 'ai-assistant-form'
 
@@ -49,6 +54,7 @@ export function AiAssistantDrawer({
   onSaved?: (assistant: AiAssistant) => void
 }) {
   const { profile } = useAuth()
+  const { t } = useLanguage()
   const isCreating = assistantId === null
   const [assistant, setAssistant] = useState<AiAssistant | null | undefined>(undefined)
   const [models, setModels] = useState<AiModel[] | null>(null)
@@ -65,7 +71,7 @@ export function AiAssistantDrawer({
       setAssistant(null)
       listAiModels()
         .then(setModels)
-        .catch((err) => setLoadError(err.message ?? 'No se pudieron cargar los modelos.'))
+        .catch((err) => setLoadError(err.message ?? t('settings.assistant.errors.loadModels')))
       return
     }
     setAssistant(undefined)
@@ -74,7 +80,8 @@ export function AiAssistantDrawer({
         setAssistant(a)
         setModels(m)
       })
-      .catch((err) => setLoadError(err.message ?? 'No se pudo cargar el agente.'))
+      .catch((err) => setLoadError(err.message ?? t('settings.assistant.errors.loadAssistant')))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, assistantId, isCreating])
 
   const loading = !models || (!isCreating && assistant === undefined)
@@ -84,16 +91,16 @@ export function AiAssistantDrawer({
     <Drawer
       open={open}
       onClose={onClose}
-      title={isCreating ? 'Nuevo agente' : 'Agente de IA'}
-      description={isCreating ? 'Configura una persona de IA reutilizable en cualquiera de tus líneas.' : (assistant?.name ?? '')}
+      title={isCreating ? t('settings.assistant.createTitle') : t('settings.assistant.editTitle')}
+      description={isCreating ? t('settings.assistant.createDescription') : (assistant?.name ?? '')}
       footer={
         ready ? (
           <div className="flex gap-2">
             <Button type="submit" form={FORM_ID} variant="secondary" disabled={submitting}>
-              {submitting ? 'Guardando…' : isCreating ? 'Crear agente' : 'Guardar cambios'}
+              {submitting ? t('common.actions.saving') : isCreating ? t('settings.assistant.create') : t('common.actions.saveChanges')}
             </Button>
             <Button type="button" variant="ghost" onClick={onClose} disabled={submitting}>
-              Cancelar
+              {t('common.actions.cancel')}
             </Button>
           </div>
         ) : undefined
@@ -128,6 +135,7 @@ export function AiAssistantDrawer({
  * superadmin le vendió/habilitó al cliente, no algo que el tenant se
  * autoconceda (ver CLAUDE.md 3.5). */
 function SkillsSection({ assistantId, updatedBy, readOnly }: { assistantId: string; updatedBy: string; readOnly: boolean }) {
+  const { t } = useLanguage()
   const [skills, setSkills] = useState<AiSkill[] | null>(null)
   const [enabledKeys, setEnabledKeys] = useState<Set<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
@@ -141,7 +149,8 @@ function SkillsSection({ assistantId, updatedBy, readOnly }: { assistantId: stri
         setSkills(s)
         setEnabledKeys(keys)
       })
-      .catch((err) => setError(err.message ?? 'No se pudieron cargar las habilidades.'))
+      .catch((err) => setError(err.message ?? t('settings.assistant.skills.errors.load')))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assistantId])
 
   async function handleToggle(skillKey: string, enable: boolean) {
@@ -156,7 +165,7 @@ function SkillsSection({ assistantId, updatedBy, readOnly }: { assistantId: stri
         return next
       })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo actualizar la habilidad.')
+      setError(err instanceof Error ? err.message : t('settings.assistant.skills.errors.toggle'))
     } finally {
       setTogglingKey(null)
     }
@@ -164,17 +173,15 @@ function SkillsSection({ assistantId, updatedBy, readOnly }: { assistantId: stri
 
   return (
     <div className="mt-6 space-y-3 border-t border-brand-100 pt-6">
-      <FormSection title="Habilidades">
+      <FormSection title={t('settings.assistant.skills.title')}>
         <p className="-mt-1 text-xs text-brand-400">
-          {readOnly
-            ? 'Qué puede hacer tu IA además de conversar -- lo habilita Leadly según tu plan.'
-            : 'Qué puede hacer la IA además de conversar -- cada una agrega herramientas reales (no solo texto) y sus instrucciones de uso al system prompt.'}
+          {readOnly ? t('settings.assistant.skills.descriptionReadOnly') : t('settings.assistant.skills.descriptionEditable')}
         </p>
         {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
         {!skills && !error && <PageSpinner />}
-        {skills && skills.length === 0 && <p className="text-sm text-brand-400">Todavía no hay habilidades en el catálogo.</p>}
+        {skills && skills.length === 0 && <p className="text-sm text-brand-400">{t('settings.assistant.skills.emptyCatalog')}</p>}
         {readOnly && skills && skills.length > 0 && enabledKeys.size === 0 && (
-          <p className="text-sm text-brand-400">Tu plan todavía no tiene ninguna habilidad activa.</p>
+          <p className="text-sm text-brand-400">{t('settings.assistant.skills.emptyReadOnly')}</p>
         )}
         {skills && skills.length > 0 && (readOnly ? enabledKeys.size > 0 : true) && (
           <div className="space-y-2">
@@ -189,7 +196,7 @@ function SkillsSection({ assistantId, updatedBy, readOnly }: { assistantId: stri
                       <p className="mt-0.5 text-xs text-brand-400">{skill.description}</p>
                     </div>
                     {readOnly ? (
-                      <Badge tone="success">Activa</Badge>
+                      <Badge tone="success">{t('settings.assistant.skills.activeBadge')}</Badge>
                     ) : (
                       <Switch checked={enabled} disabled={togglingKey === skill.key} onChange={(v) => handleToggle(skill.key, v)} />
                     )}
@@ -224,6 +231,7 @@ function AiAssistantDrawerForm({
   onClose: () => void
   onSaved?: (assistant: AiAssistant) => void
 }) {
+  const { t } = useLanguage()
   const form = useAiAssistantForm(assistant, models)
 
   async function handleSubmit(e: FormEvent) {
@@ -238,7 +246,7 @@ function AiAssistantDrawerForm({
       onSaved?.(saved)
       onClose()
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'No se pudo guardar el agente.')
+      setFormError(err instanceof Error ? err.message : t('settings.assistant.form.errors.saveFailed'))
     } finally {
       setSubmitting(false)
     }
@@ -246,81 +254,80 @@ function AiAssistantDrawerForm({
 
   return (
     <form id={FORM_ID} onSubmit={handleSubmit} noValidate className="space-y-6">
-      <FormSection title="Nombre">
+      <FormSection title={t('settings.assistant.form.sectionName')}>
         <div>
-          <Label htmlFor="ai-name">Nombre del agente</Label>
+          <Label htmlFor="ai-name">{t('settings.assistant.form.nameLabel')}</Label>
           <Input
             id="ai-name"
             value={form.name}
             invalid={!!form.nameError}
             onChange={(e) => form.setName(e.target.value)}
-            placeholder="Ej: Agente de Ventas"
+            placeholder={t('settings.assistant.form.namePlaceholder')}
           />
-          <FieldError message={form.nameError} />
+          <FieldError message={form.nameError && t(form.nameError)} />
         </div>
       </FormSection>
 
       <div className="flex items-center justify-between rounded-xl bg-brand-50 px-4 py-3">
         <div>
-          <p className="text-sm font-medium text-brand-800">{form.isActive ? 'Asistente activo' : 'Asistente inactivo'}</p>
+          <p className="text-sm font-medium text-brand-800">
+            {form.isActive ? t('settings.assistant.form.activeLabel') : t('settings.assistant.form.inactiveLabel')}
+          </p>
           <p className="text-xs text-brand-400">
-            {form.isActive ? 'Responde automáticamente en modo IA.' : 'No responde hasta que lo actives.'}
+            {form.isActive ? t('settings.assistant.form.activeDescription') : t('settings.assistant.form.inactiveDescription')}
           </p>
         </div>
         <Switch checked={form.isActive} onChange={form.setIsActive} />
       </div>
 
-      <FormSection title="Modelo de IA">
+      <FormSection title={t('settings.assistant.form.sectionModel')}>
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <Label htmlFor="ai-provider">Proveedor</Label>
+            <Label htmlFor="ai-provider">{t('settings.assistant.form.providerLabel')}</Label>
             <Select id="ai-provider" value={form.provider} onChange={(e) => form.setProvider(e.target.value as typeof form.provider)}>
               {(['openai', 'gemini'] as const).map((p) => (
                 <option key={p} value={p}>
-                  {PROVIDER_LABEL[p]}
+                  {t(PROVIDER_KEY[p])}
                 </option>
               ))}
             </Select>
           </div>
 
           <div>
-            <Label htmlFor="ai-model">Modelo</Label>
+            <Label htmlFor="ai-model">{t('settings.assistant.form.modelLabel')}</Label>
             <Select id="ai-model" value={form.model} invalid={!!form.modelError} onChange={(e) => form.setModel(e.target.value)}>
-              <option value="">Selecciona…</option>
+              <option value="">{t('common.form.selectPlaceholder')}</option>
               {form.modelsForProvider.map((m) => (
                 <option key={m.model_code} value={m.model_code}>
                   {m.display_name}
                 </option>
               ))}
             </Select>
-            <FieldError message={form.modelError} />
+            <FieldError message={form.modelError && t(form.modelError)} />
           </div>
         </div>
       </FormSection>
 
-      <FormSection title="Instrucciones">
+      <FormSection title={t('settings.assistant.form.sectionInstructions')}>
         <div>
-          <Label htmlFor="ai-system-prompt">System prompt</Label>
+          <Label htmlFor="ai-system-prompt">{t('settings.assistant.form.systemPromptLabel')}</Label>
           <Textarea
             id="ai-system-prompt"
             rows={8}
             value={form.systemPrompt}
             invalid={!!form.systemPromptError}
             onChange={(e) => form.setSystemPrompt(e.target.value)}
-            placeholder="Eres el asistente de [tu empresa]. Ayudas a los clientes con... Responde solo sobre [tema/alcance del negocio]."
+            placeholder={t('settings.assistant.form.systemPromptPlaceholder')}
           />
-          <FieldError message={form.systemPromptError} />
-          <p className="mt-1.5 text-xs text-brand-400">
-            Mantén el asistente enfocado en tu negocio (soporte, ventas, agendamiento). Configurarlo como un asistente de propósito
-            general (tipo ChatGPT, sin límite de tema) va contra la política de WhatsApp y puede hacer que Meta suspenda la línea.
-          </p>
+          <FieldError message={form.systemPromptError && t(form.systemPromptError)} />
+          <p className="mt-1.5 text-xs text-brand-400">{t('settings.assistant.form.systemPromptHint')}</p>
         </div>
       </FormSection>
 
-      <FormSection title="Comportamiento">
+      <FormSection title={t('settings.assistant.form.sectionBehavior')}>
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <Label htmlFor="ai-temperature">Temperatura</Label>
+            <Label htmlFor="ai-temperature">{t('settings.assistant.form.temperatureLabel')}</Label>
             <Input
               id="ai-temperature"
               type="number"
@@ -331,12 +338,12 @@ function AiAssistantDrawerForm({
               invalid={!!form.temperatureError}
               onChange={(e) => form.setTemperature(Number(e.target.value))}
             />
-            <FieldError message={form.temperatureError} />
-            <p className="mt-1 text-xs text-brand-400">0 = más literal, 2 = más creativo.</p>
+            <FieldError message={form.temperatureError && t(form.temperatureError)} />
+            <p className="mt-1 text-xs text-brand-400">{t('settings.assistant.form.temperatureHint')}</p>
           </div>
 
           <div>
-            <Label htmlFor="ai-max-tokens">Máx. tokens por respuesta</Label>
+            <Label htmlFor="ai-max-tokens">{t('settings.assistant.form.maxTokensLabel')}</Label>
             <Input
               id="ai-max-tokens"
               type="number"
@@ -347,7 +354,7 @@ function AiAssistantDrawerForm({
               invalid={!!form.maxTokensError}
               onChange={(e) => form.setMaxTokens(Number(e.target.value))}
             />
-            <FieldError message={form.maxTokensError} />
+            <FieldError message={form.maxTokensError && t(form.maxTokensError)} />
           </div>
         </div>
       </FormSection>

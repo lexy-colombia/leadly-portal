@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
-import { listTasks, type TaskWithRelations } from '../../lib/api/tasks'
+import { useLanguage } from '../../contexts/LanguageContext'
+import type { Language } from '../../i18n/translations'
+import { listTasks, TASK_PRIORITY_KEY, type TaskWithRelations } from '../../lib/api/tasks'
 import {
   conversationDisplayName,
   listConversations,
@@ -31,12 +33,12 @@ function formatCompactCurrency(value: number): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(value)
 }
 
-function formatShortDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })
+function formatShortDate(iso: string, language: Language): string {
+  return new Date(iso).toLocaleDateString(language === 'en' ? 'en-US' : 'es-CO', { day: '2-digit', month: 'short' })
 }
 
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })
+function formatTime(iso: string, language: Language): string {
+  return new Date(iso).toLocaleTimeString(language === 'en' ? 'en-US' : 'es-CO', { hour: '2-digit', minute: '2-digit' })
 }
 
 function formatMinutes(min: number): string {
@@ -55,13 +57,17 @@ interface DayBucket {
  * function builds both the current period and the immediately-preceding one
  * (for the "vs período anterior" deltas), instead of two separate
  * implementations that could drift apart. */
-function bucketByDay(conversations: ConversationWithLine[], days: number, offsetDays: number): DayBucket[] {
+function bucketByDay(conversations: ConversationWithLine[], days: number, offsetDays: number, language: Language): DayBucket[] {
   const buckets: DayBucket[] = []
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date()
     d.setHours(0, 0, 0, 0)
     d.setDate(d.getDate() - i - offsetDays)
-    buckets.push({ key: d.toDateString(), label: d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }), count: 0 })
+    buckets.push({
+      key: d.toDateString(),
+      label: d.toLocaleDateString(language === 'en' ? 'en-US' : 'es-CO', { day: '2-digit', month: 'short' }),
+      count: 0,
+    })
   }
   const byKey = new Map(buckets.map((b) => [b.key, b]))
   for (const c of conversations) {
@@ -105,11 +111,12 @@ function computeAvgResponseMinutes(timings: MessageTiming[], windowStart: Date, 
  * (positive = green), but a slower average response time is bad (positive =
  * red), even though both are rendered the same way otherwise. */
 function Delta({ pct, invert = false }: { pct: number; invert?: boolean }) {
+  const { t } = useLanguage()
   const isGood = invert ? pct <= 0 : pct >= 0
   return (
     <span className={`text-[11px] font-medium ${isGood ? 'text-green-600' : 'text-red-600'}`}>
       {pct >= 0 ? '↑' : '↓'}
-      {Math.abs(pct)}% vs período anterior
+      {Math.abs(pct)}% {t('dashboard.vsPreviousPeriod')}
     </span>
   )
 }
@@ -165,6 +172,7 @@ function PipelineStageTiles({
   dataByStage: Map<string, { value: number; count: number }>
   metric: 'value' | 'count'
 }) {
+  const { t } = useLanguage()
   return (
     <div className="flex gap-1.5">
       {stages.map((stage) => {
@@ -175,7 +183,7 @@ function PipelineStageTiles({
               {stage.name}
             </p>
             <p className="truncate text-sm font-bold text-brand-800">{metric === 'value' ? formatCompactCurrency(data.value) : String(data.count)}</p>
-            <p className="truncate text-[10px] text-brand-400">{data.count} op.</p>
+            <p className="truncate text-[10px] text-brand-400">{t('dashboard.pipeline.opportunityCount', { count: data.count })}</p>
           </div>
         )
       })}
@@ -185,6 +193,7 @@ function PipelineStageTiles({
 
 export function Dashboard() {
   const { profile } = useAuth()
+  const { t, language } = useLanguage()
   const navigate = useNavigate()
   const [tasks, setTasks] = useState<TaskWithRelations[] | null>(null)
   const [conversations, setConversations] = useState<ConversationWithLine[] | null>(null)
@@ -210,7 +219,7 @@ export function Dashboard() {
           .catch(() => setMessageTimings([]))
       })
       .catch((err) => {
-        setError(err.message ?? 'No se pudieron cargar las conversaciones.')
+        setError(err.message ?? t('dashboard.errors.loadConversations'))
         setConversations([])
         setMessageTimings([])
       })
@@ -251,8 +260,8 @@ export function Dashboard() {
 
   const metrics = useMemo(() => computePipelineMetrics(opportunities ?? [], history), [opportunities, history])
 
-  const currentBuckets = useMemo(() => bucketByDay(conversations ?? [], rangeDays, 0), [conversations, rangeDays])
-  const previousBuckets = useMemo(() => bucketByDay(conversations ?? [], rangeDays, rangeDays), [conversations, rangeDays])
+  const currentBuckets = useMemo(() => bucketByDay(conversations ?? [], rangeDays, 0, language), [conversations, rangeDays, language])
+  const previousBuckets = useMemo(() => bucketByDay(conversations ?? [], rangeDays, rangeDays, language), [conversations, rangeDays, language])
   const totalCurrent = currentBuckets.reduce((sum, b) => sum + b.count, 0)
   const totalPrevious = previousBuckets.reduce((sum, b) => sum + b.count, 0)
   const totalDeltaPct = totalPrevious > 0 ? Math.round(((totalCurrent - totalPrevious) / totalPrevious) * 100) : null
@@ -286,20 +295,20 @@ export function Dashboard() {
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <Card className="!p-3.5">
           <div className="mb-2.5 flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold text-brand-800">Pipeline por etapa</h2>
+            <h2 className="text-sm font-semibold text-brand-800">{t('dashboard.pipeline.title')}</h2>
             <Select value={pipelineMetric} onChange={(e) => setPipelineMetric(e.target.value as 'value' | 'count')} className="!w-auto !py-1 text-xs">
-              <option value="value">Valor total</option>
-              <option value="count">Cantidad</option>
+              <option value="value">{t('dashboard.pipeline.metric.value')}</option>
+              <option value="count">{t('dashboard.pipeline.metric.count')}</option>
             </Select>
           </div>
           {stages.length === 0 && opportunities === null && <PageSpinner />}
-          {opportunities !== null && stages.length === 0 && <EmptyState>Todavía no tenés un pipeline configurado.</EmptyState>}
+          {opportunities !== null && stages.length === 0 && <EmptyState>{t('dashboard.pipeline.notConfigured')}</EmptyState>}
           {stages.length > 0 && (
             <>
               <PipelineStageTiles stages={stages} dataByStage={dataByStage} metric={pipelineMetric} />
               <div className="mt-3 rounded-lg border border-brand-100 p-3">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-brand-500">Conversión general</span>
+                  <span className="text-brand-500">{t('dashboard.pipeline.conversion')}</span>
                   <span className="font-semibold text-brand-800">{metrics.conversionPct === null ? '—' : `${metrics.conversionPct.toFixed(1)}%`}</span>
                 </div>
                 <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-brand-100">
@@ -312,11 +321,11 @@ export function Dashboard() {
 
         <Card className="!p-3.5">
           <div className="mb-2.5 flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold text-brand-800">Conversaciones · últimos {rangeDays} días</h2>
+            <h2 className="text-sm font-semibold text-brand-800">{t('dashboard.conversations.title', { days: rangeDays })}</h2>
             <Select value={rangeDays} onChange={(e) => setRangeDays(Number(e.target.value) as RangeDays)} className="!w-auto !py-1 text-xs">
-              <option value={7}>Últimos 7 días</option>
-              <option value={14}>Últimos 14 días</option>
-              <option value={30}>Últimos 30 días</option>
+              <option value={7}>{t('dashboard.conversations.range.7')}</option>
+              <option value={14}>{t('dashboard.conversations.range.14')}</option>
+              <option value={30}>{t('dashboard.conversations.range.30')}</option>
             </Select>
           </div>
           {!conversations && <PageSpinner />}
@@ -325,12 +334,12 @@ export function Dashboard() {
               <ConversationsChart days={currentBuckets} />
               <div className="mt-3 grid grid-cols-2 gap-3 border-t border-brand-100 pt-3">
                 <div className="min-w-0">
-                  <p className="text-[11px] text-brand-400">Total conversaciones</p>
+                  <p className="text-[11px] text-brand-400">{t('dashboard.conversations.total')}</p>
                   <p className="text-lg font-bold text-brand-800">{totalCurrent}</p>
                   {totalDeltaPct !== null && <Delta pct={totalDeltaPct} />}
                 </div>
                 <div className="min-w-0">
-                  <p className="text-[11px] text-brand-400">Tiempo prom. de respuesta</p>
+                  <p className="text-[11px] text-brand-400">{t('dashboard.conversations.avgResponseTime')}</p>
                   <p className="text-lg font-bold text-brand-800">{avgResponseCurrent !== null ? formatMinutes(avgResponseCurrent) : '—'}</p>
                   {avgResponseDeltaPct !== null && <Delta pct={avgResponseDeltaPct} invert />}
                 </div>
@@ -343,13 +352,13 @@ export function Dashboard() {
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <Card className="!p-3.5">
           <div className="mb-2.5 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-brand-800">Tareas próximas</h2>
+            <h2 className="text-sm font-semibold text-brand-800">{t('dashboard.upcomingTasks.title')}</h2>
             <Link to="/app/tareas" className="text-xs font-medium text-accent-600 hover:text-accent-700">
-              Ver todas
+              {t('common.actions.viewAll')}
             </Link>
           </div>
           {!tasks && <PageSpinner />}
-          {tasks && upcomingTasks.length === 0 && <EmptyState>No tenés tareas pendientes. 🎉</EmptyState>}
+          {tasks && upcomingTasks.length === 0 && <EmptyState>{t('dashboard.upcomingTasks.empty')}</EmptyState>}
           {tasks && upcomingTasks.length > 0 && (
             <ul className="space-y-1.5">
               {upcomingTasks.map((task) => (
@@ -357,11 +366,11 @@ export function Dashboard() {
                   <div className="min-w-0">
                     <p className="truncate text-xs font-medium text-brand-800">{task.title}</p>
                     <p className="truncate text-[11px] text-brand-400">
-                      {task.contact?.full_name ?? task.opportunity?.title ?? 'Tarea general'}
-                      {task.due_date && ` · ${formatShortDate(task.due_date)}`}
+                      {task.contact?.full_name ?? task.opportunity?.title ?? t('dashboard.upcomingTasks.generalTask')}
+                      {task.due_date && ` · ${formatShortDate(task.due_date, language)}`}
                     </p>
                   </div>
-                  <Badge tone={PRIORITY_TONE[task.priority]}>{task.priority}</Badge>
+                  <Badge tone={PRIORITY_TONE[task.priority]}>{t(TASK_PRIORITY_KEY[task.priority])}</Badge>
                 </li>
               ))}
             </ul>
@@ -370,13 +379,13 @@ export function Dashboard() {
 
         <Card className="!p-3.5">
           <div className="mb-2.5 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-brand-800">Conversaciones recientes</h2>
+            <h2 className="text-sm font-semibold text-brand-800">{t('dashboard.recentConversations.title')}</h2>
             <Link to="/app" className="text-xs font-medium text-accent-600 hover:text-accent-700">
-              Ver todas
+              {t('common.actions.viewAll')}
             </Link>
           </div>
           {!conversations && <PageSpinner />}
-          {conversations && recentConversations.length === 0 && <EmptyState>Todavía no tenés conversaciones.</EmptyState>}
+          {conversations && recentConversations.length === 0 && <EmptyState>{t('dashboard.recentConversations.empty')}</EmptyState>}
           {conversations && recentConversations.length > 0 && (
             <ul className="space-y-1.5">
               {recentConversations.map((conv) => (
@@ -393,11 +402,11 @@ export function Dashboard() {
                         <span className="block truncate text-xs font-medium text-brand-800">{conversationDisplayName(conv)}</span>
                         <span className="flex items-center gap-1.5 text-[11px] text-brand-400">
                           <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${conv.mode === 'ia' ? 'bg-accent-500' : 'bg-amber-500'}`} />
-                          {conv.mode === 'ia' ? 'Modo IA' : 'Modo humano'}
+                          {conv.mode === 'ia' ? t('inbox.mode.ia') : t('inbox.mode.humano')}
                         </span>
                       </span>
                     </span>
-                    {conv.last_message_at && <span className="shrink-0 text-[11px] text-brand-300">{formatTime(conv.last_message_at)}</span>}
+                    {conv.last_message_at && <span className="shrink-0 text-[11px] text-brand-300">{formatTime(conv.last_message_at, language)}</span>}
                   </button>
                 </li>
               ))}

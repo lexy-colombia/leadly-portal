@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { deleteSupplier, listSuppliers } from '../../../lib/api/suppliers'
 import type { CrmSupplier } from '../../../types/domain'
+import { useLanguage } from '../../../contexts/LanguageContext'
 import { Badge, Button, Card, EmptyState, PageSpinner, Pagination, Table, TBody, TD, TH, THead, TRow } from '../../../components/ui'
 import { PencilIcon, PlusIcon, TrashIcon } from '../../../components/icons'
 import { SupplierDrawer } from './SupplierDrawer'
@@ -8,6 +9,7 @@ import { SupplierDrawer } from './SupplierDrawer'
 const PAGE_SIZE = 10
 
 export function SuppliersTab({ tenantId }: { tenantId: string }) {
+  const { t } = useLanguage()
   const [suppliers, setSuppliers] = useState<CrmSupplier[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [page, setPage] = useState(1)
@@ -18,7 +20,7 @@ export function SuppliersTab({ tenantId }: { tenantId: string }) {
   function reload() {
     listSuppliers(tenantId)
       .then(setSuppliers)
-      .catch((err) => setError(err.message ?? 'No se pudieron cargar los proveedores.'))
+      .catch((err) => setError(err.message ?? t('products.suppliers.errors.load')))
   }
 
   useEffect(reload, [tenantId])
@@ -34,7 +36,7 @@ export function SuppliersTab({ tenantId }: { tenantId: string }) {
       setSuppliers((prev) => (prev ? prev.filter((s) => s.id !== id) : prev))
       setDeletingId(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo eliminar el proveedor.')
+      setError(err instanceof Error ? err.message : t('products.suppliers.errors.delete'))
     } finally {
       setDeleting(false)
     }
@@ -44,10 +46,10 @@ export function SuppliersTab({ tenantId }: { tenantId: string }) {
     <div className="space-y-3">
       <div className="flex items-center gap-2">
         <span className="text-xs text-brand-400">
-          {suppliers?.length ?? 0} {(suppliers?.length ?? 0) === 1 ? 'proveedor' : 'proveedores'}
+          {suppliers?.length ?? 0} {t((suppliers?.length ?? 0) === 1 ? 'products.suppliers.count.singular' : 'products.suppliers.count.plural')}
         </span>
         <Button variant="secondary" onClick={() => setDrawer({ open: true, supplier: null })} className="!ml-auto !py-1 !text-xs">
-          <PlusIcon width={14} height={14} /> Nuevo proveedor
+          <PlusIcon width={14} height={14} /> {t('products.suppliers.actions.new')}
         </Button>
       </div>
 
@@ -56,7 +58,7 @@ export function SuppliersTab({ tenantId }: { tenantId: string }) {
 
       {suppliers && suppliers.length === 0 && (
         <Card>
-          <EmptyState>Todavía no tenés proveedores registrados.</EmptyState>
+          <EmptyState>{t('products.suppliers.empty')}</EmptyState>
         </Card>
       )}
 
@@ -65,11 +67,11 @@ export function SuppliersTab({ tenantId }: { tenantId: string }) {
           <Table>
             <THead>
               <tr>
-                <TH>Proveedor</TH>
-                <TH>Contacto</TH>
-                <TH>Teléfono</TH>
-                <TH>Estado</TH>
-                <TH className="text-right">Acciones</TH>
+                <TH>{t('products.suppliers.table.supplier')}</TH>
+                <TH>{t('products.suppliers.table.contact')}</TH>
+                <TH>{t('products.suppliers.table.phone')}</TH>
+                <TH>{t('products.suppliers.table.status')}</TH>
+                <TH className="text-right">{t('products.suppliers.table.actions')}</TH>
               </tr>
             </THead>
             <TBody>
@@ -79,16 +81,16 @@ export function SuppliersTab({ tenantId }: { tenantId: string }) {
                   <TD className="text-xs text-brand-500">{supplier.contact_name ?? '-'}</TD>
                   <TD className="text-xs text-brand-500">{supplier.phone ?? '-'}</TD>
                   <TD>
-                    <Badge tone={supplier.is_active ? 'success' : 'neutral'}>{supplier.is_active ? 'Activo' : 'Inactivo'}</Badge>
+                    <Badge tone={supplier.is_active ? 'success' : 'neutral'}>{t(supplier.is_active ? 'common.status.active' : 'common.status.inactive')}</Badge>
                   </TD>
                   <TD className="text-right">
                     {deletingId === supplier.id ? (
                       <span className="inline-flex items-center gap-1.5">
                         <Button variant="danger" onClick={() => handleDelete(supplier.id)} disabled={deleting} className="!px-2 !py-1 text-xs">
-                          {deleting ? 'Eliminando…' : 'Confirmar'}
+                          {deleting ? t('common.actions.deleting') : t('common.actions.confirm')}
                         </Button>
                         <Button variant="ghost" onClick={() => setDeletingId(null)} disabled={deleting} className="!px-2 !py-1 text-xs">
-                          Cancelar
+                          {t('common.actions.cancel')}
                         </Button>
                       </span>
                     ) : (

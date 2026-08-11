@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
+import { useLanguage } from '../../contexts/LanguageContext'
 import { connectWhatsappLineViaEmbeddedSignup } from '../../lib/api/whatsappLines'
 import { launchWhatsAppEmbeddedSignup } from '../../lib/metaEmbeddedSignup'
 import { LinesAndAgentsSection } from '../shared/LinesAndAgentsSection'
@@ -13,6 +14,7 @@ import { LinesAndAgentsSection } from '../shared/LinesAndAgentsSection'
  * tenant-specific "Conectar nueva línea" Embedded Signup flow. */
 export function IaAgentes() {
   const { profile } = useAuth()
+  const { t } = useLanguage()
   const isAdmin = profile?.role === 'tenant_admin'
   const [connecting, setConnecting] = useState(false)
   const [connectError, setConnectError] = useState<string | null>(null)
@@ -24,12 +26,12 @@ export function IaAgentes() {
     try {
       const { code, wabaId, phoneNumberId } = await launchWhatsAppEmbeddedSignup()
       if (!wabaId || !phoneNumberId) {
-        throw new Error('Meta no devolvió los datos de tu cuenta de WhatsApp. Intenta de nuevo.')
+        throw new Error(t('settings.lines.connectErrors.noData'))
       }
       await connectWhatsappLineViaEmbeddedSignup(code, wabaId, phoneNumberId, 'WhatsApp')
       setReloadKey((k) => k + 1)
     } catch (err) {
-      setConnectError(err instanceof Error ? err.message : 'No se pudo conectar tu WhatsApp.')
+      setConnectError(err instanceof Error ? err.message : t('settings.lines.connectErrors.generic'))
     } finally {
       setConnecting(false)
     }
@@ -44,7 +46,7 @@ export function IaAgentes() {
         key={reloadKey}
         tenantId={profile.tenant_id}
         canManage={isAdmin}
-        connectLine={{ label: 'Conectar nueva línea', loading: connecting, onClick: handleConnectWhatsapp }}
+        connectLine={{ label: t('settings.lines.connectNew'), loading: connecting, onClick: handleConnectWhatsapp }}
       />
     </div>
   )

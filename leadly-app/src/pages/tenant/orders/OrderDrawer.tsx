@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { createOrder, listOrderItems, updateOrder, computeOrderTotals } from '../../../lib/api/orders'
+import { createOrder, listOrderItems, updateOrder, computeOrderTotals, ORDER_STATUS_LABEL_KEY } from '../../../lib/api/orders'
 import type { OrderInput, OrderItemInput, OrderWithRelations } from '../../../lib/api/orders'
 import { listContacts } from '../../../lib/api/contacts'
 import { listOpportunities } from '../../../lib/api/opportunities'
@@ -10,20 +10,13 @@ import { listAddressesForContact } from '../../../lib/api/addresses'
 import { listTasksForOpportunity } from '../../../lib/api/tasks'
 import type { TaskWithRelations } from '../../../lib/api/tasks'
 import type { CrmContact, CrmContactAddress, OrderStatus } from '../../../types/domain'
+import { useLanguage } from '../../../contexts/LanguageContext'
 import { Button, CurrencyInput, Drawer, FieldError, Input, Label, Select, Textarea } from '../../../components/ui'
 import { OrderItemsEditor } from './OrderItemsEditor'
 import { isNotBlank } from '../../../lib/validation'
 
 function addressLabel(a: CrmContactAddress): string {
   return `${a.label ? `${a.label} — ` : ''}${a.line1}${a.city ? `, ${a.city}` : ''}`
-}
-
-const STATUS_LABEL: Record<OrderStatus, string> = {
-  cotizacion: 'Cotización',
-  confirmada: 'Confirmada',
-  en_proceso: 'En proceso',
-  entregada: 'Entregada',
-  cancelada: 'Cancelada',
 }
 
 /** No reverse transitions -- once a cotización becomes a venta it can't go
@@ -58,6 +51,7 @@ export function OrderDrawer({
   defaultContactId?: string | null
   onSaved: () => void
 }) {
+  const { t } = useLanguage()
   const [contactId, setContactId] = useState('')
   const [opportunityId, setOpportunityId] = useState('')
   const [status, setStatus] = useState<OrderStatus>('cotizacion')
@@ -125,7 +119,7 @@ export function OrderDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addresses])
 
-  const contactError = touched && !isNotBlank(contactId) ? 'El contacto es obligatorio.' : undefined
+  const contactError = touched && !isNotBlank(contactId) ? t('orders.drawer.errors.contactRequired') : undefined
 
   const totals = useMemo(() => computeOrderTotals(items, Number(shipping) || 0, Number(taxTotal) || 0), [items, shipping, taxTotal])
 
@@ -155,7 +149,7 @@ export function OrderDrawer({
       onSaved()
       onClose()
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'No se pudo guardar.')
+      setFormError(err instanceof Error ? err.message : t('orders.drawer.errors.save'))
     } finally {
       setSubmitting(false)
     }
@@ -165,13 +159,17 @@ export function OrderDrawer({
     <Drawer
       open={open}
       onClose={onClose}
-      title={order ? `Editar ${order.status === 'cotizacion' ? 'cotización' : 'venta'} ORD-${order.number}` : 'Nueva cotización'}
-      description="Cotizaciones y ventas son la misma entidad -- solo cambia el estado."
+      title={
+        order
+          ? t(order.status === 'cotizacion' ? 'orders.drawer.editQuoteTitle' : 'orders.drawer.editSaleTitle', { number: order.number })
+          : t('orders.drawer.newTitle')
+      }
+      description={t('orders.drawer.description')}
     >
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <Label htmlFor="order-contact">Contacto</Label>
+            <Label htmlFor="order-contact">{t('orders.drawer.fields.contact')}</Label>
             <Select
               id="order-contact"
               value={contactId}
@@ -179,7 +177,7 @@ export function OrderDrawer({
               disabled={!order && !!defaultContactId}
               onChange={(e) => setContactId(e.target.value)}
             >
-              <option value="">Seleccionar…</option>
+              <option value="">{t('orders.drawer.fields.selectPlaceholder')}</option>
               {contacts.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.full_name}
@@ -189,7 +187,7 @@ export function OrderDrawer({
             <FieldError message={contactError} />
           </div>
           <div>
-            <Label htmlFor="order-status">Estado</Label>
+            <Label htmlFor="order-status">{t('orders.drawer.fields.status')}</Label>
             <Select
               id="order-status"
               value={status}
@@ -198,19 +196,19 @@ export function OrderDrawer({
             >
               {availableStatusOptions(order?.status ?? null).map((s) => (
                 <option key={s} value={s}>
-                  {STATUS_LABEL[s]}
+                  {t(ORDER_STATUS_LABEL_KEY[s])}
                 </option>
               ))}
             </Select>
-            {order?.status === 'cancelada' && <p className="mt-1 text-xs text-brand-400">Una orden anulada no puede reabrirse.</p>}
+            {order?.status === 'cancelada' && <p className="mt-1 text-xs text-brand-400">{t('orders.drawer.cancelledNotice')}</p>}
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <Label htmlFor="order-opportunity">Oportunidad (opcional)</Label>
+            <Label htmlFor="order-opportunity">{t('orders.drawer.fields.opportunity')}</Label>
             <Select id="order-opportunity" value={opportunityId} onChange={(e) => setOpportunityId(e.target.value)} disabled={!contactId}>
-              <option value="">Sin oportunidad</option>
+              <option value="">{t('orders.drawer.fields.noOpportunity')}</option>
               {contactOpportunities.map((o) => (
                 <option key={o.id} value={o.id}>
                   {o.title}
@@ -219,16 +217,16 @@ export function OrderDrawer({
             </Select>
           </div>
           <div>
-            <Label htmlFor="order-valid-until">Válida hasta (opcional)</Label>
+            <Label htmlFor="order-valid-until">{t('orders.drawer.fields.validUntil')}</Label>
             <Input id="order-valid-until" type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <Label htmlFor="order-shipping-address">Dirección de envío (opcional)</Label>
+            <Label htmlFor="order-shipping-address">{t('orders.drawer.fields.shippingAddress')}</Label>
             <Select id="order-shipping-address" value={shippingAddressId} onChange={(e) => setShippingAddressId(e.target.value)} disabled={!contactId}>
-              <option value="">Sin dirección</option>
+              <option value="">{t('orders.drawer.fields.noAddress')}</option>
               {addresses
                 .filter((a) => a.is_shipping)
                 .map((a) => (
@@ -239,9 +237,9 @@ export function OrderDrawer({
             </Select>
           </div>
           <div>
-            <Label htmlFor="order-billing-address">Datos de facturación (opcional)</Label>
+            <Label htmlFor="order-billing-address">{t('orders.drawer.fields.billingAddress')}</Label>
             <Select id="order-billing-address" value={billingAddressId} onChange={(e) => setBillingAddressId(e.target.value)} disabled={!contactId}>
-              <option value="">Sin dirección</option>
+              <option value="">{t('orders.drawer.fields.noAddress')}</option>
               {addresses
                 .filter((a) => a.is_billing)
                 .map((a) => (
@@ -252,18 +250,16 @@ export function OrderDrawer({
             </Select>
           </div>
         </div>
-        {contactId && addresses.length === 0 && (
-          <p className="-mt-2 text-xs text-brand-400">Este contacto todavía no tiene direcciones guardadas -- se pueden agregar desde su ficha.</p>
-        )}
+        {contactId && addresses.length === 0 && <p className="-mt-2 text-xs text-brand-400">{t('orders.drawer.noAddressesHint')}</p>}
 
         {relatedTasks && relatedTasks.length > 0 && (
           <div className="rounded-lg border border-brand-100 px-3 py-2.5">
-            <p className="mb-1.5 text-xs font-medium text-brand-400">Tareas relacionadas</p>
+            <p className="mb-1.5 text-xs font-medium text-brand-400">{t('orders.drawer.relatedTasks')}</p>
             <ul className="space-y-1">
-              {relatedTasks.map((t) => (
-                <li key={t.id} className="flex items-center justify-between gap-2 text-xs text-brand-600">
-                  <span className="truncate">{t.title}</span>
-                  <span className="shrink-0 text-brand-400">{t.status === 'completada' ? 'Completada' : 'Pendiente'}</span>
+              {relatedTasks.map((task) => (
+                <li key={task.id} className="flex items-center justify-between gap-2 text-xs text-brand-600">
+                  <span className="truncate">{task.title}</span>
+                  <span className="shrink-0 text-brand-400">{task.status === 'completada' ? t('orders.drawer.taskCompleted') : t('orders.drawer.taskPending')}</span>
                 </li>
               ))}
             </ul>
@@ -274,32 +270,32 @@ export function OrderDrawer({
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <Label htmlFor="order-shipping">Envío</Label>
+            <Label htmlFor="order-shipping">{t('orders.drawer.fields.shipping')}</Label>
             <CurrencyInput id="order-shipping" value={shipping} onChange={(e) => setShipping(e.target.value)} />
           </div>
           <div>
-            <Label htmlFor="order-tax">Impuestos</Label>
+            <Label htmlFor="order-tax">{t('orders.drawer.fields.tax')}</Label>
             <CurrencyInput id="order-tax" value={taxTotal} onChange={(e) => setTaxTotal(e.target.value)} />
           </div>
         </div>
 
         <div className="space-y-1 rounded-lg border border-brand-100 bg-brand-50/50 px-3 py-2.5 text-xs text-brand-600">
           <div className="flex justify-between">
-            <span>Subtotal</span>
+            <span>{t('orders.drawer.summary.subtotal')}</span>
             <span>{formatCurrency(totals.subtotal, 'COP')}</span>
           </div>
           <div className="flex justify-between">
-            <span>Descuentos</span>
+            <span>{t('orders.drawer.summary.discounts')}</span>
             <span>-{formatCurrency(totals.discountTotal, 'COP')}</span>
           </div>
           <div className="flex justify-between font-semibold text-brand-800">
-            <span>Total</span>
+            <span>{t('orders.drawer.summary.total')}</span>
             <span>{formatCurrency(totals.total, 'COP')}</span>
           </div>
         </div>
 
         <div>
-          <Label htmlFor="order-notes">Notas (opcional)</Label>
+          <Label htmlFor="order-notes">{t('orders.drawer.fields.notes')}</Label>
           <Textarea id="order-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </div>
 
@@ -307,10 +303,10 @@ export function OrderDrawer({
 
         <div className="flex gap-2 border-t border-brand-100 pt-5">
           <Button type="submit" variant="secondary" disabled={submitting}>
-            {submitting ? 'Guardando…' : 'Guardar'}
+            {submitting ? t('common.actions.saving') : t('common.actions.save')}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>
-            Cancelar
+            {t('common.actions.cancel')}
           </Button>
         </div>
       </form>

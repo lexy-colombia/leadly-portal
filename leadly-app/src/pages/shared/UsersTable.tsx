@@ -1,18 +1,21 @@
 import { useState } from 'react'
 import type { Profile } from '../../types/domain'
 import { setProfileActive } from '../../lib/api/users'
+import { useLanguage } from '../../contexts/LanguageContext'
+import type { TranslationKey } from '../../i18n/translations'
 import { Badge, Button, EmptyState, InitialsAvatar, Table, TBody, TD, TH, THead, TRow } from '../../components/ui'
 
-const ROLE_LABEL: Record<string, string> = {
-  superadmin: 'Superadmin',
-  tenant_admin: 'Administrador',
-  tenant_agent: 'Agente',
+const ROLE_LABEL_KEY: Record<string, TranslationKey> = {
+  superadmin: 'account.role.superadmin',
+  tenant_admin: 'account.role.tenantAdmin',
+  tenant_agent: 'account.role.tenantAgent',
 }
 
 /** Shared between the backoffice (Cliente → Usuarios) and the tenant panel
  * (Usuarios) -- same list, same toggle, only which tenant's users get fetched
  * differs by caller. */
 export function UsersTable({ users, onChange }: { users: Profile[]; onChange: (p: Profile) => void }) {
+  const { t } = useLanguage()
   const [updatingId, setUpdatingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -22,14 +25,14 @@ export function UsersTable({ users, onChange }: { users: Profile[]; onChange: (p
     try {
       onChange(await setProfileActive(user.id, !user.active))
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo actualizar el usuario.')
+      setError(err instanceof Error ? err.message : t('account.users.errors.updateFailed'))
     } finally {
       setUpdatingId(null)
     }
   }
 
   if (users.length === 0) {
-    return <EmptyState>Todavía no hay usuarios invitados.</EmptyState>
+    return <EmptyState>{t('account.users.empty')}</EmptyState>
   }
 
   return (
@@ -38,10 +41,10 @@ export function UsersTable({ users, onChange }: { users: Profile[]; onChange: (p
       <Table bare>
         <THead>
           <tr>
-            <TH>Usuario</TH>
-            <TH>Rol</TH>
-            <TH>Estado</TH>
-            <TH className="text-right">Acciones</TH>
+            <TH>{t('account.users.table.user')}</TH>
+            <TH>{t('account.users.table.role')}</TH>
+            <TH>{t('account.users.table.status')}</TH>
+            <TH className="text-right">{t('account.users.table.actions')}</TH>
           </tr>
         </THead>
         <TBody>
@@ -56,9 +59,9 @@ export function UsersTable({ users, onChange }: { users: Profile[]; onChange: (p
                   </div>
                 </div>
               </TD>
-              <TD className="text-brand-500">{ROLE_LABEL[user.role] ?? user.role}</TD>
+              <TD className="text-brand-500">{user.role in ROLE_LABEL_KEY ? t(ROLE_LABEL_KEY[user.role]) : user.role}</TD>
               <TD>
-                <Badge tone={user.active ? 'success' : 'neutral'}>{user.active ? 'Activo' : 'Inactivo'}</Badge>
+                <Badge tone={user.active ? 'success' : 'neutral'}>{user.active ? t('common.status.active') : t('common.status.inactive')}</Badge>
               </TD>
               <TD className="text-right">
                 <Button
@@ -67,7 +70,7 @@ export function UsersTable({ users, onChange }: { users: Profile[]; onChange: (p
                   disabled={updatingId === user.id}
                   className="!px-3 !py-1.5 text-xs"
                 >
-                  {updatingId === user.id ? 'Guardando…' : user.active ? 'Desactivar' : 'Activar'}
+                  {updatingId === user.id ? t('common.actions.saving') : user.active ? t('account.users.deactivate') : t('account.users.activate')}
                 </Button>
               </TD>
             </TRow>
