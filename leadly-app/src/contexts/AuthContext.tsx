@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import type { Session, User } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabaseClient'
+import { listEnabledModuleKeys } from '../lib/api/tenantModules'
 import type { Profile, Tenant } from '../types/domain'
 
 type TenantSummary = Pick<Tenant, 'id' | 'name' | 'status'>
@@ -12,6 +13,11 @@ interface AuthContextValue {
   /** Only set for tenant_admin/tenant_agent (null for superadmin, who has no tenant_id).
    * Loaded alongside the profile so guards can block access when status is 'inactive'. */
   tenant: TenantSummary | null
+  /** Module keys (see lib/modules.ts) the superadmin turned on for this tenant --
+   * null for superadmin (no tenant, never gated) or while still loading. Drives both
+   * TenantLayout's nav filtering and the RequireModule route guard, from the same
+   * fetch so there's no duplicate query between the two call sites. */
+  enabledModules: Set<string> | null
   /** True only while the auth.users row exists but no matching profiles row was found —
    * i.e. someone authenticated (Google or email/password) whose account hasn't created or
    * joined a tenant yet. Guards route these to the onboarding screen, not "not authorized". */
@@ -46,10 +52,22 @@ async function fetchTenant(tenantId: string): Promise<TenantSummary | null> {
   return data
 }
 
+/** Fails closed (empty set = no modules visible) rather than throwing --
+ * a broken fetch must never fall back to "everything unlocked". */
+async function fetchEnabledModules(tenantId: string): Promise<Set<string>> {
+  try {
+    return await listEnabledModuleKeys(tenantId)
+  } catch (error) {
+    console.error('Failed to load enabled modules', error)
+    return new Set()
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [tenant, setTenant] = useState<TenantSummary | null>(null)
+  const [enabledModules, setEnabledModules] = useState<Set<string> | null>(null)
   const [unprovisioned, setUnprovisioned] = useState(false)
   const [loading, setLoading] = useState(true)
 
@@ -64,11 +82,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUnprovisioned(nextProfile === null)
 
       if (nextProfile?.tenant_id) {
-        const nextTenant = await fetchTenant(nextProfile.tenant_id)
+        const [nextTenant, nextModules] = await Promise.all([fetchTenant(nextProfile.tenant_id), fetchEnabledModules(nextProfile.tenant_id)])
         if (!active) return
         setTenant(nextTenant)
+        setEnabledModules(nextModules)
       } else {
         setTenant(null)
+        setEnabledModules(null)
       }
     }
 
@@ -96,6 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(session)
       setProfile(null)
       setTenant(null)
+      setEnabledModules(null)
       setUnprovisioned(false)
       if (session?.user) {
         await loadProfileFor(session.user.id)
@@ -143,7 +164,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const nextProfile = await fetchProfile(session.user.id)
       setProfile(nextProfile)
       setUnprovisioned(nextProfile === null)
-      setTenant(nextProfile?.tenant_id ? await fetchTenant(nextProfile.tenant_id) : null)
+      if (nextProfile?.tenant_id) {
+        const [nextTenant, nextModules] = await Promise.all([fetchTenant(nextProfile.tenant_id), fetchEnabledModules(nextProfile.tenant_id)])
+        setTenant(nextTenant)
+        setEnabledModules(nextModules)
+      } else {
+        setTenant(null)
+        setEnabledModules(null)
+      }
     }
   }
 
@@ -152,6 +180,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user: session?.user ?? null,
     profile,
     tenant,
+    enabledModules,
     unprovisioned,
     loading,
     signInWithPassword,

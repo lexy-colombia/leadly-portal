@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import { LanguageProvider } from './contexts/LanguageContext'
-import { RequireAuth, RequireRole } from './routes/guards'
+import { RequireAuth, RequireModule, RequireRole } from './routes/guards'
 import { RootRedirect } from './routes/RootRedirect'
 import { Login } from './pages/auth/Login'
 import { Signup } from './pages/auth/Signup'
@@ -78,44 +78,50 @@ export default function App() {
               </RequireAuth>
             }
           >
-            <Route index element={<Inbox />} />
-            <Route path="dashboard" element={<TenantDashboard />} />
-            <Route path="clientes" element={<Contactos />} />
-            <Route path="clientes/:id" element={<ContactoDetalle />} />
+            <Route index element={<RequireModule moduleKey="conversations"><Inbox /></RequireModule>} />
+            <Route path="dashboard" element={<RequireModule moduleKey="dashboard"><TenantDashboard /></RequireModule>} />
+            <Route path="clientes" element={<RequireModule moduleKey="contacts"><Contactos /></RequireModule>} />
+            <Route path="clientes/:id" element={<RequireModule moduleKey="contacts"><ContactoDetalle /></RequireModule>} />
             {/* Empresas se fusionó dentro de Contactos (crm_accounts fue
                 eliminada) -- este redirect solo cubre links/bookmarks viejos. */}
             <Route path="empresas" element={<Navigate to="/app/clientes" replace />} />
-            <Route path="oportunidades" element={<Oportunidades />} />
-            <Route path="productos" element={<Productos />} />
-            <Route path="productos/:id" element={<ProductoDetalle />} />
-            <Route path="ventas" element={<Ventas />} />
-            <Route path="ventas/:id" element={<VentaDetalle />} />
-            <Route path="tareas" element={<Tareas />} />
-            <Route path="calendario" element={<Calendario />} />
+            <Route path="oportunidades" element={<RequireModule moduleKey="pipeline"><Oportunidades /></RequireModule>} />
+            <Route path="productos" element={<RequireModule moduleKey="products"><Productos /></RequireModule>} />
+            <Route path="productos/:id" element={<RequireModule moduleKey="products"><ProductoDetalle /></RequireModule>} />
+            <Route path="ventas" element={<RequireModule moduleKey="sales"><Ventas /></RequireModule>} />
+            <Route path="ventas/:id" element={<RequireModule moduleKey="sales"><VentaDetalle /></RequireModule>} />
+            <Route path="tareas" element={<RequireModule moduleKey="tasks"><Tareas /></RequireModule>} />
+            <Route path="calendario" element={<RequireModule moduleKey="calendar"><Calendario /></RequireModule>} />
             <Route
               path="reportes"
               element={
-                <LockedFeature icon={BarChartIcon} descriptionKey="account.locked.reports" />
+                <RequireModule moduleKey="reports">
+                  <LockedFeature icon={BarChartIcon} descriptionKey="account.locked.reports" />
+                </RequireModule>
               }
             />
             <Route
               path="automatizaciones"
               element={
-                <LockedFeature icon={RefreshIcon} descriptionKey="account.locked.automations" />
+                <RequireModule moduleKey="automations">
+                  <LockedFeature icon={RefreshIcon} descriptionKey="account.locked.automations" />
+                </RequireModule>
               }
             />
-            <Route path="ia-agentes" element={<IaAgentes />} />
-            <Route path="facturacion" element={<TenantFacturacion />} />
+            <Route path="ia-agentes" element={<RequireModule moduleKey="aiAgents"><IaAgentes /></RequireModule>} />
+            <Route path="facturacion" element={<RequireModule moduleKey="billing"><TenantFacturacion /></RequireModule>} />
             <Route
               path="campanas"
               element={
-                <LockedFeature icon={MegaphoneIcon} descriptionKey="account.locked.campaigns" />
+                <RequireModule moduleKey="campaigns">
+                  <LockedFeature icon={MegaphoneIcon} descriptionKey="account.locked.campaigns" />
+                </RequireModule>
               }
             />
             {/* Catálogo se fusionó dentro de Productos (mismo catálogo, no dos
                 pantallas separadas) -- este redirect solo cubre links/bookmarks viejos. */}
             <Route path="catalogo" element={<Navigate to="/app/productos" replace />} />
-            <Route path="configuracion" element={<TenantConfiguracion />} />
+            <Route path="configuracion" element={<RequireModule moduleKey="settings"><TenantConfiguracion /></RequireModule>} />
             <Route path="novedades" element={<Changelog />} />
             <Route path="perfil" element={<MiCuenta />} />
           </Route>
