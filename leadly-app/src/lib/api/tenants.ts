@@ -12,6 +12,7 @@ export interface TenantInput {
   contact_phone: string | null
   country: string | null
   state_province: string | null
+  billing_address: string | null
   preferred_language: TenantLanguage
   notes: string | null
 }

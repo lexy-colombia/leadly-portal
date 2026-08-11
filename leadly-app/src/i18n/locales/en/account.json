@@ -27,6 +27,7 @@
   "account.users.table.actions": "Actions",
   "account.users.deactivate": "Deactivate",
   "account.users.activate": "Activate",
+  "account.users.activateDisabled": "This client reached its plan's max active users.",
   "account.invite.title": "Invite user",
   "account.invite.description": "They'll get an email to set their password.",
   "account.invite.sentPrefix": "Invitation sent to",

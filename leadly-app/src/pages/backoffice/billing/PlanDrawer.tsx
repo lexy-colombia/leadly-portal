@@ -23,6 +23,8 @@ export function PlanDrawer({
   const [description, setDescription] = useState('')
   const [amount, setAmount] = useState('')
   const [billingInterval, setBillingInterval] = useState<'monthly' | 'yearly'>('monthly')
+  const [maxUsers, setMaxUsers] = useState('')
+  const [maxWhatsappLines, setMaxWhatsappLines] = useState('')
   const [isActive, setIsActive] = useState(true)
   const [touched, setTouched] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -35,6 +37,8 @@ export function PlanDrawer({
     setDescription(plan?.description ?? '')
     setAmount(plan ? String(plan.amount_cents / 100) : '')
     setBillingInterval(plan?.billing_interval ?? 'monthly')
+    setMaxUsers(plan?.max_users != null ? String(plan.max_users) : '')
+    setMaxWhatsappLines(plan?.max_whatsapp_lines != null ? String(plan.max_whatsapp_lines) : '')
     setIsActive(plan?.is_active ?? true)
     setTouched(false)
     setFormError(null)
@@ -59,6 +63,8 @@ export function PlanDrawer({
         amount_cents: Math.round(Number(amount) * 100),
         currency: 'COP',
         billing_interval: billingInterval,
+        max_users: maxUsers.trim() ? Number(maxUsers) : null,
+        max_whatsapp_lines: maxWhatsappLines.trim() ? Number(maxWhatsappLines) : null,
         is_active: isActive,
       }
       const saved = plan ? await updateBillingPlan(plan.id, input) : await createBillingPlan(input)
@@ -103,6 +109,33 @@ export function PlanDrawer({
               <option value="monthly">{t('backoffice.facturacion.interval.monthly')}</option>
               <option value="yearly">{t('backoffice.facturacion.interval.yearly')}</option>
             </Select>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <Label htmlFor="plan-max-users">{t('backoffice.planDrawer.maxUsers')}</Label>
+            <Input
+              id="plan-max-users"
+              type="number"
+              min={1}
+              step={1}
+              value={maxUsers}
+              onChange={(e) => setMaxUsers(e.target.value)}
+              placeholder={t('backoffice.planDrawer.maxUsers.placeholder')}
+            />
+          </div>
+          <div>
+            <Label htmlFor="plan-max-lines">{t('backoffice.planDrawer.maxWhatsappLines')}</Label>
+            <Input
+              id="plan-max-lines"
+              type="number"
+              min={1}
+              step={1}
+              value={maxWhatsappLines}
+              onChange={(e) => setMaxWhatsappLines(e.target.value)}
+              placeholder={t('backoffice.planDrawer.maxWhatsappLines.placeholder')}
+            />
           </div>
         </div>
 

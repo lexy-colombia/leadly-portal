@@ -24,6 +24,7 @@ export interface Tenant {
   document_number: string | null
   country: string | null
   state_province: string | null
+  billing_address: string | null
   preferred_language: TenantLanguage
   logo_url: string | null
   created_at: string
@@ -495,6 +496,16 @@ export interface BillingPlan {
   currency: string
   billing_interval: BillingInterval
   is_active: boolean
+  /** Max active users a tenant on this plan may have. NULL = unlimited.
+   * Enforced by a DB trigger on profiles, see
+   * 20260811000006_billing_plans_max_users.sql -- this isn't just a display
+   * value, inviting/reactivating past it fails server-side regardless of
+   * which path (Edge Function or direct RLS update) is used. */
+  max_users: number | null
+  /** Max active WhatsApp lines a tenant on this plan may have connected.
+   * NULL = unlimited. Enforced by a DB trigger on whatsapp_lines, see
+   * 20260811000007_billing_plans_max_whatsapp_lines.sql. */
+  max_whatsapp_lines: number | null
   created_at: string
   updated_at: string
 }
@@ -508,6 +519,10 @@ export interface BillingSubscription {
   status: BillingSubscriptionStatus
   current_period_start: string | null
   current_period_end: string | null
+  /** Set by cancel_subscription() when the subscription still has a paid,
+   * in-progress period -- stays ACTIVE (usable) until current_period_end,
+   * then the cron flips it to CANCELLED instead of billing a renewal. */
+  cancel_at_period_end: boolean
   created_at: string
   updated_at: string
   cancelled_at: string | null
@@ -531,6 +546,20 @@ export interface PaymentInvoice {
   provider_transaction_id: string | null
   provider_payment_method: string | null
   provider_payment_data: Record<string, unknown> | null
+  // Snapshot of the buyer (tenant) at the moment the invoice was issued, plus
+  // the tax breakdown -- the data a Colombian electronic invoice (DIAN)
+  // requires. Filled server-side by a trigger, see
+  // 20260811000004_payment_invoices_dian_fields.sql.
+  buyer_legal_name: string | null
+  buyer_document_type: string | null
+  buyer_document_number: string | null
+  buyer_email: string | null
+  buyer_address: string | null
+  buyer_country: string | null
+  buyer_state_province: string | null
+  subtotal_cents: number | null
+  tax_cents: number | null
+  tax_rate: number
   deleted_at: string | null
   deleted_by: string | null
   created_at: string
@@ -552,4 +581,50 @@ export interface PaymentAttempt {
   payment_reference: string | null
   raw_data: Record<string, unknown> | null
   created_at: string
+}
+
+export interface PaymentInvoiceItem {
+  id: string
+  invoice_id: string
+  description: string
+  quantity: number
+  unit_price_cents: number
+  subtotal_cents: number
+  display_order: number
+  created_at: string
+}
+
+// Embedded-relation shape for the backoffice's platform-wide Facturas tab
+// (all tenants at once) -- same pattern as OpportunityWithRelations in
+// lib/api/opportunities.ts.
+export type PaymentInvoiceWithTenant = PaymentInvoice & {
+  tenant: { name: string } | null
+}
+
+export type IntegrationCategory = 'invoicing' | 'accounting' | 'messaging' | 'payments' | 'crm' | 'ecommerce' | 'other'
+
+export interface IntegrationProvider {
+  key: string
+  name: string
+  category: IntegrationCategory
+  description: string | null
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+/** tenant_id null = a platform-level credential (Leadly's own account with
+ * this provider); tenant_id set = that tenant's own account -- same scoping
+ * as tenant_payment_credentials. */
+export interface IntegrationCredential {
+  id: string
+  tenant_id: string | null
+  provider_key: string
+  mode: 'sandbox' | 'production'
+  config: Record<string, unknown>
+  is_active: boolean
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+  deleted_by: string | null
 }

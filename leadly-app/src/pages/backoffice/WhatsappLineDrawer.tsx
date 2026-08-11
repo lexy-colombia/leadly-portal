@@ -1,12 +1,14 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import {
   createWhatsappLine,
+  listWhatsappLinesByTenant,
   setWhatsappLineAccessToken,
   setWhatsappLineStatus,
   updateWhatsappLine,
   whatsappLineHasAccessToken,
   type WhatsappLineInput,
 } from '../../lib/api/whatsappLines'
+import { getMaxWhatsappLinesForTenant } from '../../lib/api/billing'
 import type { WhatsappLine, WhatsappLineStatus } from '../../types/domain'
 import { Button, Drawer, FieldError, Input, Label, Select } from '../../components/ui'
 import { useWhatsappLineForm } from './useWhatsappLineForm'
@@ -46,6 +48,8 @@ export function WhatsappLineDrawer({
 
   const [status, setStatus] = useState<WhatsappLineStatus>(line?.status ?? 'pending_verification')
   const [statusSaving, setStatusSaving] = useState(false)
+  const [activeLinesCount, setActiveLinesCount] = useState(0)
+  const [maxLines, setMaxLines] = useState<number | null>(null)
 
   const [hasToken, setHasToken] = useState<boolean | null>(null)
   const [tokenValue, setTokenValue] = useState('')
@@ -70,8 +74,16 @@ export function WhatsappLineDrawer({
     } else {
       setHasToken(null)
     }
+    listWhatsappLinesByTenant(tenantId)
+      .then((lines) => setActiveLinesCount(lines.filter((l) => l.status === 'active' && l.id !== line?.id).length))
+      .catch(() => setActiveLinesCount(0))
+    getMaxWhatsappLinesForTenant(tenantId)
+      .then(setMaxLines)
+      .catch(() => setMaxLines(null))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, line?.id])
+
+  const atLineCapacity = maxLines !== null && activeLinesCount >= maxLines
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -166,11 +178,14 @@ export function WhatsappLineDrawer({
               onChange={(e) => handleStatusChange(e.target.value as WhatsappLineStatus)}
             >
               {Object.entries(STATUS_LABEL_KEY).map(([value, labelKey]) => (
-                <option key={value} value={value}>
+                <option key={value} value={value} disabled={value === 'active' && atLineCapacity && status !== 'active'}>
                   {t(labelKey)}
                 </option>
               ))}
             </Select>
+            {atLineCapacity && status !== 'active' && (
+              <p className="mt-1 text-xs text-amber-600">{t('backoffice.whatsappLineDrawer.atCapacity', { max: maxLines ?? 0 })}</p>
+            )}
           </div>
         )}
 

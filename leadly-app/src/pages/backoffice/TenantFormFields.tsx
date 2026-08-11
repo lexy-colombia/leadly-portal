@@ -158,6 +158,16 @@ export function TenantFormFields({ form }: { form: TenantFormState }) {
       </div>
 
       <div>
+        <Label htmlFor="tenant-billing-address">{t('backoffice.tenantForm.billingAddress')}</Label>
+        <Input
+          id="tenant-billing-address"
+          value={form.billingAddress}
+          onChange={(e) => form.setBillingAddress(e.target.value)}
+          placeholder={t('backoffice.tenantForm.billingAddress.placeholder')}
+        />
+      </div>
+
+      <div>
         <Label htmlFor="tenant-notes">{t('backoffice.tenantForm.notes')}</Label>
         <Textarea id="tenant-notes" rows={3} value={form.notes} onChange={(e) => form.setNotes(e.target.value)} />
       </div>

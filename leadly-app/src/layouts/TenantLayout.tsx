@@ -14,5 +14,5 @@ export function TenantLayout() {
     badge: module.badge ? t(module.badge) : undefined,
   }))
 
-  return <AppShell subtitle={t('common.shell.tenantSubtitle')} navItems={navItems} theme="light" showUpsell />
+  return <AppShell subtitle={t('common.shell.tenantSubtitle')} navItems={navItems} theme="light" />
 }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { Language, TranslationKey } from '../../i18n/translations'
 import { deleteWhatsappLine, listWhatsappLinesByTenant } from '../../lib/api/whatsappLines'
+import { getMaxWhatsappLinesForTenant } from '../../lib/api/billing'
 import { assignAiAssistantToLine, deleteAiAssistant, listAiAssistantsByTenant } from '../../lib/api/aiAssistants'
 import { listConversations, type ConversationWithLine } from '../../lib/api/conversations'
 import type { AiAssistant, AiProvider, WhatsappLine, WhatsappLineStatus } from '../../types/domain'
@@ -97,6 +98,7 @@ export function LinesAndAgentsSection({
   const [deletingAgentId, setDeletingAgentId] = useState<string | null>(null)
   const [deleteAgentError, setDeleteAgentError] = useState<string | null>(null)
   const [assigningLineId, setAssigningLineId] = useState<string | null>(null)
+  const [maxLines, setMaxLines] = useState<number | null>(null)
 
   function reload() {
     listWhatsappLinesByTenant(tenantId).then(setLines).catch((err) => setError(err.message ?? t('settings.lines.errors.loadLines')))
@@ -110,6 +112,11 @@ export function LinesAndAgentsSection({
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(reload, [tenantId])
+  useEffect(() => {
+    getMaxWhatsappLinesForTenant(tenantId)
+      .then(setMaxLines)
+      .catch(() => setMaxLines(null))
+  }, [tenantId])
 
   const lastActivityByLine = useMemo(() => {
     const map = new Map<string, string>()
@@ -129,6 +136,7 @@ export function LinesAndAgentsSection({
   const linesWithAgent = (lines ?? []).filter((l) => l.ai_assistant_id).length
   const conversationsToday = (conversations ?? []).filter((c) => c.last_message_at && isToday(c.last_message_at)).length
   const activeAgents = (assistants ?? []).filter((a) => a.is_active).length
+  const atLineCapacity = maxLines !== null && connectedLines >= maxLines
 
   async function handleDeleteLine(lineId: string) {
     setDeletingLineId(lineId)
@@ -198,7 +206,13 @@ export function LinesAndAgentsSection({
         {canManage &&
           (tab === 'lineas' ? (
             connectLine ? (
-              <Button variant="primary" onClick={connectLine.onClick} disabled={connectLine.loading} className="!py-1.5 text-xs">
+              <Button
+                variant="primary"
+                onClick={connectLine.onClick}
+                disabled={connectLine.loading || atLineCapacity}
+                title={atLineCapacity ? t('settings.lines.metrics.atCapacity', { max: maxLines ?? 0 }) : undefined}
+                className="!py-1.5 text-xs"
+              >
                 <PlusIcon width={14} height={14} /> {connectLine.loading ? t('settings.lines.connecting') : connectLine.label}
               </Button>
             ) : (
@@ -218,7 +232,7 @@ export function LinesAndAgentsSection({
           <MetricCard
             icon={<PhoneIcon width={16} height={16} />}
             iconClass="bg-emerald-50 text-emerald-600"
-            value={String(connectedLines)}
+            value={maxLines !== null ? `${connectedLines}/${maxLines}` : String(connectedLines)}
             label={t('settings.lines.metrics.connectedLines')}
             sublabel={lines ? t('settings.lines.metrics.totalCount', { count: lines.length }) : undefined}
           />

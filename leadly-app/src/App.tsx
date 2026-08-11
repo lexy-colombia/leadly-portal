@@ -14,6 +14,7 @@ import { ClientesList } from './pages/backoffice/ClientesList'
 import { ClienteDetalle } from './pages/backoffice/ClienteDetalle'
 import { Configuracion } from './pages/backoffice/Configuracion'
 import { Facturacion } from './pages/backoffice/Facturacion'
+import { Integraciones } from './pages/backoffice/Integraciones'
 import { Dashboard as BackofficeDashboard } from './pages/backoffice/Dashboard'
 import { Configuracion as TenantConfiguracion } from './pages/tenant/Configuracion'
 import { Dashboard as TenantDashboard } from './pages/tenant/Dashboard'
@@ -28,6 +29,7 @@ import { VentaDetalle } from './pages/tenant/VentaDetalle'
 import { Tareas } from './pages/tenant/Tareas'
 import { Calendario } from './pages/tenant/Calendario'
 import { Facturacion as TenantFacturacion } from './pages/tenant/Facturacion'
+import { Integraciones as TenantIntegraciones } from './pages/tenant/Integraciones'
 import { IaAgentes } from './pages/tenant/IaAgentes'
 import { LockedFeature } from './pages/tenant/LockedFeature'
 import { MiCuenta } from './pages/shared/MiCuenta'
@@ -63,6 +65,7 @@ export default function App() {
             {/* Líneas de WhatsApp lives inside ClienteDetalle, not as its own route. */}
             <Route path="clientes/:id" element={<ClienteDetalle />} />
             <Route path="facturacion" element={<Facturacion />} />
+            <Route path="integraciones" element={<Integraciones />} />
             <Route path="configuracion" element={<Configuracion />} />
             <Route path="novedades" element={<Changelog />} />
             <Route path="perfil" element={<MiCuenta />} />
@@ -110,6 +113,7 @@ export default function App() {
             />
             <Route path="ia-agentes" element={<RequireModule moduleKey="aiAgents"><IaAgentes /></RequireModule>} />
             <Route path="facturacion" element={<RequireModule moduleKey="billing"><TenantFacturacion /></RequireModule>} />
+            <Route path="integraciones" element={<RequireModule moduleKey="integrations"><TenantIntegraciones /></RequireModule>} />
             <Route
               path="campanas"
               element={

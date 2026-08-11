@@ -30,6 +30,7 @@
   "settings.lines.tabs.agents": "AI agents",
   "settings.lines.metrics.connectedLines": "Connected lines",
   "settings.lines.metrics.totalCount": "{count} total",
+  "settings.lines.metrics.atCapacity": "Your plan allows a maximum of {max} active lines.",
   "settings.lines.metrics.withAgent": "With agent assigned",
   "settings.lines.metrics.percentOfLines": "{percent}% of lines",
   "settings.lines.metrics.conversationsToday": "Conversations today",

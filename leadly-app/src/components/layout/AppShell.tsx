@@ -72,14 +72,10 @@ export function AppShell({
   subtitle,
   navItems,
   theme = 'dark',
-  showUpsell = false,
 }: {
   subtitle: string
   navItems: NavItem[]
   theme?: 'dark' | 'light'
-  /** Shows the "Prueba Leadly Pro" upgrade card above the profile footer --
-   * only meaningful for the tenant panel, superadmins have nothing to upgrade. */
-  showUpsell?: boolean
 }) {
   const { profile, signOut } = useAuth()
   const { t } = useLanguage()
@@ -167,18 +163,6 @@ export function AppShell({
             </div>
           ))}
         </nav>
-
-        {showUpsell && (
-          <div className={`px-2.5 pb-1 ${collapsed ? 'lg:hidden' : ''}`}>
-            <div className="rounded-xl bg-brand-50 p-3">
-              <p className="text-xs font-semibold text-brand-800">{t('common.shell.upsell.title')}</p>
-              <p className="mt-0.5 text-[11px] leading-snug text-brand-400">{t('common.shell.upsell.subtitle')}</p>
-              <Button variant="primary" className="mt-2 w-full !py-1.5 text-xs">
-                {t('common.shell.upsell.cta')}
-              </Button>
-            </div>
-          </div>
-        )}
 
         <div className={`border-t px-2.5 py-2.5 ${isLight ? 'border-brand-100' : 'border-brand-800'} ${collapsed ? 'lg:px-2' : ''}`}>
           <Link

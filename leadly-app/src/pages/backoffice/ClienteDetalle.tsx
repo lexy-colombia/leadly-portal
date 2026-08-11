@@ -1,32 +1,45 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { getTenant, setTenantStatus } from '../../lib/api/tenants'
 import { listProfilesByTenant } from '../../lib/api/users'
-import type { Profile, Tenant } from '../../types/domain'
+import type { BillingPlan, Profile, Tenant } from '../../types/domain'
 import { COUNTRIES, DOCUMENT_TYPES, LANGUAGES } from '../../lib/referenceData'
 import { Badge, Button, Card, InitialsAvatar, PageSpinner } from '../../components/ui'
-import { CreditCardIcon, IdCardIcon, MailIcon, MenuIcon, PencilIcon, PhoneIcon, PlusIcon, UsersIcon } from '../../components/icons'
+import {
+  BuildingIcon,
+  CreditCardIcon,
+  GlobeIcon,
+  IdCardIcon,
+  MailIcon,
+  MapPinIcon,
+  MenuIcon,
+  PencilIcon,
+  PhoneIcon,
+  PlusIcon,
+  ReceiptIcon,
+  UserIcon,
+  UsersIcon,
+} from '../../components/icons'
 import { TenantDrawer } from './TenantDrawer'
 import { WhatsappLineDrawer } from './WhatsappLineDrawer'
 import { UserInviteDrawer } from '../shared/UserInviteDrawer'
 import { UsersTable } from '../shared/UsersTable'
 import { LinesAndAgentsSection } from '../shared/LinesAndAgentsSection'
 import { TenantBillingSection } from './billing/TenantBillingSection'
+import { TenantPlanSection } from './billing/TenantPlanSection'
 import { TenantModulesSection } from './TenantModulesSection'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { TranslationKey } from '../../i18n/translations'
 
-const TABS = ['informacion', 'lineas', 'usuarios', 'facturacion', 'modulos'] as const
+const TABS = ['lineas', 'usuarios', 'facturacion', 'modulos'] as const
 type Tab = (typeof TABS)[number]
 const TAB_LABEL_KEY: Record<Tab, TranslationKey> = {
-  informacion: 'backoffice.clienteDetalle.tabs.informacion',
   lineas: 'backoffice.clienteDetalle.tabs.lineas',
   usuarios: 'backoffice.clienteDetalle.tabs.usuarios',
   facturacion: 'backoffice.clienteDetalle.tabs.facturacion',
   modulos: 'backoffice.clienteDetalle.tabs.modulos',
 }
 const TAB_ICON: Record<Tab, typeof IdCardIcon> = {
-  informacion: IdCardIcon,
   lineas: PhoneIcon,
   usuarios: UsersIcon,
   facturacion: CreditCardIcon,
@@ -66,24 +79,16 @@ export function ClienteDetalle() {
   return <ClienteDetalleContent tenant={tenant} onTenantChange={setTenant} />
 }
 
-function InfoRow({ label, value }: { label: string; value: string }) {
+/** Label-above-value field with a leading icon -- one shape for every fact
+ * about the tenant in the sidebar sheet, instead of a dt/dd table grid. Same
+ * visual language as ContactoDetalle's Field on the tenant side. */
+function Field({ icon, label, value }: { icon: ReactNode; label: string; value: ReactNode }) {
   return (
-    <div className="flex justify-between gap-4 py-1.5 text-sm">
-      <dt className="text-brand-400">{label}</dt>
-      <dd className="text-right text-brand-700">{value}</dd>
-    </div>
-  )
-}
-
-function InfoField({ icon: Icon, label, value }: { icon: typeof PhoneIcon; label: string; value: string }) {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-accent-50 text-accent-600">
-        <Icon width={13} height={13} />
-      </span>
+    <div className="flex items-start gap-2.5">
+      <span className="mt-0.5 shrink-0 text-brand-300">{icon}</span>
       <div className="min-w-0">
-        <p className="text-[11px] text-brand-400">{label}</p>
-        <p className="truncate text-xs font-medium text-brand-800">{value}</p>
+        <p className="text-xs text-brand-400">{label}</p>
+        <p className="truncate text-sm text-brand-700">{value}</p>
       </div>
     </div>
   )
@@ -91,7 +96,7 @@ function InfoField({ icon: Icon, label, value }: { icon: typeof PhoneIcon; label
 
 function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onTenantChange: (t: Tenant) => void }) {
   const { t } = useLanguage()
-  const [tab, setTab] = useState<Tab>('informacion')
+  const [tab, setTab] = useState<Tab>('lineas')
   const [editOpen, setEditOpen] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
   const [confirmingDeactivate, setConfirmingDeactivate] = useState(false)
@@ -101,6 +106,7 @@ function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onT
   const [users, setUsers] = useState<Profile[] | null>(null)
   const [usersError, setUsersError] = useState<string | null>(null)
   const [inviteOpen, setInviteOpen] = useState(false)
+  const [plan, setPlan] = useState<BillingPlan | null>(null)
 
   function reloadUsers() {
     listProfilesByTenant(tenant.id)
@@ -136,6 +142,10 @@ function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onT
       setStatusUpdating(false)
     }
   }
+
+  const maxUsers = plan?.max_users ?? null
+  const activeUserCount = users?.filter((u) => u.active).length ?? 0
+  const atUserCapacity = maxUsers !== null && activeUserCount >= maxUsers
 
   const countryLabelKey = COUNTRIES.find((c) => c.code === tenant.country)?.labelKey
   const countryLabel = countryLabelKey ? t(countryLabelKey) : (tenant.country ?? '—')
@@ -209,102 +219,125 @@ function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onT
         </div>
       </div>
 
-      <Card>
-        <div className="flex flex-wrap gap-x-6 gap-y-2">
-          <InfoField icon={MailIcon} label={t('backoffice.clienteDetalle.fields.contactEmail')} value={tenant.contact_email ?? '—'} />
-          <InfoField icon={PhoneIcon} label={t('backoffice.clienteDetalle.fields.contactPhone')} value={tenant.contact_phone ?? '—'} />
-          <InfoField icon={IdCardIcon} label={t('backoffice.clienteDetalle.fields.country')} value={countryLabel} />
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+        <Card className="lg:w-72 lg:shrink-0">
+          <div className="flex items-center gap-2 pb-3">
+            <Badge tone="neutral">
+              {tenant.entity_type === 'empresa' ? t('backoffice.clienteDetalle.entityType.empresa') : t('backoffice.clienteDetalle.entityType.persona')}
+            </Badge>
+          </div>
+
+          <dl className="space-y-3 border-t border-brand-100 py-4 text-sm">
+            <Field
+              icon={tenant.entity_type === 'empresa' ? <BuildingIcon width={14} height={14} /> : <UserIcon width={14} height={14} />}
+              label={tenant.entity_type === 'empresa' ? t('backoffice.clienteDetalle.fields.legalName') : t('backoffice.clienteDetalle.fields.fullName')}
+              value={tenant.legal_name ?? '—'}
+            />
+            <Field
+              icon={<IdCardIcon width={14} height={14} />}
+              label={t('backoffice.clienteDetalle.fields.document')}
+              value={tenant.document_number ? `${documentTypeLabel} ${tenant.document_number}` : '—'}
+            />
+            <Field icon={<MailIcon width={14} height={14} />} label={t('backoffice.clienteDetalle.fields.contactEmail')} value={tenant.contact_email ?? '—'} />
+            <Field icon={<PhoneIcon width={14} height={14} />} label={t('backoffice.clienteDetalle.fields.contactPhone')} value={tenant.contact_phone ?? '—'} />
+            <Field
+              icon={<MapPinIcon width={14} height={14} />}
+              label={t('backoffice.clienteDetalle.fields.country')}
+              value={tenant.state_province ? `${countryLabel}, ${tenant.state_province}` : countryLabel}
+            />
+            <Field icon={<GlobeIcon width={14} height={14} />} label={t('backoffice.clienteDetalle.fields.preferredLanguage')} value={languageLabel} />
+            <Field icon={<ReceiptIcon width={14} height={14} />} label={t('backoffice.clienteDetalle.fields.billingAddress')} value={tenant.billing_address ?? '—'} />
+          </dl>
+
+          <div className="border-t border-brand-100 pt-4">
+            <TenantPlanSection tenantId={tenant.id} onPlanChange={setPlan} />
+          </div>
+
+          {tenant.notes && (
+            <div className="border-t border-brand-100 pt-4">
+              <p className="mb-1 text-xs font-medium text-brand-400">{t('backoffice.clienteDetalle.fields.notes')}</p>
+              <p className="whitespace-pre-wrap text-sm text-brand-600">{tenant.notes}</p>
+            </div>
+          )}
+        </Card>
+
+        <div className="min-w-0 flex-1 space-y-4">
+          <div className="flex gap-4 overflow-x-auto border-b border-brand-100">
+            {TABS.map((tabKey) => {
+              const Icon = TAB_ICON[tabKey]
+              const count = tabKey === 'usuarios' ? users?.length : undefined
+              return (
+                <button
+                  key={tabKey}
+                  onClick={() => setTab(tabKey)}
+                  className={`flex shrink-0 items-center gap-1.5 border-b-2 pb-2 text-xs font-medium transition-colors ${
+                    tab === tabKey ? 'border-accent-500 text-accent-600' : 'border-transparent text-brand-400 hover:text-brand-700'
+                  }`}
+                >
+                  <Icon width={13} height={13} />
+                  {t(TAB_LABEL_KEY[tabKey])}
+                  {count !== undefined && count > 0 && <span className="text-[11px] text-brand-300">({count})</span>}
+                </button>
+              )
+            })}
+          </div>
+
+          <div key={tab} className="animate-tab-fade-in">
+            {tab === 'lineas' && (
+              <LinesAndAgentsSection
+                tenantId={tenant.id}
+                canManage
+                manageSkills
+                renderLineDrawer={({ open, line, onClose, onSaved }) => (
+                  <WhatsappLineDrawer open={open} onClose={onClose} tenantId={tenant.id} line={line} onSaved={onSaved} />
+                )}
+              />
+            )}
+
+            {tab === 'usuarios' && (
+              <Card>
+                <div className="mb-1 flex items-center justify-between">
+                  <p className="text-sm text-brand-500">{t('backoffice.clienteDetalle.usersSubtitle')}</p>
+                  <Button
+                    variant="secondary"
+                    onClick={() => setInviteOpen(true)}
+                    disabled={atUserCapacity}
+                    className="!px-3 !py-1.5 text-xs"
+                    title={atUserCapacity ? t('backoffice.clienteDetalle.usersAtCapacity', { max: maxUsers ?? 0 }) : undefined}
+                  >
+                    <PlusIcon width={14} height={14} /> {t('backoffice.clienteDetalle.inviteUser')}
+                  </Button>
+                </div>
+                {maxUsers !== null && (
+                  <p className={`mb-3 text-xs ${atUserCapacity ? 'text-amber-600' : 'text-brand-400'}`}>
+                    {t('backoffice.clienteDetalle.usersCount', { active: activeUserCount, max: maxUsers })}
+                  </p>
+                )}
+                {usersError && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{usersError}</p>}
+                {!users && !usersError && <PageSpinner />}
+                {users && (
+                  <UsersTable
+                    users={users}
+                    onChange={(u) => setUsers((prev) => prev!.map((p) => (p.id === u.id ? u : p)))}
+                    disableActivate={atUserCapacity}
+                  />
+                )}
+              </Card>
+            )}
+
+            {tab === 'facturacion' && (
+              <Card padded={false}>
+                <TenantBillingSection tenantId={tenant.id} />
+              </Card>
+            )}
+
+            {tab === 'modulos' && (
+              <Card>
+                <TenantModulesSection tenantId={tenant.id} />
+              </Card>
+            )}
+          </div>
         </div>
-      </Card>
-
-      <div className="flex gap-4 overflow-x-auto border-b border-brand-100">
-        {TABS.map((tabKey) => {
-          const Icon = TAB_ICON[tabKey]
-          const count = tabKey === 'usuarios' ? users?.length : undefined
-          return (
-            <button
-              key={tabKey}
-              onClick={() => setTab(tabKey)}
-              className={`flex shrink-0 items-center gap-1.5 border-b-2 pb-2 text-xs font-medium transition-colors ${
-                tab === tabKey ? 'border-accent-500 text-accent-600' : 'border-transparent text-brand-400 hover:text-brand-700'
-              }`}
-            >
-              <Icon width={13} height={13} />
-              {t(TAB_LABEL_KEY[tabKey])}
-              {count !== undefined && count > 0 && <span className="text-[11px] text-brand-300">({count})</span>}
-            </button>
-          )
-        })}
-      </div>
-
-      <div key={tab} className="animate-tab-fade-in">
-        {tab === 'informacion' && (
-          <Card>
-            <div className="grid gap-x-8 sm:grid-cols-2">
-              <dl className="divide-y divide-brand-50">
-                <InfoRow
-                  label={t('backoffice.clienteDetalle.fields.type')}
-                  value={tenant.entity_type === 'empresa' ? t('backoffice.clienteDetalle.entityType.empresa') : t('backoffice.clienteDetalle.entityType.persona')}
-                />
-                <InfoRow
-                  label={tenant.entity_type === 'empresa' ? t('backoffice.clienteDetalle.fields.legalName') : t('backoffice.clienteDetalle.fields.fullName')}
-                  value={tenant.legal_name ?? '—'}
-                />
-                <InfoRow label={t('backoffice.clienteDetalle.fields.document')} value={tenant.document_number ? `${documentTypeLabel} ${tenant.document_number}` : '—'} />
-                <InfoRow label={t('backoffice.clienteDetalle.fields.preferredLanguage')} value={languageLabel} />
-              </dl>
-              <dl className="divide-y divide-brand-50">
-                <InfoRow label={t('backoffice.clienteDetalle.fields.contactEmail')} value={tenant.contact_email ?? '—'} />
-                <InfoRow label={t('backoffice.clienteDetalle.fields.contactPhone')} value={tenant.contact_phone ?? '—'} />
-                <InfoRow label={t('backoffice.clienteDetalle.fields.country')} value={countryLabel} />
-                <InfoRow label={t('backoffice.clienteDetalle.fields.stateProvince')} value={tenant.state_province ?? '—'} />
-              </dl>
-            </div>
-            {tenant.notes && (
-              <p className="mt-4 border-t border-brand-50 pt-4 text-sm text-brand-600">
-                <span className="text-brand-400">{t('backoffice.clienteDetalle.fields.notes')}: </span>
-                {tenant.notes}
-              </p>
-            )}
-          </Card>
-        )}
-
-        {tab === 'lineas' && (
-          <LinesAndAgentsSection
-            tenantId={tenant.id}
-            canManage
-            manageSkills
-            renderLineDrawer={({ open, line, onClose, onSaved }) => (
-              <WhatsappLineDrawer open={open} onClose={onClose} tenantId={tenant.id} line={line} onSaved={onSaved} />
-            )}
-          />
-        )}
-
-        {tab === 'usuarios' && (
-          <Card>
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-sm text-brand-500">{t('backoffice.clienteDetalle.usersSubtitle')}</p>
-              <Button variant="secondary" onClick={() => setInviteOpen(true)} className="!px-3 !py-1.5 text-xs">
-                <PlusIcon width={14} height={14} /> {t('backoffice.clienteDetalle.inviteUser')}
-              </Button>
-            </div>
-            {usersError && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{usersError}</p>}
-            {!users && !usersError && <PageSpinner />}
-            {users && <UsersTable users={users} onChange={(u) => setUsers((prev) => prev!.map((p) => (p.id === u.id ? u : p)))} />}
-          </Card>
-        )}
-
-        {tab === 'facturacion' && (
-          <Card padded={false}>
-            <TenantBillingSection tenantId={tenant.id} />
-          </Card>
-        )}
-
-        {tab === 'modulos' && (
-          <Card>
-            <TenantModulesSection tenantId={tenant.id} />
-          </Card>
-        )}
       </div>
 
       <TenantDrawer open={editOpen} onClose={() => setEditOpen(false)} tenant={tenant} onSaved={onTenantChange} />

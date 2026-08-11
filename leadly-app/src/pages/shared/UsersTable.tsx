@@ -13,8 +13,20 @@ const ROLE_LABEL_KEY: Record<string, TranslationKey> = {
 
 /** Shared between the backoffice (Cliente → Usuarios) and the tenant panel
  * (Usuarios) -- same list, same toggle, only which tenant's users get fetched
- * differs by caller. */
-export function UsersTable({ users, onChange }: { users: Profile[]; onChange: (p: Profile) => void }) {
+ * differs by caller. `disableActivate` blocks only the reactivation action
+ * (deactivating always stays available) when the tenant's plan is already at
+ * its max active users -- the actual enforcement is a DB trigger
+ * (enforce_plan_max_users), this is just proactive UI so the click doesn't
+ * have to round-trip to fail. */
+export function UsersTable({
+  users,
+  onChange,
+  disableActivate = false,
+}: {
+  users: Profile[]
+  onChange: (p: Profile) => void
+  disableActivate?: boolean
+}) {
   const { t } = useLanguage()
   const [updatingId, setUpdatingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -67,7 +79,8 @@ export function UsersTable({ users, onChange }: { users: Profile[]; onChange: (p
                 <Button
                   variant="ghost"
                   onClick={() => handleToggleActive(user)}
-                  disabled={updatingId === user.id}
+                  disabled={updatingId === user.id || (!user.active && disableActivate)}
+                  title={!user.active && disableActivate ? t('account.users.activateDisabled') : undefined}
                   className="!px-3 !py-1.5 text-xs"
                 >
                   {updatingId === user.id ? t('common.actions.saving') : user.active ? t('account.users.deactivate') : t('account.users.activate')}

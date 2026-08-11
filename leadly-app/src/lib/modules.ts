@@ -8,6 +8,7 @@ import {
   CheckIcon,
   CreditCardIcon,
   DashboardIcon,
+  GlobeIcon,
   MegaphoneIcon,
   ReceiptIcon,
   RefreshIcon,
@@ -47,6 +48,7 @@ export const TENANT_MODULES: TenantModuleDefinition[] = [
   { key: 'automations', labelKey: 'common.nav.automations', to: '/app/automatizaciones', icon: RefreshIcon },
   { key: 'aiAgents', labelKey: 'common.nav.aiAgents', to: '/app/ia-agentes', icon: AiSparkleIcon },
   { key: 'billing', labelKey: 'common.nav.billing', to: '/app/facturacion', icon: CreditCardIcon },
+  { key: 'integrations', labelKey: 'common.nav.integrations', to: '/app/integraciones', icon: GlobeIcon },
   { key: 'settings', labelKey: 'common.nav.settings', to: '/app/configuracion', icon: SettingsIcon },
 ]
 

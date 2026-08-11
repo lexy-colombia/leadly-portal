@@ -27,6 +27,7 @@ export function useTenantForm(initial?: Partial<TenantInput>) {
   const [contactPhone, setContactPhone] = useState(initial?.contact_phone ?? '')
   const [country, setCountry] = useState(initial?.country ?? '')
   const [stateProvince, setStateProvince] = useState(initial?.state_province ?? '')
+  const [billingAddress, setBillingAddress] = useState(initial?.billing_address ?? '')
   const [preferredLanguage, setPreferredLanguage] = useState<TenantLanguage>(initial?.preferred_language ?? 'es')
   const [notes, setNotes] = useState(initial?.notes ?? '')
   const [touched, setTouched] = useState(false)
@@ -65,6 +66,7 @@ export function useTenantForm(initial?: Partial<TenantInput>) {
       contact_phone: contactPhone.trim() || null,
       country: country || null,
       state_province: stateProvince.trim() || null,
+      billing_address: billingAddress.trim() || null,
       preferred_language: preferredLanguage,
       notes: notes.trim() || null,
     }
@@ -89,6 +91,8 @@ export function useTenantForm(initial?: Partial<TenantInput>) {
     setCountry,
     stateProvince,
     setStateProvince,
+    billingAddress,
+    setBillingAddress,
     preferredLanguage,
     setPreferredLanguage,
     notes,
