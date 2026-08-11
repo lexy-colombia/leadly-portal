@@ -4,6 +4,7 @@ import { listContacts } from '../../../lib/api/contacts'
 import type { AppointmentWithContact, CrmContact } from '../../../types/domain'
 import { Button, Drawer, FieldError, Input, Label, Textarea } from '../../../components/ui'
 import { SearchIcon } from '../../../components/icons'
+import { useLanguage } from '../../../contexts/LanguageContext'
 
 function defaultDateTime(prefill?: Date): string {
   const d = prefill ? new Date(prefill) : new Date(Date.now() + 60 * 60 * 1000)
@@ -26,6 +27,7 @@ export function AppointmentFormDrawer({
   prefillDate?: Date
   onCreated: (appointment: AppointmentWithContact) => void
 }) {
+  const { t } = useLanguage()
   const [contacts, setContacts] = useState<CrmContact[] | null>(null)
   const [contactQuery, setContactQuery] = useState('')
   const [selectedContact, setSelectedContact] = useState<CrmContact | null>(null)
@@ -47,8 +49,8 @@ export function AppointmentFormDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, tenantId, prefillDate])
 
-  const dateError = touched && !dateTime ? 'Elige fecha y hora.' : undefined
-  const contactError = touched && !selectedContact ? 'Elige un contacto.' : undefined
+  const dateError = touched && !dateTime ? t('calendar.form.dateRequired') : undefined
+  const contactError = touched && !selectedContact ? t('calendar.form.contactRequired') : undefined
   const isPast = dateTime && new Date(dateTime).getTime() < Date.now()
 
   const matches =
@@ -70,22 +72,22 @@ export function AppointmentFormDrawer({
       onCreated({ ...appointment, contact_full_name: selectedContact.full_name })
       onClose()
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'No se pudo agendar la cita.')
+      setFormError(err instanceof Error ? err.message : t('calendar.errors.createFailed'))
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <Drawer open={open} onClose={onClose} title="Nueva cita" description="Le enviamos un recordatorio por WhatsApp una hora antes.">
+    <Drawer open={open} onClose={onClose} title={t('calendar.form.title')} description={t('calendar.form.description')}>
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <div>
-          <Label htmlFor="appt-contact">Contacto</Label>
+          <Label htmlFor="appt-contact">{t('calendar.form.contact')}</Label>
           {selectedContact ? (
             <div className="flex items-center justify-between rounded-xl border border-brand-200 px-3.5 py-2.5 text-sm">
               <span className="font-medium text-brand-800">{selectedContact.full_name}</span>
               <button type="button" onClick={() => setSelectedContact(null)} className="text-xs font-medium text-accent-600 hover:underline">
-                Cambiar
+                {t('calendar.form.change')}
               </button>
             </div>
           ) : (
@@ -95,7 +97,7 @@ export function AppointmentFormDrawer({
                 value={contactQuery}
                 invalid={!!contactError}
                 onChange={(e) => setContactQuery(e.target.value)}
-                placeholder="Buscar por nombre o teléfono…"
+                placeholder={t('calendar.form.searchPlaceholder')}
                 autoComplete="off"
               />
               {matches.length > 0 && (
@@ -123,25 +125,25 @@ export function AppointmentFormDrawer({
         </div>
 
         <div>
-          <Label htmlFor="appt-datetime">Fecha y hora</Label>
+          <Label htmlFor="appt-datetime">{t('calendar.form.dateTime')}</Label>
           <Input id="appt-datetime" type="datetime-local" value={dateTime} invalid={!!dateError} onChange={(e) => setDateTime(e.target.value)} />
           <FieldError message={dateError} />
-          {!dateError && isPast && <p className="mt-1 text-xs text-amber-600">Esa fecha ya pasó -- no se enviará recordatorio.</p>}
+          {!dateError && isPast && <p className="mt-1 text-xs text-amber-600">{t('calendar.form.pastWarning')}</p>}
         </div>
 
         <div>
-          <Label htmlFor="appt-notes">Notas (opcional)</Label>
-          <Textarea id="appt-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Motivo de la cita, temas a tratar..." rows={3} />
+          <Label htmlFor="appt-notes">{t('calendar.form.notes')}</Label>
+          <Textarea id="appt-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={t('calendar.form.notesPlaceholder')} rows={3} />
         </div>
 
         {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
 
         <div className="flex gap-2 border-t border-brand-100 pt-5">
           <Button type="submit" variant="secondary" disabled={submitting}>
-            {submitting ? 'Agendando…' : 'Agendar cita'}
+            {submitting ? t('calendar.form.submitting') : t('calendar.form.submit')}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>
-            Cancelar
+            {t('common.actions.cancel')}
           </Button>
         </div>
       </form>

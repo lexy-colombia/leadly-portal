@@ -1,128 +1,80 @@
+import esAccount from './locales/es/account.json'
+import esAuth from './locales/es/auth.json'
+import esBackoffice from './locales/es/backoffice.json'
+import esBilling from './locales/es/billing.json'
+import esCalendar from './locales/es/calendar.json'
+import esChangelog from './locales/es/changelog.json'
+import esCommon from './locales/es/common.json'
+import esContacts from './locales/es/contacts.json'
+import esDashboard from './locales/es/dashboard.json'
+import esInbox from './locales/es/inbox.json'
+import esOpportunities from './locales/es/opportunities.json'
+import esOrders from './locales/es/orders.json'
+import esProducts from './locales/es/products.json'
+import esSettings from './locales/es/settings.json'
+import esTasks from './locales/es/tasks.json'
+
+import enAccount from './locales/en/account.json'
+import enAuth from './locales/en/auth.json'
+import enBackoffice from './locales/en/backoffice.json'
+import enBilling from './locales/en/billing.json'
+import enCalendar from './locales/en/calendar.json'
+import enChangelog from './locales/en/changelog.json'
+import enCommon from './locales/en/common.json'
+import enContacts from './locales/en/contacts.json'
+import enDashboard from './locales/en/dashboard.json'
+import enInbox from './locales/en/inbox.json'
+import enOpportunities from './locales/en/opportunities.json'
+import enOrders from './locales/en/orders.json'
+import enProducts from './locales/en/products.json'
+import enSettings from './locales/en/settings.json'
+import enTasks from './locales/en/tasks.json'
+
 export type Language = 'es' | 'en'
 
 // Lightweight, hand-rolled i18n instead of pulling in a library (react-i18next
 // etc.) -- the app only needs es/en today and a flat key->string dictionary
-// per language is enough. Extend `es`/`en` with new keys as more screens get
-// translated; `useTranslation()` falls back to the key itself if a
+// per language is enough. Translations live in locales/<lang>/<module>.json,
+// one file per page/feature, so it's obvious which file to touch when
+// translating a given screen -- this file only merges them. Keys keep their
+// module prefix (e.g. 'inbox.title') even though they're already scoped by
+// filename, so `t('some.key')` call sites never had to change when this file
+// was split up. `useTranslation()` falls back to the key itself if a
 // translation is missing, so a partially-translated screen never crashes.
 export const translations = {
   es: {
-    'inbox.title': 'Conversaciones',
-    'inbox.subtitle': 'Responde a tus contactos o deja que la IA lo haga por ti.',
-    'inbox.newConversation': 'Nueva conversación',
-    'inbox.tabs.all': 'Todas',
-    'inbox.tabs.mine': 'Mis',
-    'inbox.tabs.archived': 'Archivadas',
-    'inbox.search': 'Buscar...',
-    'inbox.search.clear': 'Limpiar búsqueda',
-    'inbox.filters': 'Filtros',
-    'inbox.filters.agent': 'Agente',
-    'inbox.filters.agent.all': 'Todos los agentes',
-    'inbox.filters.agent.unassigned': 'Sin asignar',
-    'inbox.filters.status': 'Estado',
-    'inbox.filters.status.all': 'Todos',
-    'inbox.filters.status.open': 'Abierta',
-    'inbox.filters.status.closed': 'Cerrada',
-    'inbox.filters.mode': 'Modo',
-    'inbox.filters.mode.all': 'Todos',
-    'inbox.filters.tag': 'Tag',
-    'inbox.filters.tag.all': 'Todas las tags',
-    'inbox.filters.mode.ia': 'IA',
-    'inbox.filters.mode.humano': 'Humano',
-    'inbox.filters.line': 'Línea',
-    'inbox.filters.line.all': 'Todas las líneas',
-    'inbox.filters.clear': 'Limpiar filtros',
-    'inbox.views.aiActive': 'IA activa',
-    'inbox.views.unassigned': 'Sin asignar',
-    'inbox.views.human': 'Modo humano',
-    'inbox.views.myOpen': 'Mis abiertas',
-    'inbox.empty.title': 'No hay conversaciones en esta vista.',
-    'inbox.empty.noneYet': 'Todavía no tienes conversaciones. Espera a que un contacto te escriba o inicia una tú mismo con "Nueva conversación".',
-    'inbox.selectConversation': 'Selecciona una conversación para ver los mensajes.',
-    'inbox.assignedTo': 'Asignada a',
-    'inbox.assign.unassigned': 'Sin asignar',
-    'inbox.assign.take': 'Tomar conversación',
-    'inbox.count.singular': 'conversación',
-    'inbox.count.plural': 'conversaciones',
-    'inbox.mode.ia': 'Modo IA',
-    'inbox.mode.humano': 'Modo humano',
-    'inbox.category.unclassified': 'Sin clasificar',
-    'inbox.category.ariaLabel': 'Tipo de conversación',
-    'inbox.assignee.unassigned': 'Sin asignar',
-    'inbox.assignee.ariaLabel': 'Agente asignado',
-    'inbox.status.open': 'Abierta',
-    'inbox.status.closed': 'Cerrada',
-    'inbox.status.closeAction': 'Cerrar conversación',
-    'inbox.status.reopenAction': 'Reabrir conversación',
-    'inbox.archive.archiveAction': 'Archivar',
-    'inbox.archive.unarchiveAction': 'Desarchivar',
-    'inbox.tags.label': 'Tags',
-    'inbox.tags.empty': 'No hay tags configuradas. Creálas en Configuración → Tags de conversación.',
-    'inbox.chat.aiRespondingHint': 'La IA está respondiendo esta conversación. Activa el modo humano para escribir directamente.',
-    'inbox.chat.messagePlaceholder': 'Escribe un mensaje...',
-    'inbox.chat.closedHint': 'Esta conversación está cerrada. Reábrela para escribirle de nuevo -- la IA empezará sin el historial anterior.',
-    'inbox.retryAi.action': 'Reintentar IA',
-    'inbox.retryAi.retrying': 'Reintentando…',
-    'inbox.retryAi.success': 'Se reintentó la respuesta de la IA.',
+    ...esCommon,
+    ...esAuth,
+    ...esDashboard,
+    ...esInbox,
+    ...esContacts,
+    ...esOpportunities,
+    ...esTasks,
+    ...esCalendar,
+    ...esProducts,
+    ...esOrders,
+    ...esBilling,
+    ...esSettings,
+    ...esBackoffice,
+    ...esAccount,
+    ...esChangelog,
   },
   en: {
-    'inbox.title': 'Conversations',
-    'inbox.subtitle': 'Reply to your contacts or let the AI handle it.',
-    'inbox.newConversation': 'New conversation',
-    'inbox.tabs.all': 'All',
-    'inbox.tabs.mine': 'Mine',
-    'inbox.tabs.archived': 'Archived',
-    'inbox.search': 'Search...',
-    'inbox.search.clear': 'Clear search',
-    'inbox.filters': 'Filters',
-    'inbox.filters.agent': 'Agent',
-    'inbox.filters.agent.all': 'All agents',
-    'inbox.filters.agent.unassigned': 'Unassigned',
-    'inbox.filters.status': 'Status',
-    'inbox.filters.status.all': 'All',
-    'inbox.filters.status.open': 'Open',
-    'inbox.filters.status.closed': 'Closed',
-    'inbox.filters.mode': 'Mode',
-    'inbox.filters.mode.all': 'All',
-    'inbox.filters.tag': 'Tag',
-    'inbox.filters.tag.all': 'All tags',
-    'inbox.filters.line': 'Line',
-    'inbox.filters.line.all': 'All lines',
-    'inbox.filters.mode.ia': 'AI',
-    'inbox.filters.mode.humano': 'Human',
-    'inbox.filters.clear': 'Clear filters',
-    'inbox.views.aiActive': 'AI active',
-    'inbox.views.unassigned': 'Unassigned',
-    'inbox.views.human': 'Human mode',
-    'inbox.views.myOpen': 'My open chats',
-    'inbox.empty.title': 'No conversations in this view.',
-    'inbox.empty.noneYet': "You don't have any conversations yet. Wait for a contact to write in, or start one yourself with \"New conversation\".",
-    'inbox.selectConversation': 'Select a conversation to see the messages.',
-    'inbox.assignedTo': 'Assigned to',
-    'inbox.assign.unassigned': 'Unassigned',
-    'inbox.assign.take': 'Take conversation',
-    'inbox.count.singular': 'conversation',
-    'inbox.count.plural': 'conversations',
-    'inbox.mode.ia': 'AI mode',
-    'inbox.mode.humano': 'Human mode',
-    'inbox.category.unclassified': 'Unclassified',
-    'inbox.category.ariaLabel': 'Conversation type',
-    'inbox.assignee.unassigned': 'Unassigned',
-    'inbox.assignee.ariaLabel': 'Assigned agent',
-    'inbox.status.open': 'Open',
-    'inbox.status.closed': 'Closed',
-    'inbox.status.closeAction': 'Close conversation',
-    'inbox.status.reopenAction': 'Reopen conversation',
-    'inbox.archive.archiveAction': 'Archive',
-    'inbox.archive.unarchiveAction': 'Unarchive',
-    'inbox.tags.label': 'Tags',
-    'inbox.tags.empty': 'No tags configured yet. Create them in Settings → Conversation tags.',
-    'inbox.chat.aiRespondingHint': 'The AI is replying in this conversation. Switch to human mode to type directly.',
-    'inbox.chat.messagePlaceholder': 'Type a message...',
-    'inbox.chat.closedHint': 'This conversation is closed. Reopen it to write again -- the AI will start without the previous history.',
-    'inbox.retryAi.action': 'Retry AI',
-    'inbox.retryAi.retrying': 'Retrying…',
-    'inbox.retryAi.success': 'The AI response was retried.',
+    ...enCommon,
+    ...enAuth,
+    ...enDashboard,
+    ...enInbox,
+    ...enContacts,
+    ...enOpportunities,
+    ...enTasks,
+    ...enCalendar,
+    ...enProducts,
+    ...enOrders,
+    ...enBilling,
+    ...enSettings,
+    ...enBackoffice,
+    ...enAccount,
+    ...enChangelog,
   },
 } as const satisfies Record<Language, Record<string, string>>
 

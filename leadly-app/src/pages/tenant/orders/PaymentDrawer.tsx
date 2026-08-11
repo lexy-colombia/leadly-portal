@@ -1,14 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { createPayment } from '../../../lib/api/orderPayments'
+import { createPayment, PAYMENT_METHOD_LABEL_KEY } from '../../../lib/api/orderPayments'
 import type { OrderPaymentMethod } from '../../../types/domain'
+import { useLanguage } from '../../../contexts/LanguageContext'
 import { Button, CurrencyInput, Drawer, FieldError, Input, Label, Select, Textarea } from '../../../components/ui'
-
-const METHOD_LABEL: Record<OrderPaymentMethod, string> = {
-  efectivo: 'Efectivo',
-  transferencia: 'Transferencia',
-  tarjeta: 'Tarjeta',
-  otro: 'Otro',
-}
 
 /** Creation only -- a payment logged by mistake is deleted and re-created
  * from VentaDetalle.tsx, never edited in place (see the plan's reasoning:
@@ -27,6 +21,7 @@ export function PaymentDrawer({
   orderId: string
   onSaved: () => void
 }) {
+  const { t } = useLanguage()
   const [method, setMethod] = useState<OrderPaymentMethod>('efectivo')
   const [amount, setAmount] = useState('')
   const [paidAt, setPaidAt] = useState('')
@@ -45,7 +40,7 @@ export function PaymentDrawer({
     setFormError(null)
   }, [open])
 
-  const amountError = touched && !(Number(amount) > 0) ? 'Ingresa un monto válido.' : undefined
+  const amountError = touched && !(Number(amount) > 0) ? t('orders.paymentDrawer.errors.amountInvalid') : undefined
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -66,21 +61,21 @@ export function PaymentDrawer({
       onSaved()
       onClose()
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'No se pudo registrar el pago.')
+      setFormError(err instanceof Error ? err.message : t('orders.paymentDrawer.errors.save'))
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <Drawer open={open} onClose={onClose} title="Registrar pago" description="Se suma al saldo pagado de esta venta.">
+    <Drawer open={open} onClose={onClose} title={t('orders.paymentDrawer.title')} description={t('orders.paymentDrawer.description')}>
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <div>
-          <Label htmlFor="payment-method">Método</Label>
+          <Label htmlFor="payment-method">{t('orders.paymentDrawer.fields.method')}</Label>
           <Select id="payment-method" value={method} onChange={(e) => setMethod(e.target.value as OrderPaymentMethod)}>
-            {(Object.keys(METHOD_LABEL) as OrderPaymentMethod[]).map((m) => (
+            {(Object.keys(PAYMENT_METHOD_LABEL_KEY) as OrderPaymentMethod[]).map((m) => (
               <option key={m} value={m}>
-                {METHOD_LABEL[m]}
+                {t(PAYMENT_METHOD_LABEL_KEY[m])}
               </option>
             ))}
           </Select>
@@ -88,18 +83,18 @@ export function PaymentDrawer({
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <Label htmlFor="payment-amount">Monto</Label>
+            <Label htmlFor="payment-amount">{t('orders.paymentDrawer.fields.amount')}</Label>
             <CurrencyInput id="payment-amount" value={amount} invalid={!!amountError} onChange={(e) => setAmount(e.target.value)} />
             <FieldError message={amountError} />
           </div>
           <div>
-            <Label htmlFor="payment-date">Fecha de pago</Label>
+            <Label htmlFor="payment-date">{t('orders.paymentDrawer.fields.date')}</Label>
             <Input id="payment-date" type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} />
           </div>
         </div>
 
         <div>
-          <Label htmlFor="payment-notes">Notas (opcional)</Label>
+          <Label htmlFor="payment-notes">{t('orders.paymentDrawer.fields.notes')}</Label>
           <Textarea id="payment-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </div>
 
@@ -107,10 +102,10 @@ export function PaymentDrawer({
 
         <div className="flex gap-2 border-t border-brand-100 pt-5">
           <Button type="submit" variant="secondary" disabled={submitting}>
-            {submitting ? 'Guardando…' : 'Guardar'}
+            {submitting ? t('common.actions.saving') : t('common.actions.save')}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>
-            Cancelar
+            {t('common.actions.cancel')}
           </Button>
         </div>
       </form>

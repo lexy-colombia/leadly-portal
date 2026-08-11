@@ -1,0 +1,58 @@
+{
+  "tasks.priority.low": "Low",
+  "tasks.priority.medium": "Medium",
+  "tasks.priority.high": "High",
+
+  "tasks.status.pendiente": "Pending",
+  "tasks.status.en_proceso": "In progress",
+  "tasks.status.completada": "Completed",
+  "tasks.status.cancelada": "Cancelled",
+
+  "tasks.filter.all": "All",
+  "tasks.count.singular": "{count} task",
+  "tasks.count.plural": "{count} tasks",
+  "tasks.actions.new": "New task",
+
+  "tasks.dueDate.none": "No date",
+  "tasks.dueDate.overdueSuffix": "{date} (overdue)",
+
+  "tasks.empty.noneInStatus": "No tasks in this status.",
+  "tasks.empty.noTasks": "You don't have any tasks yet.",
+
+  "tasks.errors.loadFailed": "Couldn't load tasks.",
+  "tasks.errors.updateFailed": "Couldn't update the task.",
+  "tasks.errors.deleteFailed": "Couldn't delete the task.",
+  "tasks.errors.saveFailed": "Couldn't save the task.",
+  "tasks.errors.uploadFailed": "Couldn't upload the file.",
+  "tasks.errors.openAttachmentFailed": "Couldn't open the file.",
+
+  "tasks.table.task": "Task",
+  "tasks.table.priority": "Priority",
+  "tasks.table.due": "Due",
+  "tasks.table.assignedTo": "Assigned to",
+  "tasks.table.actions": "Actions",
+
+  "tasks.aria.markPending": "Mark as pending",
+  "tasks.aria.markCompleted": "Mark as completed",
+
+  "tasks.drawer.editTitle": "Edit task",
+  "tasks.drawer.newTitle": "New task",
+  "tasks.drawer.description": "Follow-up or reminder for an agent.",
+
+  "tasks.field.title": "Title",
+  "tasks.field.titlePlaceholder": "E.g. Call to confirm proposal",
+  "tasks.field.titleRequired": "Title is required.",
+  "tasks.field.description": "Description (optional)",
+  "tasks.field.priority": "Priority",
+  "tasks.field.dueDate": "Due date (optional)",
+  "tasks.field.contact": "Contact (optional)",
+  "tasks.field.noContact": "No contact",
+  "tasks.field.assignedTo": "Assigned to (optional)",
+  "tasks.field.unassigned": "Unassigned",
+
+  "tasks.attachments.label": "Attachments",
+  "tasks.attachments.empty": "No files yet -- e.g. a proposal that was sent.",
+  "tasks.attachments.uploading": "Uploading…",
+  "tasks.attachments.attach": "Attach file",
+  "tasks.attachments.defaultName": "File"
+}

@@ -1,14 +1,17 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { hasPlatformAiKey, setPlatformAiKey, type AiKeyProvider } from '../../lib/api/platformAiKeys'
 import { Badge, Button, Card, CardSection, Input, Label } from '../../components/ui'
+import { useLanguage } from '../../contexts/LanguageContext'
+import type { TranslationKey } from '../../i18n/translations'
 
 const PROVIDER_LABEL: Record<AiKeyProvider, string> = { openai: 'OpenAI', gemini: 'Google Gemini' }
-const PROVIDER_HINT: Record<AiKeyProvider, string> = {
-  openai: 'Se usa para todos los asistentes configurados con proveedor OpenAI (GPT).',
-  gemini: 'Se usa para todos los asistentes configurados con proveedor Gemini.',
+const PROVIDER_HINT_KEY: Record<AiKeyProvider, TranslationKey> = {
+  openai: 'backoffice.configuracion.hint.openai',
+  gemini: 'backoffice.configuracion.hint.gemini',
 }
 
 function ProviderKeyCard({ provider }: { provider: AiKeyProvider }) {
+  const { t } = useLanguage()
   const [configured, setConfigured] = useState<boolean | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [keyInput, setKeyInput] = useState('')
@@ -18,7 +21,7 @@ function ProviderKeyCard({ provider }: { provider: AiKeyProvider }) {
   function reload() {
     hasPlatformAiKey(provider)
       .then(setConfigured)
-      .catch((err) => setError(err.message ?? 'No se pudo consultar el estado de la key.'))
+      .catch((err) => setError(err.message ?? t('backoffice.configuracion.errors.status')))
   }
 
   useEffect(reload, [provider])
@@ -35,7 +38,7 @@ function ProviderKeyCard({ provider }: { provider: AiKeyProvider }) {
       setSuccess(true)
       reload()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo guardar la key.')
+      setError(err instanceof Error ? err.message : t('backoffice.configuracion.errors.save'))
     } finally {
       setSubmitting(false)
     }
@@ -46,14 +49,16 @@ function ProviderKeyCard({ provider }: { provider: AiKeyProvider }) {
       title={PROVIDER_LABEL[provider]}
       action={
         configured !== null && (
-          <Badge tone={configured ? 'success' : 'warning'}>{configured ? 'Configurada' : 'Sin configurar'}</Badge>
+          <Badge tone={configured ? 'success' : 'warning'}>
+            {configured ? t('backoffice.configuracion.configured') : t('backoffice.configuracion.notConfigured')}
+          </Badge>
         )
       }
     >
-      <p className="mb-3 text-sm text-brand-400">{PROVIDER_HINT[provider]}</p>
+      <p className="mb-3 text-sm text-brand-400">{t(PROVIDER_HINT_KEY[provider])}</p>
       <form onSubmit={handleSubmit} className="flex flex-wrap items-end gap-3">
         <div className="min-w-[240px] flex-1">
-          <Label htmlFor={`key-${provider}`}>{configured ? 'Reemplazar API key' : 'API key'}</Label>
+          <Label htmlFor={`key-${provider}`}>{configured ? t('backoffice.configuracion.apiKey.replace') : t('backoffice.configuracion.apiKey')}</Label>
           <Input
             id={`key-${provider}`}
             type="password"
@@ -64,10 +69,10 @@ function ProviderKeyCard({ provider }: { provider: AiKeyProvider }) {
           />
         </div>
         <Button type="submit" variant="secondary" disabled={submitting || !keyInput.trim()}>
-          {submitting ? 'Guardando…' : 'Guardar'}
+          {submitting ? t('common.actions.saving') : t('common.actions.save')}
         </Button>
       </form>
-      {success && <p className="mt-2 text-xs text-emerald-600">Key guardada correctamente.</p>}
+      {success && <p className="mt-2 text-xs text-emerald-600">{t('backoffice.configuracion.saved')}</p>}
       {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
     </CardSection>
   )

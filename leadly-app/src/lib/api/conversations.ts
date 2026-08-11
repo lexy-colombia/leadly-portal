@@ -1,5 +1,16 @@
 import { supabase } from '../supabaseClient'
 import type { ConversationCategory, ConversationMode, ConversationStatus, WhatsappConversation, WhatsappMessage } from '../../types/domain'
+import type { TranslationKey } from '../../i18n/translations'
+
+// Shared between ChatPanel (category select) and ConversationListItem (category
+// pill) so the two never drift out of sync on which key maps to which category.
+export const CONVERSATION_CATEGORY_KEY: Record<ConversationCategory, TranslationKey> = {
+  venta: 'inbox.category.venta',
+  soporte: 'inbox.category.soporte',
+  consulta: 'inbox.category.consulta',
+  reclamo: 'inbox.category.reclamo',
+  otro: 'inbox.category.otro',
+}
 
 // `contact_name` on the conversation itself is whatever WhatsApp reports as
 // the contact's own profile name, and whatsapp-webhook keeps refreshing it on

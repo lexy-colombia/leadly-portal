@@ -1,16 +1,24 @@
 import type { OpportunityWithRelations } from '../../../lib/api/opportunities'
 import type { CrmPipelineStage, OpportunityPriority } from '../../../types/domain'
 import { Badge, EmptyState, Select, TBody, TD, TH, THead, Table, TRow } from '../../../components/ui'
+import { useLanguage } from '../../../contexts/LanguageContext'
+import type { TranslationKey } from '../../../i18n/translations'
 
 const PRIORITY_TONE: Record<OpportunityPriority, 'neutral' | 'warning' | 'danger'> = { baja: 'neutral', media: 'warning', alta: 'danger' }
+const PRIORITY_LABEL: Record<OpportunityPriority, TranslationKey> = {
+  baja: 'opportunities.priority.low',
+  media: 'opportunities.priority.medium',
+  alta: 'opportunities.priority.high',
+}
 
+// Currency stays Colombian formatting regardless of UI language.
 function formatCurrency(value: number, currency = 'COP'): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 }
 
-function formatDate(iso: string | null): string {
+function formatDate(iso: string | null, locale: string): string {
   if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })
+  return new Date(iso).toLocaleDateString(locale, { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
 /** "Lista" alternative to the Kanban -- same filtered/sorted opportunities,
@@ -28,21 +36,24 @@ export function OpportunityListView({
   onOpen: (opportunity: OpportunityWithRelations) => void
   onStageChange: (opportunity: OpportunityWithRelations, stage: CrmPipelineStage) => void
 }) {
+  const { t, language } = useLanguage()
+  const locale = language === 'en' ? 'en-US' : 'es-CO'
+
   if (opportunities.length === 0) {
-    return <EmptyState>Sin oportunidades para los filtros actuales.</EmptyState>
+    return <EmptyState>{t('opportunities.list.empty')}</EmptyState>
   }
 
   return (
     <Table>
       <THead>
         <tr>
-          <TH>Título</TH>
-          <TH>Contacto</TH>
-          <TH>Etapa</TH>
-          <TH>Valor</TH>
-          <TH>Prioridad</TH>
-          <TH>Responsable</TH>
-          <TH>Cierre estimado</TH>
+          <TH>{t('opportunities.list.columns.title')}</TH>
+          <TH>{t('opportunities.list.columns.contact')}</TH>
+          <TH>{t('opportunities.list.columns.stage')}</TH>
+          <TH>{t('opportunities.list.columns.value')}</TH>
+          <TH>{t('opportunities.list.columns.priority')}</TH>
+          <TH>{t('opportunities.list.columns.owner')}</TH>
+          <TH>{t('opportunities.list.columns.closeDate')}</TH>
         </tr>
       </THead>
       <TBody>
@@ -68,10 +79,10 @@ export function OpportunityListView({
             </TD>
             <TD>{formatCurrency(opp.value, opp.currency)}</TD>
             <TD>
-              <Badge tone={PRIORITY_TONE[opp.priority]}>{opp.priority}</Badge>
+              <Badge tone={PRIORITY_TONE[opp.priority]}>{t(PRIORITY_LABEL[opp.priority])}</Badge>
             </TD>
-            <TD>{opp.owner?.full_name ?? 'Sin asignar'}</TD>
-            <TD>{formatDate(opp.expected_close_date)}</TD>
+            <TD>{opp.owner?.full_name ?? t('opportunities.list.unassigned')}</TD>
+            <TD>{formatDate(opp.expected_close_date, locale)}</TD>
           </TRow>
         ))}
       </TBody>

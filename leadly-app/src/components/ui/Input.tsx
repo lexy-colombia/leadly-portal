@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useState, type ChangeEvent, type InputHTMLAttributes, type ReactNode } from 'react'
+import { useLanguage } from '../../contexts/LanguageContext'
 import { EyeIcon, EyeOffIcon } from '../icons'
 
 type BaseInputProps = InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean }
@@ -134,6 +135,7 @@ export function PasswordInput({
   invalid = false,
   ...props
 }: BaseInputProps & { icon: ReactNode }) {
+  const { t } = useLanguage()
   const [visible, setVisible] = useState(false)
 
   return (
@@ -147,7 +149,7 @@ export function PasswordInput({
       <button
         type="button"
         onClick={() => setVisible((v) => !v)}
-        aria-label={visible ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+        aria-label={visible ? t('common.form.hidePassword') : t('common.form.showPassword')}
         className="absolute inset-y-0 right-0 flex items-center pr-3 text-brand-300 hover:text-brand-500"
       >
         {visible ? <EyeOffIcon /> : <EyeIcon />}

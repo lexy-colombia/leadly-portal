@@ -4,6 +4,7 @@ import type { Tenant } from '../../types/domain'
 import { Button, Drawer, InitialsAvatar, Label } from '../../components/ui'
 import { useTenantForm } from './useTenantForm'
 import { TenantFormFields } from './TenantFormFields'
+import { useLanguage } from '../../contexts/LanguageContext'
 
 /** One drawer for both "nuevo cliente" and "editar cliente" -- editing no
  * longer means a form permanently sitting in the page, it opens this panel.
@@ -22,6 +23,7 @@ export function TenantDrawer({
   tenant?: Tenant | null
   onSaved: (tenant: Tenant) => void
 }) {
+  const { t } = useLanguage()
   const isEdit = !!tenant
   const form = useTenantForm(tenant ?? undefined)
   const [submitting, setSubmitting] = useState(false)
@@ -64,7 +66,7 @@ export function TenantDrawer({
         setLogoUrl(updated.logo_url)
         onSaved(updated)
       } catch (err) {
-        setLogoError(err instanceof Error ? err.message : 'No se pudo subir el logo.')
+        setLogoError(err instanceof Error ? err.message : t('backoffice.tenantDrawer.errors.logoUpload'))
       } finally {
         setLogoUploading(false)
       }
@@ -89,7 +91,7 @@ export function TenantDrawer({
       onSaved(saved)
       onClose()
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'No se pudo guardar el cliente.')
+      setFormError(err instanceof Error ? err.message : t('backoffice.tenantDrawer.errors.save'))
     } finally {
       setSubmitting(false)
     }
@@ -101,32 +103,32 @@ export function TenantDrawer({
     <Drawer
       open={open}
       onClose={onClose}
-      title={isEdit ? 'Editar cliente' : 'Nuevo cliente'}
+      title={isEdit ? t('backoffice.tenantDrawer.titleEdit') : t('backoffice.tenantDrawer.titleNew')}
       footer={
         <div className="flex gap-2">
           <Button type="submit" form="tenant-form" variant="secondary" disabled={submitting}>
-            {submitting ? 'Guardando…' : isEdit ? 'Guardar cambios' : 'Crear cliente'}
+            {submitting ? t('common.actions.saving') : isEdit ? t('common.actions.saveChanges') : t('backoffice.tenantDrawer.create')}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>
-            Cancelar
+            {t('common.actions.cancel')}
           </Button>
         </div>
       }
     >
       <div className="mb-6">
-        <Label>Logo</Label>
+        <Label>{t('backoffice.tenantDrawer.logo')}</Label>
         <div className="flex items-center gap-4">
           {previewLogo ? (
             <img src={previewLogo} alt="" className="h-16 w-16 rounded-full object-cover" />
           ) : (
-            <InitialsAvatar name={form.name || 'Cliente'} size="lg" />
+            <InitialsAvatar name={form.name || t('backoffice.tenantDrawer.logoFallbackName')} size="lg" />
           )}
           <div>
             <Button type="button" variant="ghost" onClick={() => fileInputRef.current?.click()} disabled={logoUploading}>
-              {logoUploading ? 'Subiendo…' : previewLogo ? 'Cambiar logo' : 'Subir logo'}
+              {logoUploading ? t('backoffice.tenantDrawer.logoUploading') : previewLogo ? t('backoffice.tenantDrawer.logoChange') : t('backoffice.tenantDrawer.logoUpload')}
             </Button>
             <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className="hidden" onChange={handleLogoPick} />
-            <p className="mt-1 text-xs text-brand-400">PNG, JPG, WEBP o SVG. Máximo 5MB.</p>
+            <p className="mt-1 text-xs text-brand-400">{t('backoffice.tenantDrawer.logoHint')}</p>
           </div>
         </div>
         {logoError && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{logoError}</p>}

@@ -2,6 +2,8 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { getProduct, getProductImageUrl } from '../../lib/api/products'
 import type { ProductDetail } from '../../lib/api/products'
+import { useLanguage } from '../../contexts/LanguageContext'
+import type { Language } from '../../i18n/translations'
 import { Badge, PageSpinner } from '../../components/ui'
 import { BoxIcon, ChevronLeftIcon, MailIcon, PencilIcon, PhoneIcon, UserIcon } from '../../components/icons'
 import { ProductDrawer } from './products/ProductDrawer'
@@ -12,8 +14,9 @@ function formatCurrency(value: number | null, currency: string): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 }
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' })
+function formatDate(iso: string, language: Language): string {
+  const locale = language === 'en' ? 'en-US' : 'es-CO'
+  return new Date(iso).toLocaleDateString(locale, { day: '2-digit', month: 'long', year: 'numeric' })
 }
 
 /** Label-above-value field, same shape ContactoDetalle uses for its data
@@ -85,6 +88,7 @@ function ProductGallery({ product }: { product: ProductDetail }) {
 export function ProductoDetalle() {
   const { id } = useParams<{ id: string }>()
   const { profile } = useAuth()
+  const { t, language } = useLanguage()
   const [product, setProduct] = useState<ProductDetail | null | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
   const [editOpen, setEditOpen] = useState(false)
@@ -93,7 +97,7 @@ export function ProductoDetalle() {
     if (!id) return
     getProduct(id)
       .then(setProduct)
-      .catch((err) => setError(err.message ?? 'No se pudo cargar el producto.'))
+      .catch((err) => setError(err.message ?? t('products.detail.loadError')))
   }
 
   useEffect(reload, [id])
@@ -103,9 +107,9 @@ export function ProductoDetalle() {
   if (product === null) {
     return (
       <div className="space-y-4">
-        <p className="text-brand-500">No encontramos este producto.</p>
+        <p className="text-brand-500">{t('products.detail.notFound')}</p>
         <Link to="/app/productos" className="text-sm font-medium text-accent-600 hover:text-accent-700">
-          Volver a Productos
+          {t('products.detail.backToList')}
         </Link>
       </div>
     )
@@ -119,7 +123,7 @@ export function ProductoDetalle() {
   return (
     <div className="space-y-4">
       <Link to="/app/productos" className="inline-flex items-center gap-1 text-sm font-medium text-brand-400 hover:text-brand-700">
-        <ChevronLeftIcon width={14} height={14} /> Productos
+        <ChevronLeftIcon width={14} height={14} /> {t('products.tabs.products')}
       </Link>
 
       <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
@@ -132,8 +136,8 @@ export function ProductoDetalle() {
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-xl font-bold text-brand-800">{product.name}</h1>
-                <Badge tone={product.is_active ? 'success' : 'neutral'}>{product.is_active ? 'Activo' : 'Inactivo'}</Badge>
-                {lowStock && <Badge tone="danger">Stock bajo</Badge>}
+                <Badge tone={product.is_active ? 'success' : 'neutral'}>{t(product.is_active ? 'common.status.active' : 'common.status.inactive')}</Badge>
+                {lowStock && <Badge tone="danger">{t('products.detail.badges.lowStock')}</Badge>}
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-brand-400">
                 {product.sku && <span>SKU: {product.sku}</span>}
@@ -150,57 +154,81 @@ export function ProductoDetalle() {
               onClick={() => setEditOpen(true)}
               className="flex shrink-0 items-center gap-1.5 rounded-lg border border-brand-200 px-3 py-1.5 text-xs font-medium text-brand-600 transition-colors hover:bg-brand-50"
             >
-              <PencilIcon width={13} height={13} /> Editar
+              <PencilIcon width={13} height={13} /> {t('common.actions.edit')}
             </button>
           </div>
 
           {product.description && <p className="whitespace-pre-wrap text-sm text-brand-600">{product.description}</p>}
 
-          <Section title="Precios">
+          <Section title={t('products.detail.sections.pricing')}>
             <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-              <Field label="Compra" value={formatCurrency(product.purchase_price, product.currency)} />
-              <Field label="Mayorista" value={formatCurrency(product.wholesale_price, product.currency)} />
-              <Field label="Público" value={formatCurrency(product.retail_price, product.currency)} />
-              <Field label="Margen" value={margin != null ? `${formatCurrency(margin, product.currency)} (${marginPct?.toFixed(0)}%)` : '-'} />
+              <Field label={t('products.detail.fields.purchase')} value={formatCurrency(product.purchase_price, product.currency)} />
+              <Field label={t('products.detail.fields.wholesale')} value={formatCurrency(product.wholesale_price, product.currency)} />
+              <Field label={t('products.detail.fields.retail')} value={formatCurrency(product.retail_price, product.currency)} />
+              <Field label={t('products.detail.fields.margin')} value={margin != null ? `${formatCurrency(margin, product.currency)} (${marginPct?.toFixed(0)}%)` : '-'} />
             </dl>
           </Section>
 
-          <Section title="Inventario">
+          <Section title={t('products.detail.sections.inventory')}>
             {product.track_inventory ? (
               <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                <Field label="Stock total" value={product.stock_quantity} />
-                <Field label="Reservado" value={product.reserved_stock} />
-                <Field label="Disponible" value={<span className={lowStock ? 'font-semibold text-red-600' : ''}>{available}</span>} />
-                <Field label="Alerta bajo" value={product.low_stock_threshold} />
+                <Field label={t('products.detail.fields.totalStock')} value={product.stock_quantity} />
+                <Field label={t('products.detail.fields.reserved')} value={product.reserved_stock} />
+                <Field label={t('products.detail.fields.available')} value={<span className={lowStock ? 'font-semibold text-red-600' : ''}>{available}</span>} />
+                <Field label={t('products.detail.fields.lowStockAlert')} value={product.low_stock_threshold} />
               </dl>
             ) : (
-              <p className="text-sm text-brand-400">Este producto no controla inventario.</p>
+              <p className="text-sm text-brand-400">{t('products.detail.noInventoryControl')}</p>
             )}
           </Section>
 
           {product.supplier && (
-            <Section title="Proveedor">
+            <Section title={t('products.detail.sections.supplier')}>
               <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-                <Field label="Nombre" value={product.supplier.name} />
+                <Field label={t('products.detail.fields.supplierName')} value={product.supplier.name} />
                 {product.supplier.contact_name && (
-                  <Field label="Contacto" value={<span className="inline-flex items-center gap-1"><UserIcon width={12} height={12} />{product.supplier.contact_name}</span>} />
+                  <Field
+                    label={t('products.detail.fields.contactPerson')}
+                    value={
+                      <span className="inline-flex items-center gap-1">
+                        <UserIcon width={12} height={12} />
+                        {product.supplier.contact_name}
+                      </span>
+                    }
+                  />
                 )}
                 {product.supplier.phone && (
-                  <Field label="Teléfono" value={<span className="inline-flex items-center gap-1"><PhoneIcon width={12} height={12} />{product.supplier.phone}</span>} />
+                  <Field
+                    label={t('products.detail.fields.phone')}
+                    value={
+                      <span className="inline-flex items-center gap-1">
+                        <PhoneIcon width={12} height={12} />
+                        {product.supplier.phone}
+                      </span>
+                    }
+                  />
                 )}
                 {product.supplier.email && (
-                  <Field label="Correo" value={<span className="inline-flex items-center gap-1"><MailIcon width={12} height={12} />{product.supplier.email}</span>} />
+                  <Field
+                    label={t('products.detail.fields.email')}
+                    value={
+                      <span className="inline-flex items-center gap-1">
+                        <MailIcon width={12} height={12} />
+                        {product.supplier.email}
+                      </span>
+                    }
+                  />
                 )}
               </dl>
             </Section>
           )}
 
-          <Section title="Detalles">
+          <Section title={t('products.detail.sections.details')}>
             <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-              <Field label="Slug" value={product.slug ?? '-'} />
-              <Field label="Moneda" value={product.currency} />
-              <Field label="Creado" value={formatDate(product.created_at)} />
-              <Field label="Actualizado" value={formatDate(product.updated_at)} />
+              <Field label={t('products.detail.fields.slug')} value={product.slug ?? '-'} />
+              <Field label={t('products.detail.fields.currency')} value={product.currency} />
+              <Field label={t('products.detail.fields.createdAt')} value={formatDate(product.created_at, language)} />
+              <Field label={t('products.detail.fields.updatedAt')} value={formatDate(product.updated_at, language)} />
             </dl>
           </Section>
         </div>

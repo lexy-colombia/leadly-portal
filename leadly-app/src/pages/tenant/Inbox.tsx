@@ -48,7 +48,7 @@ export function Inbox() {
         setConversations(list)
         listTagAssignmentsForConversations(list.map((c) => c.id)).then(setTagAssignments).catch(() => {})
       })
-      .catch((err) => setError(err.message ?? 'No se pudieron cargar las conversaciones.'))
+      .catch((err) => setError(err.message ?? t('inbox.errors.loadConversations')))
     listProfilesByTenant(tenantId).then(setAgents).catch(() => {})
     listConversationTags(tenantId).then(setTags).catch(() => {})
     listWhatsappLinesByTenant(tenantId).then(setLines).catch(() => {})
@@ -190,7 +190,7 @@ export function Inbox() {
           {filtersOpen && (
             <div className="absolute right-0 top-full z-40 mt-2 w-64 max-w-[calc(100vw-2rem)] space-y-3 rounded-2xl border border-brand-100 bg-white p-4 shadow-lg">
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-brand-400">Vistas rápidas</label>
+                <label className="mb-1.5 block text-xs font-medium text-brand-400">{t('inbox.filters.quickViews')}</label>
                 <div className="flex flex-wrap gap-1.5">
                   {(['aiActive', 'unassigned', 'human', 'myOpen'] as const).map((view) => (
                     <button

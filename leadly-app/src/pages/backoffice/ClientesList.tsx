@@ -5,8 +5,10 @@ import type { Tenant } from '../../types/domain'
 import { Badge, Button, EmptyState, InitialsAvatar, PageSpinner, Table, TBody, TD, TH, THead, TRow } from '../../components/ui'
 import { PlusIcon } from '../../components/icons'
 import { TenantDrawer } from './TenantDrawer'
+import { useLanguage } from '../../contexts/LanguageContext'
 
 export function ClientesList() {
+  const { t, language } = useLanguage()
   const [tenants, setTenants] = useState<Tenant[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -14,7 +16,7 @@ export function ClientesList() {
   function reload() {
     listTenants()
       .then(setTenants)
-      .catch((err) => setError(err.message ?? 'No se pudieron cargar los clientes.'))
+      .catch((err) => setError(err.message ?? t('backoffice.clientesList.errors.load')))
   }
 
   useEffect(reload, [])
@@ -23,7 +25,7 @@ export function ClientesList() {
     <div className="space-y-4">
       <div className="flex items-center justify-end gap-3">
         <Button variant="secondary" onClick={() => setDrawerOpen(true)}>
-          <PlusIcon width={16} height={16} /> Nuevo cliente
+          <PlusIcon width={16} height={16} /> {t('backoffice.clientesList.new')}
         </Button>
       </div>
 
@@ -36,7 +38,7 @@ export function ClientesList() {
           <TBody>
             <tr>
               <td>
-                <EmptyState>Todavía no hay clientes. Crea el primero con "Nuevo cliente".</EmptyState>
+                <EmptyState>{t('backoffice.clientesList.empty')}</EmptyState>
               </td>
             </tr>
           </TBody>
@@ -47,10 +49,10 @@ export function ClientesList() {
         <Table>
           <THead>
             <tr>
-              <TH>Nombre</TH>
-              <TH>Estado</TH>
-              <TH className="hidden sm:table-cell">Contacto</TH>
-              <TH className="hidden md:table-cell">Creado</TH>
+              <TH>{t('backoffice.clientesList.table.name')}</TH>
+              <TH>{t('backoffice.clientesList.table.status')}</TH>
+              <TH className="hidden sm:table-cell">{t('backoffice.clientesList.table.contact')}</TH>
+              <TH className="hidden md:table-cell">{t('backoffice.clientesList.table.created')}</TH>
             </tr>
           </THead>
           <TBody>
@@ -68,11 +70,13 @@ export function ClientesList() {
                 </TD>
                 <TD>
                   <Badge tone={tenant.status === 'active' ? 'success' : 'neutral'}>
-                    {tenant.status === 'active' ? 'Activo' : 'Inactivo'}
+                    {tenant.status === 'active' ? t('common.status.active') : t('common.status.inactive')}
                   </Badge>
                 </TD>
                 <TD className="hidden sm:table-cell text-brand-400">{tenant.contact_email ?? '—'}</TD>
-                <TD className="hidden md:table-cell text-brand-400">{new Date(tenant.created_at).toLocaleDateString('es-CO')}</TD>
+                <TD className="hidden md:table-cell text-brand-400">
+                  {new Date(tenant.created_at).toLocaleDateString(language === 'en' ? 'en-US' : 'es-CO')}
+                </TD>
               </TRow>
             ))}
           </TBody>

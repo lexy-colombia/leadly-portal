@@ -3,6 +3,7 @@ import { createBillingPlan, updateBillingPlan, type BillingPlanInput } from '../
 import type { BillingPlan } from '../../../types/domain'
 import { Button, CurrencyInput, Drawer, FieldError, Input, Label, Select, Switch } from '../../../components/ui'
 import { isNotBlank } from '../../../lib/validation'
+import { useLanguage } from '../../../contexts/LanguageContext'
 
 export function PlanDrawer({
   open,
@@ -16,6 +17,7 @@ export function PlanDrawer({
   plan?: BillingPlan | null
   onSaved: (plan: BillingPlan) => void
 }) {
+  const { t } = useLanguage()
   const [key, setKey] = useState('')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -38,9 +40,9 @@ export function PlanDrawer({
     setFormError(null)
   }, [open, plan])
 
-  const keyError = touched && !isNotBlank(key) ? 'La clave es obligatoria.' : undefined
-  const nameError = touched && !isNotBlank(name) ? 'El nombre es obligatorio.' : undefined
-  const amountError = touched && (!amount || Number(amount) <= 0) ? 'Ingresa un monto válido.' : undefined
+  const keyError = touched && !isNotBlank(key) ? t('backoffice.planDrawer.errors.key') : undefined
+  const nameError = touched && !isNotBlank(name) ? t('backoffice.planDrawer.errors.name') : undefined
+  const amountError = touched && (!amount || Number(amount) <= 0) ? t('backoffice.planDrawer.errors.amount') : undefined
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -63,49 +65,54 @@ export function PlanDrawer({
       onSaved(saved)
       onClose()
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'No se pudo guardar el plan.')
+      setFormError(err instanceof Error ? err.message : t('backoffice.planDrawer.errors.save'))
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <Drawer open={open} onClose={onClose} title={plan ? 'Editar plan' : 'Nuevo plan'} description="Plan de suscripción de Leadly para tus clientes.">
+    <Drawer
+      open={open}
+      onClose={onClose}
+      title={plan ? t('backoffice.planDrawer.titleEdit') : t('backoffice.planDrawer.titleNew')}
+      description={t('backoffice.planDrawer.description')}
+    >
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <div>
-          <Label htmlFor="plan-name">Nombre</Label>
+          <Label htmlFor="plan-name">{t('backoffice.planDrawer.name')}</Label>
           <Input id="plan-name" value={name} invalid={!!nameError} onChange={(e) => setName(e.target.value)} placeholder="Plan Pro" />
           <FieldError message={nameError} />
         </div>
 
         <div>
-          <Label htmlFor="plan-key">Clave interna</Label>
+          <Label htmlFor="plan-key">{t('backoffice.planDrawer.key')}</Label>
           <Input id="plan-key" value={key} invalid={!!keyError} onChange={(e) => setKey(e.target.value)} placeholder="pro" disabled={!!plan} />
           <FieldError message={keyError} />
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <Label htmlFor="plan-amount">Monto (COP)</Label>
+            <Label htmlFor="plan-amount">{t('backoffice.planDrawer.amount')}</Label>
             <CurrencyInput id="plan-amount" min={1} step={1} value={amount} invalid={!!amountError} onChange={(e) => setAmount(e.target.value)} />
             <FieldError message={amountError} />
           </div>
           <div>
-            <Label htmlFor="plan-interval">Periodicidad</Label>
+            <Label htmlFor="plan-interval">{t('backoffice.planDrawer.interval')}</Label>
             <Select id="plan-interval" value={billingInterval} onChange={(e) => setBillingInterval(e.target.value as 'monthly' | 'yearly')}>
-              <option value="monthly">Mensual</option>
-              <option value="yearly">Anual</option>
+              <option value="monthly">{t('backoffice.facturacion.interval.monthly')}</option>
+              <option value="yearly">{t('backoffice.facturacion.interval.yearly')}</option>
             </Select>
           </div>
         </div>
 
         <div>
-          <Label htmlFor="plan-description">Descripción (opcional)</Label>
+          <Label htmlFor="plan-description">{t('backoffice.planDrawer.descriptionField')}</Label>
           <Input id="plan-description" value={description} onChange={(e) => setDescription(e.target.value)} />
         </div>
 
         <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
-          <span className="text-sm text-brand-700">Plan activo</span>
+          <span className="text-sm text-brand-700">{t('backoffice.planDrawer.activePlan')}</span>
           <Switch checked={isActive} onChange={setIsActive} />
         </div>
 
@@ -113,10 +120,10 @@ export function PlanDrawer({
 
         <div className="flex gap-2 border-t border-brand-100 pt-5">
           <Button type="submit" variant="secondary" disabled={submitting}>
-            {submitting ? 'Guardando…' : 'Guardar'}
+            {submitting ? t('common.actions.saving') : t('common.actions.save')}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>
-            Cancelar
+            {t('common.actions.cancel')}
           </Button>
         </div>
       </form>

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useLanguage } from '../../contexts/LanguageContext'
 import { Logo } from '../brand/Logo'
 import { AuthMarketingPanel } from './AuthMarketingPanel'
 
@@ -9,6 +10,7 @@ const CURRENT_YEAR = new Date().getFullYear()
  * with an optional top-right link and a Lexy Colombia copyright footer. Add new auth
  * pages as children here instead of re-building the split layout per page. */
 export function AuthSplitLayout({ topRight, children }: { topRight?: ReactNode; children: ReactNode }) {
+  const { t } = useLanguage()
   return (
     <div className="flex min-h-screen bg-white">
       <AuthMarketingPanel />
@@ -25,9 +27,7 @@ export function AuthSplitLayout({ topRight, children }: { topRight?: ReactNode; 
           <div className="w-full max-w-md">{children}</div>
         </div>
 
-        <p className="pb-6 text-center text-xs text-brand-300">
-          © {CURRENT_YEAR} Leadly. Un producto de Lexy Colombia SAS. Todos los derechos reservados.
-        </p>
+        <p className="pb-6 text-center text-xs text-brand-300">{t('auth.footer.copyright', { year: CURRENT_YEAR })}</p>
       </div>
     </div>
   )

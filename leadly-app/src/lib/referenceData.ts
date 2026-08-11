@@ -1,36 +1,39 @@
 import type { TenantDocumentType, TenantLanguage } from '../types/domain'
+import type { TranslationKey } from '../i18n/translations'
 
 /** Curated, not exhaustive -- covers Lexy Colombia's expected markets. "OT" for
  * anything else keeps the field from blocking a real signup while we don't
- * have a full ISO country list wired up. */
-export const COUNTRIES: { code: string; label: string }[] = [
-  { code: 'CO', label: 'Colombia' },
-  { code: 'MX', label: 'México' },
-  { code: 'AR', label: 'Argentina' },
-  { code: 'CL', label: 'Chile' },
-  { code: 'PE', label: 'Perú' },
-  { code: 'EC', label: 'Ecuador' },
-  { code: 'VE', label: 'Venezuela' },
-  { code: 'PA', label: 'Panamá' },
-  { code: 'CR', label: 'Costa Rica' },
-  { code: 'US', label: 'Estados Unidos' },
-  { code: 'ES', label: 'España' },
-  { code: 'OT', label: 'Otro' },
+ * have a full ISO country list wired up. `labelKey` instead of a literal
+ * label since this is plain data (no access to the language context) --
+ * callers resolve it with `t()`. */
+export const COUNTRIES: { code: string; labelKey: TranslationKey }[] = [
+  { code: 'CO', labelKey: 'backoffice.countries.CO' },
+  { code: 'MX', labelKey: 'backoffice.countries.MX' },
+  { code: 'AR', labelKey: 'backoffice.countries.AR' },
+  { code: 'CL', labelKey: 'backoffice.countries.CL' },
+  { code: 'PE', labelKey: 'backoffice.countries.PE' },
+  { code: 'EC', labelKey: 'backoffice.countries.EC' },
+  { code: 'VE', labelKey: 'backoffice.countries.VE' },
+  { code: 'PA', labelKey: 'backoffice.countries.PA' },
+  { code: 'CR', labelKey: 'backoffice.countries.CR' },
+  { code: 'US', labelKey: 'backoffice.countries.US' },
+  { code: 'ES', labelKey: 'backoffice.countries.ES' },
+  { code: 'OT', labelKey: 'backoffice.countries.OT' },
 ]
 
-export const DOCUMENT_TYPES: { value: TenantDocumentType; label: string }[] = [
-  { value: 'NIT', label: 'NIT' },
-  { value: 'CC', label: 'Cédula de ciudadanía' },
-  { value: 'CE', label: 'Cédula de extranjería' },
-  { value: 'RUC', label: 'RUC' },
-  { value: 'RFC', label: 'RFC' },
-  { value: 'PASAPORTE', label: 'Pasaporte' },
-  { value: 'OTRO', label: 'Otro' },
+export const DOCUMENT_TYPES: { value: TenantDocumentType; labelKey: TranslationKey }[] = [
+  { value: 'NIT', labelKey: 'backoffice.documentTypes.NIT' },
+  { value: 'CC', labelKey: 'backoffice.documentTypes.CC' },
+  { value: 'CE', labelKey: 'backoffice.documentTypes.CE' },
+  { value: 'RUC', labelKey: 'backoffice.documentTypes.RUC' },
+  { value: 'RFC', labelKey: 'backoffice.documentTypes.RFC' },
+  { value: 'PASAPORTE', labelKey: 'backoffice.documentTypes.PASAPORTE' },
+  { value: 'OTRO', labelKey: 'backoffice.documentTypes.OTRO' },
 ]
 
-export const LANGUAGES: { value: TenantLanguage; label: string }[] = [
-  { value: 'es', label: 'Español' },
-  { value: 'en', label: 'English' },
+export const LANGUAGES: { value: TenantLanguage; labelKey: TranslationKey }[] = [
+  { value: 'es', labelKey: 'backoffice.languages.es' },
+  { value: 'en', labelKey: 'backoffice.languages.en' },
 ]
 
 export const TENANT_LOGO_MAX_BYTES = 5 * 1024 * 1024

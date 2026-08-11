@@ -1,0 +1,42 @@
+{
+  "calendar.weekday.mon": "Lun",
+  "calendar.weekday.tue": "Mar",
+  "calendar.weekday.wed": "Mié",
+  "calendar.weekday.thu": "Jue",
+  "calendar.weekday.fri": "Vie",
+  "calendar.weekday.sat": "Sáb",
+  "calendar.weekday.sun": "Dom",
+
+  "calendar.today": "Hoy",
+  "calendar.aria.prevMonth": "Mes anterior",
+  "calendar.aria.nextMonth": "Mes siguiente",
+  "calendar.actions.new": "Nueva cita",
+  "calendar.moreCount": "+{count} más",
+
+  "calendar.errors.loadFailed": "No se pudieron cargar las citas.",
+  "calendar.errors.updateFailed": "No se pudo actualizar la cita.",
+  "calendar.errors.createFailed": "No se pudo agendar la cita.",
+
+  "calendar.status.activa": "Programada",
+  "calendar.status.completada": "Completada",
+  "calendar.status.cancelada": "Cancelada",
+
+  "calendar.detail.title": "Detalle de la cita",
+  "calendar.detail.contactFallback": "Contacto",
+  "calendar.detail.markCompleted": "Marcar completada",
+  "calendar.detail.cancelAppointment": "Cancelar cita",
+
+  "calendar.form.title": "Nueva cita",
+  "calendar.form.description": "Le enviamos un recordatorio por WhatsApp una hora antes.",
+  "calendar.form.contact": "Contacto",
+  "calendar.form.change": "Cambiar",
+  "calendar.form.searchPlaceholder": "Buscar por nombre o teléfono…",
+  "calendar.form.contactRequired": "Elige un contacto.",
+  "calendar.form.dateTime": "Fecha y hora",
+  "calendar.form.dateRequired": "Elige fecha y hora.",
+  "calendar.form.pastWarning": "Esa fecha ya pasó -- no se enviará recordatorio.",
+  "calendar.form.notes": "Notas (opcional)",
+  "calendar.form.notesPlaceholder": "Motivo de la cita, temas a tratar...",
+  "calendar.form.submitting": "Agendando…",
+  "calendar.form.submit": "Agendar cita"
+}

@@ -86,6 +86,23 @@ Deno.serve(async (req: Request) => {
 
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
+  // Fetch the human-readable phone number (e.g. "+57 313 4931455") -- the
+  // tenant only gave us the opaque phone_number_id, and that's all that was
+  // stored until now, which made every line in the UI show a meaningless
+  // numeric ID instead of the actual WhatsApp number. Best-effort: a failure
+  // here shouldn't block the connection, it just leaves the column null.
+  let displayPhoneNumber: string | null = null;
+  try {
+    const phoneResp = await fetch(
+      `https://graph.facebook.com/${GRAPH_API_VERSION}/${phone_number_id}?fields=display_phone_number`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    const phoneData = await phoneResp.json();
+    if (phoneResp.ok) displayPhoneNumber = phoneData.display_phone_number ?? null;
+  } catch (err) {
+    console.error("Failed to fetch display_phone_number", err);
+  }
+
   // Step 2: create the line + default (inactive) assistant, mirroring
   // leadly-app/src/lib/api/whatsappLines.ts::createWhatsappLine.
   const { data: line, error: lineError } = await adminClient
@@ -95,6 +112,7 @@ Deno.serve(async (req: Request) => {
       phone_number_id,
       business_account_id: waba_id,
       display_name: display_name?.trim() || "WhatsApp",
+      display_phone_number: displayPhoneNumber,
       status: "active",
     })
     .select()
@@ -114,13 +132,21 @@ Deno.serve(async (req: Request) => {
     .maybeSingle();
 
   if (defaultModel) {
-    await adminClient.from("ai_assistants").insert({
-      whatsapp_line_id: line.id,
-      provider: defaultModel.provider,
-      model: defaultModel.model_code,
-      system_prompt: "",
-      is_active: false,
-    });
+    const { data: assistant } = await adminClient
+      .from("ai_assistants")
+      .insert({
+        tenant_id: tenantId,
+        name: `Asistente de ${line.display_name}`,
+        provider: defaultModel.provider,
+        model: defaultModel.model_code,
+        system_prompt: "",
+        is_active: false,
+      })
+      .select("id")
+      .single();
+    if (assistant) {
+      await adminClient.from("whatsapp_lines").update({ ai_assistant_id: assistant.id }).eq("id", line.id);
+    }
   }
 
   // Step 3: store the token (write-only Vault path, service_role-eligible

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
+import { useLanguage } from '../../contexts/LanguageContext'
+import type { Language } from '../../i18n/translations'
 import { deleteContact, listContacts } from '../../lib/api/contacts'
 import { listLastContactTimesByTenant } from '../../lib/api/conversations'
 import { listProfilesByTenant } from '../../lib/api/users'
@@ -35,18 +37,20 @@ const STAGE_TONE: Record<ContactStage, 'neutral' | 'success' | 'warning' | 'dang
   perdido: 'danger',
 }
 
-function formatLastContact(iso: string | undefined): string {
+function formatLastContact(iso: string | undefined, language: Language): string {
   if (!iso) return '-'
+  const locale = language === 'en' ? 'en-US' : 'es-CO'
   const date = new Date(iso)
   const now = new Date()
   const sameDay = date.toDateString() === now.toDateString()
   return sameDay
-    ? date.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })
-    : date.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })
+    ? date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
+    : date.toLocaleDateString(locale, { day: '2-digit', month: 'short' })
 }
 
 export function Contactos() {
   const { profile } = useAuth()
+  const { t, language } = useLanguage()
   const navigate = useNavigate()
   const [contacts, setContacts] = useState<CrmContact[] | null>(null)
   const [agents, setAgents] = useState<Profile[]>([])
@@ -68,7 +72,7 @@ export function Contactos() {
     const tenantId = profile.tenant_id
     listContacts(tenantId)
       .then(setContacts)
-      .catch((err) => setError(err.message ?? 'No se pudieron cargar los contactos.'))
+      .catch((err) => setError(err.message ?? t('contacts.errors.load')))
     listProfilesByTenant(tenantId).then(setAgents).catch(() => {})
     listLastContactTimesByTenant(tenantId).then(setLastContact).catch(() => {})
   }, [profile?.tenant_id])
@@ -122,7 +126,7 @@ export function Contactos() {
       setContacts((prev) => (prev ? prev.filter((c) => c.id !== id) : prev))
       setDeletingId(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo eliminar el contacto.')
+      setError(err instanceof Error ? err.message : t('contacts.errors.delete'))
     } finally {
       setDeleting(false)
     }
@@ -132,13 +136,13 @@ export function Contactos() {
 
   return (
     <div className="animate-fade-in space-y-3">
-      <h1 className="text-xl font-bold text-brand-800 sm:text-2xl">Contactos</h1>
+      <h1 className="text-xl font-bold text-brand-800 sm:text-2xl">{t('contacts.title')}</h1>
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="w-full max-w-[220px] sm:w-auto">
           <IconInput
             icon={<SearchIcon width={14} height={14} />}
-            placeholder="Buscar..."
+            placeholder={t('contacts.search.placeholder')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="!py-1.5 !pl-8 text-sm"
@@ -154,28 +158,28 @@ export function Contactos() {
             }`}
           >
             <FilterIcon width={14} height={14} />
-            Filtros
+            {t('contacts.filters.label')}
             {hasActiveFilters && <span className="h-1.5 w-1.5 rounded-full bg-accent-500" />}
           </button>
 
           {filtersOpen && (
             <div className="absolute left-0 top-full z-40 mt-2 w-64 max-w-[calc(100vw-2rem)] space-y-3 rounded-2xl border border-brand-100 bg-white p-4 shadow-lg">
               <div>
-                <label className="mb-1 block text-xs font-medium text-brand-400">Etapa</label>
+                <label className="mb-1 block text-xs font-medium text-brand-400">{t('contacts.filters.stage.label')}</label>
                 <Select value={stageFilter} onChange={(e) => setStageFilter(e.target.value as ContactStage | '')} className="!py-1.5 text-sm">
-                  <option value="">Todas las etapas</option>
+                  <option value="">{t('contacts.filters.stage.all')}</option>
                   {(Object.keys(STAGE_LABEL) as ContactStage[]).map((s) => (
                     <option key={s} value={s}>
-                      {STAGE_LABEL[s]}
+                      {t(STAGE_LABEL[s])}
                     </option>
                   ))}
                 </Select>
               </div>
               {agents.length > 0 && (
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-brand-400">Agente</label>
+                  <label className="mb-1 block text-xs font-medium text-brand-400">{t('contacts.filters.agent.label')}</label>
                   <Select value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)} className="!py-1.5 text-sm">
-                    <option value="">Todos los agentes</option>
+                    <option value="">{t('contacts.filters.agent.all')}</option>
                     {agents.map((a) => (
                       <option key={a.id} value={a.id}>
                         {a.full_name}
@@ -186,9 +190,9 @@ export function Contactos() {
               )}
               {allTags.length > 0 && (
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-brand-400">Etiqueta</label>
+                  <label className="mb-1 block text-xs font-medium text-brand-400">{t('contacts.filters.tag.label')}</label>
                   <Select value={tagFilter} onChange={(e) => setTagFilter(e.target.value)} className="!py-1.5 text-sm">
-                    <option value="">Todas las etiquetas</option>
+                    <option value="">{t('contacts.filters.tag.all')}</option>
                     {allTags.map((tag) => (
                       <option key={tag} value={tag}>
                         {tag}
@@ -208,7 +212,7 @@ export function Contactos() {
                   }}
                   className="text-xs font-medium text-brand-400 hover:text-brand-700"
                 >
-                  Limpiar filtros
+                  {t('contacts.filters.clear')}
                 </button>
               )}
             </div>
@@ -216,11 +220,11 @@ export function Contactos() {
         </div>
 
         <span className="shrink-0 text-xs text-brand-400">
-          {filtered?.length ?? 0} {(filtered?.length ?? 0) === 1 ? 'contacto' : 'contactos'}
+          {filtered?.length ?? 0} {t((filtered?.length ?? 0) === 1 ? 'contacts.count.singular' : 'contacts.count.plural')}
         </span>
 
         <Button variant="secondary" onClick={() => setDrawer({ open: true, contact: null })} className="!ml-auto !py-1.5 !text-sm">
-          <PlusIcon width={16} height={16} /> Nuevo contacto
+          <PlusIcon width={16} height={16} /> {t('contacts.actions.new')}
         </Button>
       </div>
 
@@ -230,7 +234,7 @@ export function Contactos() {
       {filtered && filtered.length === 0 && (
         <Card>
           <EmptyState>
-            {contacts && contacts.length > 0 ? 'Ningún contacto coincide con tu búsqueda.' : 'Todavía no tienes contactos registrados.'}
+            {contacts && contacts.length > 0 ? t('contacts.emptyState.noMatch') : t('contacts.emptyState.none')}
           </EmptyState>
         </Card>
       )}
@@ -240,12 +244,12 @@ export function Contactos() {
           <Table>
             <THead>
               <tr>
-                <TH>Contacto</TH>
-                <TH>Teléfono</TH>
-                <TH>Etapa</TH>
-                <TH>Agente</TH>
-                <TH>Último contacto</TH>
-                <TH className="text-right">Acciones</TH>
+                <TH>{t('contacts.table.contact')}</TH>
+                <TH>{t('contacts.table.phone')}</TH>
+                <TH>{t('contacts.table.stage')}</TH>
+                <TH>{t('contacts.table.agent')}</TH>
+                <TH>{t('contacts.table.lastContact')}</TH>
+                <TH className="text-right">{t('contacts.table.actions')}</TH>
               </tr>
             </THead>
             <TBody>
@@ -262,26 +266,36 @@ export function Contactos() {
                   </TD>
                   <TD>{contact.phone}</TD>
                   <TD>
-                    <Badge tone={STAGE_TONE[contact.stage]}>{STAGE_LABEL[contact.stage]}</Badge>
+                    <Badge tone={STAGE_TONE[contact.stage]}>{t(STAGE_LABEL[contact.stage])}</Badge>
                   </TD>
                   <TD className="text-brand-500">{agents.find((a) => a.id === contact.assigned_to)?.full_name ?? '-'}</TD>
-                  <TD className="text-brand-500">{formatLastContact(lastContact.get(contact.id))}</TD>
+                  <TD className="text-brand-500">{formatLastContact(lastContact.get(contact.id), language)}</TD>
                   <TD className="text-right" onClick={(e) => e.stopPropagation()}>
                     {deletingId === contact.id ? (
                       <span className="inline-flex items-center gap-1.5">
                         <Button variant="danger" onClick={() => handleDelete(contact.id)} disabled={deleting} className="!px-2.5 !py-1.5 text-xs">
-                          {deleting ? 'Eliminando…' : 'Confirmar'}
+                          {deleting ? t('common.actions.deleting') : t('common.actions.confirm')}
                         </Button>
                         <Button variant="ghost" onClick={() => setDeletingId(null)} disabled={deleting} className="!px-2.5 !py-1.5 text-xs">
-                          Cancelar
+                          {t('common.actions.cancel')}
                         </Button>
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1">
-                        <Button variant="ghost" onClick={() => setDrawer({ open: true, contact })} className="!px-2.5 !py-1.5 text-xs">
+                        <Button
+                          variant="ghost"
+                          onClick={() => setDrawer({ open: true, contact })}
+                          className="!px-2.5 !py-1.5 text-xs"
+                          aria-label={t('contacts.table.aria.edit')}
+                        >
                           <PencilIcon width={13} height={13} />
                         </Button>
-                        <Button variant="ghost" onClick={() => setDeletingId(contact.id)} className="!px-2.5 !py-1.5 text-xs !text-red-600 hover:!bg-red-50">
+                        <Button
+                          variant="ghost"
+                          onClick={() => setDeletingId(contact.id)}
+                          className="!px-2.5 !py-1.5 text-xs !text-red-600 hover:!bg-red-50"
+                          aria-label={t('contacts.table.aria.delete')}
+                        >
                           <TrashIcon width={13} height={13} />
                         </Button>
                       </span>

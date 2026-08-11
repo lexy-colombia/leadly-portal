@@ -4,15 +4,20 @@ import { PQR_ATTACHMENT_ALLOWED_TYPES, PQR_ATTACHMENT_MAX_BYTES, TASK_ATTACHMENT
 
 const SIGNED_URL_TTL_SECONDS = 60 * 60
 
-export function validatePqrAttachmentFile(file: File): string | null {
-  if (!PQR_ATTACHMENT_ALLOWED_TYPES.includes(file.type)) return 'La imagen debe ser PNG, JPG o WEBP.'
-  if (file.size > PQR_ATTACHMENT_MAX_BYTES) return 'La imagen no puede pesar más de 8MB.'
+// Returns a translation key (under common.attachment.error.*) instead of a literal
+// message, since this is plain business logic with no access to the language
+// context -- call sites resolve it with `t()`.
+export type AttachmentValidationError = 'common.attachment.error.invalidImageType' | 'common.attachment.error.invalidFileType' | 'common.attachment.error.tooLarge'
+
+export function validatePqrAttachmentFile(file: File): AttachmentValidationError | null {
+  if (!PQR_ATTACHMENT_ALLOWED_TYPES.includes(file.type)) return 'common.attachment.error.invalidImageType'
+  if (file.size > PQR_ATTACHMENT_MAX_BYTES) return 'common.attachment.error.tooLarge'
   return null
 }
 
-export function validateTaskAttachmentFile(file: File): string | null {
-  if (!TASK_ATTACHMENT_ALLOWED_TYPES.includes(file.type)) return 'El archivo debe ser PNG, JPG, WEBP o PDF.'
-  if (file.size > TASK_ATTACHMENT_MAX_BYTES) return 'El archivo no puede pesar más de 8MB.'
+export function validateTaskAttachmentFile(file: File): AttachmentValidationError | null {
+  if (!TASK_ATTACHMENT_ALLOWED_TYPES.includes(file.type)) return 'common.attachment.error.invalidFileType'
+  if (file.size > TASK_ATTACHMENT_MAX_BYTES) return 'common.attachment.error.tooLarge'
   return null
 }
 

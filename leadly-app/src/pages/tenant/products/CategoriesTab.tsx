@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { deleteProductCategory, listProductCategories } from '../../../lib/api/productCategories'
 import type { CrmProductCategory } from '../../../types/domain'
+import { useLanguage } from '../../../contexts/LanguageContext'
 import { Button, Card, EmptyState, PageSpinner, Pagination, Table, TBody, TD, TH, THead, TRow } from '../../../components/ui'
 import { PencilIcon, PlusIcon, TrashIcon } from '../../../components/icons'
 import { CategoryDrawer } from './CategoryDrawer'
@@ -8,6 +9,7 @@ import { CategoryDrawer } from './CategoryDrawer'
 const PAGE_SIZE = 10
 
 export function CategoriesTab({ tenantId }: { tenantId: string }) {
+  const { t } = useLanguage()
   const [categories, setCategories] = useState<CrmProductCategory[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [page, setPage] = useState(1)
@@ -18,7 +20,7 @@ export function CategoriesTab({ tenantId }: { tenantId: string }) {
   function reload() {
     listProductCategories(tenantId)
       .then(setCategories)
-      .catch((err) => setError(err.message ?? 'No se pudieron cargar las categorías.'))
+      .catch((err) => setError(err.message ?? t('products.categories.errors.load')))
   }
 
   useEffect(reload, [tenantId])
@@ -34,7 +36,7 @@ export function CategoriesTab({ tenantId }: { tenantId: string }) {
       setCategories((prev) => (prev ? prev.filter((c) => c.id !== id) : prev))
       setDeletingId(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo eliminar la categoría.')
+      setError(err instanceof Error ? err.message : t('products.categories.errors.delete'))
     } finally {
       setDeleting(false)
     }
@@ -44,10 +46,10 @@ export function CategoriesTab({ tenantId }: { tenantId: string }) {
     <div className="space-y-3">
       <div className="flex items-center gap-2">
         <span className="text-xs text-brand-400">
-          {categories?.length ?? 0} {(categories?.length ?? 0) === 1 ? 'categoría' : 'categorías'}
+          {categories?.length ?? 0} {t((categories?.length ?? 0) === 1 ? 'products.categories.count.singular' : 'products.categories.count.plural')}
         </span>
         <Button variant="secondary" onClick={() => setDrawer({ open: true, category: null })} className="!ml-auto !py-1 !text-xs">
-          <PlusIcon width={14} height={14} /> Nueva categoría
+          <PlusIcon width={14} height={14} /> {t('products.categories.actions.new')}
         </Button>
       </div>
 
@@ -56,7 +58,7 @@ export function CategoriesTab({ tenantId }: { tenantId: string }) {
 
       {categories && categories.length === 0 && (
         <Card>
-          <EmptyState>Todavía no tenés categorías. Creá una para organizar tus productos.</EmptyState>
+          <EmptyState>{t('products.categories.empty')}</EmptyState>
         </Card>
       )}
 
@@ -65,9 +67,9 @@ export function CategoriesTab({ tenantId }: { tenantId: string }) {
           <Table>
             <THead>
               <tr>
-                <TH>Categoría</TH>
-                <TH>Descripción</TH>
-                <TH className="text-right">Acciones</TH>
+                <TH>{t('products.categories.table.category')}</TH>
+                <TH>{t('products.categories.table.description')}</TH>
+                <TH className="text-right">{t('products.categories.table.actions')}</TH>
               </tr>
             </THead>
             <TBody>
@@ -84,10 +86,10 @@ export function CategoriesTab({ tenantId }: { tenantId: string }) {
                     {deletingId === category.id ? (
                       <span className="inline-flex items-center gap-1.5">
                         <Button variant="danger" onClick={() => handleDelete(category.id)} disabled={deleting} className="!px-2 !py-1 text-xs">
-                          {deleting ? 'Eliminando…' : 'Confirmar'}
+                          {deleting ? t('common.actions.deleting') : t('common.actions.confirm')}
                         </Button>
                         <Button variant="ghost" onClick={() => setDeletingId(null)} disabled={deleting} className="!px-2 !py-1 text-xs">
-                          Cancelar
+                          {t('common.actions.cancel')}
                         </Button>
                       </span>
                     ) : (

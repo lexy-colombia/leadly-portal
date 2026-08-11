@@ -11,6 +11,16 @@ import {
 import type { CrmPipeline, CrmPipelineStage } from '../../../types/domain'
 import { Button, ConfirmDialog, Drawer, Input, Label, Select } from '../../../components/ui'
 import { ChevronLeftIcon, PlusIcon, TrashIcon } from '../../../components/icons'
+import { useLanguage } from '../../../contexts/LanguageContext'
+import type { TranslationKey } from '../../../i18n/translations'
+
+// `deletePipeline`/`deleteStage` throw an `Error` whose `message` is itself a
+// translation key (they live in lib/api, with no access to the language
+// context) -- `t()` passes through anything that isn't a known key
+// unchanged, so this is safe for the raw-Postgres-error case too.
+function resolveDeleteError(err: unknown, t: (key: TranslationKey) => string, fallback: TranslationKey): string {
+  return err instanceof Error ? t(err.message as TranslationKey) : t(fallback)
+}
 
 type StageOutcome = 'abierta' | 'ganada' | 'perdida'
 
@@ -24,7 +34,16 @@ function outcomeToFlags(outcome: StageOutcome): { is_won: boolean; is_lost: bool
   return { is_won: outcome === 'ganada', is_lost: outcome === 'perdida' }
 }
 
-const NEW_STAGE_DEFAULTS: StageInput = { name: 'Nueva etapa', color: '#94A3B8', probability: 0, is_won: false, is_lost: false }
+const OUTCOME_LABEL: Record<StageOutcome, TranslationKey> = {
+  abierta: 'opportunities.settings.stages.outcome.open',
+  ganada: 'opportunities.settings.stages.outcome.won',
+  perdida: 'opportunities.settings.stages.outcome.lost',
+}
+
+// Stored as opportunity/stage data (the tenant renames it immediately after
+// adding a stage), not UI chrome -- left in Spanish like the rest of the
+// seeded stage names in lib/api/pipelines.ts's DEFAULT_STAGES.
+const NEW_STAGE_DEFAULT_STYLE = { color: '#94A3B8', probability: 0, is_won: false, is_lost: false } as const
 
 export function PipelineSettingsDrawer({
   open,
@@ -47,6 +66,7 @@ export function PipelineSettingsDrawer({
   onPipelineDeleted: () => void
   onStagesChange: () => void
 }) {
+  const { t } = useLanguage()
   const [name, setName] = useState(pipeline.name)
   const [description, setDescription] = useState(pipeline.description ?? '')
   const [color, setColor] = useState(pipeline.color)
@@ -80,7 +100,7 @@ export function PipelineSettingsDrawer({
       await updatePipeline(pipeline.id, { name: name.trim(), description: description.trim() || null, color })
       onPipelineChange()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo guardar el pipeline.')
+      setError(err instanceof Error ? err.message : t('opportunities.settings.errors.savePipeline'))
     } finally {
       setSavingPipeline(false)
     }
@@ -92,7 +112,7 @@ export function PipelineSettingsDrawer({
       await updateStage(stage.id, input)
       onStagesChange()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo guardar la etapa.')
+      setError(err instanceof Error ? err.message : t('opportunities.settings.errors.saveStage'))
     }
   }
 
@@ -100,10 +120,10 @@ export function PipelineSettingsDrawer({
     setAddingStage(true)
     setError(null)
     try {
-      await createStage(pipeline.id, NEW_STAGE_DEFAULTS)
+      await createStage(pipeline.id, { name: t('opportunities.settings.newStageName'), ...NEW_STAGE_DEFAULT_STYLE })
       onStagesChange()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo agregar la etapa.')
+      setError(err instanceof Error ? err.message : t('opportunities.settings.errors.addStage'))
     } finally {
       setAddingStage(false)
     }
@@ -120,7 +140,7 @@ export function PipelineSettingsDrawer({
       await reorderStages(reordered.map((s) => s.id))
       onStagesChange()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo reordenar las etapas.')
+      setError(err instanceof Error ? err.message : t('opportunities.settings.errors.reorderStages'))
       setLocalStages(stages)
     }
   }
@@ -133,7 +153,7 @@ export function PipelineSettingsDrawer({
       setStageToDelete(null)
       onStagesChange()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo eliminar la etapa.')
+      setError(resolveDeleteError(err, t, 'opportunities.settings.errors.deleteStage'))
       setStageToDelete(null)
     } finally {
       setDeletingStage(false)
@@ -148,7 +168,7 @@ export function PipelineSettingsDrawer({
       onPipelineChange()
       onPipelineDeleted()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo eliminar el pipeline.')
+      setError(resolveDeleteError(err, t, 'opportunities.settings.errors.deletePipeline'))
       setDeletePipelineOpen(false)
     } finally {
       setDeletingPipeline(false)
@@ -157,21 +177,21 @@ export function PipelineSettingsDrawer({
 
   return (
     <>
-      <Drawer open={open} onClose={onClose} title="Configurar pipeline" description="Nombre, etapas y su orden en el tablero.">
+      <Drawer open={open} onClose={onClose} title={t('opportunities.settings.title')} description={t('opportunities.settings.description')}>
         <div className="space-y-6">
           {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
           <form onSubmit={handleSavePipeline} className="space-y-3">
             <div>
-              <Label htmlFor="pipeline-name">Nombre</Label>
+              <Label htmlFor="pipeline-name">{t('opportunities.settings.fields.name')}</Label>
               <Input id="pipeline-name" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
             <div>
-              <Label htmlFor="pipeline-description">Descripción (opcional)</Label>
+              <Label htmlFor="pipeline-description">{t('opportunities.settings.fields.description')}</Label>
               <Input id="pipeline-description" value={description} onChange={(e) => setDescription(e.target.value)} />
             </div>
             <div className="flex items-center gap-2">
-              <Label htmlFor="pipeline-color">Color</Label>
+              <Label htmlFor="pipeline-color">{t('opportunities.settings.fields.color')}</Label>
               <input
                 id="pipeline-color"
                 type="color"
@@ -181,12 +201,12 @@ export function PipelineSettingsDrawer({
               />
             </div>
             <Button type="submit" variant="secondary" disabled={savingPipeline || !name.trim()} className="!py-1.5 text-xs">
-              {savingPipeline ? 'Guardando…' : 'Guardar pipeline'}
+              {savingPipeline ? t('common.actions.saving') : t('opportunities.settings.actions.savePipeline')}
             </Button>
           </form>
 
           <div className="border-t border-brand-100 pt-4">
-            <p className="mb-2 text-sm font-semibold text-brand-800">Etapas</p>
+            <p className="mb-2 text-sm font-semibold text-brand-800">{t('opportunities.settings.stages.title')}</p>
             <div className="space-y-2">
               {localStages.map((stage, index) => (
                 <div key={stage.id} className="flex items-center gap-1.5 rounded-xl border border-brand-100 p-2">
@@ -195,7 +215,7 @@ export function PipelineSettingsDrawer({
                       type="button"
                       onClick={() => handleMoveStage(index, -1)}
                       disabled={index === 0}
-                      aria-label="Subir etapa"
+                      aria-label={t('opportunities.settings.stages.moveUpAria')}
                       className="text-brand-400 hover:text-brand-700 disabled:opacity-30"
                     >
                       <ChevronLeftIcon width={12} height={12} className="rotate-90" />
@@ -204,7 +224,7 @@ export function PipelineSettingsDrawer({
                       type="button"
                       onClick={() => handleMoveStage(index, 1)}
                       disabled={index === localStages.length - 1}
-                      aria-label="Bajar etapa"
+                      aria-label={t('opportunities.settings.stages.moveDownAria')}
                       className="text-brand-400 hover:text-brand-700 disabled:opacity-30"
                     >
                       <ChevronLeftIcon width={12} height={12} className="-rotate-90" />
@@ -241,15 +261,17 @@ export function PipelineSettingsDrawer({
                     onChange={(e) => handleStageFieldSave(stage, outcomeToFlags(e.target.value as StageOutcome))}
                     className="!w-auto !py-1.5 text-xs"
                   >
-                    <option value="abierta">Abierta</option>
-                    <option value="ganada">Ganada</option>
-                    <option value="perdida">Perdida</option>
+                    {(Object.keys(OUTCOME_LABEL) as StageOutcome[]).map((outcome) => (
+                      <option key={outcome} value={outcome}>
+                        {t(OUTCOME_LABEL[outcome])}
+                      </option>
+                    ))}
                   </Select>
 
                   <button
                     type="button"
                     onClick={() => setStageToDelete(stage)}
-                    aria-label={`Eliminar etapa ${stage.name}`}
+                    aria-label={t('opportunities.settings.stages.deleteAria', { name: stage.name })}
                     className="shrink-0 rounded-lg p-1.5 text-brand-400 hover:bg-red-50 hover:text-red-600"
                   >
                     <TrashIcon width={14} height={14} />
@@ -259,16 +281,16 @@ export function PipelineSettingsDrawer({
             </div>
 
             <Button type="button" variant="ghost" onClick={handleAddStage} disabled={addingStage} className="!mt-3 !py-1.5 text-xs">
-              <PlusIcon width={13} height={13} /> {addingStage ? 'Agregando…' : 'Agregar etapa'}
+              <PlusIcon width={13} height={13} /> {addingStage ? t('opportunities.settings.stages.adding') : t('opportunities.settings.stages.add')}
             </Button>
           </div>
 
           <div className="border-t border-brand-100 pt-4">
             {pipelineCount <= 1 ? (
-              <p className="text-xs text-brand-400">No podés eliminar el único pipeline del equipo.</p>
+              <p className="text-xs text-brand-400">{t('opportunities.settings.pipeline.onlyOne')}</p>
             ) : (
               <Button type="button" variant="danger" onClick={() => setDeletePipelineOpen(true)} className="!py-1.5 text-xs">
-                <TrashIcon width={13} height={13} /> Eliminar pipeline
+                <TrashIcon width={13} height={13} /> {t('opportunities.settings.pipeline.delete')}
               </Button>
             )}
           </div>
@@ -279,8 +301,8 @@ export function PipelineSettingsDrawer({
         open={!!stageToDelete}
         onClose={() => setStageToDelete(null)}
         onConfirm={handleConfirmDeleteStage}
-        title="Eliminar etapa"
-        description={`¿Eliminar la etapa "${stageToDelete?.name}"? Si ya tiene oportunidades o historial, no se podrá eliminar.`}
+        title={t('opportunities.settings.deleteStageConfirm.title')}
+        description={t('opportunities.settings.deleteStageConfirm.description', { name: stageToDelete?.name ?? '' })}
         loading={deletingStage}
       />
 
@@ -288,8 +310,8 @@ export function PipelineSettingsDrawer({
         open={deletePipelineOpen}
         onClose={() => setDeletePipelineOpen(false)}
         onConfirm={handleConfirmDeletePipeline}
-        title="Eliminar pipeline"
-        description={`¿Eliminar el pipeline "${pipeline.name}"? Si ya tiene oportunidades, no se podrá eliminar.`}
+        title={t('opportunities.settings.deletePipelineConfirm.title')}
+        description={t('opportunities.settings.deletePipelineConfirm.description', { name: pipeline.name })}
         loading={deletingPipeline}
       />
     </>

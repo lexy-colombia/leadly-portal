@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useLanguage } from '../../contexts/LanguageContext'
+import type { Language, TranslationKey } from '../../i18n/translations'
 import { deleteWhatsappLine, listWhatsappLinesByTenant } from '../../lib/api/whatsappLines'
 import { assignAiAssistantToLine, deleteAiAssistant, listAiAssistantsByTenant } from '../../lib/api/aiAssistants'
 import { listConversations, type ConversationWithLine } from '../../lib/api/conversations'
@@ -7,11 +9,11 @@ import { Badge, Button, ConfirmDialog, EmptyState, InitialsAvatar, PageSpinner, 
 import { AiSparkleIcon, ChatBubbleIcon, PencilIcon, PhoneIcon, PlusIcon, TrashIcon } from '../../components/icons'
 import { AiAssistantDrawer } from './AiAssistantDrawer'
 
-const LINE_STATUS_LABEL: Record<WhatsappLineStatus, string> = {
-  pending_verification: 'Pendiente de verificación',
-  active: 'Activa',
-  suspended: 'Suspendida',
-  disconnected: 'Desconectada',
+const LINE_STATUS_KEY: Record<WhatsappLineStatus, TranslationKey> = {
+  pending_verification: 'settings.lines.status.pendingVerification',
+  active: 'settings.lines.status.active',
+  suspended: 'settings.lines.status.suspended',
+  disconnected: 'settings.lines.status.disconnected',
 }
 
 const LINE_STATUS_TONE: Record<WhatsappLineStatus, 'neutral' | 'success' | 'warning' | 'danger'> = {
@@ -21,16 +23,20 @@ const LINE_STATUS_TONE: Record<WhatsappLineStatus, 'neutral' | 'success' | 'warn
   disconnected: 'neutral',
 }
 
-const PROVIDER_LABEL: Record<AiProvider, string> = { openai: 'OpenAI (ChatGPT)', gemini: 'Google (Gemini)' }
+const PROVIDER_KEY: Record<AiProvider, TranslationKey> = {
+  openai: 'settings.assistant.provider.openai',
+  gemini: 'settings.assistant.provider.gemini',
+}
 
 function isToday(iso: string): boolean {
   return new Date(iso).toDateString() === new Date().toDateString()
 }
 
-function formatActivity(iso: string | undefined): string {
-  if (!iso) return 'Sin actividad'
+function formatActivity(iso: string | undefined, language: Language, noActivityLabel: string): string {
+  if (!iso) return noActivityLabel
   const date = new Date(iso)
-  return isToday(iso) ? date.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }) : date.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })
+  const locale = language === 'en' ? 'en-US' : 'es-CO'
+  return isToday(iso) ? date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }) : date.toLocaleDateString(locale, { day: '2-digit', month: 'short' })
 }
 
 function MetricCard({ icon, iconClass, value, label, sublabel }: { icon: ReactNode; iconClass: string; value: string; label: string; sublabel?: string }) {
@@ -76,6 +82,7 @@ export function LinesAndAgentsSection({
   /** Tenant: Embedded Signup self-service connect instead of a manual drawer. */
   connectLine?: { label: string; loading: boolean; onClick: () => void }
 }) {
+  const { t, language } = useLanguage()
   const [tab, setTab] = useState<'lineas' | 'agentes'>('lineas')
   const [lines, setLines] = useState<WhatsappLine[] | null>(null)
   const [assistants, setAssistants] = useState<AiAssistant[] | null>(null)
@@ -92,15 +99,16 @@ export function LinesAndAgentsSection({
   const [assigningLineId, setAssigningLineId] = useState<string | null>(null)
 
   function reload() {
-    listWhatsappLinesByTenant(tenantId).then(setLines).catch((err) => setError(err.message ?? 'No se pudieron cargar las líneas.'))
+    listWhatsappLinesByTenant(tenantId).then(setLines).catch((err) => setError(err.message ?? t('settings.lines.errors.loadLines')))
     listAiAssistantsByTenant(tenantId)
       .then(setAssistants)
-      .catch((err) => setError(err.message ?? 'No se pudieron cargar los agentes.'))
+      .catch((err) => setError(err.message ?? t('settings.lines.errors.loadAgents')))
     listConversations(tenantId)
       .then(setConversations)
       .catch(() => setConversations([]))
   }
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(reload, [tenantId])
 
   const lastActivityByLine = useMemo(() => {
@@ -130,7 +138,7 @@ export function LinesAndAgentsSection({
       setConfirmingDeleteLineId(null)
       reload()
     } catch (err) {
-      setDeleteLineError(err instanceof Error ? err.message : 'No se pudo desconectar la línea.')
+      setDeleteLineError(err instanceof Error ? err.message : t('settings.lines.errors.deleteLine'))
     } finally {
       setDeletingLineId(null)
     }
@@ -144,7 +152,7 @@ export function LinesAndAgentsSection({
       setConfirmingDeleteAgentId(null)
       reload()
     } catch (err) {
-      setDeleteAgentError(err instanceof Error ? err.message : 'No se pudo eliminar el agente.')
+      setDeleteAgentError(err instanceof Error ? err.message : t('settings.lines.errors.deleteAgent'))
     } finally {
       setDeletingAgentId(null)
     }
@@ -156,7 +164,7 @@ export function LinesAndAgentsSection({
     try {
       await assignAiAssistantToLine(lineId, assistantId || null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo asignar el agente.')
+      setError(err instanceof Error ? err.message : t('settings.lines.errors.assignAgent'))
       reload()
     } finally {
       setAssigningLineId(null)
@@ -171,8 +179,8 @@ export function LinesAndAgentsSection({
         <div className="flex gap-1 border-b border-brand-100">
           {(
             [
-              ['lineas', 'Líneas de WhatsApp', PhoneIcon],
-              ['agentes', 'Agentes de IA', AiSparkleIcon],
+              ['lineas', t('settings.lines.tabs.lines'), PhoneIcon],
+              ['agentes', t('settings.lines.tabs.agents'), AiSparkleIcon],
             ] as const
           ).map(([value, label, Icon]) => (
             <button
@@ -191,16 +199,16 @@ export function LinesAndAgentsSection({
           (tab === 'lineas' ? (
             connectLine ? (
               <Button variant="primary" onClick={connectLine.onClick} disabled={connectLine.loading} className="!py-1.5 text-xs">
-                <PlusIcon width={14} height={14} /> {connectLine.loading ? 'Conectando…' : connectLine.label}
+                <PlusIcon width={14} height={14} /> {connectLine.loading ? t('settings.lines.connecting') : connectLine.label}
               </Button>
             ) : (
               <Button variant="secondary" onClick={() => setLineDrawerState({ open: true, line: null })} className="!py-1.5 text-xs">
-                <PlusIcon width={14} height={14} /> Nueva línea
+                <PlusIcon width={14} height={14} /> {t('settings.lines.newLine')}
               </Button>
             )
           ) : (
             <Button variant="primary" onClick={() => setAgentDrawer({ open: true, assistantId: null })} className="!py-1.5 text-xs">
-              <PlusIcon width={14} height={14} /> Nuevo agente
+              <PlusIcon width={14} height={14} /> {t('settings.lines.newAgent')}
             </Button>
           ))}
       </div>
@@ -211,28 +219,32 @@ export function LinesAndAgentsSection({
             icon={<PhoneIcon width={16} height={16} />}
             iconClass="bg-emerald-50 text-emerald-600"
             value={String(connectedLines)}
-            label="Líneas conectadas"
-            sublabel={lines ? `${lines.length} en total` : undefined}
+            label={t('settings.lines.metrics.connectedLines')}
+            sublabel={lines ? t('settings.lines.metrics.totalCount', { count: lines.length }) : undefined}
           />
           <MetricCard
             icon={<AiSparkleIcon width={16} height={16} />}
             iconClass="bg-violet-50 text-violet-600"
             value={String(linesWithAgent)}
-            label="Con agente asignado"
-            sublabel={lines && lines.length > 0 ? `${Math.round((linesWithAgent / lines.length) * 100)}% de las líneas` : undefined}
+            label={t('settings.lines.metrics.withAgent')}
+            sublabel={
+              lines && lines.length > 0
+                ? t('settings.lines.metrics.percentOfLines', { percent: Math.round((linesWithAgent / lines.length) * 100) })
+                : undefined
+            }
           />
           <MetricCard
             icon={<ChatBubbleIcon width={16} height={16} />}
             iconClass="bg-sky-50 text-sky-600"
             value={String(conversationsToday)}
-            label="Conversaciones hoy"
+            label={t('settings.lines.metrics.conversationsToday')}
           />
           <MetricCard
             icon={<AiSparkleIcon width={16} height={16} />}
             iconClass="bg-amber-50 text-amber-600"
             value={String(activeAgents)}
-            label="Agentes activos"
-            sublabel={assistants ? `${assistants.length} en total` : undefined}
+            label={t('settings.lines.metrics.activeAgents')}
+            sublabel={assistants ? t('settings.lines.metrics.totalCount', { count: assistants.length }) : undefined}
           />
         </div>
       )}
@@ -241,21 +253,17 @@ export function LinesAndAgentsSection({
         <>
           {!lines && !error && <PageSpinner />}
           {lines && lines.length === 0 && (
-            <EmptyState>
-              {connectLine
-                ? 'Todavía no tienes ninguna línea de WhatsApp conectada. Usa "Conectar nueva línea" para vincular tu propia cuenta de WhatsApp Business (los costos de Meta quedan a tu nombre), o contacta a Leadly para que te asignen una manualmente.'
-                : 'Este cliente todavía no tiene líneas de WhatsApp asignadas.'}
-            </EmptyState>
+            <EmptyState>{connectLine ? t('settings.lines.emptyTenant') : t('settings.lines.emptyBackoffice')}</EmptyState>
           )}
           {lines && lines.length > 0 && (
             <Table>
               <THead>
                 <tr>
-                  <TH>Línea de WhatsApp</TH>
-                  <TH>Estado</TH>
-                  <TH>Agente asignado</TH>
-                  <TH>Última actividad</TH>
-                  <TH className="text-right">Acciones</TH>
+                  <TH>{t('settings.lines.table.line')}</TH>
+                  <TH>{t('settings.lines.table.status')}</TH>
+                  <TH>{t('settings.lines.table.assignedAgent')}</TH>
+                  <TH>{t('settings.lines.table.lastActivity')}</TH>
+                  <TH className="text-right">{t('settings.lines.table.actions')}</TH>
                 </tr>
               </THead>
               <TBody>
@@ -276,7 +284,7 @@ export function LinesAndAgentsSection({
                         </span>
                       </TD>
                       <TD>
-                        <Badge tone={LINE_STATUS_TONE[line.status]}>{LINE_STATUS_LABEL[line.status]}</Badge>
+                        <Badge tone={LINE_STATUS_TONE[line.status]}>{t(LINE_STATUS_KEY[line.status])}</Badge>
                       </TD>
                       <TD>
                         <div className="flex items-center gap-2">
@@ -287,7 +295,7 @@ export function LinesAndAgentsSection({
                             onChange={(e) => handleAssign(line.id, e.target.value)}
                             className="!w-auto !py-1 text-xs"
                           >
-                            <option value="">Sin agente asignado</option>
+                            <option value="">{t('settings.lines.table.noAgentOption')}</option>
                             {(assistants ?? []).map((agent) => (
                               <option key={agent.id} value={agent.id}>
                                 {agent.name}
@@ -296,7 +304,7 @@ export function LinesAndAgentsSection({
                           </Select>
                         </div>
                       </TD>
-                      <TD className="text-xs text-brand-400">{formatActivity(lastActivityByLine.get(line.id))}</TD>
+                      <TD className="text-xs text-brand-400">{formatActivity(lastActivityByLine.get(line.id), language, t('settings.lines.noActivity'))}</TD>
                       <TD className="text-right">
                         {canManage && line.status !== 'disconnected' && (
                           <Button variant="ghost" onClick={() => setConfirmingDeleteLineId(line.id)} className="!px-2 !py-1.5 text-xs !text-red-600">
@@ -312,10 +320,8 @@ export function LinesAndAgentsSection({
           )}
           {lines && lines.length > 0 && (
             <p className="flex flex-wrap items-center justify-between gap-2 text-xs text-brand-400">
-              <span>Cada línea de WhatsApp solo puede tener un agente de IA asignado.</span>
-              <span>
-                Mostrando {lines.length} de {lines.length} líneas
-              </span>
+              <span>{t('settings.lines.footerNote')}</span>
+              <span>{t('settings.lines.showingCount', { shown: lines.length, total: lines.length })}</span>
             </p>
           )}
         </>
@@ -324,16 +330,16 @@ export function LinesAndAgentsSection({
       {tab === 'agentes' && (
         <>
           {!assistants && !error && <PageSpinner />}
-          {assistants && assistants.length === 0 && <EmptyState>Todavía no tienes ningún agente configurado.</EmptyState>}
+          {assistants && assistants.length === 0 && <EmptyState>{t('settings.lines.agentsEmpty')}</EmptyState>}
           {assistants && assistants.length > 0 && (
             <Table>
               <THead>
                 <tr>
-                  <TH>Agente</TH>
-                  <TH>Modelo</TH>
-                  <TH>Estado</TH>
-                  <TH>Líneas asignadas</TH>
-                  <TH className="text-right">Acciones</TH>
+                  <TH>{t('settings.lines.agentTable.agent')}</TH>
+                  <TH>{t('settings.lines.agentTable.model')}</TH>
+                  <TH>{t('settings.lines.agentTable.status')}</TH>
+                  <TH>{t('settings.lines.agentTable.assignedLines')}</TH>
+                  <TH className="text-right">{t('settings.lines.agentTable.actions')}</TH>
                 </tr>
               </THead>
               <TBody>
@@ -348,12 +354,16 @@ export function LinesAndAgentsSection({
                         </span>
                       </TD>
                       <TD className="text-xs text-brand-500">
-                        {PROVIDER_LABEL[agent.provider]} · {agent.model}
+                        {t(PROVIDER_KEY[agent.provider])} · {agent.model}
                       </TD>
                       <TD>
-                        <Badge tone={agent.is_active ? 'success' : 'warning'}>{agent.is_active ? 'Activo' : 'Inactivo'}</Badge>
+                        <Badge tone={agent.is_active ? 'success' : 'warning'}>{t(agent.is_active ? 'common.status.active' : 'common.status.inactive')}</Badge>
                       </TD>
-                      <TD className="text-xs text-brand-500">{usage === 0 ? 'Ninguna' : `${usage} línea${usage === 1 ? '' : 's'}`}</TD>
+                      <TD className="text-xs text-brand-500">
+                        {usage === 0
+                          ? t('settings.lines.agentTable.noLines')
+                          : t(usage === 1 ? 'settings.lines.agentTable.linesOne' : 'settings.lines.agentTable.linesOther', { count: usage })}
+                      </TD>
                       <TD className="text-right">
                         <div className="flex items-center justify-end gap-1">
                           <Button variant="ghost" onClick={() => setAgentDrawer({ open: true, assistantId: agent.id })} className="!px-2 !py-1.5 text-xs">
@@ -406,9 +416,9 @@ export function LinesAndAgentsSection({
         onConfirm={() => confirmingDeleteLineId && handleDeleteLine(confirmingDeleteLineId)}
         loading={!!deletingLineId}
         error={deleteLineError}
-        title="Desconectar línea de WhatsApp"
-        description={`Vas a desconectar "${lines?.find((l) => l.id === confirmingDeleteLineId)?.display_name ?? ''}". No va a poder enviar ni recibir mensajes nunca más. Si ya tiene conversaciones, se conservan con su historial completo y la línea queda marcada como desconectada en vez de eliminarse; si no tiene ninguna, se elimina del todo.`}
-        confirmLabel="Desconectar"
+        title={t('settings.lines.deleteLine.title')}
+        description={t('settings.lines.deleteLine.description', { name: lines?.find((l) => l.id === confirmingDeleteLineId)?.display_name ?? '' })}
+        confirmLabel={t('settings.lines.deleteLine.confirm')}
       />
 
       <ConfirmDialog
@@ -420,9 +430,9 @@ export function LinesAndAgentsSection({
         onConfirm={() => confirmingDeleteAgentId && handleDeleteAgent(confirmingDeleteAgentId)}
         loading={!!deletingAgentId}
         error={deleteAgentError}
-        title="Eliminar agente"
-        description={`Vas a eliminar "${assistants?.find((a) => a.id === confirmingDeleteAgentId)?.name ?? ''}". Si está asignado a alguna línea, primero tenés que reasignarla.`}
-        confirmLabel="Eliminar"
+        title={t('settings.lines.deleteAgent.title')}
+        description={t('settings.lines.deleteAgent.description', { name: assistants?.find((a) => a.id === confirmingDeleteAgentId)?.name ?? '' })}
+        confirmLabel={t('common.actions.delete')}
       />
     </div>
   )

@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
+import { useLanguage } from '../../contexts/LanguageContext'
 import { AuthSplitLayout } from '../../components/layout/AuthSplitLayout'
 import { Button, FieldError, IconInput, Input, Label, PasswordInput } from '../../components/ui'
 import { GoogleIcon, LockIcon, MailIcon } from '../../components/icons'
@@ -8,6 +9,7 @@ import { isNotBlank, isValidEmail, isValidPassword, normalizeEmail, PASSWORD_MIN
 
 export function Signup() {
   const { session, loading, signUpWithPassword, signInWithGoogle } = useAuth()
+  const { t } = useLanguage()
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -20,10 +22,10 @@ export function Signup() {
     return <Navigate to="/" replace />
   }
 
-  const fullNameError = touched && !isNotBlank(fullName) ? 'Ingresa tu nombre.' : undefined
-  const emailError = touched && !isValidEmail(email) ? 'Ingresa un correo válido.' : undefined
+  const fullNameError = touched && !isNotBlank(fullName) ? t('auth.errors.nameRequired') : undefined
+  const emailError = touched && !isValidEmail(email) ? t('auth.errors.invalidEmail') : undefined
   const passwordError =
-    touched && !isValidPassword(password) ? `La contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres.` : undefined
+    touched && !isValidPassword(password) ? t('auth.errors.passwordMinLength', { min: PASSWORD_MIN_LENGTH }) : undefined
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -35,7 +37,7 @@ export function Signup() {
     const { error, needsEmailConfirmation } = await signUpWithPassword(normalizeEmail(email), password, fullName.trim())
     setSubmitting(false)
     if (error) {
-      setFormError(error.toLowerCase().includes('already registered') ? 'Ya existe una cuenta con este correo.' : error)
+      setFormError(error.toLowerCase().includes('already registered') ? t('auth.errors.emailAlreadyRegistered') : error)
       return
     }
     if (needsEmailConfirmation) setConfirmationSent(true)
@@ -51,40 +53,40 @@ export function Signup() {
     <AuthSplitLayout
       topRight={
         <span className="flex items-center gap-3 text-sm">
-          <span className="hidden text-brand-400 sm:inline">¿Ya tienes cuenta?</span>
+          <span className="hidden text-brand-400 sm:inline">{t('auth.signup.hasAccount')}</span>
           <Link to="/login" className="rounded-lg border border-accent-200 px-3 py-1.5 font-medium text-accent-600 hover:bg-accent-50">
-            Inicia sesión
+            {t('auth.signup.signIn')}
           </Link>
         </span>
       }
     >
       <div className="animate-fade-in">
-        <h1 className="text-2xl font-extrabold text-brand-800 sm:text-3xl">Crea tu cuenta</h1>
-        <p className="mt-1 text-brand-400">Empieza a convertir conversaciones en oportunidades.</p>
+        <h1 className="text-2xl font-extrabold text-brand-800 sm:text-3xl">{t('auth.signup.title')}</h1>
+        <p className="mt-1 text-brand-400">{t('auth.signup.subtitle')}</p>
 
         {confirmationSent ? (
           <p className="mt-6 rounded-lg bg-accent-50 px-4 py-3 text-sm text-accent-700">
-            Te enviamos un correo a <span className="font-medium">{normalizeEmail(email)}</span> para confirmar tu cuenta. Ábrelo para
-            continuar.
+            {t('auth.signup.confirmationSent.prefix')} <span className="font-medium">{normalizeEmail(email)}</span>{' '}
+            {t('auth.signup.confirmationSent.suffix')}
           </p>
         ) : (
           <>
             <form onSubmit={handleSubmit} noValidate className="mt-6 space-y-4">
               <div>
-                <Label htmlFor="fullName">Tu nombre</Label>
+                <Label htmlFor="fullName">{t('auth.signup.yourName')}</Label>
                 <Input
                   id="fullName"
                   autoComplete="name"
                   value={fullName}
                   invalid={!!fullNameError}
                   onChange={(e) => setFullName(e.target.value)}
-                  placeholder="Nombre y apellido"
+                  placeholder={t('auth.namePlaceholder')}
                 />
                 <FieldError message={fullNameError} />
               </div>
 
               <div>
-                <Label htmlFor="email">Correo electrónico</Label>
+                <Label htmlFor="email">{t('auth.email')}</Label>
                 <IconInput
                   id="email"
                   type="email"
@@ -99,7 +101,7 @@ export function Signup() {
               </div>
 
               <div>
-                <Label htmlFor="password">Contraseña</Label>
+                <Label htmlFor="password">{t('auth.password')}</Label>
                 <PasswordInput
                   id="password"
                   autoComplete="new-password"
@@ -107,7 +109,7 @@ export function Signup() {
                   value={password}
                   invalid={!!passwordError}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Mínimo 8 caracteres"
+                  placeholder={t('auth.signup.passwordPlaceholder')}
                 />
                 <FieldError message={passwordError} />
               </div>
@@ -115,22 +117,21 @@ export function Signup() {
               {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
 
               <Button type="submit" variant="secondary" className="w-full" disabled={submitting}>
-                {submitting ? 'Creando cuenta…' : 'Crear cuenta'}
+                {submitting ? t('auth.signup.submitting') : t('auth.signup.submit')}
               </Button>
             </form>
 
             <div className="my-5 flex items-center gap-3 text-xs text-brand-300">
-              <div className="h-px flex-1 bg-brand-100" />o continúa con
+              <div className="h-px flex-1 bg-brand-100" />
+              {t('auth.orContinueWith')}
               <div className="h-px flex-1 bg-brand-100" />
             </div>
 
             <Button type="button" variant="ghost" className="w-full" onClick={handleGoogle}>
-              <GoogleIcon /> Registrarte con Google
+              <GoogleIcon /> {t('auth.signup.continueWithGoogle')}
             </Button>
 
-            <p className="mt-6 text-center text-xs text-brand-300">
-              Al continuar podrás crear tu propia empresa en Leadly, o esperar a que un administrador te invite a una existente.
-            </p>
+            <p className="mt-6 text-center text-xs text-brand-300">{t('auth.signup.disclaimer')}</p>
           </>
         )}
       </div>

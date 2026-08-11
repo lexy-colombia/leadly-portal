@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
+import { useLanguage } from '../../contexts/LanguageContext'
+import type { TranslationKey } from '../../i18n/translations'
 import {
   computePipelineMetrics,
   listOpportunities,
@@ -20,17 +22,28 @@ import { OpportunityListView } from './opportunities/OpportunityListView'
 import { OpportunityPanel } from './opportunities/OpportunityPanel'
 import { PipelineSettingsDrawer } from './opportunities/PipelineSettingsDrawer'
 
-const PRIORITY_LABEL: Record<OpportunityPriority, string> = { baja: 'Baja', media: 'Media', alta: 'Alta' }
+const PRIORITY_LABEL: Record<OpportunityPriority, TranslationKey> = {
+  baja: 'opportunities.priority.low',
+  media: 'opportunities.priority.medium',
+  alta: 'opportunities.priority.high',
+}
 type SortBy = 'recent' | 'value_desc' | 'value_asc' | 'close_date'
 
 const PRIORITY_TONE: Record<OpportunityPriority, 'neutral' | 'warning' | 'danger'> = { baja: 'neutral', media: 'warning', alta: 'danger' }
 
+const VIEW_MODE_LABEL: Record<'kanban' | 'lista', TranslationKey> = {
+  kanban: 'opportunities.view.kanban',
+  lista: 'opportunities.view.list',
+}
+
+// Currency stays Colombian formatting regardless of UI language -- these are
+// COP values, not something that should re-render as USD-style grouping.
 function formatCurrency(value: number, currency = 'COP'): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 }
 
-function formatShortDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })
+function formatShortDate(iso: string, locale: string): string {
+  return new Date(iso).toLocaleDateString(locale, { day: '2-digit', month: 'short' })
 }
 
 function formatCompactCurrency(value: number): string {
@@ -51,6 +64,8 @@ function MetricTile({ label, value, tone = 'neutral' }: { label: string; value: 
 
 export function Oportunidades() {
   const { profile } = useAuth()
+  const { t, language } = useLanguage()
+  const locale = language === 'en' ? 'en-US' : 'es-CO'
   const isAdmin = profile?.role === 'tenant_admin'
   const [pipelines, setPipelines] = useState<CrmPipeline[] | undefined>(undefined)
   const [selectedPipelineId, setSelectedPipelineId] = useState<string | null>(null)
@@ -88,14 +103,14 @@ export function Oportunidades() {
         setPipelines(list)
         setSelectedPipelineId((prev) => (prev && list.some((p) => p.id === prev) ? prev : (list[0]?.id ?? null)))
       })
-      .catch((err) => setError(err.message ?? 'No se pudo cargar el pipeline.'))
+      .catch((err) => setError(err.message ?? t('opportunities.errors.loadPipeline')))
   }
 
   function reload() {
     if (!profile?.tenant_id) return
     listOpportunities(profile.tenant_id, selectedPipelineId ?? undefined)
       .then(setOpportunities)
-      .catch((err) => setError(err.message ?? 'No se pudieron cargar las oportunidades.'))
+      .catch((err) => setError(err.message ?? t('opportunities.errors.loadOpportunities')))
     listTasks(profile.tenant_id)
       .then(setTasks)
       .catch(() => {})
@@ -156,7 +171,7 @@ export function Oportunidades() {
       setNewPipelineName('')
       setPipelinePopoverOpen(false)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo crear el pipeline.')
+      setError(err instanceof Error ? err.message : t('opportunities.errors.createPipeline'))
     } finally {
       setCreatingPipeline(false)
     }
@@ -227,7 +242,7 @@ export function Oportunidades() {
       await moveOpportunityToStage(oppId, stage)
       reload()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo mover la oportunidad.')
+      setError(err instanceof Error ? err.message : t('opportunities.errors.moveOpportunity'))
       reload()
     } finally {
       setMovingId(null)
@@ -250,7 +265,7 @@ export function Oportunidades() {
             onClick={() => setPipelinePopoverOpen((o) => !o)}
             className="flex items-center gap-1.5 rounded-full border border-brand-200 px-2.5 py-1 text-xs font-medium text-brand-700 hover:border-brand-300"
           >
-            Pipeline: {pipeline?.name ?? '—'}
+            {t('opportunities.pipeline.label', { name: pipeline?.name ?? t('opportunities.pipeline.none') })}
             <ChevronLeftIcon width={12} height={12} className="-rotate-90 text-brand-300" />
           </button>
 
@@ -277,7 +292,7 @@ export function Oportunidades() {
                   <Input
                     value={newPipelineName}
                     onChange={(e) => setNewPipelineName(e.target.value)}
-                    placeholder="Nuevo pipeline..."
+                    placeholder={t('opportunities.pipeline.newPlaceholder')}
                     className="!py-1.5 text-xs"
                   />
                   <Button type="submit" variant="secondary" disabled={creatingPipeline || !newPipelineName.trim()} className="!px-2.5 !py-1.5 text-xs shrink-0">
@@ -293,7 +308,7 @@ export function Oportunidades() {
           <button
             type="button"
             onClick={() => setSettingsOpen(true)}
-            aria-label="Configurar pipeline"
+            aria-label={t('opportunities.pipeline.configureAria')}
             className="rounded-full border border-brand-200 p-1 text-brand-500 hover:border-brand-300 hover:bg-brand-50"
           >
             <SettingsIcon width={14} height={14} />
@@ -310,13 +325,13 @@ export function Oportunidades() {
                 viewMode === mode ? 'bg-white text-brand-800 shadow-sm' : 'text-brand-400 hover:text-brand-700'
               }`}
             >
-              {mode}
+              {t(VIEW_MODE_LABEL[mode])}
             </button>
           ))}
         </div>
 
         <Select value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)} className="!w-auto !py-1 text-xs">
-          <option value="">Todos los responsables</option>
+          <option value="">{t('opportunities.filters.owner.all')}</option>
           {agents.map((a) => (
             <option key={a.id} value={a.id}>
               {a.full_name}
@@ -325,10 +340,10 @@ export function Oportunidades() {
         </Select>
 
         <Select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)} className="!w-auto !py-1 text-xs">
-          <option value="recent">Ordenar por: Más reciente</option>
-          <option value="value_desc">Ordenar por: Valor (mayor a menor)</option>
-          <option value="value_asc">Ordenar por: Valor (menor a mayor)</option>
-          <option value="close_date">Ordenar por: Cierre más próximo</option>
+          <option value="recent">{t('opportunities.sort.recent')}</option>
+          <option value="value_desc">{t('opportunities.sort.valueDesc')}</option>
+          <option value="value_asc">{t('opportunities.sort.valueAsc')}</option>
+          <option value="close_date">{t('opportunities.sort.closeDate')}</option>
         </Select>
 
         <div ref={filtersRef} className="relative">
@@ -340,16 +355,16 @@ export function Oportunidades() {
             }`}
           >
             <FilterIcon width={13} height={13} />
-            Filtros
+            {t('opportunities.filters.toggle')}
             {hasActiveFilters && <span className="h-1.5 w-1.5 rounded-full bg-accent-500" />}
           </button>
 
           {filtersOpen && (
             <div className="absolute left-0 top-full z-40 mt-2 w-56 max-w-[calc(100vw-2rem)] space-y-3 rounded-2xl border border-brand-100 bg-white p-4 shadow-lg">
               <div>
-                <label className="mb-1 block text-xs font-medium text-brand-400">Etapa</label>
+                <label className="mb-1 block text-xs font-medium text-brand-400">{t('opportunities.filters.stage.label')}</label>
                 <Select value={stageFilter} onChange={(e) => setStageFilter(e.target.value)} className="!py-1.5 text-sm">
-                  <option value="">Todas</option>
+                  <option value="">{t('opportunities.filters.stage.all')}</option>
                   {stages.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name}
@@ -358,12 +373,12 @@ export function Oportunidades() {
                 </Select>
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium text-brand-400">Prioridad</label>
+                <label className="mb-1 block text-xs font-medium text-brand-400">{t('opportunities.filters.priority.label')}</label>
                 <Select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value as OpportunityPriority | '')} className="!py-1.5 text-sm">
-                  <option value="">Todas</option>
+                  <option value="">{t('opportunities.filters.priority.all')}</option>
                   {(Object.keys(PRIORITY_LABEL) as OpportunityPriority[]).map((p) => (
                     <option key={p} value={p}>
-                      {PRIORITY_LABEL[p]}
+                      {t(PRIORITY_LABEL[p])}
                     </option>
                   ))}
                 </Select>
@@ -378,7 +393,7 @@ export function Oportunidades() {
                   }}
                   className="text-xs font-medium text-brand-400 hover:text-brand-700"
                 >
-                  Limpiar filtros
+                  {t('common.actions.clearFilters')}
                 </button>
               )}
             </div>
@@ -386,18 +401,21 @@ export function Oportunidades() {
         </div>
 
         <Button variant="primary" onClick={() => setDrawer({ open: true, opportunity: null })} disabled={!pipeline} className="!ml-auto !py-1 !text-xs">
-          <PlusIcon width={14} height={14} /> Nueva oportunidad
+          <PlusIcon width={14} height={14} /> {t('opportunities.actions.new')}
         </Button>
       </div>
 
       <div className="grid grid-cols-3 gap-1 sm:grid-cols-4 lg:grid-cols-7">
-        <MetricTile label="Valor total" value={formatCompactCurrency(metrics.totalValue)} />
-        <MetricTile label="Ganado" value={formatCompactCurrency(metrics.wonValue)} tone="success" />
-        <MetricTile label="Perdido" value={formatCompactCurrency(metrics.lostValue)} tone="danger" />
-        <MetricTile label="Oportunidades" value={String(metrics.count)} />
-        <MetricTile label="Conversión" value={metrics.conversionPct === null ? '—' : `${Math.round(metrics.conversionPct)}%`} />
-        <MetricTile label="Tiempo promedio" value={metrics.avgCloseDays === null ? '—' : `${Math.round(metrics.avgCloseDays)} días`} />
-        <MetricTile label="Tareas pendientes" value={tasks === null ? '—' : String(pendingTaskCount)} />
+        <MetricTile label={t('opportunities.metrics.totalValue')} value={formatCompactCurrency(metrics.totalValue)} />
+        <MetricTile label={t('opportunities.metrics.won')} value={formatCompactCurrency(metrics.wonValue)} tone="success" />
+        <MetricTile label={t('opportunities.metrics.lost')} value={formatCompactCurrency(metrics.lostValue)} tone="danger" />
+        <MetricTile label={t('opportunities.metrics.count')} value={String(metrics.count)} />
+        <MetricTile label={t('opportunities.metrics.conversion')} value={metrics.conversionPct === null ? '—' : `${Math.round(metrics.conversionPct)}%`} />
+        <MetricTile
+          label={t('opportunities.metrics.avgTime')}
+          value={metrics.avgCloseDays === null ? '—' : t('opportunities.metrics.avgTimeValue', { days: Math.round(metrics.avgCloseDays) })}
+        />
+        <MetricTile label={t('opportunities.metrics.pendingTasks')} value={tasks === null ? '—' : String(pendingTaskCount)} />
       </div>
 
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
@@ -475,7 +493,7 @@ export function Oportunidades() {
 
                       <div className="mt-1.5 flex items-center justify-between">
                         <span className="flex items-center gap-1.5">
-                          <Badge tone={PRIORITY_TONE[opp.priority]}>{PRIORITY_LABEL[opp.priority]}</Badge>
+                          <Badge tone={PRIORITY_TONE[opp.priority]}>{t(PRIORITY_LABEL[opp.priority])}</Badge>
                           {!!pendingTaskCountByOpportunity.get(opp.id) && (
                             <button
                               type="button"
@@ -485,7 +503,7 @@ export function Oportunidades() {
                                 setPanelOpportunity(opp)
                               }}
                               className="flex items-center gap-0.5 rounded-full bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium text-brand-500 hover:bg-brand-100 hover:text-brand-700"
-                              title="Ver tareas pendientes"
+                              title={t('opportunities.card.pendingTasksTitle')}
                             >
                               <CheckIcon width={9} height={9} />
                               {pendingTaskCountByOpportunity.get(opp.id)}
@@ -503,7 +521,7 @@ export function Oportunidades() {
                             <a
                               href={`tel:${opp.contact.phone}`}
                               onClick={(e) => e.stopPropagation()}
-                              aria-label="Llamar"
+                              aria-label={t('opportunities.card.callAria')}
                               className="rounded-full p-0.5 hover:bg-brand-50 hover:text-accent-600"
                             >
                               <PhoneIcon width={12} height={12} />
@@ -513,7 +531,7 @@ export function Oportunidades() {
                             <a
                               href={`mailto:${opp.contact.email}`}
                               onClick={(e) => e.stopPropagation()}
-                              aria-label="Enviar correo"
+                              aria-label={t('opportunities.card.emailAria')}
                               className="rounded-full p-0.5 hover:bg-brand-50 hover:text-accent-600"
                             >
                               <MailIcon width={12} height={12} />
@@ -523,11 +541,11 @@ export function Oportunidades() {
                             <CalendarIcon width={12} height={12} />
                           </span>
                         </div>
-                        <span className="text-[10px] text-brand-300">{formatShortDate(opp.expected_close_date ?? opp.created_at)}</span>
+                        <span className="text-[10px] text-brand-300">{formatShortDate(opp.expected_close_date ?? opp.created_at, locale)}</span>
                       </div>
                     </div>
                   ))}
-                  {stageOpps.length === 0 && <p className="px-1 py-2 text-center text-[11px] text-brand-300">Sin oportunidades</p>}
+                  {stageOpps.length === 0 && <p className="px-1 py-2 text-center text-[11px] text-brand-300">{t('opportunities.card.empty')}</p>}
                 </div>
               </div>
             )

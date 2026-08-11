@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
+import { useLanguage } from '../../contexts/LanguageContext'
+import type { TranslationKey } from '../../i18n/translations'
 import { listAppointmentsForTenantRange } from '../../lib/api/appointments'
 import type { AppointmentStatus, AppointmentWithContact } from '../../types/domain'
 import { Button, Card, PageSpinner } from '../../components/ui'
@@ -7,7 +9,15 @@ import { ChevronLeftIcon, PlusIcon } from '../../components/icons'
 import { AppointmentFormDrawer } from './calendar/AppointmentFormDrawer'
 import { AppointmentDetailDrawer } from './calendar/AppointmentDetailDrawer'
 
-const WEEKDAY_LABELS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
+const WEEKDAY_KEYS: TranslationKey[] = [
+  'calendar.weekday.mon',
+  'calendar.weekday.tue',
+  'calendar.weekday.wed',
+  'calendar.weekday.thu',
+  'calendar.weekday.fri',
+  'calendar.weekday.sat',
+  'calendar.weekday.sun',
+]
 
 const STATUS_DOT: Record<AppointmentStatus, string> = {
   activa: 'bg-amber-500',
@@ -48,6 +58,7 @@ function startOfGrid(monthStart: Date): Date {
 
 export function Calendario() {
   const { profile } = useAuth()
+  const { t, language } = useLanguage()
   const tenantId = profile?.tenant_id ?? null
 
   const [month, setMonth] = useState(() => startOfMonth(new Date()))
@@ -69,7 +80,7 @@ export function Calendario() {
     if (!tenantId) return
     listAppointmentsForTenantRange(tenantId, gridStart.toISOString(), gridEnd.toISOString())
       .then(setAppointments)
-      .catch((err) => setError(err.message ?? 'No se pudieron cargar las citas.'))
+      .catch((err) => setError(err.message ?? t('calendar.errors.loadFailed')))
   }
 
   useEffect(reload, [tenantId, gridStart, gridEnd])
@@ -94,7 +105,8 @@ export function Calendario() {
 
   const today = new Date()
   const todayKey = dateKey(today)
-  const monthLabel = month.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' })
+  const locale = language === 'en' ? 'en-US' : 'es-CO'
+  const monthLabel = month.toLocaleDateString(locale, { month: 'long', year: 'numeric' })
 
   if (!tenantId) return <PageSpinner />
 
@@ -103,17 +115,17 @@ export function Calendario() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-bold capitalize text-brand-800 sm:text-2xl">{monthLabel}</h1>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" onClick={() => setMonth(addMonths(month, -1))} className="!px-2.5 !py-1.5" aria-label="Mes anterior">
+          <Button variant="ghost" onClick={() => setMonth(addMonths(month, -1))} className="!px-2.5 !py-1.5" aria-label={t('calendar.aria.prevMonth')}>
             <ChevronLeftIcon width={16} height={16} />
           </Button>
           <Button variant="ghost" onClick={() => setMonth(startOfMonth(new Date()))} className="!px-3 !py-1.5 text-xs">
-            Hoy
+            {t('calendar.today')}
           </Button>
-          <Button variant="ghost" onClick={() => setMonth(addMonths(month, 1))} className="!px-2.5 !py-1.5" aria-label="Mes siguiente">
+          <Button variant="ghost" onClick={() => setMonth(addMonths(month, 1))} className="!px-2.5 !py-1.5" aria-label={t('calendar.aria.nextMonth')}>
             <ChevronLeftIcon width={16} height={16} className="rotate-180" />
           </Button>
           <Button variant="secondary" onClick={() => setFormDrawer({ open: true })} className="!px-3 !py-1.5 text-xs">
-            <PlusIcon width={14} height={14} /> Nueva cita
+            <PlusIcon width={14} height={14} /> {t('calendar.actions.new')}
           </Button>
         </div>
       </div>
@@ -122,9 +134,9 @@ export function Calendario() {
 
       <Card padded={false} className="overflow-hidden">
         <div className="grid grid-cols-7 border-b border-brand-100 bg-brand-50/50">
-          {WEEKDAY_LABELS.map((label) => (
-            <div key={label} className="px-2 py-2 text-center text-[11px] font-semibold uppercase tracking-wide text-brand-400">
-              {label}
+          {WEEKDAY_KEYS.map((key) => (
+            <div key={key} className="px-2 py-2 text-center text-[11px] font-semibold uppercase tracking-wide text-brand-400">
+              {t(key)}
             </div>
           ))}
         </div>
@@ -168,11 +180,11 @@ export function Calendario() {
                       >
                         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[appt.status]}`} />
                         <span className="truncate">
-                          {new Date(appt.scheduled_at).toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit' })} {appt.contact_full_name}
+                          {new Date(appt.scheduled_at).toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' })} {appt.contact_full_name}
                         </span>
                       </button>
                     ))}
-                    {overflow > 0 && <p className="px-1.5 text-[10px] text-brand-400">+{overflow} más</p>}
+                    {overflow > 0 && <p className="px-1.5 text-[10px] text-brand-400">{t('calendar.moreCount', { count: overflow })}</p>}
                   </div>
                 </div>
               )

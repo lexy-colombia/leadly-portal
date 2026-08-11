@@ -1,12 +1,14 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { inviteTenantUser } from '../../lib/api/users'
 import type { Profile } from '../../types/domain'
+import { useLanguage } from '../../contexts/LanguageContext'
+import type { TranslationKey } from '../../i18n/translations'
 import { Button, Drawer, FieldError, Input, Label, Select } from '../../components/ui'
 import { isNotBlank, isValidE164Phone, isValidEmail } from '../../lib/validation'
 
-const ROLE_LABEL: Record<'tenant_admin' | 'tenant_agent', string> = {
-  tenant_admin: 'Administrador',
-  tenant_agent: 'Agente',
+const ROLE_LABEL_KEY: Record<'tenant_admin' | 'tenant_agent', TranslationKey> = {
+  tenant_admin: 'account.role.tenantAdmin',
+  tenant_agent: 'account.role.tenantAgent',
 }
 
 /** Shared by the backoffice (from a Cliente's "Usuarios" section) and the
@@ -24,6 +26,7 @@ export function UserInviteDrawer({
   tenantId: string
   onInvited: (profile: Profile) => void
 }) {
+  const { t } = useLanguage()
   const [email, setEmail] = useState('')
   const [fullName, setFullName] = useState('')
   const [phone, setPhone] = useState('')
@@ -44,9 +47,9 @@ export function UserInviteDrawer({
     setSuccess(false)
   }, [open])
 
-  const emailError = touched && !isValidEmail(email) ? 'Ingresa un correo válido.' : undefined
-  const fullNameError = touched && !isNotBlank(fullName) ? 'El nombre es obligatorio.' : undefined
-  const phoneError = touched && isNotBlank(phone) && !isValidE164Phone(phone) ? 'Teléfono inválido (formato internacional).' : undefined
+  const emailError = touched && !isValidEmail(email) ? t('auth.errors.invalidEmail') : undefined
+  const fullNameError = touched && !isNotBlank(fullName) ? t('auth.errors.nameRequired') : undefined
+  const phoneError = touched && isNotBlank(phone) && !isValidE164Phone(phone) ? t('inbox.newConv.errors.invalidPhone') : undefined
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -66,39 +69,39 @@ export function UserInviteDrawer({
       onInvited(profile)
       setSuccess(true)
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'No se pudo invitar al usuario.')
+      setFormError(err instanceof Error ? err.message : t('account.invite.errors.failed'))
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <Drawer open={open} onClose={onClose} title="Invitar usuario" description="Le llegará un correo para crear su contraseña.">
+    <Drawer open={open} onClose={onClose} title={t('account.invite.title')} description={t('account.invite.description')}>
       {success ? (
         <div className="space-y-4">
           <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-            Invitación enviada a <span className="font-medium">{email}</span>.
+            {t('account.invite.sentPrefix')} <span className="font-medium">{email}</span>.
           </p>
           <Button type="button" variant="ghost" onClick={onClose}>
-            Cerrar
+            {t('common.actions.close')}
           </Button>
         </div>
       ) : (
         <form onSubmit={handleSubmit} noValidate className="space-y-4">
           <div>
-            <Label htmlFor="invite-full-name">Nombre completo</Label>
+            <Label htmlFor="invite-full-name">{t('auth.signup.yourName')}</Label>
             <Input
               id="invite-full-name"
               value={fullName}
               invalid={!!fullNameError}
               onChange={(e) => setFullName(e.target.value)}
-              placeholder="Nombre y apellido"
+              placeholder={t('auth.namePlaceholder')}
             />
             <FieldError message={fullNameError} />
           </div>
 
           <div>
-            <Label htmlFor="invite-email">Correo</Label>
+            <Label htmlFor="invite-email">{t('account.field.email')}</Label>
             <Input
               id="invite-email"
               type="email"
@@ -111,7 +114,7 @@ export function UserInviteDrawer({
           </div>
 
           <div>
-            <Label htmlFor="invite-phone">Teléfono (opcional)</Label>
+            <Label htmlFor="invite-phone">{t('account.invite.phoneOptional')}</Label>
             <Input
               id="invite-phone"
               value={phone}
@@ -123,11 +126,11 @@ export function UserInviteDrawer({
           </div>
 
           <div>
-            <Label htmlFor="invite-role">Rol</Label>
+            <Label htmlFor="invite-role">{t('account.invite.role')}</Label>
             <Select id="invite-role" value={role} onChange={(e) => setRole(e.target.value as typeof role)}>
               {(['tenant_admin', 'tenant_agent'] as const).map((r) => (
                 <option key={r} value={r}>
-                  {ROLE_LABEL[r]}
+                  {t(ROLE_LABEL_KEY[r])}
                 </option>
               ))}
             </Select>
@@ -137,10 +140,10 @@ export function UserInviteDrawer({
 
           <div className="flex gap-2 border-t border-brand-100 pt-5">
             <Button type="submit" variant="secondary" disabled={submitting}>
-              {submitting ? 'Invitando…' : 'Enviar invitación'}
+              {submitting ? t('account.invite.submitting') : t('account.invite.submit')}
             </Button>
             <Button type="button" variant="ghost" onClick={onClose}>
-              Cancelar
+              {t('common.actions.cancel')}
             </Button>
           </div>
         </form>

@@ -1,5 +1,14 @@
 import { supabase } from '../supabaseClient'
 import type { CrmTask, TaskPriority, TaskStatus } from '../../types/domain'
+import type { TranslationKey } from '../../i18n/translations'
+
+// Shared between the Dashboard widget, Tareas, and TaskDrawer so the priority
+// wording never drifts between screens.
+export const TASK_PRIORITY_KEY: Record<TaskPriority, TranslationKey> = {
+  baja: 'tasks.priority.low',
+  media: 'tasks.priority.medium',
+  alta: 'tasks.priority.high',
+}
 
 export interface TaskInput {
   tenant_id: string

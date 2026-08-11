@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { createTask, updateTask } from '../../../lib/api/tasks'
+import { createTask, TASK_PRIORITY_KEY, updateTask } from '../../../lib/api/tasks'
 import type { TaskWithRelations } from '../../../lib/api/tasks'
 import { listContacts } from '../../../lib/api/contacts'
 import { listProfilesByTenant } from '../../../lib/api/users'
@@ -8,8 +8,7 @@ import type { CrmAttachment, CrmContact, Profile, TaskPriority } from '../../../
 import { Button, Drawer, FieldError, Input, Label, Select, Textarea } from '../../../components/ui'
 import { FileIcon, ImageIcon, PaperclipIcon } from '../../../components/icons'
 import { isNotBlank } from '../../../lib/validation'
-
-const PRIORITY_LABEL: Record<TaskPriority, string> = { baja: 'Baja', media: 'Media', alta: 'Alta' }
+import { useLanguage } from '../../../contexts/LanguageContext'
 
 function formatFileSize(bytes: number): string {
   if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`
@@ -20,6 +19,7 @@ function formatFileSize(bytes: number): string {
  * (crm_attachments.task_id needs a real row to point at) -- so this section
  * only renders for an existing task, never in the "create" form. */
 function TaskAttachments({ tenantId, taskId }: { tenantId: string; taskId: string }) {
+  const { t } = useLanguage()
   const inputRef = useRef<HTMLInputElement>(null)
   const [attachments, setAttachments] = useState<CrmAttachment[] | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -37,7 +37,7 @@ function TaskAttachments({ tenantId, taskId }: { tenantId: string; taskId: strin
     if (!file) return
     const validationError = validateTaskAttachmentFile(file)
     if (validationError) {
-      setError(validationError)
+      setError(t(validationError))
       return
     }
     setError(null)
@@ -46,7 +46,7 @@ function TaskAttachments({ tenantId, taskId }: { tenantId: string; taskId: strin
       await uploadTaskAttachment(tenantId, file, taskId)
       reload()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo subir el archivo.')
+      setError(err instanceof Error ? err.message : t('tasks.errors.uploadFailed'))
     } finally {
       setUploading(false)
     }
@@ -57,15 +57,15 @@ function TaskAttachments({ tenantId, taskId }: { tenantId: string; taskId: strin
       const url = await getAttachmentSignedUrl(attachment.storage_path)
       window.open(url, '_blank', 'noopener,noreferrer')
     } catch {
-      setError('No se pudo abrir el archivo.')
+      setError(t('tasks.errors.openAttachmentFailed'))
     }
   }
 
   return (
     <div>
-      <Label>Archivos adjuntos</Label>
-      {attachments === null && <p className="text-xs text-brand-400">Cargando…</p>}
-      {attachments && attachments.length === 0 && <p className="text-xs text-brand-400">Sin archivos todavía -- ej. una propuesta enviada.</p>}
+      <Label>{t('tasks.attachments.label')}</Label>
+      {attachments === null && <p className="text-xs text-brand-400">{t('common.status.loading')}</p>}
+      {attachments && attachments.length === 0 && <p className="text-xs text-brand-400">{t('tasks.attachments.empty')}</p>}
       {attachments && attachments.length > 0 && (
         <ul className="space-y-1.5">
           {attachments.map((a) => (
@@ -79,7 +79,7 @@ function TaskAttachments({ tenantId, taskId }: { tenantId: string; taskId: strin
                   {a.mime_type === 'application/pdf' ? <FileIcon width={15} height={15} /> : <ImageIcon width={15} height={15} />}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm text-brand-700">{a.original_filename ?? 'Archivo'}</span>
+                  <span className="block truncate text-sm text-brand-700">{a.original_filename ?? t('tasks.attachments.defaultName')}</span>
                   <span className="block text-xs text-brand-400">{formatFileSize(a.size_bytes)}</span>
                 </span>
               </button>
@@ -89,7 +89,7 @@ function TaskAttachments({ tenantId, taskId }: { tenantId: string; taskId: strin
       )}
       <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp,application/pdf" className="hidden" onChange={handleSelect} />
       <Button type="button" variant="ghost" onClick={() => inputRef.current?.click()} disabled={uploading} className="!mt-2 !px-3 !py-1.5 text-xs">
-        <PaperclipIcon width={13} height={13} /> {uploading ? 'Subiendo…' : 'Adjuntar archivo'}
+        <PaperclipIcon width={13} height={13} /> {uploading ? t('tasks.attachments.uploading') : t('tasks.attachments.attach')}
       </Button>
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
     </div>
@@ -114,6 +114,7 @@ export function TaskDrawer({
   defaultOpportunityId?: string | null
   onSaved: () => void
 }) {
+  const { t } = useLanguage()
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [priority, setPriority] = useState<TaskPriority>('media')
@@ -144,7 +145,7 @@ export function TaskDrawer({
     listProfilesByTenant(tenantId).then(setAgents).catch(() => {})
   }, [open, tenantId])
 
-  const titleError = touched && !isNotBlank(title) ? 'El título es obligatorio.' : undefined
+  const titleError = touched && !isNotBlank(title) ? t('tasks.field.titleRequired') : undefined
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -169,47 +170,47 @@ export function TaskDrawer({
       onSaved()
       onClose()
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'No se pudo guardar la tarea.')
+      setFormError(err instanceof Error ? err.message : t('tasks.errors.saveFailed'))
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <Drawer open={open} onClose={onClose} title={task ? 'Editar tarea' : 'Nueva tarea'} description="Seguimiento o recordatorio para un agente.">
+    <Drawer open={open} onClose={onClose} title={task ? t('tasks.drawer.editTitle') : t('tasks.drawer.newTitle')} description={t('tasks.drawer.description')}>
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <div>
-          <Label htmlFor="task-title">Título</Label>
-          <Input id="task-title" value={title} invalid={!!titleError} onChange={(e) => setTitle(e.target.value)} placeholder="Ej. Llamar para confirmar propuesta" />
+          <Label htmlFor="task-title">{t('tasks.field.title')}</Label>
+          <Input id="task-title" value={title} invalid={!!titleError} onChange={(e) => setTitle(e.target.value)} placeholder={t('tasks.field.titlePlaceholder')} />
           <FieldError message={titleError} />
         </div>
 
         <div>
-          <Label htmlFor="task-description">Descripción (opcional)</Label>
+          <Label htmlFor="task-description">{t('tasks.field.description')}</Label>
           <Textarea id="task-description" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <Label htmlFor="task-priority">Prioridad</Label>
+            <Label htmlFor="task-priority">{t('tasks.field.priority')}</Label>
             <Select id="task-priority" value={priority} onChange={(e) => setPriority(e.target.value as TaskPriority)}>
-              {(Object.keys(PRIORITY_LABEL) as TaskPriority[]).map((p) => (
+              {(Object.keys(TASK_PRIORITY_KEY) as TaskPriority[]).map((p) => (
                 <option key={p} value={p}>
-                  {PRIORITY_LABEL[p]}
+                  {t(TASK_PRIORITY_KEY[p])}
                 </option>
               ))}
             </Select>
           </div>
           <div>
-            <Label htmlFor="task-due">Fecha límite (opcional)</Label>
+            <Label htmlFor="task-due">{t('tasks.field.dueDate')}</Label>
             <Input id="task-due" type="datetime-local" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
           </div>
         </div>
 
         <div>
-          <Label htmlFor="task-contact">Contacto (opcional)</Label>
+          <Label htmlFor="task-contact">{t('tasks.field.contact')}</Label>
           <Select id="task-contact" value={contactId} onChange={(e) => setContactId(e.target.value)}>
-            <option value="">Sin contacto</option>
+            <option value="">{t('tasks.field.noContact')}</option>
             {contacts.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.full_name}
@@ -219,9 +220,9 @@ export function TaskDrawer({
         </div>
 
         <div>
-          <Label htmlFor="task-assigned">Asignada a (opcional)</Label>
+          <Label htmlFor="task-assigned">{t('tasks.field.assignedTo')}</Label>
           <Select id="task-assigned" value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)}>
-            <option value="">Sin asignar</option>
+            <option value="">{t('tasks.field.unassigned')}</option>
             {agents.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.full_name}
@@ -236,10 +237,10 @@ export function TaskDrawer({
 
         <div className="flex gap-2 border-t border-brand-100 pt-5">
           <Button type="submit" variant="secondary" disabled={submitting}>
-            {submitting ? 'Guardando…' : 'Guardar'}
+            {submitting ? t('common.actions.saving') : t('common.actions.save')}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>
-            Cancelar
+            {t('common.actions.cancel')}
           </Button>
         </div>
       </form>

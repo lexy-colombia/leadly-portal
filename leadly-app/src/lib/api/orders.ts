@@ -1,5 +1,16 @@
 import { supabase } from '../supabaseClient'
 import type { CrmContactAddress, CrmOrder, CrmOrderItem, OrderStatus } from '../../types/domain'
+import type { TranslationKey } from '../../i18n/translations'
+
+// Shared between Ventas.tsx, VentaDetalle.tsx, and OrderDrawer.tsx so the
+// status wording never drifts between screens.
+export const ORDER_STATUS_LABEL_KEY: Record<OrderStatus, TranslationKey> = {
+  cotizacion: 'orders.status.quote',
+  confirmada: 'orders.status.confirmed',
+  en_proceso: 'orders.status.inProgress',
+  entregada: 'orders.status.delivered',
+  cancelada: 'orders.status.cancelled',
+}
 
 export interface OrderItemInput {
   product_id?: string | null

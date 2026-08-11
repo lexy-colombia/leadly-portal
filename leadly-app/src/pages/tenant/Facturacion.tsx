@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
+import { useLanguage } from '../../contexts/LanguageContext'
+import type { Language, TranslationKey } from '../../i18n/translations'
 import {
   createCheckoutForInvoice,
   getActiveSubscriptionForTenant,
@@ -11,12 +13,12 @@ import { Badge, Button, Card, CardSection, EmptyState, PageSpinner, Pagination, 
 
 const PAGE_SIZE = 8
 
-const STATUS_LABEL: Record<PaymentInvoiceStatus, string> = {
-  PENDING: 'Pendiente',
-  PAID: 'Pagada',
-  OVERDUE: 'Vencida',
-  CANCELLED: 'Cancelada',
-  REFUNDED: 'Reembolsada',
+const STATUS_KEY: Record<PaymentInvoiceStatus, TranslationKey> = {
+  PENDING: 'billing.invoiceStatus.pending',
+  PAID: 'billing.invoiceStatus.paid',
+  OVERDUE: 'billing.invoiceStatus.overdue',
+  CANCELLED: 'billing.invoiceStatus.cancelled',
+  REFUNDED: 'billing.invoiceStatus.refunded',
 }
 
 const STATUS_TONE: Record<PaymentInvoiceStatus, 'success' | 'warning' | 'danger' | 'neutral'> = {
@@ -27,24 +29,27 @@ const STATUS_TONE: Record<PaymentInvoiceStatus, 'success' | 'warning' | 'danger'
   REFUNDED: 'neutral',
 }
 
-const SUBSCRIPTION_STATUS_LABEL: Record<BillingSubscription['status'], string> = {
-  ACTIVE: 'Activa',
-  CANCELLED: 'Cancelada',
-  PAST_DUE: 'En mora',
-  EXPIRED: 'Vencida',
-  PENDING_PAYMENT: 'Pendiente de pago',
+const SUBSCRIPTION_STATUS_KEY: Record<BillingSubscription['status'], TranslationKey> = {
+  ACTIVE: 'billing.subscriptionStatus.active',
+  CANCELLED: 'billing.subscriptionStatus.cancelled',
+  PAST_DUE: 'billing.subscriptionStatus.pastDue',
+  EXPIRED: 'billing.subscriptionStatus.expired',
+  PENDING_PAYMENT: 'billing.subscriptionStatus.pendingPayment',
 }
 
 function formatMoney(amountCents: number, currency: string): string {
+  // Currency stays Colombian-formatted regardless of language -- only surrounding labels translate.
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amountCents / 100)
 }
 
-function formatDate(iso: string | null): string {
+function formatDate(iso: string | null, language: Language): string {
   if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })
+  const locale = language === 'en' ? 'en-US' : 'es-CO'
+  return new Date(iso).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
 function PayButton({ invoice }: { invoice: PaymentInvoice }) {
+  const { t } = useLanguage()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -55,7 +60,7 @@ function PayButton({ invoice }: { invoice: PaymentInvoice }) {
       const checkoutUrl = await createCheckoutForInvoice(invoice.id, window.location.href)
       window.open(checkoutUrl, '_blank', 'noopener,noreferrer')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo generar el enlace de pago.')
+      setError(err instanceof Error ? err.message : t('billing.errors.payLinkFailed'))
     } finally {
       setLoading(false)
     }
@@ -64,7 +69,7 @@ function PayButton({ invoice }: { invoice: PaymentInvoice }) {
   return (
     <div className="text-right">
       <Button variant="secondary" onClick={handlePay} disabled={loading} className="!px-3 !py-1.5 text-xs">
-        {loading ? 'Generando…' : 'Pagar ahora'}
+        {loading ? t('billing.invoices.generating') : t('billing.invoices.payNow')}
       </Button>
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
     </div>
@@ -73,6 +78,7 @@ function PayButton({ invoice }: { invoice: PaymentInvoice }) {
 
 export function Facturacion() {
   const { profile } = useAuth()
+  const { t, language } = useLanguage()
   const tenantId = profile?.tenant_id ?? null
 
   const [subscription, setSubscription] = useState<BillingSubscription | null | undefined>(undefined)
@@ -85,11 +91,12 @@ export function Facturacion() {
     if (!tenantId) return
     getActiveSubscriptionForTenant(tenantId)
       .then(setSubscription)
-      .catch((err) => setError(err.message ?? 'No se pudo cargar tu plan.'))
+      .catch((err) => setError(err.message ?? t('billing.errors.loadPlan')))
     listInvoicesForTenant(tenantId)
       .then(setInvoices)
-      .catch((err) => setError(err.message ?? 'No se pudieron cargar tus facturas.'))
+      .catch((err) => setError(err.message ?? t('billing.errors.loadInvoices')))
     listBillingPlans().then(setPlans).catch(() => setPlans([]))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId])
 
   const plan = plans?.find((p) => p.id === subscription?.plan_id)
@@ -100,45 +107,49 @@ export function Facturacion() {
 
   return (
     <div className="animate-fade-in space-y-4">
-      <h1 className="text-xl font-bold text-brand-800 sm:text-2xl">Facturación</h1>
+      <h1 className="text-xl font-bold text-brand-800 sm:text-2xl">{t('billing.title')}</h1>
 
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
       <Card padded={false}>
-        <CardSection title="Tu plan">
+        <CardSection title={t('billing.plan.title')}>
           {subscription === undefined && <PageSpinner />}
-          {subscription === null && <EmptyState>Todavía no tienes un plan asignado. Contacta a Leadly para activar tu suscripción.</EmptyState>}
+          {subscription === null && <EmptyState>{t('billing.plan.empty')}</EmptyState>}
           {subscription && (
             <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
               <div>
-                <span className="font-medium text-brand-800">{plan?.name ?? 'Plan'}</span>
+                <span className="font-medium text-brand-800">{plan?.name ?? t('billing.plan.fallbackName')}</span>
                 <span className="ml-2 text-brand-400">
-                  {plan ? `${formatMoney(plan.amount_cents, plan.currency)}/${plan.billing_interval === 'monthly' ? 'mes' : 'año'}` : ''}
+                  {plan
+                    ? t(plan.billing_interval === 'monthly' ? 'billing.plan.priceMonthly' : 'billing.plan.priceYearly', {
+                        amount: formatMoney(plan.amount_cents, plan.currency),
+                      })
+                    : ''}
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-brand-400">Próximo vencimiento: {formatDate(subscription.current_period_end)}</span>
+                <span className="text-brand-400">{t('billing.plan.nextDue', { date: formatDate(subscription.current_period_end, language) })}</span>
                 <Badge tone={subscription.status === 'ACTIVE' ? 'success' : subscription.status === 'PENDING_PAYMENT' ? 'warning' : 'danger'}>
-                  {SUBSCRIPTION_STATUS_LABEL[subscription.status]}
+                  {t(SUBSCRIPTION_STATUS_KEY[subscription.status])}
                 </Badge>
               </div>
             </div>
           )}
         </CardSection>
 
-        <CardSection title="Historial de facturas">
+        <CardSection title={t('billing.invoices.title')}>
           {!invoices && <PageSpinner />}
-          {invoices && invoices.length === 0 && <EmptyState>Todavía no tienes facturas.</EmptyState>}
+          {invoices && invoices.length === 0 && <EmptyState>{t('billing.invoices.empty')}</EmptyState>}
           {pageItems && pageItems.length > 0 && (
             <>
               <Table bare>
                 <THead>
                   <tr>
-                    <TH>Factura</TH>
-                    <TH>Monto</TH>
-                    <TH>Estado</TH>
-                    <TH>Vence</TH>
-                    <TH className="text-right">Acciones</TH>
+                    <TH>{t('billing.invoices.table.invoice')}</TH>
+                    <TH>{t('billing.invoices.table.amount')}</TH>
+                    <TH>{t('billing.invoices.table.status')}</TH>
+                    <TH>{t('billing.invoices.table.dueDate')}</TH>
+                    <TH className="text-right">{t('billing.invoices.table.actions')}</TH>
                   </tr>
                 </THead>
                 <TBody>
@@ -147,9 +158,9 @@ export function Facturacion() {
                       <TD className="font-medium text-brand-800">{invoice.invoice_number ?? invoice.id.slice(0, 8)}</TD>
                       <TD>{formatMoney(invoice.amount_cents, invoice.currency)}</TD>
                       <TD>
-                        <Badge tone={STATUS_TONE[invoice.status]}>{STATUS_LABEL[invoice.status]}</Badge>
+                        <Badge tone={STATUS_TONE[invoice.status]}>{t(STATUS_KEY[invoice.status])}</Badge>
                       </TD>
-                      <TD className="text-brand-400">{formatDate(invoice.due_date)}</TD>
+                      <TD className="text-brand-400">{formatDate(invoice.due_date, language)}</TD>
                       <TD>{invoice.status === 'PENDING' || invoice.status === 'OVERDUE' ? <PayButton invoice={invoice} /> : null}</TD>
                     </TRow>
                   ))}

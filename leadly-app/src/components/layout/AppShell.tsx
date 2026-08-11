@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import changelogRaw from '../../../CHANGELOG.md?raw'
 import { useAuth } from '../../contexts/AuthContext'
+import { useLanguage } from '../../contexts/LanguageContext'
 import { SidebarNavItem } from './SidebarNavItem'
 import { NotificationsBell } from './NotificationsBell'
 import { LanguageSwitcher } from './LanguageSwitcher'
@@ -43,9 +44,13 @@ const COLLAPSE_STORAGE_KEY = 'leadly:sidebar-collapsed'
 // below its list, e.g. /app/clientes/:id under /app/clientes), `backTo` is
 // set so the header renders a clickable "← Clientes" instead of a plain
 // title -- pages no longer need their own "Volver a ..." link in the body.
-function resolvePageTitle(pathname: string, navItems: NavItem[]): { title: string; badge?: string; backTo?: string } {
-  if (pathname.endsWith('/perfil')) return { title: 'Mi cuenta' }
-  if (pathname.endsWith('/novedades')) return { title: 'Novedades' }
+function resolvePageTitle(
+  pathname: string,
+  navItems: NavItem[],
+  specialTitles: { account: string; whatsNew: string },
+): { title: string; badge?: string; backTo?: string } {
+  if (pathname.endsWith('/perfil')) return { title: specialTitles.account }
+  if (pathname.endsWith('/novedades')) return { title: specialTitles.whatsNew }
 
   const matches = navItems.filter((item) => pathname === item.to || pathname.startsWith(`${item.to}/`))
   const best = matches.reduce<NavItem | null>((longest, item) => (!longest || item.to.length > longest.to.length ? item : longest), null)
@@ -77,11 +82,15 @@ export function AppShell({
   showUpsell?: boolean
 }) {
   const { profile, signOut } = useAuth()
+  const { t } = useLanguage()
   const location = useLocation()
   const basePath = location.pathname.startsWith('/backoffice') ? '/backoffice' : '/app'
   const profilePath = `${basePath}/perfil`
   const changelogPath = `${basePath}/novedades`
-  const pageHeader = useMemo(() => resolvePageTitle(location.pathname, navItems), [location.pathname, navItems])
+  const pageHeader = useMemo(
+    () => resolvePageTitle(location.pathname, navItems, { account: t('common.shell.myAccount'), whatsNew: t('common.shell.whatsNew') }),
+    [location.pathname, navItems, t],
+  )
   const [mobileOpen, setMobileOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_STORAGE_KEY) === '1')
   const isLight = theme === 'light'
@@ -101,7 +110,7 @@ export function AppShell({
         <button
           type="button"
           onClick={() => setMobileOpen(true)}
-          aria-label="Abrir menú"
+          aria-label={t('common.shell.openMenu')}
           className={isLight ? '-mr-2 p-2 text-brand-500 hover:text-brand-800' : '-mr-2 p-2 text-brand-100 hover:text-white'}
         >
           <MenuIcon />
@@ -130,7 +139,7 @@ export function AppShell({
           <button
             type="button"
             onClick={() => setCollapsed((c) => !c)}
-            aria-label={collapsed ? 'Expandir menú' : 'Colapsar menú'}
+            aria-label={collapsed ? t('common.shell.expandMenu') : t('common.shell.collapseMenu')}
             className={`hidden rounded-lg p-1.5 lg:ml-auto lg:block ${
               isLight ? 'text-brand-400 hover:bg-brand-50 hover:text-brand-800' : 'text-brand-300 hover:bg-brand-600 hover:text-white'
             }`}
@@ -162,10 +171,10 @@ export function AppShell({
         {showUpsell && (
           <div className={`px-2.5 pb-1 ${collapsed ? 'lg:hidden' : ''}`}>
             <div className="rounded-xl bg-brand-50 p-3">
-              <p className="text-xs font-semibold text-brand-800">Prueba Leadly Pro</p>
-              <p className="mt-0.5 text-[11px] leading-snug text-brand-400">Desbloquea más funciones para hacer crecer tu negocio.</p>
+              <p className="text-xs font-semibold text-brand-800">{t('common.shell.upsell.title')}</p>
+              <p className="mt-0.5 text-[11px] leading-snug text-brand-400">{t('common.shell.upsell.subtitle')}</p>
               <Button variant="primary" className="mt-2 w-full !py-1.5 text-xs">
-                Actualizar plan
+                {t('common.shell.upsell.cta')}
               </Button>
             </div>
           </div>
@@ -189,22 +198,22 @@ export function AppShell({
           <Button
             variant={isLight ? 'ghost' : 'ghost-dark'}
             onClick={() => signOut()}
-            title={collapsed ? 'Cerrar sesión' : undefined}
+            title={collapsed ? t('common.shell.logout') : undefined}
             className={`mt-1.5 w-full !py-1.5 text-xs ${collapsed ? 'lg:justify-center lg:px-0' : 'justify-start'}`}
           >
             <LogoutIcon width={13} height={13} />
-            <span className={collapsed ? 'lg:hidden' : ''}>Cerrar sesión</span>
+            <span className={collapsed ? 'lg:hidden' : ''}>{t('common.shell.logout')}</span>
           </Button>
           {CURRENT_VERSION && (
             <Link
               to={changelogPath}
               onClick={() => setMobileOpen(false)}
-              title={collapsed ? `Versión ${CURRENT_VERSION} · Novedades` : undefined}
+              title={collapsed ? `${t('common.shell.version')} ${CURRENT_VERSION} · ${t('common.shell.whatsNew')}` : undefined}
               className={`mt-1.5 block truncate text-center text-[10px] ${collapsed ? 'lg:hidden' : ''} ${
                 isLight ? 'text-brand-300 hover:text-brand-600' : 'text-brand-400 hover:text-brand-200'
               }`}
             >
-              v{CURRENT_VERSION} · Novedades
+              v{CURRENT_VERSION} · {t('common.shell.whatsNew')}
             </Link>
           )}
         </div>
