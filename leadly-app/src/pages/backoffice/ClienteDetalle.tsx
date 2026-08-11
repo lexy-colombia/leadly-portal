@@ -5,29 +5,32 @@ import { listProfilesByTenant } from '../../lib/api/users'
 import type { Profile, Tenant } from '../../types/domain'
 import { COUNTRIES, DOCUMENT_TYPES, LANGUAGES } from '../../lib/referenceData'
 import { Badge, Button, Card, InitialsAvatar, PageSpinner } from '../../components/ui'
-import { CreditCardIcon, IdCardIcon, MailIcon, PencilIcon, PhoneIcon, PlusIcon, UsersIcon } from '../../components/icons'
+import { CreditCardIcon, IdCardIcon, MailIcon, MenuIcon, PencilIcon, PhoneIcon, PlusIcon, UsersIcon } from '../../components/icons'
 import { TenantDrawer } from './TenantDrawer'
 import { WhatsappLineDrawer } from './WhatsappLineDrawer'
 import { UserInviteDrawer } from '../shared/UserInviteDrawer'
 import { UsersTable } from '../shared/UsersTable'
 import { LinesAndAgentsSection } from '../shared/LinesAndAgentsSection'
 import { TenantBillingSection } from './billing/TenantBillingSection'
+import { TenantModulesSection } from './TenantModulesSection'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { TranslationKey } from '../../i18n/translations'
 
-const TABS = ['informacion', 'lineas', 'usuarios', 'facturacion'] as const
+const TABS = ['informacion', 'lineas', 'usuarios', 'facturacion', 'modulos'] as const
 type Tab = (typeof TABS)[number]
 const TAB_LABEL_KEY: Record<Tab, TranslationKey> = {
   informacion: 'backoffice.clienteDetalle.tabs.informacion',
   lineas: 'backoffice.clienteDetalle.tabs.lineas',
   usuarios: 'backoffice.clienteDetalle.tabs.usuarios',
   facturacion: 'backoffice.clienteDetalle.tabs.facturacion',
+  modulos: 'backoffice.clienteDetalle.tabs.modulos',
 }
 const TAB_ICON: Record<Tab, typeof IdCardIcon> = {
   informacion: IdCardIcon,
   lineas: PhoneIcon,
   usuarios: UsersIcon,
   facturacion: CreditCardIcon,
+  modulos: MenuIcon,
 }
 
 export function ClienteDetalle() {
@@ -294,6 +297,12 @@ function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onT
         {tab === 'facturacion' && (
           <Card padded={false}>
             <TenantBillingSection tenantId={tenant.id} />
+          </Card>
+        )}
+
+        {tab === 'modulos' && (
+          <Card>
+            <TenantModulesSection tenantId={tenant.id} />
           </Card>
         )}
       </div>

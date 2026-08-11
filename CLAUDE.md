@@ -4,6 +4,8 @@
 
 ## Estado actual (2026-08-09)
 
+**Ronda del 2026-08-11 (módulos por tenant)**: nuevo sistema de feature-gating a nivel de tenant, pedido explícito del superadmin — hasta ahora el nav del panel de cliente (`TenantLayout.tsx`) era el mismo catálogo fijo de 14 ítems para todos los tenants, sin forma de restringir qué ve cada uno. `tenant_enabled_modules` (`20260811000001_tenant_modules.sql`) es una tabla puente presence-based (sin catálogo aparte, mismo shape que `ai_assistant_skills`: una fila = módulo habilitado, sin fila = deshabilitado; RLS de escritura solo superadmin, lectura propia + superadmin) contra el catálogo fijo de módulos que ahora vive en `leadly-app/src/lib/modules.ts` (`TENANT_MODULES`, única fuente de verdad para label/ícono/ruta, usada tanto por el nav como por el guard como por la tab nueva). **Los 14 ítems del nav son togglables, incluidos Dashboard/Conversaciones/Configuración** — decisión explícita del superadmin de no dejar ningún módulo protegido de fábrica. El gating es real en dos capas: `TenantLayout.tsx` filtra el nav por `AuthContext.enabledModules` (cargado junto con el perfil/tenant), y cada ruta de `/app` en `App.tsx` está envuelta en el guard nuevo `RequireModule` (`routes/guards.tsx`, mismo patrón "lock en el lugar, no redirect" que `RequireRole`) para que un link directo a una ruta deshabilitada tampoco funcione. Backoffice: tab nueva "Módulos" en `ClienteDetalle.tsx` (`TenantModulesSection.tsx`) con un switch por módulo, aplica al instante (sin botón "Guardar"), mismo patrón que la sección "Habilidades" de IA. **Backfill: al ser presence-based, la tabla arrancó vacía** — decisión explícita del superadmin de que todos los tenants existentes (ya en producción real) quedaran sin ningún módulo habilitado tras aplicar la migración, para reactivarlos él mismo manualmente desde la tab nueva en vez de auto-habilitar todo.
+
 **Nota de desfase**: el bloque "Estado actual (2026-08-06)" de abajo (y la sección 3.6) quedó desactualizado por dos días de trabajo no documentado antes de esta sesión — el modelo B2B (`crm_accounts`/`Empresas.tsx`/`EmpresaDetalle.tsx`) se **revirtió el 2026-08-08** (fusionado de vuelta en `crm_contacts`, ver `leadly-db/supabase/migrations/20260808172403_merge_contacts_accounts.sql`) y se construyó un pipeline completo de catálogo → cotizaciones → ventas (`crm_products`, `crm_orders`/`crm_order_items`, habilidades de IA `catalogo`/`ventas`) entre el 08-08 y el 08-09, ya en producción y afinado con pruebas reales por WhatsApp. Tratar ese bloque como historial, no como estado vigente, hasta que se reescriba a fondo.
 
 **Ronda del 2026-08-09** (seguimiento inteligente de oportunidades + direcciones + ficha de cliente completa):
@@ -60,11 +62,11 @@
 | Tema | Decisión | Notas |
 |---|---|---|
 | Nombre | **Leadly** | |
-| Organización de Supabase | **Lexy** (no la org "Bedly") | El MCP de Supabase de esta sesión solo ve "Bedly" — hay que loguear/conectar el MCP contra la cuenta de la org "Lexy" antes de poder crear el proyecto. Primera tarea bloqueante del roadmap. |
-| Proyecto de Supabase | Nuevo y dedicado, no compartido con Bedly ni Lexy-web | |
-| Integración de WhatsApp | **Meta Cloud API directo** (mismo patrón que seeri) | `graph.facebook.com`, `phone_number_id`, `business_account_id`, webhook propio con `X-Hub-Signature-256` + `verify_token`. No hay agregador (Twilio/360dialog). Implica que cada tenant debe pasar por verificación de negocio de Meta — se documenta como requisito de onboarding, no como bloqueante técnico. |
+| Organización de Supabase | **Lexy** | |
+| Proyecto de Supabase | `leadly-portal` (ref `kkdtrkfcnyvuefazndnj`), nuevo y dedicado | |
+| Integración de WhatsApp | **Meta Cloud API directo** | `graph.facebook.com`, `phone_number_id`, `business_account_id`, webhook propio con `X-Hub-Signature-256` + `verify_token`. No hay agregador (Twilio/360dialog). Implica que cada tenant debe pasar por verificación de negocio de Meta — se documenta como requisito de onboarding, no como bloqueante técnico. |
 | Quién paga los costos de Meta (plantillas/conversaciones) | **Cada tenant paga directo a Meta con su propia WABA**, no Leadly (decisión del 2026-08-04, revierte el modelo inicial "una sola WABA de Leadly con clientes como líneas") | Requiere que cada tenant conecte **su propia** cuenta de WhatsApp Business vía Embedded Signup (ver "Conectar tu WhatsApp" en Estado actual) — Meta factura al Business Manager dueño de la WABA, no hay forma de fraccionar el cobro dentro de una WABA compartida. El modelo alternativo más simple (Leadly paga y lo traslada dentro de su propio plan/suscripción) queda descartado por ahora pero documentado como Camino A si se necesita algo más rápido en el futuro. |
-| API keys de IA | **Leadly usa keys propias compartidas** (OpenAI y Gemini), igual que el patrón de fallback de seeri (`OPENAI_API_KEY` global) | Costeado por Leadly, facturado al tenant por plan (límite de mensajes/tokens). Se deja la puerta abierta a que un tenant traiga su propia key en el futuro (columna nullable, no v1). |
+| API keys de IA | **Leadly usa keys propias compartidas** (OpenAI y Gemini) | Costeado por Leadly, facturado al tenant por plan (límite de mensajes/tokens). Se deja la puerta abierta a que un tenant traiga su propia key en el futuro (columna nullable, no v1). |
 | Proveedor de IA | **Multi-proveedor desde el día 1**: OpenAI (ChatGPT) o Google (Gemini), seleccionable por asistente | Ver sección 3.3 — esto descarta usar el objeto "Assistant" del dashboard de OpenAI como fuente de verdad (Gemini no tiene equivalente), así que la config vive en nuestra propia tabla y las llamadas a los LLM son *stateless* (chat/responses por turno), no threads persistentes del lado del proveedor. |
 | Auth | Email/password + Google OAuth (Supabase Auth), **registro libre abierto** | `disable_signup` se deja en `false` a propósito (decisión revertida el 2026-08-02: se evaluó cerrarlo y se decidió lo contrario). Cualquiera puede crear una cuenta; lo que la separa de "tener acceso" es la fila en `profiles` (ver siguiente fila). |
 | Multi-tenancy | Dos caminos para crear un tenant, ambos terminan en la misma tabla `tenants`+`profiles`: (1) el superadmin lo crea desde el backoffice y asigna línea de WhatsApp, o (2) **auto-registro**: un usuario nuevo (Google o email/password) sin fila en `profiles` aterriza en la pantalla de onboarding `/create-company`, y al enviar el nombre de su empresa se crea el tenant y queda como su `tenant_admin` vía la función `self_register_tenant` (RPC `SECURITY DEFINER`, `leadly-db/supabase/migrations/20260802000008_self_register_tenant.sql`). Si fue sin querer, puede borrar su cuenta ahí mismo (`self-delete-account`, Edge Function) — solo funciona si esa cuenta *todavía* no tiene perfil, nunca sobre un tenant ya activo. | La app (`AuthContext.unprovisioned` + `RequireAuth`) es la que decide mostrar `/create-company` en vez de contenido real cuando `auth.uid()` no tiene fila en `profiles`. Un tenant auto-registrado queda con el mismo `status='active'` que uno creado por el backoffice — sin distinción por diseño (decisión del usuario). No pueden usar WhatsApp real hasta que el superadmin les asigne una línea manualmente. |
@@ -79,7 +81,7 @@
 
 ## 2. Estructura del repositorio
 
-Dos carpetas hermanas dentro de `Desktop/Proyectos/Leadly/`, mismo patrón que Bedly:
+Dos carpetas hermanas dentro de `Desktop/Proyectos/Leadly/`:
 
 ```
 Leadly/
@@ -101,7 +103,7 @@ Leadly/
 ### 3.1 Multi-tenancy y roles
 - `tenants` — un negocio cliente de Leadly. Más allá de `name`/`status`, incluye datos reales de identidad legal y contacto (agregados en `20260802000013_tenant_profile_fields.sql` a pedido explícito del usuario, "el formulario de crear empresa es muy corto"): `entity_type` (`persona`|`empresa`), `legal_name` (obligatorio en el formulario si es empresa), `document_type`/`document_number`, `contact_email`/`contact_phone` (obligatorios en el formulario), `country`/`state_province`, `preferred_language` (`es`|`en` — primer paso hacia multi-idioma), `logo_url` (bucket Storage `tenant-logos`, público de lectura, máx. 5MB, RLS de escritura por tenant/superadmin). Estos campos son NULLables a nivel de base de datos (para no romper `self_register_tenant`, que solo pide el nombre) — lo "obligatorio" vive en la validación del formulario (`leadly-app/src/pages/backoffice/useTenantForm.ts`), no en constraints de DB.
 - `profiles` — `id` (= `auth.users.id`), `role` (`superadmin` | `tenant_admin` | `tenant_agent`), `tenant_id` (null para superadmin).
-- `auth_tenant_id()` / `is_superadmin()` — funciones `SECURITY DEFINER`, mismo patrón que Bedly (`bedly-db/supabase/migrations/20260729000002_helpers.sql` como referencia directa a copiar/adaptar).
+- `auth_tenant_id()` / `is_superadmin()` — funciones `SECURITY DEFINER` que resuelven tenant/rol del `auth.uid()` actual, usadas como base de toda policy RLS del proyecto.
 - RLS en toda tabla con `tenant_id`: el tenant solo ve sus propias filas; el superadmin ve todo.
 
 ### 3.2 WhatsApp
@@ -214,7 +216,7 @@ Dos layouts, cada uno con su propio árbol de rutas, protegidos tanto por **guar
 - **Changelog**: versión de solo lectura, mismo componente que en backoffice.
 
 ### 4.3 Guards
-- Guard de ruta (`RequireAuth` + `RequireRole`) que redirige según `profiles.role` — mismo patrón que Bedly.
+- Guard de ruta (`RequireAuth` + `RequireRole`) que redirige según `profiles.role`.
 - La navegación (sidebar/menú) se arma condicionalmente según el rol; nunca se renderiza un link a una ruta que el guard vaya a bloquear.
 
 ---
@@ -234,14 +236,14 @@ Todas desplegadas y probadas end-to-end (webhook simulado con payload de Meta fi
 - `whatsapp-webhook` — ✅ handshake `GET` + mensajes entrantes `POST`, valida firma (`X-Hub-Signature-256`) y `verify_token`, resuelve/crea conversación (`upsert` por `whatsapp_line_id`+`contact_phone`), inserta mensaje inbound, e invoca `whatsapp-ai-respond` (con `await`, ver pitfall en "Estado actual") cuando la conversación está en modo IA y la línea activa. Desplegada con `--no-verify-jwt` (endpoint público, Meta no manda JWT).
 - `whatsapp-ai-respond` — ✅ interno, solo acepta llamadas cuyo bearer token sea exactamente el `SUPABASE_SERVICE_ROLE_KEY` del proyecto. Arma contexto (últimos 10 mensajes), detecta traspaso a humano por frase antes de llamar al LLM, llama al proveedor configurado (`ai_assistants.provider`), responde por Graph API. No se ejecuta si la conversación está en modo humano, la línea no está activa, o el asistente está inactivo. **Cumplimiento Meta implementado** (política AI-Assisted Business Messaging Guidelines, vigente desde 2026-01-15): divulga que es IA en el primer mensaje automático de cada conversación (`alreadyRespondedByAi` chequea el historial), y frases tipo "hablar con humano" cambian `mode` a `humano` automáticamente (`_shared/whatsapp.ts::requestsHumanHandoff`). Pendiente/spike abierto: validación/aviso en el editor de `system_prompt` para que un tenant no lo configure como asistente genérico sin límite de tema.
 - `whatsapp-send-human` — ✅ envío de mensaje manual desde el panel del tenant en modo humano; usa el JWT del propio caller (no admin), así que RLS aplica tal cual sin lógica de autorización reinventada. Desde 2026-08-05 también acepta un `media` opcional (`storage_path`/`mime_type`/`size_bytes`, subido antes por el agente al bucket `crm-attachments` con su propio JWT) para adjuntar una imagen al mensaje saliente: la función firma una URL de corta duración (Meta necesita poder descargarla ella misma) y llama a la Graph API con `type: image`, mismo patrón que `send_attachment` de la IA (ver 3.4).
-- `admin-create-tenant-user` — ✅ creación de usuarios de un tenant (mismo patrón que `admin-create-user` de Bedly), invita por correo (`inviteUserByEmail`).
+- `admin-create-tenant-user` — ✅ creación de usuarios de un tenant, invita por correo (`inviteUserByEmail`).
 
 ---
 
 ## 7. Changelog del producto
 
 - `leadly-app/CHANGELOG.md`, formato [Keep a Changelog](https://keepachangelog.com/) + versionado semántico, empezando en `0.1.0` para el MVP.
-- Se expone también dentro de la app (sección "Novedades" visible en ambos layouts) leyendo el mismo archivo o una tabla `release_notes` si se prefiere editable desde el backoffice sin deploy — **decidir en Fase 1**: archivo estático vs. tabla editable.
+- Se expone también dentro de la app (sección "Novedades" visible en ambos layouts, componente `Changelog`) — **decidido en Fase 1**: sigue siendo el archivo estático `CHANGELOG.md`, no una tabla editable.
 
 ---
 

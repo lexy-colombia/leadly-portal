@@ -51,3 +51,24 @@ export function RequireRole({ allowed, children }: { allowed: UserRole[]; childr
 
   return <>{children}</>
 }
+
+/** Gates a single tenant-panel route behind one of TENANT_MODULES's keys (see
+ * lib/modules.ts) -- same "lock in place, don't redirect" shape as RequireRole,
+ * for the same reason: a direct URL hit on a module the superadmin turned off
+ * for this tenant must show a lock, not silently bounce or (worse) render the
+ * page. `enabledModules` is null only for superadmin (never reaches /app
+ * routes) or while AuthContext is still loading -- both already covered by
+ * `loading` here, so a null set past that point reads as "nothing enabled". */
+export function RequireModule({ moduleKey, children }: { moduleKey: string; children: ReactNode }) {
+  const { enabledModules, loading } = useAuth()
+
+  if (loading) {
+    return <PageSpinner />
+  }
+
+  if (!enabledModules?.has(moduleKey)) {
+    return <AccessDenied />
+  }
+
+  return <>{children}</>
+}
