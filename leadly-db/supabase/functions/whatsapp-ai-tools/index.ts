@@ -9,6 +9,10 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { json } from "../_shared/cors.ts";
 import { AI_TOOLS, isToolAllowed } from "../_shared/aiTools.ts";
 import { sendWhatsappImage } from "../_shared/whatsapp.ts";
+import { getAdapter, makeSecretGetter, resolveCredential } from "../_shared/payments/registry.ts";
+import { makeIntegrationSecretGetter, resolveTenantIntegrationCredential } from "../_shared/integrations/credentials.ts";
+import { createDeal, createOrUpdateContact, getDealPipelines } from "../_shared/integrations/hubspot.ts";
+import { resolveShopifyDomain, searchCustomerByPhone, searchOrders, searchProducts } from "../_shared/integrations/shopify.ts";
 
 const ATTACHMENT_SIGNED_URL_TTL_SECONDS = 300;
 const CATALOG_SEARCH_LIMIT = 15;
@@ -319,19 +323,59 @@ async function executeTool(
         .eq("id", conversationId)
         .maybeSingle();
 
-      const { data, error } = await adminClient
+      // Idempotent by (contact, activa) instead of trusting the model to
+      // call list_contact_appointments and check first -- a stateless
+      // per-turn model that offers to schedule again later in the same
+      // conversation (e.g. the closing-rule flow re-offering an advisor)
+      // will happily call this a second time. Found for real 2026-08-14: the
+      // same contact ended up with two active appointments for the exact
+      // same slot because the model re-ran the whole "qué día y hora"
+      // exchange after already booking one. Treating a second call as a
+      // reschedule of the existing active appointment -- not a second row --
+      // is what the customer actually means by confirming a time again.
+      const { data: existing } = await adminClient
         .from("crm_appointments")
-        .insert({
-          tenant_id: tenantId,
-          contact_id: contactId,
-          whatsapp_line_id: conversation?.whatsapp_line_id ?? null,
-          scheduled_at: scheduledAt.toISOString(),
-          notes,
-        })
-        .select("id, scheduled_at, status")
-        .single();
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .eq("contact_id", contactId)
+        .eq("status", "activa")
+        .gte("scheduled_at", new Date().toISOString())
+        .order("scheduled_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      let data: { id: string; scheduled_at: string; status: string } | null;
+      let error: { message: string } | null;
+      if (existing) {
+        ({ data, error } = await adminClient
+          .from("crm_appointments")
+          .update({ scheduled_at: scheduledAt.toISOString(), notes, whatsapp_line_id: conversation?.whatsapp_line_id ?? null })
+          .eq("id", existing.id)
+          .select("id, scheduled_at, status")
+          .single());
+      } else {
+        ({ data, error } = await adminClient
+          .from("crm_appointments")
+          .insert({
+            tenant_id: tenantId,
+            contact_id: contactId,
+            whatsapp_line_id: conversation?.whatsapp_line_id ?? null,
+            scheduled_at: scheduledAt.toISOString(),
+            notes,
+          })
+          .select("id, scheduled_at, status")
+          .single());
+      }
       if (error) throw new Error(error.message);
-      return data;
+
+      // A real appointment is unambiguous evidence of negotiation -- enforce
+      // this server-side instead of trusting the model to also remember
+      // set_lead_stage in the same turn (it doesn't, reliably). Only bumps
+      // off the untouched 'lead' default; never downgrades or overrides a
+      // stage an agent or a later signal already set (contactado/cliente/etc).
+      await adminClient.from("crm_contacts").update({ stage: "negociacion" }).eq("id", contactId).eq("stage", "lead");
+
+      return { ...data, rescheduled: !!existing };
     }
 
     case "list_contact_appointments": {
@@ -956,9 +1000,152 @@ async function executeTool(
       return { address_id: savedAddressId, saved: true };
     }
 
+    case "generate_payment_link": {
+      const description = String(parameters.description ?? "").trim();
+      if (!description) throw new Error("description es requerido");
+      const amount = Number(parameters.amount);
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("amount debe ser mayor a cero");
+      const reference = parameters.reference ? String(parameters.reference).trim() : `wa-${conversationId}-${Date.now()}`;
+
+      // Tenant's own Wompi account (tenant_payment_credentials with
+      // tenant_id = this tenant), not Leadly's platform credential -- same
+      // adapter/registry that already powers real invoice checkout.
+      const credential = await resolveCredential(adminClient, tenantId, "wompi");
+      const getSecret = makeSecretGetter(adminClient, credential.id);
+      const adapter = getAdapter("wompi");
+      const result = await adapter.createCheckout(credential, getSecret, {
+        invoiceId: reference,
+        amountCents: Math.round(amount * 100),
+        currency: "COP",
+        description,
+      });
+      return { checkout_url: result.checkoutUrl, reference };
+    }
+
+    case "hubspot_sync_contact": {
+      if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
+      const email = String(parameters.email ?? "").trim();
+      if (!email) throw new Error("email es requerido");
+
+      const { data: contact } = await adminClient.from("crm_contacts").select("phone, full_name").eq("id", contactId).maybeSingle();
+
+      const properties: Record<string, string> = { email };
+      if (contact?.phone) properties.phone = contact.phone;
+      if (parameters.firstname) properties.firstname = String(parameters.firstname).trim();
+      else if (contact?.full_name) properties.firstname = contact.full_name;
+      if (parameters.lastname) properties.lastname = String(parameters.lastname).trim();
+      if (parameters.company) properties.company = String(parameters.company).trim();
+      if (parameters.jobtitle) properties.jobtitle = String(parameters.jobtitle).trim();
+
+      const credential = await resolveTenantIntegrationCredential(adminClient, tenantId, "hubspot");
+      const token = await makeIntegrationSecretGetter(adminClient, credential.id)("token");
+      if (!token) throw new Error("HubSpot no tiene un token configurado para este tenant.");
+
+      const { id, created } = await createOrUpdateContact(token, properties);
+      await adminClient.from("crm_contacts").update({ hubspot_contact_id: id }).eq("id", contactId);
+      return { hubspot_contact_id: id, created };
+    }
+
+    case "hubspot_list_deal_pipelines": {
+      const credential = await resolveTenantIntegrationCredential(adminClient, tenantId, "hubspot");
+      const token = await makeIntegrationSecretGetter(adminClient, credential.id)("token");
+      if (!token) throw new Error("HubSpot no tiene un token configurado para este tenant.");
+      const pipelines = await getDealPipelines(token);
+      return {
+        pipelines: pipelines.map((p) => ({
+          name: p.label,
+          stages: ((p.stages as Array<Record<string, unknown>>) ?? []).map((s) => s.label),
+        })),
+      };
+    }
+
+    case "hubspot_create_deal": {
+      if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
+      const { data: contact } = await adminClient.from("crm_contacts").select("hubspot_contact_id").eq("id", contactId).maybeSingle();
+      if (!contact?.hubspot_contact_id) {
+        throw new Error("El contacto todavía no está sincronizado con HubSpot -- llamá a hubspot_sync_contact primero.");
+      }
+
+      const dealname = String(parameters.dealname ?? "").trim();
+      if (!dealname) throw new Error("dealname es requerido");
+      const pipelineName = String(parameters.pipeline_name ?? "").trim();
+      const dealstageName = String(parameters.dealstage_name ?? "").trim();
+      if (!pipelineName || !dealstageName) throw new Error("pipeline_name y dealstage_name son requeridos");
+
+      const credential = await resolveTenantIntegrationCredential(adminClient, tenantId, "hubspot");
+      const token = await makeIntegrationSecretGetter(adminClient, credential.id)("token");
+      if (!token) throw new Error("HubSpot no tiene un token configurado para este tenant.");
+
+      const pipelines = await getDealPipelines(token);
+      const pipeline = pipelines.find((p) => p.label === pipelineName);
+      if (!pipeline) throw new Error(`No existe el pipeline "${pipelineName}" en HubSpot.`);
+      const stage = ((pipeline.stages as Array<Record<string, unknown>>) ?? []).find((s) => s.label === dealstageName);
+      if (!stage) throw new Error(`No existe la etapa "${dealstageName}" en el pipeline "${pipelineName}".`);
+
+      const properties: Record<string, string> = { dealname, pipeline: String(pipeline.id), dealstage: String((stage as Record<string, unknown>).id) };
+      if (parameters.amount !== undefined) properties.amount = String(parameters.amount);
+      if (parameters.description) properties.description = String(parameters.description).trim();
+
+      const deal = await createDeal(token, properties, contact.hubspot_contact_id as string);
+      return { hubspot_deal_id: deal.id, dealname };
+    }
+
+    case "shopify_search_products": {
+      const query = String(parameters.query ?? "").trim();
+      if (!query) throw new Error("query es requerido");
+      const { shop, accessToken } = await resolveShopifyConfig(adminClient, tenantId);
+      const products = await searchProducts(shop, accessToken, query);
+      return { products };
+    }
+
+    case "shopify_search_customer_by_phone": {
+      if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
+      const { data: contact } = await adminClient.from("crm_contacts").select("phone").eq("id", contactId).maybeSingle();
+      if (!contact?.phone) throw new Error("Este contacto no tiene teléfono registrado.");
+      const { shop, accessToken } = await resolveShopifyConfig(adminClient, tenantId);
+      const customer = await searchCustomerByPhone(shop, accessToken, contact.phone);
+      return { found: !!customer, customer };
+    }
+
+    case "shopify_search_orders": {
+      if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
+      const { data: contact } = await adminClient.from("crm_contacts").select("phone").eq("id", contactId).maybeSingle();
+      if (!contact?.phone) throw new Error("Este contacto no tiene teléfono registrado.");
+      const { shop, accessToken } = await resolveShopifyConfig(adminClient, tenantId);
+
+      // Always resolve the Shopify customer for *this* contact's own phone
+      // first, and scope the order search to that customer server-side --
+      // the AI's free-text query is only ever a refinement on top of that
+      // scope, never the sole filter, so this contact can't retrieve another
+      // customer's orders no matter what it searches for.
+      const customer = await searchCustomerByPhone(shop, accessToken, contact.phone);
+      if (!customer) return { orders: [], note: "Este contacto no tiene un perfil de cliente en Shopify." };
+
+      const refinement = String(parameters.query ?? "").trim();
+      const orders = await searchOrders(shop, accessToken, (customer as { id: string }).id, refinement);
+      return { orders };
+    }
+
     default:
       throw new Error(`Unknown function_name: ${functionName}`);
   }
+}
+
+/** Resolves this tenant's Shopify credential into the `{shop}.myshopify.com`
+ * domain + access token the Admin GraphQL client needs. The credential
+ * drawer only stores the bare store name (e.g. "mi-tienda") in config.shop --
+ * resolveShopifyDomain both appends ".myshopify.com" and rejects anything
+ * that isn't a valid Shopify store name, so a tenant can never point this
+ * fetch() at an arbitrary host (SSRF) via a crafted config.shop value. */
+// deno-lint-ignore no-explicit-any
+async function resolveShopifyConfig(adminClient: any, tenantId: string): Promise<{ shop: string; accessToken: string }> {
+  const credential = await resolveTenantIntegrationCredential(adminClient, tenantId, "shopify");
+  const shopName = String(credential.config.shop ?? "").trim();
+  if (!shopName) throw new Error("Shopify no tiene una tienda configurada para este tenant.");
+  const accessToken = await makeIntegrationSecretGetter(adminClient, credential.id)("access_token");
+  if (!accessToken) throw new Error("Shopify no tiene un token configurado para este tenant.");
+  const shop = resolveShopifyDomain(shopName);
+  return { shop, accessToken };
 }
 
 /** If whatsapp-ai-respond injected a pending_attachment (a photo the customer

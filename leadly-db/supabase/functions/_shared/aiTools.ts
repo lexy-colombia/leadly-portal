@@ -328,6 +328,91 @@ export const AI_TOOLS: AiToolDefinition[] = [
       required: [],
     },
   },
+  {
+    name: "generate_payment_link",
+    skill: "wompi",
+    description:
+      "Genera un enlace de pago real de Wompi (la cuenta del propio tenant, no la de Leadly) y devuelve la URL para compartir con el cliente. Solo cuando ya sabés el monto exacto a cobrar y el cliente confirmó que quiere pagar -- nunca inventes un monto.",
+    parameters: {
+      type: "object",
+      properties: {
+        description: { type: "string", description: "Descripción breve del cobro (ej. \"Orden #1234 - Juan Pérez\")." },
+        amount: { type: "number", description: "Monto a cobrar en pesos colombianos (COP), sin centavos (ej. 50000 = $50.000 COP)." },
+        reference: { type: "string", description: "Referencia única del cobro, opcional (si no se pasa, se genera una automáticamente)." },
+      },
+      required: ["description", "amount"],
+    },
+  },
+  {
+    name: "hubspot_sync_contact",
+    skill: "hubspot",
+    description:
+      "Crea o actualiza el contacto de este cliente en la cuenta de HubSpot del tenant (el teléfono se toma automáticamente del contacto de esta conversación). Llamala en cuanto tengas al menos el email del cliente.",
+    parameters: {
+      type: "object",
+      properties: {
+        email: { type: "string", description: "Correo del cliente." },
+        firstname: { type: "string", description: "Nombre (opcional)." },
+        lastname: { type: "string", description: "Apellido (opcional)." },
+        company: { type: "string", description: "Empresa del cliente (opcional)." },
+        jobtitle: { type: "string", description: "Cargo del cliente (opcional)." },
+      },
+      required: ["email"],
+    },
+  },
+  {
+    name: "hubspot_list_deal_pipelines",
+    skill: "hubspot",
+    description: "Lista los pipelines y etapas de negocios (deals) de la cuenta de HubSpot del tenant. Consultala antes de hubspot_create_deal si no sabés el nombre exacto del pipeline/etapa -- nunca los inventes.",
+    parameters: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "hubspot_create_deal",
+    skill: "hubspot",
+    description:
+      "Crea un negocio (deal) en HubSpot vinculado al contacto de este cliente -- el contacto debe estar sincronizado primero con hubspot_sync_contact. Usá los nombres exactos de pipeline/etapa que devolvió hubspot_list_deal_pipelines.",
+    parameters: {
+      type: "object",
+      properties: {
+        dealname: { type: "string", description: "Nombre del negocio (ej. \"Plan Pro - Juan Pérez\")." },
+        pipeline_name: { type: "string", description: "Nombre exacto del pipeline, tal como lo devolvió hubspot_list_deal_pipelines." },
+        dealstage_name: { type: "string", description: "Nombre exacto de la etapa dentro de ese pipeline." },
+        amount: { type: "number", description: "Valor estimado del negocio, si se conoce (opcional)." },
+        description: { type: "string", description: "Detalle del negocio (opcional)." },
+      },
+      required: ["dealname", "pipeline_name", "dealstage_name"],
+    },
+  },
+  {
+    name: "shopify_search_products",
+    skill: "shopify",
+    description: "Busca productos en la tienda Shopify real del tenant (no el catálogo propio de Leadly). Úsala cuando el catálogo del negocio viva en Shopify.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Texto o filtro de búsqueda (ej. \"camiseta\", \"title:*gift card*\")." },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "shopify_search_customer_by_phone",
+    skill: "shopify",
+    description: "Busca el perfil de cliente en Shopify correspondiente a este contacto (usa su teléfono automáticamente, no hace falta pedirlo).",
+    parameters: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "shopify_search_orders",
+    skill: "shopify",
+    description: "Busca los pedidos de Shopify del cliente de esta conversación (nunca de otros clientes), para consultar su estado. Si el cliente dio un número de pedido, pasalo en query para acotar entre sus propios pedidos.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Texto para acotar entre los pedidos de este cliente (ej. \"1001\"), opcional -- sin esto devuelve sus pedidos más recientes." },
+      },
+      required: [],
+    },
+  },
 ];
 
 /** Only ever offer the model tools whose skill is enabled for this

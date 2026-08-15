@@ -123,7 +123,35 @@ Deno.serve(async (req: Request) => {
     "Antes de mandar tu respuesta final, revisala frase por frase: por cada frase que afirme una acción (\"quedó registrado\", \"ya lo anoté\", \"listo, confirmado\", \"cancelé tu...\", \"guardé...\"), preguntate si en este turno hiciste la llamada real a la herramienta que la respalda. Si la respuesta es no, tenés dos opciones: llamar la herramienta ahora mismo, o borrar esa frase de tu respuesta -- nunca dejarla así.\n\n" +
     'Ejemplo de lo que NO hay que hacer: el cliente pregunta el precio de un producto que ya se mencionó antes en la conversación; respondés el precio de memoria (está bien, no hace falta re-consultarlo si no cambió), pero además agregás "ya registré tu interés" sin haber llamado a create_opportunity en este turno -- eso es una mentira, aunque sea una mentira sin mala intención.\n\n' +
     'Que "ya lo mencionaste antes en esta conversación" no es lo mismo que "ya llamaste la herramienta antes" -- si no estás segura de haberla llamado ya (por ejemplo, no ves el resultado de esa llamada en los mensajes de este turno o el anterior), volvé a llamarla. Las herramientas de este sistema están hechas para poder llamarse más de una vez sin duplicar nada ni romper nada -- así que ante la duda, llamala.';
-  const fullSystemPrompt = [TOOL_INTEGRITY_RULE, assistant.system_prompt, ...enabledSkills.map((s) => s.prompt_fragment), TOOL_INTEGRITY_RULE]
+  // Global, same reasoning as TOOL_INTEGRITY_RULE above: the model has no
+  // built-in notion of "today" (each turn is a stateless call, see CLAUDE.md
+  // 3.3), so without this it guesses -- caught for real 2026-08-14, an
+  // assistant tried to book an appointment for "mañana" and sent
+  // scheduled_at with the wrong year entirely. Computed fresh per request in
+  // Colombia's timezone (every tenant so far is Colombian) rather than
+  // trusting the model to know the offset from UTC on its own.
+  const nowInBogota = new Date();
+  const bogotaIsoDate = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bogota" }).format(nowInBogota);
+  const bogotaHuman = new Intl.DateTimeFormat("es-CO", {
+    timeZone: "America/Bogota",
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  }).format(nowInBogota);
+  const CURRENT_DATE_CONTEXT =
+    `Fecha y hora actual real (zona horaria de Colombia, America/Bogota): ${bogotaHuman}. En formato ISO, hoy es ${bogotaIsoDate}.\n\n` +
+    'Usá esto como referencia real para resolver cualquier fecha relativa que mencione el cliente ("hoy", "mañana", "pasado mañana", "el viernes que viene", "en dos semanas", etc.) -- nunca asumas ni inventes qué día es hoy ni en qué año estás. Cuando llames a una herramienta que reciba una fecha (ej. scheduled_at, expected_close_date), calculá la fecha real a partir de esta referencia, en el formato exacto que pida esa herramienta.';
+  const fullSystemPrompt = [
+    CURRENT_DATE_CONTEXT,
+    TOOL_INTEGRITY_RULE,
+    assistant.system_prompt,
+    ...enabledSkills.map((s) => s.prompt_fragment),
+    TOOL_INTEGRITY_RULE,
+  ]
     .filter(Boolean)
     .join("\n\n");
 
