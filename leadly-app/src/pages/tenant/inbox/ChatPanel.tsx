@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Button, IconSelect, InitialsAvatar, PageSpinner } from '../../../components/ui'
-import { ArchiveIcon, ChevronLeftIcon, ImageIcon, LockClosedIcon, RefreshIcon, SendIcon, TagIcon, UserIcon, XCircleIcon } from '../../../components/icons'
+import { Button, IconSelect, InitialsAvatar, Input, PageSpinner } from '../../../components/ui'
+import { ArchiveIcon, ChevronLeftIcon, ImageIcon, LockClosedIcon, PlusIcon, RefreshIcon, SendIcon, TagIcon, UserIcon, XCircleIcon } from '../../../components/icons'
 import {
   CONVERSATION_CATEGORY_KEY,
   conversationDisplayName,
@@ -14,11 +14,18 @@ import {
   setConversationStatus,
   subscribeToMessages,
 } from '../../../lib/api/conversations'
-import { listConversationTags, listTagIdsForConversation, setConversationTags } from '../../../lib/api/conversationTags'
+import {
+  createConversationTag,
+  deleteConversationTag,
+  listConversationTags,
+  listTagIdsForConversation,
+  setConversationTags,
+} from '../../../lib/api/conversationTags'
 import { uploadChatImage, validatePqrAttachmentFile } from '../../../lib/api/attachments'
 import type { ConversationWithLine } from '../../../lib/api/conversations'
 import type { ConversationCategory, ConversationTag, Profile, WhatsappMessage } from '../../../types/domain'
 import { MessageBubble } from './MessageBubble'
+import { useAuth } from '../../../contexts/AuthContext'
 import { useLanguage } from '../../../contexts/LanguageContext'
 
 export function ChatPanel({
@@ -31,6 +38,8 @@ export function ChatPanel({
   onBack: () => void
 }) {
   const { t } = useLanguage()
+  const { profile } = useAuth()
+  const isAdmin = profile?.role === 'tenant_admin'
   const [messages, setMessages] = useState<WhatsappMessage[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [modeUpdating, setModeUpdating] = useState(false)
@@ -49,6 +58,10 @@ export function ChatPanel({
   const [assignedTagIds, setAssignedTagIds] = useState<string[]>([])
   const [tagsUpdating, setTagsUpdating] = useState(false)
   const [tagsPopoverOpen, setTagsPopoverOpen] = useState(false)
+  const [newTagName, setNewTagName] = useState('')
+  const [creatingTag, setCreatingTag] = useState(false)
+  const [deletingTagId, setDeletingTagId] = useState<string | null>(null)
+  const [tagCatalogError, setTagCatalogError] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const tagsPopoverRef = useRef<HTMLDivElement>(null)
 
@@ -196,6 +209,42 @@ export function ChatPanel({
     }
   }
 
+  // Tag catalog management (create/delete) lives here, admin-only, instead
+  // of a separate Configuración screen -- this is the only place tags
+  // actually get used (assigned to a conversation), so managing the
+  // catalog where you use it beats a settings page with no visual
+  // connection to it (2026-08-16, explicit user request).
+  async function handleCreateTag(e: React.FormEvent) {
+    e.preventDefault()
+    const name = newTagName.trim()
+    if (!name) return
+    setCreatingTag(true)
+    setTagCatalogError(null)
+    try {
+      const tag = await createConversationTag(conversation.tenant_id, name)
+      setTagCatalog((prev) => [...prev, tag].sort((a, b) => a.name.localeCompare(b.name)))
+      setNewTagName('')
+    } catch (err) {
+      setTagCatalogError(err instanceof Error ? err.message : t('inbox.tags.errors.create'))
+    } finally {
+      setCreatingTag(false)
+    }
+  }
+
+  async function handleDeleteTag(tagId: string) {
+    setDeletingTagId(tagId)
+    setTagCatalogError(null)
+    try {
+      await deleteConversationTag(tagId)
+      setTagCatalog((prev) => prev.filter((tag) => tag.id !== tagId))
+      setAssignedTagIds((prev) => prev.filter((id) => id !== tagId))
+    } catch (err) {
+      setTagCatalogError(err instanceof Error ? err.message : t('inbox.tags.errors.delete'))
+    } finally {
+      setDeletingTagId(null)
+    }
+  }
+
   function handleAttachmentSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] ?? null
     e.target.value = ''
@@ -318,23 +367,53 @@ export function ChatPanel({
             </button>
 
             {tagsPopoverOpen && (
-              <div className="absolute left-0 top-full z-40 mt-2 w-56 max-w-[calc(100vw-2rem)] space-y-1 rounded-2xl border border-brand-100 bg-white p-3 shadow-lg">
-                {tagCatalog.length === 0 ? (
-                  <p className="px-1 py-1 text-xs text-brand-400">{t('inbox.tags.empty')}</p>
-                ) : (
-                  tagCatalog.map((tag) => (
-                    <label key={tag.id} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-brand-700 hover:bg-brand-50">
-                      <input
-                        type="checkbox"
-                        checked={assignedTagIds.includes(tag.id)}
-                        onChange={() => handleToggleTag(tag.id)}
-                        disabled={tagsUpdating}
-                        className="h-3.5 w-3.5 rounded border-brand-300 text-accent-500 focus:ring-accent-400"
-                      />
-                      {tag.name}
-                    </label>
-                  ))
+              <div className="absolute left-0 top-full z-40 mt-2 w-64 max-w-[calc(100vw-2rem)] rounded-2xl border border-brand-100 bg-white p-3 shadow-lg">
+                <div className="space-y-1">
+                  {tagCatalog.length === 0 ? (
+                    <p className="px-1 py-1 text-xs text-brand-400">{t('inbox.tags.empty')}</p>
+                  ) : (
+                    tagCatalog.map((tag) => (
+                      <div key={tag.id} className="flex items-center gap-1 rounded-lg pr-1 hover:bg-brand-50">
+                        <label className="flex flex-1 cursor-pointer items-center gap-2 px-2 py-1.5 text-sm text-brand-700">
+                          <input
+                            type="checkbox"
+                            checked={assignedTagIds.includes(tag.id)}
+                            onChange={() => handleToggleTag(tag.id)}
+                            disabled={tagsUpdating}
+                            className="h-3.5 w-3.5 rounded border-brand-300 text-accent-500 focus:ring-accent-400"
+                          />
+                          {tag.name}
+                        </label>
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteTag(tag.id)}
+                            disabled={deletingTagId === tag.id}
+                            aria-label={t('inbox.tags.deleteAria', { name: tag.name })}
+                            className="shrink-0 rounded-full p-1 text-brand-300 transition-colors hover:bg-brand-100 hover:text-red-600 disabled:opacity-50"
+                          >
+                            <XCircleIcon width={12} height={12} />
+                          </button>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {isAdmin && (
+                  <form onSubmit={handleCreateTag} className="mt-2 flex gap-1.5 border-t border-brand-100 pt-2">
+                    <Input
+                      value={newTagName}
+                      onChange={(e) => setNewTagName(e.target.value)}
+                      placeholder={t('inbox.tags.placeholder')}
+                      className="!py-1 !text-xs"
+                    />
+                    <Button type="submit" variant="secondary" disabled={creatingTag || !newTagName.trim()} className="!shrink-0 !px-2 !py-1 !text-xs">
+                      <PlusIcon width={12} height={12} />
+                    </Button>
+                  </form>
                 )}
+                {tagCatalogError && <p className="mt-1.5 px-1 text-xs text-red-600">{tagCatalogError}</p>}
               </div>
             )}
           </div>
