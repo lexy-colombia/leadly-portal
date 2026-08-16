@@ -1,10 +1,14 @@
 import { supabase } from '../supabaseClient'
-import type { Warehouse } from '../../types/domain'
+import type { Warehouse, WarehouseType } from '../../types/domain'
 
 export interface WarehouseInput {
   tenant_id: string
   name: string
   address?: string | null
+  city?: string | null
+  type?: WarehouseType
+  manager_name?: string | null
+  phone?: string | null
   is_default?: boolean
   is_active?: boolean
 }

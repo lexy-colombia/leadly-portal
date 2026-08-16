@@ -2,11 +2,14 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { getProduct, getProductImageUrl } from '../../lib/api/products'
 import type { ProductDetail } from '../../lib/api/products'
+import { isStockEntry, listMovementsForProduct, listStockByProduct, MOVEMENT_TYPE_KEY } from '../../lib/api/stockMovements'
+import type { ProductStockWithWarehouse, StockMovementWithWarehouse } from '../../lib/api/stockMovements'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { Language } from '../../i18n/translations'
-import { Badge, PageSpinner } from '../../components/ui'
-import { BoxIcon, ChevronLeftIcon, MailIcon, PencilIcon, PhoneIcon, UserIcon } from '../../components/icons'
+import { Badge, Button, PageSpinner, Table, TBody, TD, TH, THead, TRow } from '../../components/ui'
+import { BoxIcon, ChevronLeftIcon, MailIcon, PencilIcon, PhoneIcon, PlusIcon, UserIcon } from '../../components/icons'
 import { ProductDrawer } from './products/ProductDrawer'
+import { StockMovementDrawer } from './inventory/StockMovementDrawer'
 import { useAuth } from '../../contexts/AuthContext'
 
 function formatCurrency(value: number | null, currency: string): string {
@@ -92,6 +95,11 @@ export function ProductoDetalle() {
   const [product, setProduct] = useState<ProductDetail | null | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
   const [editOpen, setEditOpen] = useState(false)
+  const [stockByWarehouse, setStockByWarehouse] = useState<ProductStockWithWarehouse[] | null>(null)
+  const [stockError, setStockError] = useState<string | null>(null)
+  const [movements, setMovements] = useState<StockMovementWithWarehouse[] | null>(null)
+  const [movementsError, setMovementsError] = useState<string | null>(null)
+  const [movementDrawerOpen, setMovementDrawerOpen] = useState(false)
 
   function reload() {
     if (!id) return
@@ -101,6 +109,18 @@ export function ProductoDetalle() {
   }
 
   useEffect(reload, [id])
+
+  function reloadStock() {
+    if (!id) return
+    listStockByProduct(id)
+      .then(setStockByWarehouse)
+      .catch((err) => setStockError(err.message ?? t('inventory.product.errors.loadStock')))
+    listMovementsForProduct(id)
+      .then(setMovements)
+      .catch((err) => setMovementsError(err.message ?? t('inventory.product.errors.loadMovements')))
+  }
+
+  useEffect(reloadStock, [id])
 
   if (error) return <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
   if (product === undefined) return <PageSpinner />
@@ -182,6 +202,67 @@ export function ProductoDetalle() {
             )}
           </Section>
 
+          {product.track_inventory && (
+            <Section title={t('inventory.product.section.stockByWarehouse')}>
+              <div className="mb-3 flex justify-end">
+                <Button variant="secondary" onClick={() => setMovementDrawerOpen(true)} className="!py-1 !text-xs">
+                  <PlusIcon width={14} height={14} /> {t('inventory.product.actions.registerMovement')}
+                </Button>
+              </div>
+
+              {stockError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{stockError}</p>}
+              {!stockByWarehouse && !stockError && <PageSpinner />}
+              {stockByWarehouse && stockByWarehouse.length === 0 && <p className="text-sm text-brand-400">{t('inventory.product.empty.noStock')}</p>}
+
+              {stockByWarehouse && stockByWarehouse.length > 0 && (
+                <Table>
+                  <THead>
+                    <tr>
+                      <TH>{t('inventory.product.table.warehouse')}</TH>
+                      <TH className="text-right">{t('inventory.product.table.available')}</TH>
+                      <TH className="text-right">{t('products.detail.fields.reserved')}</TH>
+                      <TH className="text-right">{t('inventory.movementType.salida_despacho')}</TH>
+                      <TH className="text-right">{t('inventory.movementType.ajuste_dano')}</TH>
+                    </tr>
+                  </THead>
+                  <TBody>
+                    {stockByWarehouse.map((row) => (
+                      <TRow key={row.id}>
+                        <TD className="text-xs font-medium text-brand-800">{row.warehouse.name}</TD>
+                        <TD className="text-right text-xs text-brand-700">{row.quantity}</TD>
+                        <TD className="text-right text-xs text-brand-500">{row.reserved_quantity}</TD>
+                        <TD className="text-right text-xs text-brand-500">{row.departure_quantity}</TD>
+                        <TD className="text-right text-xs text-brand-500">{row.damaged_quantity}</TD>
+                      </TRow>
+                    ))}
+                  </TBody>
+                </Table>
+              )}
+
+              <h4 className="mb-2 mt-5 text-xs font-semibold text-brand-600">{t('inventory.product.section.movements')}</h4>
+              {movementsError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{movementsError}</p>}
+              {!movements && !movementsError && <PageSpinner />}
+              {movements && movements.length === 0 && <p className="text-sm text-brand-400">{t('inventory.product.empty.noMovements')}</p>}
+
+              {movements && movements.length > 0 && (
+                <Table>
+                  <TBody>
+                    {movements.map((movement) => (
+                      <TRow key={movement.id}>
+                        <TD className="text-xs text-brand-500">{formatDate(movement.created_at, language)}</TD>
+                        <TD className="text-xs text-brand-500">{movement.warehouse.name}</TD>
+                        <TD className="text-xs text-brand-700">{t(MOVEMENT_TYPE_KEY[movement.movement_type])}</TD>
+                        <TD className={`text-right text-xs font-medium ${isStockEntry(movement.movement_type) ? 'text-emerald-600' : 'text-red-600'}`}>
+                          {t('inventory.product.movement.quantitySign', { sign: isStockEntry(movement.movement_type) ? '+' : '-', quantity: movement.quantity })}
+                        </TD>
+                      </TRow>
+                    ))}
+                  </TBody>
+                </Table>
+              )}
+            </Section>
+          )}
+
           {product.supplier && (
             <Section title={t('products.detail.sections.supplier')}>
               <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
@@ -235,7 +316,16 @@ export function ProductoDetalle() {
       </div>
 
       {profile?.tenant_id && (
-        <ProductDrawer open={editOpen} onClose={() => setEditOpen(false)} tenantId={profile.tenant_id} product={product} onSaved={reload} />
+        <>
+          <ProductDrawer open={editOpen} onClose={() => setEditOpen(false)} tenantId={profile.tenant_id} product={product} onSaved={reload} />
+          <StockMovementDrawer
+            open={movementDrawerOpen}
+            onClose={() => setMovementDrawerOpen(false)}
+            tenantId={profile.tenant_id}
+            productId={product.id}
+            onSaved={reloadStock}
+          />
+        </>
       )}
     </div>
   )

@@ -73,6 +73,8 @@ export function Bodegas() {
               <tr>
                 <TH>{t('inventory.warehouses.table.name')}</TH>
                 <TH>{t('inventory.warehouses.table.address')}</TH>
+                <TH>{t('inventory.warehouses.table.city')}</TH>
+                <TH>{t('inventory.warehouses.table.type')}</TH>
                 <TH>{t('inventory.warehouses.table.status')}</TH>
                 <TH className="text-right">{t('inventory.warehouses.table.actions')}</TH>
               </tr>
@@ -87,6 +89,8 @@ export function Bodegas() {
                     </span>
                   </TD>
                   <TD className="text-xs text-brand-500">{warehouse.address ?? '-'}</TD>
+                  <TD className="text-xs text-brand-500">{warehouse.city ?? '-'}</TD>
+                  <TD className="text-xs text-brand-500">{t(`inventory.warehouseType.${warehouse.type}`)}</TD>
                   <TD>
                     <Badge tone={warehouse.is_active ? 'success' : 'neutral'}>{t(warehouse.is_active ? 'common.status.active' : 'common.status.inactive')}</Badge>
                   </TD>

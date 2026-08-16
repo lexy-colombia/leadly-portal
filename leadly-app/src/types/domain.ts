@@ -633,11 +633,17 @@ export interface IntegrationCredential {
 // -- Pivote a ERP". Tablas nuevas, sin prefijo crm_, no tocan el catálogo
 // existente (crm_products.stock_quantity/reserved_stock siguen intactos).
 
+export type WarehouseType = 'bodega' | 'punto_venta' | 'transito'
+
 export interface Warehouse {
   id: string
   tenant_id: string
   name: string
   address: string | null
+  city: string | null
+  type: WarehouseType
+  manager_name: string | null
+  phone: string | null
   is_default: boolean
   is_active: boolean
   created_at: string
@@ -653,11 +659,25 @@ export interface ProductStock {
   warehouse_id: string
   quantity: number
   reserved_quantity: number
+  departure_quantity: number
+  damaged_quantity: number
   created_at: string
   updated_at: string
 }
 
-export type StockMovementType = 'entrada' | 'salida' | 'ajuste_positivo' | 'ajuste_negativo' | 'transferencia_salida' | 'transferencia_entrada'
+export type StockMovementType =
+  | 'entrada'
+  | 'salida'
+  | 'ajuste_positivo'
+  | 'ajuste_negativo'
+  | 'transferencia_salida'
+  | 'transferencia_entrada'
+  | 'reserva'
+  | 'liberacion_reserva'
+  | 'salida_despacho'
+  | 'entrega_despacho'
+  | 'ajuste_dano'
+  | 'reversion_dano'
 export type StockReferenceType = 'carga_inicial' | 'compra' | 'despacho' | 'ajuste_manual' | 'transferencia'
 
 export interface StockMovement {
@@ -667,6 +687,7 @@ export interface StockMovement {
   warehouse_id: string
   movement_type: StockMovementType
   quantity: number
+  unit_cost: number | null
   reference_type: StockReferenceType | null
   reference_id: string | null
   notes: string | null

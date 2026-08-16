@@ -24,6 +24,7 @@ import { ContactoDetalle } from './pages/tenant/ContactoDetalle'
 import { Oportunidades } from './pages/tenant/Oportunidades'
 import { Productos } from './pages/tenant/Productos'
 import { ProductoDetalle } from './pages/tenant/ProductoDetalle'
+import { Bodegas } from './pages/tenant/Bodegas'
 import { Ventas } from './pages/tenant/Ventas'
 import { VentaDetalle } from './pages/tenant/VentaDetalle'
 import { Tareas } from './pages/tenant/Tareas'
@@ -91,6 +92,7 @@ export default function App() {
             <Route path="oportunidades" element={<RequireModule moduleKey="pipeline"><Oportunidades /></RequireModule>} />
             <Route path="productos" element={<RequireModule moduleKey="products"><Productos /></RequireModule>} />
             <Route path="productos/:id" element={<RequireModule moduleKey="products"><ProductoDetalle /></RequireModule>} />
+            <Route path="inventario" element={<RequireModule moduleKey="inventory"><Bodegas /></RequireModule>} />
             <Route path="ventas" element={<RequireModule moduleKey="sales"><Ventas /></RequireModule>} />
             <Route path="ventas/:id" element={<RequireModule moduleKey="sales"><VentaDetalle /></RequireModule>} />
             <Route path="tareas" element={<RequireModule moduleKey="tasks"><Tareas /></RequireModule>} />

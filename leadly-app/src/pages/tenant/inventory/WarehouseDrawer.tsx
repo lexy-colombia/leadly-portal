@@ -1,9 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { createWarehouse, updateWarehouse } from '../../../lib/api/warehouses'
-import type { Warehouse } from '../../../types/domain'
+import type { Warehouse, WarehouseType } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { Button, Drawer, FieldError, Input, Label, Switch } from '../../../components/ui'
+import { Button, Drawer, FieldError, Input, Label, Select, Switch } from '../../../components/ui'
 import { isNotBlank } from '../../../lib/validation'
+
+const WAREHOUSE_TYPES: WarehouseType[] = ['bodega', 'punto_venta', 'transito']
 
 export function WarehouseDrawer({
   open,
@@ -21,6 +23,10 @@ export function WarehouseDrawer({
   const { t } = useLanguage()
   const [name, setName] = useState('')
   const [address, setAddress] = useState('')
+  const [city, setCity] = useState('')
+  const [type, setType] = useState<WarehouseType>('bodega')
+  const [managerName, setManagerName] = useState('')
+  const [phone, setPhone] = useState('')
   const [isDefault, setIsDefault] = useState(false)
   const [isActive, setIsActive] = useState(true)
   const [touched, setTouched] = useState(false)
@@ -31,6 +37,10 @@ export function WarehouseDrawer({
     if (!open) return
     setName(warehouse?.name ?? '')
     setAddress(warehouse?.address ?? '')
+    setCity(warehouse?.city ?? '')
+    setType(warehouse?.type ?? 'bodega')
+    setManagerName(warehouse?.manager_name ?? '')
+    setPhone(warehouse?.phone ?? '')
     setIsDefault(warehouse?.is_default ?? false)
     setIsActive(warehouse?.is_active ?? true)
     setTouched(false)
@@ -51,6 +61,10 @@ export function WarehouseDrawer({
         tenant_id: tenantId,
         name: name.trim(),
         address: address.trim() || null,
+        city: city.trim() || null,
+        type,
+        manager_name: managerName.trim() || null,
+        phone: phone.trim() || null,
         is_default: isDefault,
         is_active: isActive,
       }
@@ -88,6 +102,34 @@ export function WarehouseDrawer({
         <div>
           <Label htmlFor="warehouse-address">{t('inventory.warehouseDrawer.field.address')}</Label>
           <Input id="warehouse-address" value={address} onChange={(e) => setAddress(e.target.value)} />
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <Label htmlFor="warehouse-city">{t('inventory.warehouseDrawer.field.city')}</Label>
+            <Input id="warehouse-city" value={city} onChange={(e) => setCity(e.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="warehouse-type">{t('inventory.warehouseDrawer.field.type')}</Label>
+            <Select id="warehouse-type" value={type} onChange={(e) => setType(e.target.value as WarehouseType)}>
+              {WAREHOUSE_TYPES.map((wt) => (
+                <option key={wt} value={wt}>
+                  {t(`inventory.warehouseType.${wt}`)}
+                </option>
+              ))}
+            </Select>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <Label htmlFor="warehouse-manager">{t('inventory.warehouseDrawer.field.managerName')}</Label>
+            <Input id="warehouse-manager" value={managerName} onChange={(e) => setManagerName(e.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="warehouse-phone">{t('inventory.warehouseDrawer.field.phone')}</Label>
+            <Input id="warehouse-phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          </div>
         </div>
 
         <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
