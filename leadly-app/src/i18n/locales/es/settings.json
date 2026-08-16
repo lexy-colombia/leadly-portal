@@ -5,6 +5,7 @@
   "settings.logo.change": "Cambiar logo",
   "settings.logo.uploading": "Subiendo…",
   "settings.logo.hint": "PNG, JPG, WEBP o SVG. Máximo 5MB.",
+  "settings.logo.viewLarger": "Ver logo en tamaño completo",
   "settings.logo.errors.load": "No se pudo cargar tu empresa.",
   "settings.logo.errors.upload": "No se pudo subir el logo.",
   "settings.company.title": "Perfil de la empresa",

@@ -1,11 +1,48 @@
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import { getTenant, uploadTenantLogo, validateTenantLogoFile } from '../../lib/api/tenants'
 import type { Tenant } from '../../types/domain'
 import { Card, CardSection, InitialsAvatar, PageSpinner } from '../../components/ui'
-import { PencilIcon } from '../../components/icons'
+import { PencilIcon, XCircleIcon } from '../../components/icons'
 import { Bodegas } from './Bodegas'
+
+/** Full-size preview on click -- the thumbnail is only 20x20, a logo that
+ * isn't a small icon (a wordmark, anything wide) is unreadable at that
+ * size and there was previously no way to see it any bigger. Same overlay
+ * pattern as ConfirmDialog (portal, backdrop, Escape-to-close). */
+function LogoPreviewModal({ src, alt, onClose }: { src: string; alt: string; onClose: () => void }) {
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', handleKey)
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.removeEventListener('keydown', handleKey)
+      document.body.style.overflow = prevOverflow
+    }
+  }, [onClose])
+
+  return createPortal(
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-6">
+      <div className="absolute inset-0 animate-fade-in bg-brand-900/60" onClick={onClose} aria-hidden="true" />
+      <div className="relative max-h-[85vh] max-w-[85vw] rounded-2xl bg-white p-3 shadow-2xl">
+        <button
+          type="button"
+          onClick={onClose}
+          className="absolute -right-2.5 -top-2.5 flex h-7 w-7 items-center justify-center rounded-full bg-white text-brand-500 shadow-md hover:text-brand-800"
+        >
+          <XCircleIcon width={18} height={18} />
+        </button>
+        <img src={src} alt={alt} className="max-h-[75vh] max-w-[75vw] rounded-xl object-contain" />
+      </div>
+    </div>,
+    document.body,
+  )
+}
 
 /** Label-above-value field, same shape ProductoDetalle/ContactoDetalle use
  * for their data sheets -- reused here instead of inventing a third layout
@@ -57,6 +94,7 @@ function CompanySection() {
   const [error, setError] = useState<string | null>(null)
   const [logoUploading, setLogoUploading] = useState(false)
   const [logoError, setLogoError] = useState<string | null>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -103,21 +141,36 @@ function CompanySection() {
         {tenant && (
           <div className="flex flex-col gap-5 md:flex-row md:items-start">
             <div className="flex shrink-0 items-center gap-3 md:w-56">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={logoUploading}
-                className="group relative shrink-0 rounded-full"
-                aria-label={tenant.logo_url ? t('settings.logo.change') : t('settings.logo.upload')}
-              >
+              <div className="relative shrink-0">
                 {tenant.logo_url ? (
-                  <img src={tenant.logo_url} alt="" className="h-12 w-12 rounded-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => setPreviewOpen(true)}
+                    className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-brand-100 bg-white p-1.5"
+                    aria-label={t('settings.logo.viewLarger')}
+                  >
+                    <img src={tenant.logo_url} alt={tenant.name} className="max-h-full max-w-full object-contain" />
+                  </button>
                 ) : (
-                  <InitialsAvatar name={tenant.name} size="lg" />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={logoUploading}
+                    className="flex h-20 w-20 items-center justify-center rounded-2xl bg-brand-50"
+                    aria-label={t('settings.logo.upload')}
+                  >
+                    <InitialsAvatar name={tenant.name} size="lg" />
+                  </button>
                 )}
-                <span className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full border border-brand-100 bg-white text-brand-500 shadow-sm transition-colors group-hover:bg-brand-50">
-                  <PencilIcon width={10} height={10} />
-                </span>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={logoUploading}
+                  aria-label={tenant.logo_url ? t('settings.logo.change') : t('settings.logo.upload')}
+                  className="absolute -bottom-1.5 -right-1.5 flex h-6 w-6 items-center justify-center rounded-full border border-brand-100 bg-white text-brand-500 shadow-sm transition-colors hover:bg-brand-50"
+                >
+                  <PencilIcon width={11} height={11} />
+                </button>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -125,12 +178,13 @@ function CompanySection() {
                   className="hidden"
                   onChange={handleLogoPick}
                 />
-              </button>
+              </div>
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold text-brand-800">{tenant.name}</p>
                 <p className="text-xs text-brand-400">{logoUploading ? t('settings.logo.uploading') : t('settings.logo.hint')}</p>
               </div>
             </div>
+            {previewOpen && tenant.logo_url && <LogoPreviewModal src={tenant.logo_url} alt={tenant.name} onClose={() => setPreviewOpen(false)} />}
 
             <dl className="grid flex-1 grid-cols-2 gap-x-6 gap-y-3.5 border-t border-brand-100 pt-4 sm:grid-cols-3 md:border-t-0 md:border-l md:pl-6 md:pt-0">
               <Field label={t('settings.company.legalName')} value={tenant.legal_name} />
