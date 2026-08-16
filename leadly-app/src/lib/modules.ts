@@ -1,5 +1,6 @@
 import {
   AiSparkleIcon,
+  ArchiveIcon,
   BarChartIcon,
   BoxIcon,
   BuildingIcon,
@@ -40,6 +41,7 @@ export const TENANT_MODULES: TenantModuleDefinition[] = [
   { key: 'contacts', labelKey: 'common.nav.contacts', to: '/app/clientes', icon: BuildingIcon },
   { key: 'pipeline', labelKey: 'common.nav.pipeline', to: '/app/oportunidades', icon: TargetIcon },
   { key: 'products', labelKey: 'common.nav.products', to: '/app/productos', icon: BoxIcon },
+  { key: 'inventory', labelKey: 'common.nav.inventory', to: '/app/inventario', icon: ArchiveIcon },
   { key: 'sales', labelKey: 'common.nav.sales', to: '/app/ventas', icon: ReceiptIcon },
   { key: 'tasks', labelKey: 'common.nav.tasks', to: '/app/tareas', icon: CheckIcon },
   { key: 'calendar', labelKey: 'common.nav.calendar', to: '/app/calendario', icon: CalendarIcon },
