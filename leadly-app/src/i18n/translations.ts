@@ -9,6 +9,7 @@ import esContacts from './locales/es/contacts.json'
 import esDashboard from './locales/es/dashboard.json'
 import esInbox from './locales/es/inbox.json'
 import esIntegrations from './locales/es/integrations.json'
+import esInventory from './locales/es/inventory.json'
 import esOpportunities from './locales/es/opportunities.json'
 import esOrders from './locales/es/orders.json'
 import esProducts from './locales/es/products.json'
@@ -26,6 +27,7 @@ import enContacts from './locales/en/contacts.json'
 import enDashboard from './locales/en/dashboard.json'
 import enInbox from './locales/en/inbox.json'
 import enIntegrations from './locales/en/integrations.json'
+import enInventory from './locales/en/inventory.json'
 import enOpportunities from './locales/en/opportunities.json'
 import enOrders from './locales/en/orders.json'
 import enProducts from './locales/en/products.json'
@@ -55,6 +57,7 @@ export const translations = {
     ...esTasks,
     ...esCalendar,
     ...esProducts,
+    ...esInventory,
     ...esOrders,
     ...esBilling,
     ...esSettings,
@@ -73,6 +76,7 @@ export const translations = {
     ...enTasks,
     ...enCalendar,
     ...enProducts,
+    ...enInventory,
     ...enOrders,
     ...enBilling,
     ...enSettings,

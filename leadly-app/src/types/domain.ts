@@ -628,3 +628,48 @@ export interface IntegrationCredential {
   deleted_at: string | null
   deleted_by: string | null
 }
+
+// --- ERP: Fase 1 (Inventario) -- ver CLAUDE.md "Estado actual (2026-08-15)
+// -- Pivote a ERP". Tablas nuevas, sin prefijo crm_, no tocan el catálogo
+// existente (crm_products.stock_quantity/reserved_stock siguen intactos).
+
+export interface Warehouse {
+  id: string
+  tenant_id: string
+  name: string
+  address: string | null
+  is_default: boolean
+  is_active: boolean
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+  deleted_by: string | null
+}
+
+export interface ProductStock {
+  id: string
+  tenant_id: string
+  product_id: string
+  warehouse_id: string
+  quantity: number
+  reserved_quantity: number
+  created_at: string
+  updated_at: string
+}
+
+export type StockMovementType = 'entrada' | 'salida' | 'ajuste_positivo' | 'ajuste_negativo' | 'transferencia_salida' | 'transferencia_entrada'
+export type StockReferenceType = 'carga_inicial' | 'compra' | 'despacho' | 'ajuste_manual' | 'transferencia'
+
+export interface StockMovement {
+  id: string
+  tenant_id: string
+  product_id: string
+  warehouse_id: string
+  movement_type: StockMovementType
+  quantity: number
+  reference_type: StockReferenceType | null
+  reference_id: string | null
+  notes: string | null
+  created_by: string | null
+  created_at: string
+}
