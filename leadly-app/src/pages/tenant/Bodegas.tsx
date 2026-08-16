@@ -47,12 +47,11 @@ export function Bodegas() {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <h1 className="text-lg font-bold text-brand-800">{t('inventory.warehouses.title')}</h1>
+      <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-brand-400">
           {warehouses?.length ?? 0} {t((warehouses?.length ?? 0) === 1 ? 'inventory.warehouses.count.singular' : 'inventory.warehouses.count.plural')}
         </span>
-        <Button variant="secondary" onClick={() => setDrawer({ open: true, warehouse: null })} className="!ml-auto !py-1 !text-xs">
+        <Button variant="secondary" onClick={() => setDrawer({ open: true, warehouse: null })} className="!py-1 !text-xs">
           <PlusIcon width={14} height={14} /> {t('inventory.warehouses.actions.new')}
         </Button>
       </div>

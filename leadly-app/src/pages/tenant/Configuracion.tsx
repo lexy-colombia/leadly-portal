@@ -1,62 +1,39 @@
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import { getTenant, uploadTenantLogo, validateTenantLogoFile } from '../../lib/api/tenants'
 import { createConversationTag, deleteConversationTag, listConversationTags } from '../../lib/api/conversationTags'
 import type { ConversationTag, Tenant } from '../../types/domain'
-import { Button, Card, EmptyState, InitialsAvatar, Input, PageSpinner } from '../../components/ui'
-import { BuildingIcon, PlusIcon, TagIcon, XCircleIcon } from '../../components/icons'
+import { Button, Card, CardSection, EmptyState, InitialsAvatar, Input, PageSpinner } from '../../components/ui'
+import { PencilIcon, PlusIcon, XCircleIcon } from '../../components/icons'
 import { Bodegas } from './Bodegas'
 
-/** Every section header here follows the same shape (icon chip + title + one-line
- * description), and at most one accent-filled button per Card -- everything else is
- * `ghost`. Previously three sections lived stacked in one shared Card with a button
- * in every header, which read as a wall of same-weight buttons with no clear "this is
- * the one thing to click here" per section. Separate Cards + one clear CTA each fixes that. */
-function SectionHeader({ icon, title, description, action }: { icon: ReactNode; title: string; description: string; action?: ReactNode }) {
-  return (
-    <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-      <div className="flex items-start gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-500">{icon}</span>
-        <div>
-          <h2 className="font-semibold text-brand-800">{title}</h2>
-          <p className="text-sm text-brand-400">{description}</p>
-        </div>
-      </div>
-      {action}
-    </div>
-  )
-}
-
+// One Card, divided into CardSections (same pattern as MiCuenta.tsx/
+// Facturacion.tsx) instead of a separate floating Card per concern -- the
+// previous version (2026-08-16) gave every section its own card with an
+// icon chip + description header, which read as a tall stack of
+// same-weight boxes instead of one compact profile page. Dropped the
+// per-section description paragraphs too (title is enough, matches every
+// other CardSection screen in the app -- none of them carry one).
 export function Configuracion() {
   const { profile, enabledModules } = useAuth()
+  const { t } = useLanguage()
   const isAdmin = profile?.role === 'tenant_admin'
 
   return (
-    <div className="space-y-4">
-      {isAdmin && <LogoSection />}
+    <Card padded={false} className="max-w-2xl">
+      {isAdmin && <CompanySection />}
       {isAdmin && <TagsSection />}
-      {enabledModules?.has('inventory') && <BodegasSection />}
-    </div>
-  )
-}
-
-/** Bodegas (Inventario Fase 1) vivía en su propia ruta de nav (/app/inventario)
- * -- se movió acá el 2026-08-16 (pedido explícito del usuario, inspirado en
- * cómo Seeri agrupa toda la configuración operativa del negocio bajo una
- * sola pantalla de "perfil de la empresa" en vez de esparcirla en el nav) y
- * ya no tiene ruta propia. Sigue gateado por el módulo `inventory`, pero
- * ahora accesible tanto a tenant_admin como tenant_agent (mismo nivel de
- * acceso que tenía la ruta vieja, no se restringe a admin como Logo/Tags). */
-function BodegasSection() {
-  return (
-    <Card>
-      <Bodegas />
+      {enabledModules?.has('inventory') && (
+        <CardSection title={t('inventory.warehouses.title')}>
+          <Bodegas />
+        </CardSection>
+      )}
     </Card>
   )
 }
 
-function LogoSection() {
+function CompanySection() {
   const { profile } = useAuth()
   const { t } = useLanguage()
   const [tenant, setTenant] = useState<Tenant | null | undefined>(undefined)
@@ -100,22 +77,26 @@ function LogoSection() {
   }
 
   return (
-    <Card>
-      <SectionHeader icon={<BuildingIcon width={18} height={18} />} title={t('settings.logo.title')} description={t('settings.logo.description')} />
-
+    <CardSection title={t('settings.logo.title')}>
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       {!error && tenant === undefined && <PageSpinner />}
       {tenant && (
-        <div className="flex items-center gap-4">
-          {tenant.logo_url ? (
-            <img src={tenant.logo_url} alt="" className="h-16 w-16 shrink-0 rounded-full object-cover" />
-          ) : (
-            <InitialsAvatar name={tenant.name} size="lg" />
-          )}
-          <div>
-            <Button type="button" variant="ghost" onClick={() => fileInputRef.current?.click()} disabled={logoUploading} className="!px-3.5 !py-2 text-xs">
-              {logoUploading ? t('settings.logo.uploading') : tenant.logo_url ? t('settings.logo.change') : t('settings.logo.upload')}
-            </Button>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={logoUploading}
+            className="group relative shrink-0 rounded-full"
+            aria-label={tenant.logo_url ? t('settings.logo.change') : t('settings.logo.upload')}
+          >
+            {tenant.logo_url ? (
+              <img src={tenant.logo_url} alt="" className="h-14 w-14 rounded-full object-cover" />
+            ) : (
+              <InitialsAvatar name={tenant.name} size="md" />
+            )}
+            <span className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full border border-brand-100 bg-white text-brand-500 shadow-sm transition-colors group-hover:bg-brand-50">
+              <PencilIcon width={10} height={10} />
+            </span>
             <input
               ref={fileInputRef}
               type="file"
@@ -123,12 +104,15 @@ function LogoSection() {
               className="hidden"
               onChange={handleLogoPick}
             />
-            <p className="mt-1.5 text-xs text-brand-400">{t('settings.logo.hint')}</p>
+          </button>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-brand-800">{tenant.name}</p>
+            <p className="text-xs text-brand-400">{logoUploading ? t('settings.logo.uploading') : t('settings.logo.hint')}</p>
           </div>
         </div>
       )}
       {logoError && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{logoError}</p>}
-    </Card>
+    </CardSection>
   )
 }
 
@@ -182,9 +166,7 @@ function TagsSection() {
   }
 
   return (
-    <Card>
-      <SectionHeader icon={<TagIcon width={18} height={18} />} title={t('settings.tags.title')} description={t('settings.tags.description')} />
-
+    <CardSection title={t('settings.tags.title')}>
       {error && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       {!tags && !error && <PageSpinner />}
 
@@ -219,6 +201,6 @@ function TagsSection() {
           )}
         </>
       )}
-    </Card>
+    </CardSection>
   )
 }
