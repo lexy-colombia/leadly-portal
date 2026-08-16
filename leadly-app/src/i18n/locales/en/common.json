@@ -1,5 +1,6 @@
 {
   "common.nav.dashboard": "Dashboard",
+  "common.nav.crm": "CRM",
   "common.nav.conversations": "Conversations",
   "common.nav.contacts": "Contacts",
   "common.nav.pipeline": "Pipeline",

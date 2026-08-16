@@ -29,6 +29,12 @@ export interface NavItem {
    * but intentionally locked (Campañas, Catálogo) -- signals "coming soon",
    * not a permissions error. */
   badge?: string
+  /** One level of nested items, rendered as a collapsible group (e.g. "CRM").
+   * A parent with children is a pure grouping label, not a page of its own
+   * -- its `to` is only used to decide which group to auto-expand and is
+   * excluded from page-title resolution below, so it never competes with
+   * one of its children for the header title. */
+  children?: NavItem[]
 }
 
 const COLLAPSE_STORAGE_KEY = 'leadly:sidebar-collapsed'
@@ -52,7 +58,12 @@ function resolvePageTitle(
   if (pathname.endsWith('/perfil')) return { title: specialTitles.account }
   if (pathname.endsWith('/novedades')) return { title: specialTitles.whatsNew }
 
-  const matches = navItems.filter((item) => pathname === item.to || pathname.startsWith(`${item.to}/`))
+  // Flatten one level so a grouped item's children (e.g. "Contactos" inside
+  // "CRM") still resolve to a real page title -- only leaf items (no
+  // children of their own) are real pages, so the parent's own `to` is
+  // excluded here even though it's still used for auto-expand elsewhere.
+  const candidates = navItems.flatMap((item) => (item.children && item.children.length > 0 ? item.children : [item]))
+  const matches = candidates.filter((item) => pathname === item.to || pathname.startsWith(`${item.to}/`))
   const best = matches.reduce<NavItem | null>((longest, item) => (!longest || item.to.length > longest.to.length ? item : longest), null)
   if (!best) return { title: '' }
   return { title: best.label, badge: best.badge, backTo: pathname !== best.to ? best.to : undefined }
@@ -156,6 +167,7 @@ export function AppShell({
                 label={item.label}
                 icon={item.icon}
                 badge={item.badge}
+                children={item.children}
                 collapsed={collapsed}
                 theme={theme}
                 onClick={() => setMobileOpen(false)}

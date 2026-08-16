@@ -6,6 +6,7 @@ import { createConversationTag, deleteConversationTag, listConversationTags } fr
 import type { ConversationTag, Tenant } from '../../types/domain'
 import { Button, Card, EmptyState, InitialsAvatar, Input, PageSpinner } from '../../components/ui'
 import { BuildingIcon, PlusIcon, TagIcon, XCircleIcon } from '../../components/icons'
+import { Bodegas } from './Bodegas'
 
 /** Every section header here follows the same shape (icon chip + title + one-line
  * description), and at most one accent-filled button per Card -- everything else is
@@ -28,14 +29,30 @@ function SectionHeader({ icon, title, description, action }: { icon: ReactNode; 
 }
 
 export function Configuracion() {
-  const { profile } = useAuth()
+  const { profile, enabledModules } = useAuth()
   const isAdmin = profile?.role === 'tenant_admin'
 
   return (
     <div className="space-y-4">
       {isAdmin && <LogoSection />}
       {isAdmin && <TagsSection />}
+      {enabledModules?.has('inventory') && <BodegasSection />}
     </div>
+  )
+}
+
+/** Bodegas (Inventario Fase 1) vivía en su propia ruta de nav (/app/inventario)
+ * -- se movió acá el 2026-08-16 (pedido explícito del usuario, inspirado en
+ * cómo Seeri agrupa toda la configuración operativa del negocio bajo una
+ * sola pantalla de "perfil de la empresa" en vez de esparcirla en el nav) y
+ * ya no tiene ruta propia. Sigue gateado por el módulo `inventory`, pero
+ * ahora accesible tanto a tenant_admin como tenant_agent (mismo nivel de
+ * acceso que tenía la ruta vieja, no se restringe a admin como Logo/Tags). */
+function BodegasSection() {
+  return (
+    <Card>
+      <Bodegas />
+    </Card>
   )
 }
 
