@@ -20,10 +20,10 @@ import {
   type OpportunityWithRelations,
   type StageHistoryRow,
 } from '../../lib/api/opportunities'
-import type { CrmPipelineStage, OpportunityPriority } from '../../types/domain'
-import { Badge, Card, EmptyState, PageSpinner, Select } from '../../components/ui'
-import { PhoneIcon } from '../../components/icons'
-
+import type { PipelineStage, OpportunityPriority } from '../../types/domain'
+import { Badge, PageSpinner, Select } from '@/components/atoms'
+import { Card, EmptyState } from '@/components/molecules'
+import { PhoneIcon } from '@/components/atoms/icons'
 const PRIORITY_TONE: Record<OpportunityPriority, 'neutral' | 'warning' | 'danger'> = { baja: 'neutral', media: 'warning', alta: 'danger' }
 type RangeDays = 7 | 14 | 30
 
@@ -168,7 +168,7 @@ function PipelineStageTiles({
   dataByStage,
   metric,
 }: {
-  stages: CrmPipelineStage[]
+  stages: PipelineStage[]
   dataByStage: Map<string, { value: number; count: number }>
   metric: 'value' | 'count'
 }) {
@@ -198,7 +198,7 @@ export function Dashboard() {
   const [tasks, setTasks] = useState<TaskWithRelations[] | null>(null)
   const [conversations, setConversations] = useState<ConversationWithLine[] | null>(null)
   const [messageTimings, setMessageTimings] = useState<MessageTiming[] | null>(null)
-  const [stages, setStages] = useState<CrmPipelineStage[]>([])
+  const [stages, setStages] = useState<PipelineStage[]>([])
   const [opportunities, setOpportunities] = useState<OpportunityWithRelations[] | null>(null)
   const [history, setHistory] = useState<StageHistoryRow[]>([])
   const [error, setError] = useState<string | null>(null)

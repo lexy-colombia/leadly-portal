@@ -1,9 +1,8 @@
 import type { ComponentType } from 'react'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { TranslationKey } from '../../i18n/translations'
-import { Card } from '../../components/ui'
-import { LockClosedIcon } from '../../components/icons'
-
+import { Card } from '@/components/molecules'
+import { LockClosedIcon } from '@/components/atoms/icons'
 /** Placeholder for features that are visible in the nav (so the product feels
  * complete in a demo/sales context) but intentionally not built yet --
  * Campañas and Catálogo. Distinct from AccessDenied: this isn't a permissions

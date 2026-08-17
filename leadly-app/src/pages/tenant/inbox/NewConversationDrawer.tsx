@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { listContacts, createContact } from '../../../lib/api/contacts'
 import { createConversation } from '../../../lib/api/conversations'
 import { listWhatsappLinesByTenant } from '../../../lib/api/whatsappLines'
-import type { CrmContact, WhatsappLine } from '../../../types/domain'
-import { Button, Drawer, FieldError, IconInput, Input, Label, Select } from '../../../components/ui'
-import { SearchIcon, UserIcon } from '../../../components/icons'
+import type { Client, WhatsappLine } from '../../../types/domain'
+import { Button, FieldError, Input, Label, Select } from '@/components/atoms'
+import { IconInput } from '@/components/molecules'
+import { Drawer } from '@/components/organisms'
+import { SearchIcon, UserIcon } from '@/components/atoms/icons'
 import { isNotBlank, isValidE164Phone } from '../../../lib/validation'
 import { useLanguage } from '../../../contexts/LanguageContext'
 
@@ -20,7 +22,7 @@ export function NewConversationDrawer({
   onCreated: (conversationId: string) => void
 }) {
   const { t } = useLanguage()
-  const [contacts, setContacts] = useState<CrmContact[]>([])
+  const [contacts, setContacts] = useState<Client[]>([])
   const [lines, setLines] = useState<WhatsappLine[]>([])
   const [mode, setMode] = useState<'existing' | 'new'>('existing')
   const [search, setSearch] = useState('')
@@ -72,7 +74,7 @@ export function NewConversationDrawer({
 
     setSubmitting(true)
     try {
-      let contact: CrmContact
+      let contact: Client
       if (mode === 'existing') {
         contact = contacts.find((c) => c.id === selectedContactId)!
       } else {

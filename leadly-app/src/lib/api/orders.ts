@@ -1,8 +1,8 @@
 import { supabase } from '../supabaseClient'
-import type { CrmContactAddress, CrmOrder, CrmOrderItem, OrderStatus } from '../../types/domain'
+import type { CrmContactAddress, SalesOrder, SalesOrderItem, OrderStatus } from '../../types/domain'
 import type { TranslationKey } from '../../i18n/translations'
 
-// Shared between Ventas.tsx, VentaDetalle.tsx, and OrderDrawer.tsx so the
+// Shared between Orders.tsx, OrderDetail.tsx, and OrderDrawer.tsx so the
 // status wording never drifts between screens.
 export const ORDER_STATUS_LABEL_KEY: Record<OrderStatus, TranslationKey> = {
   cotizacion: 'orders.status.quote',
@@ -36,15 +36,20 @@ export interface OrderInput {
   created_by?: string | null
 }
 
-export type OrderWithRelations = CrmOrder & {
+export type OrderWithRelations = SalesOrder & {
   contact: { full_name: string; phone: string } | null
   opportunity: { title: string } | null
   shipping_address: { label: string | null; line1: string; city: string | null } | null
   billing_address: { label: string | null; line1: string; city: string | null } | null
 }
 
+// contact -> `contacts` (migró en esta ronda); opportunity/shipping_address/
+// billing_address siguen en crm_opportunities/crm_contact_addresses --
+// Opportunities y Direcciones no migran todavía (ver plan de la ronda
+// 2026-08-16), sales_orders.opportunity_id/shipping_address_id/
+// billing_address_id fueron repunteadas hacia esas tablas viejas.
 const ORDER_SELECT =
-  '*, contact:crm_contacts(full_name, phone), opportunity:crm_opportunities(title), shipping_address:crm_contact_addresses!shipping_address_id(label, line1, city), billing_address:crm_contact_addresses!billing_address_id(label, line1, city)'
+  '*, contact:clients(full_name, phone), opportunity:crm_opportunities(title), shipping_address:crm_contact_addresses!shipping_address_id(label, line1, city), billing_address:crm_contact_addresses!billing_address_id(label, line1, city)'
 
 /** Pure function: derives subtotal/discount_total/total from a set of line
  * items plus header-level shipping/tax -- the same shape both the drawer's
@@ -64,7 +69,7 @@ export function computeOrderTotals(items: OrderItemInput[], shipping: number, ta
 
 export async function listOrders(tenantId: string): Promise<OrderWithRelations[]> {
   const { data, error } = await supabase
-    .from('crm_orders')
+    .from('sales_orders')
     .select(ORDER_SELECT)
     .eq('tenant_id', tenantId)
     .is('deleted_at', null)
@@ -73,10 +78,10 @@ export async function listOrders(tenantId: string): Promise<OrderWithRelations[]
   return data as unknown as OrderWithRelations[]
 }
 
-/** "Ventas" tab on ContactoDetalle.tsx. */
+/** "Orders" tab on ClientDetail.tsx. */
 export async function listOrdersForContact(contactId: string): Promise<OrderWithRelations[]> {
   const { data, error } = await supabase
-    .from('crm_orders')
+    .from('sales_orders')
     .select(ORDER_SELECT)
     .eq('contact_id', contactId)
     .is('deleted_at', null)
@@ -88,7 +93,7 @@ export async function listOrdersForContact(contactId: string): Promise<OrderWith
 /** Read-only "Cotizaciones" section on OpportunityPanel.tsx's Resumen tab. */
 export async function listOrdersForOpportunity(opportunityId: string): Promise<OrderWithRelations[]> {
   const { data, error } = await supabase
-    .from('crm_orders')
+    .from('sales_orders')
     .select(ORDER_SELECT)
     .eq('opportunity_id', opportunityId)
     .is('deleted_at', null)
@@ -97,7 +102,7 @@ export async function listOrdersForOpportunity(opportunityId: string): Promise<O
   return data as unknown as OrderWithRelations[]
 }
 
-export type OrderDetail = CrmOrder & {
+export type OrderDetail = SalesOrder & {
   contact: { id: string; full_name: string; phone: string } | null
   opportunity: { title: string } | null
   shipping_address: CrmContactAddress | null
@@ -105,14 +110,14 @@ export type OrderDetail = CrmOrder & {
   created_by_profile: { full_name: string } | null
 }
 
-/** VentaDetalle.tsx -- unlike ORDER_SELECT (used by list views, which only
+/** OrderDetail.tsx -- unlike ORDER_SELECT (used by list views, which only
  * need a one-line address summary), the detail page shows every field of
  * the linked shipping/billing address, so this joins the full row. */
 export async function getOrder(id: string): Promise<OrderDetail | null> {
   const { data, error } = await supabase
-    .from('crm_orders')
+    .from('sales_orders')
     .select(
-      '*, contact:crm_contacts(id, full_name, phone), opportunity:crm_opportunities(title), shipping_address:crm_contact_addresses!shipping_address_id(*), billing_address:crm_contact_addresses!billing_address_id(*), created_by_profile:profiles!created_by(full_name)',
+      '*, contact:clients(id, full_name, phone), opportunity:crm_opportunities(title), shipping_address:crm_contact_addresses!shipping_address_id(*), billing_address:crm_contact_addresses!billing_address_id(*), created_by_profile:profiles!created_by(full_name)',
     )
     .eq('id', id)
     .is('deleted_at', null)
@@ -121,8 +126,8 @@ export async function getOrder(id: string): Promise<OrderDetail | null> {
   return data as unknown as OrderDetail | null
 }
 
-export async function listOrderItems(orderId: string): Promise<CrmOrderItem[]> {
-  const { data, error } = await supabase.from('crm_order_items').select('*').eq('order_id', orderId).order('display_order', { ascending: true })
+export async function listOrderItems(orderId: string): Promise<SalesOrderItem[]> {
+  const { data, error } = await supabase.from('sales_order_items').select('*').eq('order_id', orderId).order('display_order', { ascending: true })
   if (error) throw error
   return data
 }
@@ -134,7 +139,7 @@ export async function listOrderItems(orderId: string): Promise<CrmOrderItem[]> {
  * drawer always edits the full list at once, so delete-then-reinsert is
  * simpler than reconciling adds/edits/removes line by line. */
 export async function saveOrderItems(tenantId: string, orderId: string, items: OrderItemInput[]): Promise<void> {
-  const { error: deleteError } = await supabase.from('crm_order_items').delete().eq('order_id', orderId)
+  const { error: deleteError } = await supabase.from('sales_order_items').delete().eq('order_id', orderId)
   if (deleteError) throw deleteError
   if (items.length === 0) return
 
@@ -155,14 +160,14 @@ export async function saveOrderItems(tenantId: string, orderId: string, items: O
       display_order: index,
     }
   })
-  const { error: insertError } = await supabase.from('crm_order_items').insert(rows)
+  const { error: insertError } = await supabase.from('sales_order_items').insert(rows)
   if (insertError) throw insertError
 }
 
-export async function createOrder(input: OrderInput, items: OrderItemInput[]): Promise<CrmOrder> {
+export async function createOrder(input: OrderInput, items: OrderItemInput[]): Promise<SalesOrder> {
   const { subtotal, discountTotal, total } = computeOrderTotals(items, input.shipping ?? 0, input.tax_total ?? 0)
   const { data, error } = await supabase
-    .from('crm_orders')
+    .from('sales_orders')
     .insert({ ...input, subtotal, discount_total: discountTotal, total })
     .select()
     .single()
@@ -171,10 +176,10 @@ export async function createOrder(input: OrderInput, items: OrderItemInput[]): P
   return data
 }
 
-export async function updateOrder(id: string, tenantId: string, input: Partial<OrderInput>, items: OrderItemInput[]): Promise<CrmOrder> {
+export async function updateOrder(id: string, tenantId: string, input: Partial<OrderInput>, items: OrderItemInput[]): Promise<SalesOrder> {
   const { subtotal, discountTotal, total } = computeOrderTotals(items, input.shipping ?? 0, input.tax_total ?? 0)
   const { data, error } = await supabase
-    .from('crm_orders')
+    .from('sales_orders')
     .update({ ...input, subtotal, discount_total: discountTotal, total })
     .eq('id', id)
     .select()
@@ -185,22 +190,22 @@ export async function updateOrder(id: string, tenantId: string, input: Partial<O
 }
 
 /** Patches a handful of header fields (notes, shipping/billing address)
- * without touching items or recomputing totals -- used by VentaDetalle.tsx's
+ * without touching items or recomputing totals -- used by OrderDetail.tsx's
  * inline editors, where each section saves itself independently instead of
  * going through the full OrderDrawer form. */
-export async function updateOrderFields(id: string, patch: Partial<OrderInput>): Promise<CrmOrder> {
-  const { data, error } = await supabase.from('crm_orders').update(patch).eq('id', id).select().single()
+export async function updateOrderFields(id: string, patch: Partial<OrderInput>): Promise<SalesOrder> {
+  const { data, error } = await supabase.from('sales_orders').update(patch).eq('id', id).select().single()
   if (error) throw error
   return data
 }
 
 /** Same "recompute totals + replace items" logic as updateOrder, but without
- * requiring the rest of OrderInput (contact_id, status, ...) -- VentaDetalle.tsx's
+ * requiring the rest of OrderInput (contact_id, status, ...) -- OrderDetail.tsx's
  * inline product editor only ever changes items/shipping/tax, never those. */
-export async function updateOrderItemsAndTotals(id: string, tenantId: string, items: OrderItemInput[], shipping: number, taxTotal: number): Promise<CrmOrder> {
+export async function updateOrderItemsAndTotals(id: string, tenantId: string, items: OrderItemInput[], shipping: number, taxTotal: number): Promise<SalesOrder> {
   const { subtotal, discountTotal, total } = computeOrderTotals(items, shipping, taxTotal)
   const { data, error } = await supabase
-    .from('crm_orders')
+    .from('sales_orders')
     .update({ subtotal, discount_total: discountTotal, total, shipping, tax_total: taxTotal })
     .eq('id', id)
     .select()
@@ -210,25 +215,24 @@ export async function updateOrderItemsAndTotals(id: string, tenantId: string, it
   return data
 }
 
-export async function updateOrderStatus(id: string, status: OrderStatus): Promise<CrmOrder> {
-  const { data, error } = await supabase.from('crm_orders').update({ status }).eq('id', id).select().single()
+export async function updateOrderStatus(id: string, status: OrderStatus): Promise<SalesOrder> {
+  const { data, error } = await supabase.from('sales_orders').update({ status }).eq('id', id).select().single()
   if (error) throw error
   return data
 }
 
-/** Only ever called on a still-open cotización (Ventas.tsx hides this action
+/** Only ever called on a still-open cotización (Orders.tsx hides this action
  * once an order becomes a venta, see updateOrderStatus/'cancelada' for
  * voiding one of those instead). Sets status to 'cancelada' in the same
- * update as the soft-delete -- not two separate calls -- so the stock-effect
- * trigger on crm_orders (20260809000001_order_stock_effects.sql) sees the
- * cotizacion -> cancelada transition and releases the reserved stock;
- * deleted_at alone wouldn't fire it. */
+ * update as the soft-delete, mirroring the old crm_orders behavior -- no
+ * stock-effect trigger exists on sales_orders yet (ver core_sales.sql: el
+ * efecto de stock por bodega queda para la Fase de Despachos). */
 export async function deleteOrder(id: string): Promise<void> {
   const {
     data: { user },
   } = await supabase.auth.getUser()
   const { error } = await supabase
-    .from('crm_orders')
+    .from('sales_orders')
     .update({ status: 'cancelada', deleted_at: new Date().toISOString(), deleted_by: user?.id ?? null })
     .eq('id', id)
   if (error) throw error

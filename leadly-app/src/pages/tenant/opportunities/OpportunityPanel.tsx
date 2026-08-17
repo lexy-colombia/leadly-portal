@@ -5,8 +5,10 @@ import { listConversationsForContact, type ConversationWithLine } from '../../..
 import { listTasksForOpportunity, updateTask, type TaskWithRelations } from '../../../lib/api/tasks'
 import { listOrdersForOpportunity, type OrderWithRelations } from '../../../lib/api/orders'
 import type { OpportunityPriority, OrderStatus } from '../../../types/domain'
-import { Badge, Button, Card, ConfirmDialog, Drawer, EmptyState, PageSpinner } from '../../../components/ui'
-import { ChatBubbleIcon, CheckIcon, PlusIcon, TrashIcon } from '../../../components/icons'
+import { Badge, Button, PageSpinner } from '@/components/atoms'
+import { Card, EmptyState } from '@/components/molecules'
+import { ConfirmDialog, Drawer } from '@/components/organisms'
+import { ChatBubbleIcon, CheckIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
 import { TaskDrawer } from '../tasks/TaskDrawer'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import type { TranslationKey } from '../../../i18n/translations'
@@ -48,7 +50,7 @@ function formatDateTime(iso: string, locale: string): string {
   return new Date(iso).toLocaleString(locale, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
 }
 
-/** Label-above-value field, same shape as ContactoDetalle's own `Field` --
+/** Label-above-value field, same shape as ClientDetail's own `Field` --
  * duplicated locally rather than shared since it's a 6-line presentational
  * helper, not worth a cross-page import for. */
 function Field({ label, value }: { label: string; value: string }) {

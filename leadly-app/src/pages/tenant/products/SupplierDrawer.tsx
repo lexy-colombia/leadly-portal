@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { createSupplier, updateSupplier } from '../../../lib/api/suppliers'
-import type { CrmSupplier } from '../../../types/domain'
+import type { Supplier } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { Button, Drawer, FieldError, Input, Label, Switch, Textarea } from '../../../components/ui'
+import { Button, FieldError, Input, Label, Switch, Textarea } from '@/components/atoms'
+import { Drawer } from '@/components/organisms'
 import { isNotBlank } from '../../../lib/validation'
 
 export function SupplierDrawer({
@@ -15,7 +16,7 @@ export function SupplierDrawer({
   open: boolean
   onClose: () => void
   tenantId: string
-  supplier?: CrmSupplier | null
+  supplier?: Supplier | null
   onSaved: () => void
 }) {
   const { t } = useLanguage()

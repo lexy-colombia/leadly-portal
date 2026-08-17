@@ -1,19 +1,20 @@
 import { useEffect, useState } from 'react'
 import { deleteSupplier, listSuppliers } from '../../../lib/api/suppliers'
-import type { CrmSupplier } from '../../../types/domain'
+import type { Supplier } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { Badge, Button, Card, EmptyState, PageSpinner, Pagination, Table, TBody, TD, TH, THead, TRow } from '../../../components/ui'
-import { PencilIcon, PlusIcon, TrashIcon } from '../../../components/icons'
+import { Badge, Button, PageSpinner, Table, TBody, TD, TH, THead, TRow } from '@/components/atoms'
+import { Card, EmptyState, Pagination } from '@/components/molecules'
+import { PencilIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
 import { SupplierDrawer } from './SupplierDrawer'
 
 const PAGE_SIZE = 10
 
 export function SuppliersTab({ tenantId }: { tenantId: string }) {
   const { t } = useLanguage()
-  const [suppliers, setSuppliers] = useState<CrmSupplier[] | null>(null)
+  const [suppliers, setSuppliers] = useState<Supplier[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [page, setPage] = useState(1)
-  const [drawer, setDrawer] = useState<{ open: boolean; supplier: CrmSupplier | null }>({ open: false, supplier: null })
+  const [drawer, setDrawer] = useState<{ open: boolean; supplier: Supplier | null }>({ open: false, supplier: null })
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 

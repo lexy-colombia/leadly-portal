@@ -1,7 +1,6 @@
 import { useLanguage } from '../contexts/LanguageContext'
-import { AppShell, type NavItem } from '../components/layout/AppShell'
-import { BuildingIcon, CreditCardIcon, DashboardIcon, GlobeIcon, KeyIcon } from '../components/icons'
-
+import { AppShell, type NavItem } from '@/components/organisms'
+import { BuildingIcon, CreditCardIcon, DashboardIcon, GlobeIcon, KeyIcon } from '@/components/atoms/icons'
 // Líneas de WhatsApp deliberately has no top-level nav entry -- it lives inside
 // each Cliente's detail page (a line always belongs to exactly one tenant).
 export function BackofficeLayout() {

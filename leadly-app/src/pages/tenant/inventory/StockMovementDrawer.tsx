@@ -3,8 +3,8 @@ import { MOVEMENT_TYPE_KEY, recordStockMovement } from '../../../lib/api/stockMo
 import { listWarehouses } from '../../../lib/api/warehouses'
 import type { StockMovementType, Warehouse } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { Button, Drawer, FieldError, Input, Label, Select, Textarea } from '../../../components/ui'
-
+import { Button, FieldError, Input, Label, Select, Textarea } from '@/components/atoms'
+import { Drawer } from '@/components/organisms'
 const MOVEMENT_TYPES: StockMovementType[] = ['entrada', 'salida', 'ajuste_positivo', 'ajuste_negativo']
 
 export function StockMovementDrawer({

@@ -108,15 +108,15 @@ Deno.serve(async (req: Request) => {
           }
         }
 
-        // Every inbound message belongs to a CRM contact -- auto-create one
+        // Every inbound message belongs to a client -- auto-create one
         // (by tenant+phone) the first time we hear from a number, same as any
         // real CRM's WhatsApp integration would. Never overwrites a name the
         // tenant already edited manually on later messages. Excludes
-        // soft-deleted contacts (see CLAUDE.md section 3) -- a number that
-        // messages again after its contact was deleted gets a fresh record,
+        // soft-deleted clients (see CLAUDE.md section 3) -- a number that
+        // messages again after its client was deleted gets a fresh record,
         // it doesn't silently resurrect the old one.
         const { data: existingContact } = await adminClient
-          .from("crm_contacts")
+          .from("clients")
           .select("id")
           .eq("tenant_id", line.tenant_id)
           .eq("phone", contactPhone)
@@ -126,7 +126,7 @@ Deno.serve(async (req: Request) => {
         let contactId = existingContact?.id ?? null;
         if (!contactId) {
           const { data: newContact } = await adminClient
-            .from("crm_contacts")
+            .from("clients")
             .insert({ tenant_id: line.tenant_id, phone: contactPhone, full_name: contactName ?? contactPhone })
             .select("id")
             .single();

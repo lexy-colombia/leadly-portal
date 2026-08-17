@@ -6,7 +6,8 @@ import type { AiAssistant, AiModel, AiProvider, AiSkill } from '../../types/doma
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { TranslationKey } from '../../i18n/translations'
-import { Badge, Button, Drawer, FieldError, Input, Label, PageSpinner, Select, Switch, Textarea } from '../../components/ui'
+import { Badge, Button, FieldError, Input, Label, PageSpinner, Select, Switch, Textarea } from '@/components/atoms'
+import { Drawer } from '@/components/organisms'
 import { useAiAssistantForm } from './useAiAssistantForm'
 
 const PROVIDER_KEY: Record<AiProvider, TranslationKey> = {

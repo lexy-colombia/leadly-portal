@@ -1,19 +1,20 @@
 import { useEffect, useState } from 'react'
 import { deleteProductCategory, listProductCategories } from '../../../lib/api/productCategories'
-import type { CrmProductCategory } from '../../../types/domain'
+import type { ProductCategory } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { Button, Card, EmptyState, PageSpinner, Pagination, Table, TBody, TD, TH, THead, TRow } from '../../../components/ui'
-import { PencilIcon, PlusIcon, TrashIcon } from '../../../components/icons'
+import { Button, PageSpinner, Table, TBody, TD, TH, THead, TRow } from '@/components/atoms'
+import { Card, EmptyState, Pagination } from '@/components/molecules'
+import { PencilIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
 import { CategoryDrawer } from './CategoryDrawer'
 
 const PAGE_SIZE = 10
 
 export function CategoriesTab({ tenantId }: { tenantId: string }) {
   const { t } = useLanguage()
-  const [categories, setCategories] = useState<CrmProductCategory[] | null>(null)
+  const [categories, setCategories] = useState<ProductCategory[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [page, setPage] = useState(1)
-  const [drawer, setDrawer] = useState<{ open: boolean; category: CrmProductCategory | null }>({ open: false, category: null })
+  const [drawer, setDrawer] = useState<{ open: boolean; category: ProductCategory | null }>({ open: false, category: null })
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 

@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient'
-import type { CrmAttachment } from '../../types/domain'
+import type { Attachment, CrmAttachment } from '../../types/domain'
 import { PQR_ATTACHMENT_ALLOWED_TYPES, PQR_ATTACHMENT_MAX_BYTES, TASK_ATTACHMENT_ALLOWED_TYPES, TASK_ATTACHMENT_MAX_BYTES } from '../referenceData'
 
 const SIGNED_URL_TTL_SECONDS = 60 * 60
@@ -45,42 +45,9 @@ async function uploadAttachmentFile(tenantId: string, file: File): Promise<Uploa
   return { storage_path: path, mime_type: file.type, size_bytes: file.size }
 }
 
-/** Uploads an agent-attached image and links it to a PQR or a seguimiento
- * (exactly one of the two, mirrors the DB check constraint). */
-export async function uploadPqrAttachment(
-  tenantId: string,
-  file: File,
-  target: { pqrId: string } | { pqrUpdateId: string },
-): Promise<CrmAttachment> {
-  const validationError = validatePqrAttachmentFile(file)
-  if (validationError) throw new Error(validationError)
-  const uploaded = await uploadAttachmentFile(tenantId, file)
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  const { data, error } = await supabase
-    .from('crm_attachments')
-    .insert({
-      tenant_id: tenantId,
-      pqr_id: 'pqrId' in target ? target.pqrId : null,
-      pqr_update_id: 'pqrUpdateId' in target ? target.pqrUpdateId : null,
-      storage_path: uploaded.storage_path,
-      mime_type: uploaded.mime_type,
-      size_bytes: uploaded.size_bytes,
-      original_filename: file.name || null,
-      created_by: user?.id ?? null,
-    })
-    .select()
-    .single()
-  if (error) throw error
-  return data
-}
-
 /** Uploads an image the agent is about to send directly in the human-mode
- * chat -- not linked to any PQR/seguimiento, whatsapp-send-human just reads
- * it back by storage_path to build the outbound WhatsApp message. */
+ * chat -- whatsapp-send-human just reads it back by storage_path to build
+ * the outbound WhatsApp message. */
 export async function uploadChatImage(tenantId: string, file: File): Promise<UploadedMedia> {
   const validationError = validatePqrAttachmentFile(file)
   if (validationError) throw new Error(validationError)
@@ -119,8 +86,12 @@ export async function uploadTaskAttachment(tenantId: string, file: File, taskId:
 
 /** Uploads an agent-attached image and links it to a venta/cotización
  * comment -- same "images only" criterion as PQR seguimientos (evidence
- * photos, not documents), unlike task attachments which also allow PDF. */
-export async function uploadOrderCommentAttachment(tenantId: string, file: File, commentId: string): Promise<CrmAttachment> {
+ * photos, not documents), unlike task attachments which also allow PDF.
+ * Uses `attachments` (sin prefijo), no `crm_attachments` -- desde el
+ * cutover de Órdenes (2026-08-16) los comentarios de venta viven en
+ * sales_order_comments, y attachments.sales_order_comment_id ya apunta ahí
+ * (crm_attachments perdió esa columna en la misma migración). */
+export async function uploadOrderCommentAttachment(tenantId: string, file: File, commentId: string): Promise<Attachment> {
   const validationError = validatePqrAttachmentFile(file)
   if (validationError) throw new Error(validationError)
   const uploaded = await uploadAttachmentFile(tenantId, file)
@@ -130,10 +101,10 @@ export async function uploadOrderCommentAttachment(tenantId: string, file: File,
   } = await supabase.auth.getUser()
 
   const { data, error } = await supabase
-    .from('crm_attachments')
+    .from('attachments')
     .insert({
       tenant_id: tenantId,
-      order_comment_id: commentId,
+      sales_order_comment_id: commentId,
       storage_path: uploaded.storage_path,
       mime_type: uploaded.mime_type,
       size_bytes: uploaded.size_bytes,
@@ -146,29 +117,12 @@ export async function uploadOrderCommentAttachment(tenantId: string, file: File,
   return data
 }
 
-export async function listAttachmentsForOrderComments(commentIds: string[]): Promise<CrmAttachment[]> {
+export async function listAttachmentsForOrderComments(commentIds: string[]): Promise<Attachment[]> {
   if (commentIds.length === 0) return []
   const { data, error } = await supabase
-    .from('crm_attachments')
+    .from('attachments')
     .select('*')
-    .in('order_comment_id', commentIds)
-    .order('created_at', { ascending: true })
-  if (error) throw error
-  return data
-}
-
-export async function listAttachmentsForPqr(pqrId: string): Promise<CrmAttachment[]> {
-  const { data, error } = await supabase.from('crm_attachments').select('*').eq('pqr_id', pqrId).order('created_at', { ascending: true })
-  if (error) throw error
-  return data
-}
-
-export async function listAttachmentsForPqrUpdates(pqrUpdateIds: string[]): Promise<CrmAttachment[]> {
-  if (pqrUpdateIds.length === 0) return []
-  const { data, error } = await supabase
-    .from('crm_attachments')
-    .select('*')
-    .in('pqr_update_id', pqrUpdateIds)
+    .in('sales_order_comment_id', commentIds)
     .order('created_at', { ascending: true })
   if (error) throw error
   return data

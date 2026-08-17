@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient'
-import type { CrmPipeline, CrmPipelineStage } from '../../types/domain'
+import type { Pipeline, PipelineStage } from '../../types/domain'
 
 /** Same 6 stages the `seed_default_pipeline` DB trigger seeds for a brand
  * new tenant -- reused here so a manually created pipeline is immediately
@@ -33,21 +33,21 @@ function friendlyDeleteError(err: unknown, inUseKey: 'opportunities.settings.err
   return err instanceof Error ? err : new Error(message)
 }
 
-export async function listPipelinesByTenant(tenantId: string): Promise<CrmPipeline[]> {
-  const { data, error } = await supabase.from('crm_pipelines').select('*').eq('tenant_id', tenantId).eq('is_active', true).order('created_at')
+export async function listPipelinesByTenant(tenantId: string): Promise<Pipeline[]> {
+  const { data, error } = await supabase.from('pipelines').select('*').eq('tenant_id', tenantId).eq('is_active', true).order('created_at')
   if (error) throw error
   return data
 }
 
-export async function createPipeline(tenantId: string, name: string): Promise<CrmPipeline> {
-  const { data: pipeline, error } = await supabase.from('crm_pipelines').insert({ tenant_id: tenantId, name }).select().single()
+export async function createPipeline(tenantId: string, name: string): Promise<Pipeline> {
+  const { data: pipeline, error } = await supabase.from('pipelines').insert({ tenant_id: tenantId, name }).select().single()
   if (error) throw error
 
   const { error: stagesError } = await supabase
-    .from('crm_pipeline_stages')
+    .from('pipeline_stages')
     .insert(DEFAULT_STAGES.map((stage) => ({ ...stage, pipeline_id: pipeline.id })))
   if (stagesError) {
-    await supabase.from('crm_pipelines').delete().eq('id', pipeline.id)
+    await supabase.from('pipelines').delete().eq('id', pipeline.id)
     throw stagesError
   }
 
@@ -60,13 +60,13 @@ export interface PipelineUpdateInput {
   color?: string
 }
 
-export async function updatePipeline(id: string, input: PipelineUpdateInput): Promise<CrmPipeline> {
-  const { data, error } = await supabase.from('crm_pipelines').update(input).eq('id', id).select().single()
+export async function updatePipeline(id: string, input: PipelineUpdateInput): Promise<Pipeline> {
+  const { data, error } = await supabase.from('pipelines').update(input).eq('id', id).select().single()
   if (error) throw error
   return data
 }
 
-/** Refuses client-side if this is the tenant's only pipeline -- Oportunidades.tsx
+/** Refuses client-side if this is the tenant's only pipeline -- Opportunities.tsx
  * would have nowhere to point after deleting it. Postgres itself refuses (FK
  * restrict) if the pipeline still has opportunities. */
 export async function deletePipeline(tenantId: string, id: string): Promise<void> {
@@ -74,7 +74,7 @@ export async function deletePipeline(tenantId: string, id: string): Promise<void
   if (remaining.length <= 1) {
     throw new Error('opportunities.settings.errors.onlyPipeline')
   }
-  const { error } = await supabase.from('crm_pipelines').delete().eq('id', id)
+  const { error } = await supabase.from('pipelines').delete().eq('id', id)
   if (error) throw friendlyDeleteError(error, 'opportunities.settings.errors.pipelineInUse')
 }
 
@@ -86,9 +86,9 @@ export interface StageInput {
   is_lost: boolean
 }
 
-export async function createStage(pipelineId: string, input: StageInput): Promise<CrmPipelineStage> {
+export async function createStage(pipelineId: string, input: StageInput): Promise<PipelineStage> {
   const { data: existing, error: existingError } = await supabase
-    .from('crm_pipeline_stages')
+    .from('pipeline_stages')
     .select('display_order')
     .eq('pipeline_id', pipelineId)
     .order('display_order', { ascending: false })
@@ -97,7 +97,7 @@ export async function createStage(pipelineId: string, input: StageInput): Promis
   if (existingError) throw existingError
 
   const { data, error } = await supabase
-    .from('crm_pipeline_stages')
+    .from('pipeline_stages')
     .insert({ ...input, pipeline_id: pipelineId, display_order: (existing?.display_order ?? -1) + 1 })
     .select()
     .single()
@@ -105,8 +105,8 @@ export async function createStage(pipelineId: string, input: StageInput): Promis
   return data
 }
 
-export async function updateStage(id: string, input: Partial<StageInput>): Promise<CrmPipelineStage> {
-  const { data, error } = await supabase.from('crm_pipeline_stages').update(input).eq('id', id).select().single()
+export async function updateStage(id: string, input: Partial<StageInput>): Promise<PipelineStage> {
+  const { data, error } = await supabase.from('pipeline_stages').update(input).eq('id', id).select().single()
   if (error) throw error
   return data
 }
@@ -115,15 +115,15 @@ export async function updateStage(id: string, input: Partial<StageInput>): Promi
  * per-row updates is fine at this scale (a pipeline realistically has well
  * under 10 stages), no need for a bulk-upsert RPC. */
 export async function reorderStages(orderedStageIds: string[]): Promise<void> {
-  await Promise.all(orderedStageIds.map((id, index) => supabase.from('crm_pipeline_stages').update({ display_order: index }).eq('id', id)))
+  await Promise.all(orderedStageIds.map((id, index) => supabase.from('pipeline_stages').update({ display_order: index }).eq('id', id)))
 }
 
 export async function deleteStage(pipelineId: string, id: string): Promise<void> {
-  const { data: existing, error: existingError } = await supabase.from('crm_pipeline_stages').select('id').eq('pipeline_id', pipelineId)
+  const { data: existing, error: existingError } = await supabase.from('pipeline_stages').select('id').eq('pipeline_id', pipelineId)
   if (existingError) throw existingError
   if ((existing?.length ?? 0) <= 1) {
     throw new Error('opportunities.settings.errors.onlyStage')
   }
-  const { error } = await supabase.from('crm_pipeline_stages').delete().eq('id', id)
+  const { error } = await supabase.from('pipeline_stages').delete().eq('id', id)
   if (error) throw friendlyDeleteError(error, 'opportunities.settings.errors.stageInUse')
 }

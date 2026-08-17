@@ -6,8 +6,10 @@ import { getMaxWhatsappLinesForTenant } from '../../lib/api/billing'
 import { assignAiAssistantToLine, deleteAiAssistant, listAiAssistantsByTenant } from '../../lib/api/aiAssistants'
 import { listConversations, type ConversationWithLine } from '../../lib/api/conversations'
 import type { AiAssistant, AiProvider, WhatsappLine, WhatsappLineStatus } from '../../types/domain'
-import { Badge, Button, ConfirmDialog, EmptyState, InitialsAvatar, PageSpinner, Select, TBody, TD, TH, THead, Table, TRow } from '../../components/ui'
-import { AiSparkleIcon, ChatBubbleIcon, PencilIcon, PhoneIcon, PlusIcon, TrashIcon } from '../../components/icons'
+import { Badge, Button, InitialsAvatar, PageSpinner, Select, TBody, TD, TH, THead, Table, TRow } from '@/components/atoms'
+import { EmptyState } from '@/components/molecules'
+import { ConfirmDialog } from '@/components/organisms'
+import { AiSparkleIcon, ChatBubbleIcon, PencilIcon, PhoneIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
 import { AiAssistantDrawer } from './AiAssistantDrawer'
 
 const LINE_STATUS_KEY: Record<WhatsappLineStatus, TranslationKey> = {

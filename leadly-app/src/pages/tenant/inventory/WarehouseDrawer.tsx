@@ -2,7 +2,8 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { createWarehouse, updateWarehouse } from '../../../lib/api/warehouses'
 import type { Warehouse, WarehouseType } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { Button, Drawer, FieldError, Input, Label, Select, Switch } from '../../../components/ui'
+import { Button, FieldError, Input, Label, Select, Switch } from '@/components/atoms'
+import { Drawer } from '@/components/organisms'
 import { isNotBlank } from '../../../lib/validation'
 
 const WAREHOUSE_TYPES: WarehouseType[] = ['bodega', 'punto_venta', 'transito']

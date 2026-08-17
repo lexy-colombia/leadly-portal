@@ -10,14 +10,17 @@ import {
 import type { ProductWithImages } from '../../../lib/api/products'
 import { listProductCategories } from '../../../lib/api/productCategories'
 import { listSuppliers } from '../../../lib/api/suppliers'
-import type { CrmProductCategory, CrmSupplier } from '../../../types/domain'
+import { listBrands } from '../../../lib/api/brands'
+import type { Brand, ProductCategory, Supplier } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { Button, CurrencyInput, Drawer, FieldError, Input, Label, Select, Switch, Textarea } from '../../../components/ui'
-import { PlusIcon, TrashIcon } from '../../../components/icons'
+import { Button, FieldError, Input, Label, Select, Switch, Textarea } from '@/components/atoms'
+import { CurrencyInput } from '@/components/molecules'
+import { Drawer } from '@/components/organisms'
+import { PlusIcon, TrashIcon } from '@/components/atoms/icons'
 import { isNotBlank } from '../../../lib/validation'
 
 /** Images only make sense once the product exists in the DB
- * (crm_product_images.product_id needs a real row to point at) -- same
+ * (product_images.product_id needs a real row to point at) -- same
  * rule as TaskAttachments, so this section only renders while editing. */
 function ProductImages({ tenantId, product, onChanged }: { tenantId: string; product: ProductWithImages; onChanged: () => void }) {
   const { t } = useLanguage()
@@ -109,13 +112,14 @@ export function ProductDrawer({
   const [slug, setSlug] = useState('')
   const [categoryId, setCategoryId] = useState('')
   const [supplierId, setSupplierId] = useState('')
-  const [categories, setCategories] = useState<CrmProductCategory[]>([])
-  const [suppliers, setSuppliers] = useState<CrmSupplier[]>([])
+  const [brandId, setBrandId] = useState('')
+  const [categories, setCategories] = useState<ProductCategory[]>([])
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [brands, setBrands] = useState<Brand[]>([])
   const [purchasePrice, setPurchasePrice] = useState('')
   const [wholesalePrice, setWholesalePrice] = useState('')
   const [retailPrice, setRetailPrice] = useState('')
   const [trackInventory, setTrackInventory] = useState(true)
-  const [stockQuantity, setStockQuantity] = useState('0')
   const [lowStockThreshold, setLowStockThreshold] = useState('5')
   const [isActive, setIsActive] = useState(true)
   const [touched, setTouched] = useState(false)
@@ -130,11 +134,11 @@ export function ProductDrawer({
     setSlug(product?.slug ?? '')
     setCategoryId(product?.category_id ?? '')
     setSupplierId(product?.supplier_id ?? '')
+    setBrandId(product?.brand_id ?? '')
     setPurchasePrice(product?.purchase_price != null ? String(product.purchase_price) : '')
     setWholesalePrice(product?.wholesale_price != null ? String(product.wholesale_price) : '')
     setRetailPrice(product?.retail_price != null ? String(product.retail_price) : '')
     setTrackInventory(product?.track_inventory ?? true)
-    setStockQuantity(product ? String(product.stock_quantity) : '0')
     setLowStockThreshold(product ? String(product.low_stock_threshold) : '5')
     setIsActive(product?.is_active ?? true)
     setTouched(false)
@@ -145,6 +149,7 @@ export function ProductDrawer({
     if (!open) return
     listProductCategories(tenantId).then(setCategories).catch(() => {})
     listSuppliers(tenantId).then(setSuppliers).catch(() => {})
+    listBrands(tenantId).then(setBrands).catch(() => {})
   }, [open, tenantId])
 
   const nameError = touched && !isNotBlank(name) ? t('products.drawer.errors.nameRequired') : undefined
@@ -171,11 +176,11 @@ export function ProductDrawer({
         slug: slug.trim() || null,
         category_id: categoryId || null,
         supplier_id: supplierId || null,
+        brand_id: brandId || null,
         purchase_price: toNumberOrNull(purchasePrice),
         wholesale_price: toNumberOrNull(wholesalePrice),
         retail_price: toNumberOrNull(retailPrice),
         track_inventory: trackInventory,
-        stock_quantity: Math.max(0, Math.trunc(Number(stockQuantity) || 0)),
         low_stock_threshold: Math.max(0, Math.trunc(Number(lowStockThreshold) || 0)),
         is_active: isActive,
       }
@@ -197,19 +202,14 @@ export function ProductDrawer({
       title={product ? t('products.drawer.editTitle') : t('products.drawer.newTitle')}
       description={t('products.drawer.description')}
     >
-      <form onSubmit={handleSubmit} noValidate className="space-y-4">
+      <form onSubmit={handleSubmit} noValidate className="space-y-3">
         <div>
           <Label htmlFor="product-name">{t('products.drawer.fields.name')}</Label>
           <Input id="product-name" value={name} invalid={!!nameError} onChange={(e) => setName(e.target.value)} placeholder={t('products.drawer.fields.namePlaceholder')} />
           <FieldError message={nameError} />
         </div>
 
-        <div>
-          <Label htmlFor="product-description">{t('products.drawer.fields.description')}</Label>
-          <Textarea id="product-description" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-3">
           <div>
             <Label htmlFor="product-sku">{t('products.drawer.fields.sku')}</Label>
             <Input id="product-sku" value={sku} onChange={(e) => setSku(e.target.value)} placeholder={t('products.drawer.fields.skuPlaceholder')} />
@@ -220,7 +220,12 @@ export function ProductDrawer({
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div>
+          <Label htmlFor="product-description">{t('products.drawer.fields.description')}</Label>
+          <Textarea id="product-description" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <div>
             <Label htmlFor="product-category">{t('products.drawer.fields.category')}</Label>
             <Select id="product-category" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
@@ -228,6 +233,17 @@ export function ProductDrawer({
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="product-brand">{t('products.drawer.fields.brand')}</Label>
+            <Select id="product-brand" value={brandId} onChange={(e) => setBrandId(e.target.value)}>
+              <option value="">{t('products.drawer.fields.noBrand')}</option>
+              {brands.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
                 </option>
               ))}
             </Select>
@@ -245,7 +261,7 @@ export function ProductDrawer({
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-3 gap-3">
           <div>
             <Label htmlFor="product-purchase-price">{t('products.drawer.fields.purchasePrice')}</Label>
             <CurrencyInput id="product-purchase-price" value={purchasePrice} onChange={(e) => setPurchasePrice(e.target.value)} />
@@ -260,34 +276,38 @@ export function ProductDrawer({
           </div>
         </div>
 
-        <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
-          <span className="text-sm text-brand-700">{t('products.drawer.fields.trackInventory')}</span>
-          <Switch checked={trackInventory} onChange={setTrackInventory} />
-        </div>
-
-        {trackInventory && (
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="product-stock">{t('products.drawer.fields.currentStock')}</Label>
-              <Input id="product-stock" type="number" min="0" step="1" value={stockQuantity} onChange={(e) => setStockQuantity(e.target.value)} />
-            </div>
-            <div>
-              <Label htmlFor="product-low-stock">{t('products.drawer.fields.lowStockAlert')}</Label>
-              <Input id="product-low-stock" type="number" min="0" step="1" value={lowStockThreshold} onChange={(e) => setLowStockThreshold(e.target.value)} />
-            </div>
+        {/* Una sola tarjeta con las 3 configuraciones (antes 3 bloques con
+            borde propio cada uno) -- mismo contenido, mitad del alto. */}
+        <div className="divide-y divide-brand-100 rounded-lg border border-brand-100">
+          <div className="flex items-center justify-between px-3 py-2">
+            <span className="text-sm text-brand-700">{t('products.drawer.fields.trackInventory')}</span>
+            <Switch checked={trackInventory} onChange={setTrackInventory} />
           </div>
-        )}
-
-        <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
-          <span className="text-sm text-brand-700">{t('products.drawer.fields.active')}</span>
-          <Switch checked={isActive} onChange={setIsActive} />
+          {trackInventory && (
+            <div className="px-3 py-2">
+              <Label htmlFor="product-low-stock">{t('products.drawer.fields.lowStockAlert')}</Label>
+              <Input
+                id="product-low-stock"
+                type="number"
+                min="0"
+                step="1"
+                value={lowStockThreshold}
+                onChange={(e) => setLowStockThreshold(e.target.value)}
+                className="!py-1.5 text-sm"
+              />
+            </div>
+          )}
+          <div className="flex items-center justify-between px-3 py-2">
+            <span className="text-sm text-brand-700">{t('products.drawer.fields.active')}</span>
+            <Switch checked={isActive} onChange={setIsActive} />
+          </div>
         </div>
 
         {product && <ProductImages tenantId={tenantId} product={product} onChanged={onSaved} />}
 
         {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
 
-        <div className="flex gap-2 border-t border-brand-100 pt-5">
+        <div className="flex gap-2 border-t border-brand-100 pt-4">
           <Button type="submit" variant="secondary" disabled={submitting}>
             {submitting ? t('common.actions.saving') : t('common.actions.save')}
           </Button>

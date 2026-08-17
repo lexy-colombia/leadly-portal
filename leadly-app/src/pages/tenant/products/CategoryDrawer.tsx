@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { createProductCategory, updateProductCategory } from '../../../lib/api/productCategories'
-import type { CrmProductCategory } from '../../../types/domain'
+import type { ProductCategory } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { Button, Drawer, FieldError, Input, Label, Textarea } from '../../../components/ui'
+import { Button, FieldError, Input, Label, Textarea } from '@/components/atoms'
+import { Drawer } from '@/components/organisms'
 import { isNotBlank } from '../../../lib/validation'
 
 const DEFAULT_COLOR = '#2FA9A5'
@@ -17,7 +18,7 @@ export function CategoryDrawer({
   open: boolean
   onClose: () => void
   tenantId: string
-  category?: CrmProductCategory | null
+  category?: ProductCategory | null
   onSaved: () => void
 }) {
   const { t } = useLanguage()

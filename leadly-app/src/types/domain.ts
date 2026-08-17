@@ -125,7 +125,7 @@ export interface ConversationTag {
 
 export type ContactStage = 'lead' | 'contactado' | 'negociacion' | 'cliente' | 'perdido'
 
-export interface CrmContact {
+export interface Client {
   id: string
   tenant_id: string
   full_name: string
@@ -142,13 +142,14 @@ export interface CrmContact {
   stage: ContactStage
   tags: string[]
   assigned_to: string | null
+  hubspot_contact_id: string | null
   deleted_at: string | null
   deleted_by: string | null
   created_at: string
   updated_at: string
 }
 
-export interface CrmPipeline {
+export interface Pipeline {
   id: string
   tenant_id: string
   name: string
@@ -159,7 +160,7 @@ export interface CrmPipeline {
   updated_at: string
 }
 
-export interface CrmPipelineStage {
+export interface PipelineStage {
   id: string
   pipeline_id: string
   name: string
@@ -174,7 +175,7 @@ export interface CrmPipelineStage {
 export type OpportunityPriority = 'baja' | 'media' | 'alta'
 export type OpportunityStatus = 'open' | 'won' | 'lost'
 
-export interface CrmOpportunity {
+export interface Opportunity {
   id: string
   tenant_id: string
   pipeline_id: string
@@ -198,7 +199,7 @@ export interface CrmOpportunity {
 export type TaskPriority = 'baja' | 'media' | 'alta'
 export type TaskStatus = 'pendiente' | 'en_proceso' | 'completada' | 'cancelada'
 
-export interface CrmTask {
+export interface Task {
   id: string
   tenant_id: string
   contact_id: string | null
@@ -215,7 +216,17 @@ export interface CrmTask {
   updated_at: string
 }
 
-export interface CrmProduct {
+// Catálogo -- esquema ERP sin prefijo (products/product_images/
+// product_categories/suppliers/brands). Cutover empezado el 2026-08-16
+// (pedido explícito del usuario): el frontend ya lee/escribe estas tablas
+// en vez de crm_products/crm_product_images/crm_product_categories/
+// crm_suppliers. Esas tablas viejas siguen existiendo intactas (no se
+// borran), pero el catálogo humano y el picker de productos de una orden
+// ya no las usan. Sin stock_quantity/reserved_stock -- ese contador plano
+// no existe en `products`, a propósito (ver core_catalog.sql): el stock
+// vive solo en product_stock/stock_movements (Inventario Fase 1), que ya
+// se repuntaron a esta tabla en la misma migración de este cutover.
+export interface Product {
   id: string
   tenant_id: string
   name: string
@@ -224,13 +235,12 @@ export interface CrmProduct {
   slug: string | null
   category_id: string | null
   supplier_id: string | null
+  brand_id: string | null
   purchase_price: number | null
   wholesale_price: number | null
   retail_price: number | null
   currency: string
   track_inventory: boolean
-  stock_quantity: number
-  reserved_stock: number
   low_stock_threshold: number
   is_active: boolean
   deleted_at: string | null
@@ -239,7 +249,7 @@ export interface CrmProduct {
   updated_at: string
 }
 
-export interface CrmProductImage {
+export interface ProductImage {
   id: string
   tenant_id: string
   product_id: string
@@ -248,7 +258,7 @@ export interface CrmProductImage {
   created_at: string
 }
 
-export interface CrmProductCategory {
+export interface ProductCategory {
   id: string
   tenant_id: string
   name: string
@@ -260,7 +270,19 @@ export interface CrmProductCategory {
   updated_at: string
 }
 
-export interface CrmSupplier {
+export interface Brand {
+  id: string
+  tenant_id: string
+  name: string
+  logo_url: string | null
+  is_active: boolean
+  deleted_at: string | null
+  deleted_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Supplier {
   id: string
   tenant_id: string
   name: string
@@ -277,7 +299,7 @@ export interface CrmSupplier {
 
 export type OrderStatus = 'cotizacion' | 'confirmada' | 'en_proceso' | 'entregada' | 'cancelada'
 
-export interface CrmOrder {
+export interface SalesOrder {
   id: string
   tenant_id: string
   number: number
@@ -325,11 +347,12 @@ export interface CrmContactAddress {
   updated_at: string
 }
 
-export interface CrmOrderItem {
+export interface SalesOrderItem {
   id: string
   tenant_id: string
   order_id: string
   product_id: string | null
+  warehouse_id: string | null
   product_name: string
   sku: string | null
   quantity: number
@@ -342,7 +365,7 @@ export interface CrmOrderItem {
 
 export type OrderPaymentMethod = 'efectivo' | 'transferencia' | 'tarjeta' | 'otro'
 
-export interface CrmOrderPayment {
+export interface SalesOrderPayment {
   id: string
   tenant_id: string
   order_id: string
@@ -358,7 +381,7 @@ export interface CrmOrderPayment {
   updated_at: string
 }
 
-export interface CrmOrderComment {
+export interface SalesOrderComment {
   id: string
   tenant_id: string
   order_id: string
@@ -400,35 +423,6 @@ export interface AppointmentWithContact extends CrmAppointment {
   contact_full_name: string | null
 }
 
-export type PqrType = 'peticion' | 'queja' | 'reclamo'
-export type PqrStatus = 'abierto' | 'en_proceso' | 'resuelto' | 'cerrado'
-
-export interface CrmPqr {
-  id: string
-  tenant_id: string
-  contact_id: string
-  code: number
-  type: PqrType
-  subject: string
-  description: string | null
-  status: PqrStatus
-  created_by: string | null
-  created_by_ai: boolean
-  created_at: string
-  updated_at: string
-}
-
-export interface CrmPqrUpdate {
-  id: string
-  tenant_id: string
-  pqr_id: string
-  seq: number
-  content: string
-  created_by: string | null
-  created_by_ai: boolean
-  created_at: string
-}
-
 export interface WhatsappMessage {
   id: string
   conversation_id: string
@@ -447,10 +441,23 @@ export interface WhatsappMessage {
 export interface CrmAttachment {
   id: string
   tenant_id: string
-  pqr_id: string | null
-  pqr_update_id: string | null
   task_id: string | null
-  order_comment_id: string | null
+  storage_path: string
+  mime_type: string
+  size_bytes: number
+  original_filename: string | null
+  created_by: string | null
+  created_by_ai: boolean
+  created_at: string
+}
+
+/** `attachments` (sin prefijo) -- usada para comentarios de venta
+ * (sales_order_comment_id); Tasks se queda en crm_attachments. */
+export interface Attachment {
+  id: string
+  tenant_id: string
+  task_id: string | null
+  sales_order_comment_id: string | null
   storage_path: string
   mime_type: string
   size_bytes: number
@@ -630,8 +637,9 @@ export interface IntegrationCredential {
 }
 
 // --- ERP: Fase 1 (Inventario) -- ver CLAUDE.md "Estado actual (2026-08-15)
-// -- Pivote a ERP". Tablas nuevas, sin prefijo crm_, no tocan el catálogo
-// existente (crm_products.stock_quantity/reserved_stock siguen intactos).
+// -- Pivote a ERP". product_stock/stock_movements referenciaban
+// crm_products originalmente; se repuntaron a `products` el 2026-08-16
+// como parte del cutover del catálogo (ver Product más arriba).
 
 export type WarehouseType = 'bodega' | 'punto_venta' | 'transito'
 

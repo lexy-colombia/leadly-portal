@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getIntegrationCredential, getIntegrationCredentialConfiguredSecrets, setIntegrationCredentialSecret } from '../../../lib/api/integrations'
-import { Badge, Button, Drawer, FieldError, Input } from '../../../components/ui'
+import { Badge, Button, FieldError, Input } from '@/components/atoms'
+import { Drawer } from '@/components/organisms'
 import { IntegrationStatusBanner } from './IntegrationStatusBanner'
 import { IntegrationFieldLabel, IntegrationSection } from './IntegrationFieldLabel'
 import { useLanguage } from '../../../contexts/LanguageContext'
@@ -10,7 +11,7 @@ const PROVIDER_KEY = 'hubspot'
 /** Just the Private App Token -- HubSpot's simplest auth method (no OAuth
  * app registration needed, unlike Shopify). Mapped, not wired: no Edge
  * Function syncs contacts/deals yet. Shared between the backoffice (platform
- * account, tenantId null) and each tenant's own Integraciones page (their
+ * account, tenantId null) and each tenant's own Integrations page (their
  * own account, tenantId set). */
 export function HubSpotCredentialDrawer({
   open,

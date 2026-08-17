@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { listAttemptsForInvoice, listItemsForInvoice } from '../../../lib/api/billing'
 import type { PaymentAttempt, PaymentInvoice, PaymentInvoiceItem } from '../../../types/domain'
-import { Badge, Drawer, PageSpinner, Table, TBody, TD, TH, THead, TRow } from '../../../components/ui'
+import { Badge, PageSpinner, Table, TBody, TD, TH, THead, TRow } from '@/components/atoms'
+import { Drawer } from '@/components/organisms'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import type { Language } from '../../../i18n/translations'
 

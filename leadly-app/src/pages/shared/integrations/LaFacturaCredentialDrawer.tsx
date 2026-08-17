@@ -6,7 +6,8 @@ import {
   setIntegrationCredentialMode,
   setIntegrationCredentialSecret,
 } from '../../../lib/api/integrations'
-import { Badge, Button, Drawer, FieldError, Input, Select } from '../../../components/ui'
+import { Badge, Button, FieldError, Input, Select } from '@/components/atoms'
+import { Drawer } from '@/components/organisms'
 import { IntegrationStatusBanner } from './IntegrationStatusBanner'
 import { IntegrationFieldLabel, IntegrationSection } from './IntegrationFieldLabel'
 import { useLanguage } from '../../../contexts/LanguageContext'
@@ -21,7 +22,7 @@ const PROVIDER_KEY = 'lafactura'
  * extending this component -- same pattern as tania-functions, where each
  * integration (HubSpot, Shopify, ...) gets its own typed config shape.
  * Shared between the backoffice (platform account, tenantId null) and each
- * tenant's own Integraciones page (their own account, tenantId set). */
+ * tenant's own Integrations page (their own account, tenantId set). */
 export function LaFacturaCredentialDrawer({
   open,
   onClose,

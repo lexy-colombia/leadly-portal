@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getPaymentCredentialStatus, setPaymentCredentialSecret, setPaymentMode } from '../../../lib/api/billing'
-import { Badge, Button, Drawer, FieldError, Input, Select } from '../../../components/ui'
+import { Badge, Button, FieldError, Input, Select } from '@/components/atoms'
+import { Drawer } from '@/components/organisms'
 import { IntegrationStatusBanner } from './IntegrationStatusBanner'
 import { IntegrationFieldLabel, IntegrationSection } from './IntegrationFieldLabel'
 import { useLanguage } from '../../../contexts/LanguageContext'
@@ -11,7 +12,7 @@ import { useLanguage } from '../../../contexts/LanguageContext'
  * functions billing.ts already exposed for the platform's own Wompi account
  * -- tenantId null there means Leadly's own merchant credential, a set
  * tenantId means that tenant's own. Shared between the backoffice (platform
- * account) and each tenant's own Integraciones page (their own account). */
+ * account) and each tenant's own Integrations page (their own account). */
 export function WompiIntegrationDrawer({
   open,
   onClose,

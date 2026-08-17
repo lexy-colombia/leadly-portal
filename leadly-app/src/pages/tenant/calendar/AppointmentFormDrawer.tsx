@@ -1,9 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { createAppointment } from '../../../lib/api/appointments'
 import { listContacts } from '../../../lib/api/contacts'
-import type { AppointmentWithContact, CrmContact } from '../../../types/domain'
-import { Button, Drawer, FieldError, Input, Label, Textarea } from '../../../components/ui'
-import { SearchIcon } from '../../../components/icons'
+import type { AppointmentWithContact, Client } from '../../../types/domain'
+import { Button, FieldError, Input, Label, Textarea } from '@/components/atoms'
+import { Drawer } from '@/components/organisms'
+import { SearchIcon } from '@/components/atoms/icons'
 import { useLanguage } from '../../../contexts/LanguageContext'
 
 function defaultDateTime(prefill?: Date): string {
@@ -28,9 +29,9 @@ export function AppointmentFormDrawer({
   onCreated: (appointment: AppointmentWithContact) => void
 }) {
   const { t } = useLanguage()
-  const [contacts, setContacts] = useState<CrmContact[] | null>(null)
+  const [contacts, setContacts] = useState<Client[] | null>(null)
   const [contactQuery, setContactQuery] = useState('')
-  const [selectedContact, setSelectedContact] = useState<CrmContact | null>(null)
+  const [selectedContact, setSelectedContact] = useState<Client | null>(null)
   const [dateTime, setDateTime] = useState(defaultDateTime())
   const [notes, setNotes] = useState('')
   const [touched, setTouched] = useState(false)

@@ -1,4 +1,4 @@
-import { InitialsAvatar } from '../../../components/ui'
+import { InitialsAvatar } from '@/components/atoms'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import type { Language } from '../../../i18n/translations'
 import { CONVERSATION_CATEGORY_KEY, conversationDisplayName, type ConversationWithLine } from '../../../lib/api/conversations'

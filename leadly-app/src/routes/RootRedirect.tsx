@@ -1,6 +1,6 @@
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { PageSpinner } from '../components/ui'
+import { PageSpinner } from '@/components/atoms'
 import { roleHome } from './guards'
 
 /** Landing point right after login (and for "/"): sends the user to the layout

@@ -9,9 +9,11 @@ import type { ProductWithImages } from '../../../lib/api/products'
 import { listAddressesForContact } from '../../../lib/api/addresses'
 import { listTasksForOpportunity } from '../../../lib/api/tasks'
 import type { TaskWithRelations } from '../../../lib/api/tasks'
-import type { CrmContact, CrmContactAddress, OrderStatus } from '../../../types/domain'
+import type { Client, CrmContactAddress, OrderStatus } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { Button, CurrencyInput, Drawer, FieldError, Input, Label, Select, Textarea } from '../../../components/ui'
+import { Button, FieldError, Input, Label, Select, Textarea } from '@/components/atoms'
+import { CurrencyInput } from '@/components/molecules'
+import { Drawer } from '@/components/organisms'
 import { OrderItemsEditor } from './OrderItemsEditor'
 import { isNotBlank } from '../../../lib/validation'
 
@@ -47,7 +49,7 @@ export function OrderDrawer({
   tenantId: string
   /** Present when editing an existing order; omitted when creating a new one. */
   order?: OrderWithRelations | null
-  /** Pre-selects and locks the contact when creating from ContactoDetalle.tsx -- ignored once `order` is set (its own contact wins). */
+  /** Pre-selects and locks the contact when creating from ClientDetail.tsx -- ignored once `order` is set (its own contact wins). */
   defaultContactId?: string | null
   onSaved: () => void
 }) {
@@ -62,7 +64,7 @@ export function OrderDrawer({
   const [shippingAddressId, setShippingAddressId] = useState('')
   const [billingAddressId, setBillingAddressId] = useState('')
   const [items, setItems] = useState<OrderItemInput[]>([])
-  const [contacts, setContacts] = useState<CrmContact[]>([])
+  const [contacts, setContacts] = useState<Client[]>([])
   const [opportunities, setOpportunities] = useState<OpportunityWithRelations[]>([])
   const [products, setProducts] = useState<ProductWithImages[]>([])
   const [addresses, setAddresses] = useState<CrmContactAddress[]>([])

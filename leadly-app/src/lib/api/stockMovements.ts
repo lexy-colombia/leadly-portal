@@ -45,6 +45,30 @@ export async function listStockByProduct(productId: string): Promise<ProductStoc
   return data
 }
 
+export interface ProductStockTotal {
+  available: number
+  reserved: number
+}
+
+/** One query, summed client-side per product -- used by the products LIST
+ * (Products.tsx) to show "available"/"low stock" at a glance without a
+ * per-product round trip. `products` itself carries no stock counter
+ * anymore (see types/domain.ts), so this is the only way the list can know
+ * how much of a product exists across every warehouse. */
+export async function listStockTotalsByTenant(tenantId: string): Promise<Map<string, ProductStockTotal>> {
+  const { data, error } = await supabase.from('product_stock').select('product_id, quantity, reserved_quantity').eq('tenant_id', tenantId)
+  if (error) throw error
+
+  const totals = new Map<string, ProductStockTotal>()
+  for (const row of data as { product_id: string; quantity: number; reserved_quantity: number }[]) {
+    const existing = totals.get(row.product_id) ?? { available: 0, reserved: 0 }
+    existing.available += row.quantity
+    existing.reserved += row.reserved_quantity
+    totals.set(row.product_id, existing)
+  }
+  return totals
+}
+
 export async function listMovementsForProduct(productId: string, limit = 20): Promise<StockMovementWithWarehouse[]> {
   const { data, error } = await supabase
     .from('stock_movements')

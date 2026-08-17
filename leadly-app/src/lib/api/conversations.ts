@@ -31,7 +31,7 @@ export function conversationDisplayName(conversation: ConversationWithLine): str
 export async function listConversations(tenantId: string): Promise<ConversationWithLine[]> {
   const { data, error } = await supabase
     .from('whatsapp_conversations')
-    .select('*, whatsapp_line:whatsapp_lines(display_name), contact:crm_contacts(full_name), agent:profiles!assigned_agent_id(full_name)')
+    .select('*, whatsapp_line:whatsapp_lines(display_name), contact:clients(full_name), agent:profiles!assigned_agent_id(full_name)')
     .eq('tenant_id', tenantId)
     .order('last_message_at', { ascending: false, nullsFirst: false })
   if (error) throw error
@@ -135,7 +135,7 @@ export async function setConversationArchived(conversationId: string, archived: 
 export async function listConversationsForContact(contactId: string): Promise<ConversationWithLine[]> {
   const { data, error } = await supabase
     .from('whatsapp_conversations')
-    .select('*, whatsapp_line:whatsapp_lines(display_name), contact:crm_contacts(full_name), agent:profiles!assigned_agent_id(full_name)')
+    .select('*, whatsapp_line:whatsapp_lines(display_name), contact:clients(full_name), agent:profiles!assigned_agent_id(full_name)')
     .eq('contact_id', contactId)
     .order('last_message_at', { ascending: false, nullsFirst: false })
   if (error) throw error
@@ -151,7 +151,7 @@ export async function listConversationsForContacts(contactIds: string[]): Promis
   if (contactIds.length === 0) return []
   const { data, error } = await supabase
     .from('whatsapp_conversations')
-    .select('*, whatsapp_line:whatsapp_lines(display_name), contact:crm_contacts(full_name), agent:profiles!assigned_agent_id(full_name)')
+    .select('*, whatsapp_line:whatsapp_lines(display_name), contact:clients(full_name), agent:profiles!assigned_agent_id(full_name)')
     .in('contact_id', contactIds)
     .order('last_message_at', { ascending: false, nullsFirst: false })
   if (error) throw error

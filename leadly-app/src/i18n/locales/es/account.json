@@ -37,7 +37,5 @@
   "account.invite.submit": "Enviar invitación",
   "account.invite.errors.failed": "No se pudo invitar al usuario.",
   "account.comingSoon.message": "Este módulo se implementa en la siguiente etapa del roadmap. Ver CLAUDE.md / backlog.",
-  "account.locked.reports": "Reportes de conversión, actividad y desempeño llegarán próximamente. Estamos trabajando en esta función.",
-  "account.locked.automations": "Automatizaciones de seguimiento y flujos de trabajo llegarán próximamente. Estamos trabajando en esta función.",
   "account.locked.campaigns": "Pausas publicitarias y campañas masivas de WhatsApp llegarán próximamente. Estamos trabajando en esta función."
 }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { Button, IconSelect, InitialsAvatar, Input, PageSpinner } from '../../../components/ui'
-import { ArchiveIcon, ChevronLeftIcon, ImageIcon, LockClosedIcon, PlusIcon, RefreshIcon, SendIcon, TagIcon, UserIcon, XCircleIcon } from '../../../components/icons'
+import { Button, InitialsAvatar, Input, PageSpinner } from '@/components/atoms'
+import { IconSelect } from '@/components/molecules'
+import { ArchiveIcon, ChevronLeftIcon, ImageIcon, LockClosedIcon, PlusIcon, RefreshIcon, SendIcon, TagIcon, UserIcon, XCircleIcon } from '@/components/atoms/icons'
 import {
   CONVERSATION_CATEGORY_KEY,
   conversationDisplayName,

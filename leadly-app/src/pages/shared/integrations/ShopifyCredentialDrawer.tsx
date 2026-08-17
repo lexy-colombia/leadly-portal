@@ -5,7 +5,8 @@ import {
   setIntegrationCredentialConfig,
   setIntegrationCredentialSecret,
 } from '../../../lib/api/integrations'
-import { Badge, Button, Drawer, FieldError, Input } from '../../../components/ui'
+import { Badge, Button, FieldError, Input } from '@/components/atoms'
+import { Drawer } from '@/components/organisms'
 import { IntegrationStatusBanner } from './IntegrationStatusBanner'
 import { IntegrationFieldLabel, IntegrationSection } from './IntegrationFieldLabel'
 import { useLanguage } from '../../../contexts/LanguageContext'
@@ -19,7 +20,7 @@ const PROVIDER_KEY = 'shopify'
  * ShopifyConnection) needs a registered public app with redirect URIs --
  * out of scope until there's an actual product/order sync to build. Shared
  * between the backoffice (platform account, tenantId null) and each
- * tenant's own Integraciones page (their own account, tenantId set). */
+ * tenant's own Integrations page (their own account, tenantId set). */
 export function ShopifyCredentialDrawer({
   open,
   onClose,

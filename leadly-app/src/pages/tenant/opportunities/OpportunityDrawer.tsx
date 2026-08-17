@@ -1,8 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { createOpportunity, listStages, updateOpportunity, type OpportunityWithRelations } from '../../../lib/api/opportunities'
 import { listContacts } from '../../../lib/api/contacts'
-import type { CrmContact, CrmPipelineStage, OpportunityPriority } from '../../../types/domain'
-import { Button, CurrencyInput, Drawer, FieldError, Input, Label, Select, Textarea } from '../../../components/ui'
+import type { Client, PipelineStage, OpportunityPriority } from '../../../types/domain'
+import { Button, FieldError, Input, Label, Select, Textarea } from '@/components/atoms'
+import { CurrencyInput } from '@/components/molecules'
+import { Drawer } from '@/components/organisms'
 import { isNotBlank } from '../../../lib/validation'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import type { TranslationKey } from '../../../i18n/translations'
@@ -37,8 +39,8 @@ export function OpportunityDrawer({
   const [priority, setPriority] = useState<OpportunityPriority>('media')
   const [expectedCloseDate, setExpectedCloseDate] = useState('')
   const [description, setDescription] = useState('')
-  const [contacts, setContacts] = useState<CrmContact[]>([])
-  const [stages, setStages] = useState<CrmPipelineStage[]>([])
+  const [contacts, setContacts] = useState<Client[]>([])
+  const [stages, setStages] = useState<PipelineStage[]>([])
   const [touched, setTouched] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)

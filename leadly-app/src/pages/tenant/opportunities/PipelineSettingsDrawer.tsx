@@ -8,9 +8,10 @@ import {
   updateStage,
   type StageInput,
 } from '../../../lib/api/pipelines'
-import type { CrmPipeline, CrmPipelineStage } from '../../../types/domain'
-import { Button, ConfirmDialog, Drawer, Input, Label, Select } from '../../../components/ui'
-import { ChevronLeftIcon, PlusIcon, TrashIcon } from '../../../components/icons'
+import type { Pipeline, PipelineStage } from '../../../types/domain'
+import { Button, Input, Label, Select } from '@/components/atoms'
+import { ConfirmDialog, Drawer } from '@/components/organisms'
+import { ChevronLeftIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import type { TranslationKey } from '../../../i18n/translations'
 
@@ -24,7 +25,7 @@ function resolveDeleteError(err: unknown, t: (key: TranslationKey) => string, fa
 
 type StageOutcome = 'abierta' | 'ganada' | 'perdida'
 
-function outcomeOf(stage: Pick<CrmPipelineStage, 'is_won' | 'is_lost'>): StageOutcome {
+function outcomeOf(stage: Pick<PipelineStage, 'is_won' | 'is_lost'>): StageOutcome {
   if (stage.is_won) return 'ganada'
   if (stage.is_lost) return 'perdida'
   return 'abierta'
@@ -59,9 +60,9 @@ export function PipelineSettingsDrawer({
   open: boolean
   onClose: () => void
   tenantId: string
-  pipeline: CrmPipeline
+  pipeline: Pipeline
   pipelineCount: number
-  stages: CrmPipelineStage[]
+  stages: PipelineStage[]
   onPipelineChange: () => void
   onPipelineDeleted: () => void
   onStagesChange: () => void
@@ -72,9 +73,9 @@ export function PipelineSettingsDrawer({
   const [color, setColor] = useState(pipeline.color)
   const [savingPipeline, setSavingPipeline] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [localStages, setLocalStages] = useState<CrmPipelineStage[]>(stages)
+  const [localStages, setLocalStages] = useState<PipelineStage[]>(stages)
   const [addingStage, setAddingStage] = useState(false)
-  const [stageToDelete, setStageToDelete] = useState<CrmPipelineStage | null>(null)
+  const [stageToDelete, setStageToDelete] = useState<PipelineStage | null>(null)
   const [deletingStage, setDeletingStage] = useState(false)
   const [deletePipelineOpen, setDeletePipelineOpen] = useState(false)
   const [deletingPipeline, setDeletingPipeline] = useState(false)
@@ -106,7 +107,7 @@ export function PipelineSettingsDrawer({
     }
   }
 
-  async function handleStageFieldSave(stage: CrmPipelineStage, input: Partial<StageInput>) {
+  async function handleStageFieldSave(stage: PipelineStage, input: Partial<StageInput>) {
     setError(null)
     try {
       await updateStage(stage.id, input)

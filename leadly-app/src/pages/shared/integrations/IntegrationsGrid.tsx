@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { getPaymentCredentialStatus } from '../../../lib/api/billing'
 import { getIntegrationCredential, getIntegrationCredentialConfiguredSecrets, listIntegrationProviders } from '../../../lib/api/integrations'
 import type { IntegrationCategory, IntegrationProvider } from '../../../types/domain'
-import { Badge, Card, PageSpinner } from '../../../components/ui'
-import { GlobeIcon } from '../../../components/icons'
+import { Badge, PageSpinner } from '@/components/atoms'
+import { Card } from '@/components/molecules'
+import { GlobeIcon } from '@/components/atoms/icons'
 import { LaFacturaCredentialDrawer } from './LaFacturaCredentialDrawer'
 import { WompiIntegrationDrawer } from './WompiIntegrationDrawer'
 import { ShopifyCredentialDrawer } from './ShopifyCredentialDrawer'
@@ -47,7 +48,7 @@ async function checkConnected(providerKey: string, tenantId: string | null): Pro
 /** Card grid + drawers for the third-party integrations catalog
  * (LaFactura/Wompi/Shopify/HubSpot today). Shared between the backoffice
  * (tenantId null -- Leadly's own accounts with each provider) and each
- * tenant's own Integraciones page (tenantId set -- that tenant's own
+ * tenant's own Integrations page (tenantId set -- that tenant's own
  * accounts) -- same catalog, same drawers, different credential rows
  * underneath (see integration_credentials/tenant_payment_credentials'
  * tenant_id-nullable scoping). */

@@ -14,6 +14,7 @@
   "orders.errors.confirm": "No se pudo confirmar la venta.",
   "orders.errors.cancelQuote": "No se pudo cancelar la cotización.",
   "orders.errors.void": "No se pudo anular la venta.",
+  "orders.list.searchPlaceholder": "Buscar por número o cliente...",
   "orders.filters.all": "Todas",
   "orders.count.singular": "resultado",
   "orders.count.plural": "resultados",
@@ -34,8 +35,8 @@
 
   "orders.detail.loadError": "No se pudo cargar la venta.",
   "orders.detail.notFound": "No encontramos esta venta.",
-  "orders.detail.backToList": "Volver a Ventas",
-  "orders.detail.title": "Venta {number}",
+  "orders.detail.backToList": "Volver a Órdenes",
+  "orders.detail.title": "Orden {number}",
   "orders.detail.voidAction": "Anular pedido",
   "orders.detail.client": "Cliente",
   "orders.detail.opportunity": "Oportunidad",

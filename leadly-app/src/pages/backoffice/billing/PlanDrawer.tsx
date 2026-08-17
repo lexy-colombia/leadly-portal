@@ -1,7 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { createBillingPlan, updateBillingPlan, type BillingPlanInput } from '../../../lib/api/billing'
 import type { BillingPlan } from '../../../types/domain'
-import { Button, CurrencyInput, Drawer, FieldError, Input, Label, Select, Switch } from '../../../components/ui'
+import { Button, FieldError, Input, Label, Select, Switch } from '@/components/atoms'
+import { CurrencyInput } from '@/components/molecules'
+import { Drawer } from '@/components/organisms'
 import { isNotBlank } from '../../../lib/validation'
 import { useLanguage } from '../../../contexts/LanguageContext'
 

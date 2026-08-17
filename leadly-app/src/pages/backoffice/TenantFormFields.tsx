@@ -1,21 +1,31 @@
-import { FieldError, Input, Label, Select, Textarea } from '../../components/ui'
+import { FieldError, Input, Label, Select, Textarea } from '@/components/atoms'
 import { COUNTRIES, DOCUMENT_TYPES, LANGUAGES } from '../../lib/referenceData'
 import type { TenantFormState } from './useTenantForm'
 import { useLanguage } from '../../contexts/LanguageContext'
 
-export function TenantFormFields({ form }: { form: TenantFormState }) {
+/** `compact` tightens spacing/sizing for narrow contexts (a Drawer, ~448px)
+ * -- the default spacing was tuned for the backoffice's full-width page and
+ * reads as too tall/loose inside a side panel. Same fields either way,
+ * just less breathing room and one fewer grid column per row so nothing
+ * gets cramped at drawer width. */
+export function TenantFormFields({ form, hideNotes = false, compact = false }: { form: TenantFormState; hideNotes?: boolean; compact?: boolean }) {
   const { t } = useLanguage()
+  const sectionGap = compact ? 'space-y-3.5' : 'space-y-6'
+  const rowGap = compact ? 'gap-3' : 'gap-4'
+  const rowCols2 = 'grid sm:grid-cols-2'
+  const rowCols3 = compact ? 'grid sm:grid-cols-2' : 'grid sm:grid-cols-3'
+
   return (
-    <div className="space-y-6">
+    <div className={sectionGap}>
       <div>
         <Label>{t('backoffice.tenantForm.type')}</Label>
-        <div className="grid grid-cols-2 gap-2">
+        <div className={`grid grid-cols-2 ${compact ? 'gap-1.5' : 'gap-2'}`}>
           {(['empresa', 'persona'] as const).map((type) => (
             <button
               key={type}
               type="button"
               onClick={() => form.setEntityType(type)}
-              className={`rounded-xl border px-3 py-2.5 text-sm font-medium transition-colors ${
+              className={`rounded-xl border font-medium transition-colors ${compact ? 'px-2.5 py-1.5 text-xs' : 'px-3 py-2.5 text-sm'} ${
                 form.entityType === type
                   ? 'border-accent-400 bg-accent-50 text-accent-700'
                   : 'border-brand-200 text-brand-500 hover:bg-brand-50'
@@ -27,7 +37,7 @@ export function TenantFormFields({ form }: { form: TenantFormState }) {
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className={`${rowCols2} ${rowGap}`}>
         <div>
           <Label htmlFor="tenant-name">{t('backoffice.tenantForm.name')}</Label>
           <Input
@@ -55,7 +65,7 @@ export function TenantFormFields({ form }: { form: TenantFormState }) {
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className={`${rowCols2} ${rowGap}`}>
         <div>
           <Label htmlFor="tenant-document-type">{t('backoffice.tenantForm.documentType')}</Label>
           <Select
@@ -87,7 +97,7 @@ export function TenantFormFields({ form }: { form: TenantFormState }) {
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className={`${rowCols2} ${rowGap}`}>
         <div>
           <Label htmlFor="tenant-email">{t('backoffice.tenantForm.contactEmail')}</Label>
           <Input
@@ -114,7 +124,7 @@ export function TenantFormFields({ form }: { form: TenantFormState }) {
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className={`${rowCols3} ${rowGap}`}>
         <div>
           <Label htmlFor="tenant-country">{t('backoffice.tenantForm.country')}</Label>
           <Select
@@ -167,10 +177,12 @@ export function TenantFormFields({ form }: { form: TenantFormState }) {
         />
       </div>
 
-      <div>
-        <Label htmlFor="tenant-notes">{t('backoffice.tenantForm.notes')}</Label>
-        <Textarea id="tenant-notes" rows={3} value={form.notes} onChange={(e) => form.setNotes(e.target.value)} />
-      </div>
+      {!hideNotes && (
+        <div>
+          <Label htmlFor="tenant-notes">{t('backoffice.tenantForm.notes')}</Label>
+          <Textarea id="tenant-notes" rows={3} value={form.notes} onChange={(e) => form.setNotes(e.target.value)} />
+        </div>
+      )}
     </div>
   )
 }

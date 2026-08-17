@@ -14,6 +14,7 @@
   "orders.errors.confirm": "Couldn't confirm the sale.",
   "orders.errors.cancelQuote": "Couldn't cancel the quote.",
   "orders.errors.void": "Couldn't void the sale.",
+  "orders.list.searchPlaceholder": "Search by number or customer...",
   "orders.filters.all": "All",
   "orders.count.singular": "result",
   "orders.count.plural": "results",
@@ -34,8 +35,8 @@
 
   "orders.detail.loadError": "Couldn't load the sale.",
   "orders.detail.notFound": "We couldn't find this sale.",
-  "orders.detail.backToList": "Back to Sales",
-  "orders.detail.title": "Sale {number}",
+  "orders.detail.backToList": "Back to Orders",
+  "orders.detail.title": "Order {number}",
   "orders.detail.voidAction": "Void order",
   "orders.detail.client": "Client",
   "orders.detail.opportunity": "Opportunity",

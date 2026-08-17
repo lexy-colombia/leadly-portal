@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient'
-import type { CrmProductCategory } from '../../types/domain'
+import type { ProductCategory } from '../../types/domain'
 
 export interface ProductCategoryInput {
   tenant_id: string
@@ -8,9 +8,9 @@ export interface ProductCategoryInput {
   color?: string | null
 }
 
-export async function listProductCategories(tenantId: string): Promise<CrmProductCategory[]> {
+export async function listProductCategories(tenantId: string): Promise<ProductCategory[]> {
   const { data, error } = await supabase
-    .from('crm_product_categories')
+    .from('product_categories')
     .select('*')
     .eq('tenant_id', tenantId)
     .is('deleted_at', null)
@@ -19,14 +19,14 @@ export async function listProductCategories(tenantId: string): Promise<CrmProduc
   return data
 }
 
-export async function createProductCategory(input: ProductCategoryInput): Promise<CrmProductCategory> {
-  const { data, error } = await supabase.from('crm_product_categories').insert(input).select().single()
+export async function createProductCategory(input: ProductCategoryInput): Promise<ProductCategory> {
+  const { data, error } = await supabase.from('product_categories').insert(input).select().single()
   if (error) throw error
   return data
 }
 
-export async function updateProductCategory(id: string, input: Partial<ProductCategoryInput>): Promise<CrmProductCategory> {
-  const { data, error } = await supabase.from('crm_product_categories').update(input).eq('id', id).select().single()
+export async function updateProductCategory(id: string, input: Partial<ProductCategoryInput>): Promise<ProductCategory> {
+  const { data, error } = await supabase.from('product_categories').update(input).eq('id', id).select().single()
   if (error) throw error
   return data
 }
@@ -36,7 +36,7 @@ export async function deleteProductCategory(id: string): Promise<void> {
     data: { user },
   } = await supabase.auth.getUser()
   const { error } = await supabase
-    .from('crm_product_categories')
+    .from('product_categories')
     .update({ deleted_at: new Date().toISOString(), deleted_by: user?.id ?? null })
     .eq('id', id)
   if (error) throw error

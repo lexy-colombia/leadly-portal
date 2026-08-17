@@ -1,6 +1,5 @@
 import { useLanguage } from '../contexts/LanguageContext'
-import { Card } from '../components/ui'
-
+import { Card } from '@/components/molecules'
 export function ComingSoon() {
   const { t } = useLanguage()
   return (

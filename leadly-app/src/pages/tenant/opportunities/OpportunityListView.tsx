@@ -1,6 +1,7 @@
 import type { OpportunityWithRelations } from '../../../lib/api/opportunities'
-import type { CrmPipelineStage, OpportunityPriority } from '../../../types/domain'
-import { Badge, EmptyState, Select, TBody, TD, TH, THead, Table, TRow } from '../../../components/ui'
+import type { PipelineStage, OpportunityPriority } from '../../../types/domain'
+import { Badge, Select, TBody, TD, TH, THead, Table, TRow } from '@/components/atoms'
+import { EmptyState } from '@/components/molecules'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import type { TranslationKey } from '../../../i18n/translations'
 
@@ -23,7 +24,7 @@ function formatDate(iso: string | null, locale: string): string {
 
 /** "Lista" alternative to the Kanban -- same filtered/sorted opportunities,
  * flat table instead of columns-by-stage. Moving stage here is a plain
- * select per row (same as the pre-Kanban Oportunidades.tsx used to work)
+ * select per row (same as the pre-Kanban Opportunities.tsx used to work)
  * instead of drag-and-drop, since there's nothing to drop a row onto. */
 export function OpportunityListView({
   opportunities,
@@ -32,9 +33,9 @@ export function OpportunityListView({
   onStageChange,
 }: {
   opportunities: OpportunityWithRelations[]
-  stages: CrmPipelineStage[]
+  stages: PipelineStage[]
   onOpen: (opportunity: OpportunityWithRelations) => void
-  onStageChange: (opportunity: OpportunityWithRelations, stage: CrmPipelineStage) => void
+  onStageChange: (opportunity: OpportunityWithRelations, stage: PipelineStage) => void
 }) {
   const { t, language } = useLanguage()
   const locale = language === 'en' ? 'en-US' : 'es-CO'

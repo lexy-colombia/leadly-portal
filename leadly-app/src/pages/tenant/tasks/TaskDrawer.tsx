@@ -4,9 +4,10 @@ import type { TaskWithRelations } from '../../../lib/api/tasks'
 import { listContacts } from '../../../lib/api/contacts'
 import { listProfilesByTenant } from '../../../lib/api/users'
 import { getAttachmentSignedUrl, listAttachmentsForTask, uploadTaskAttachment, validateTaskAttachmentFile } from '../../../lib/api/attachments'
-import type { CrmAttachment, CrmContact, Profile, TaskPriority } from '../../../types/domain'
-import { Button, Drawer, FieldError, Input, Label, Select, Textarea } from '../../../components/ui'
-import { FileIcon, ImageIcon, PaperclipIcon } from '../../../components/icons'
+import type { CrmAttachment, Client, Profile, TaskPriority } from '../../../types/domain'
+import { Button, FieldError, Input, Label, Select, Textarea } from '@/components/atoms'
+import { Drawer } from '@/components/organisms'
+import { FileIcon, ImageIcon, PaperclipIcon } from '@/components/atoms/icons'
 import { isNotBlank } from '../../../lib/validation'
 import { useLanguage } from '../../../contexts/LanguageContext'
 
@@ -110,7 +111,7 @@ export function TaskDrawer({
   /** Present when editing an existing task; omitted when creating a new one. */
   task?: TaskWithRelations | null
   /** Pre-links the task to an opportunity when created from OpportunityPanel's
-   * "Tareas" tab -- ignored when editing (the task's own opportunity_id wins). */
+   * "Tasks" tab -- ignored when editing (the task's own opportunity_id wins). */
   defaultOpportunityId?: string | null
   onSaved: () => void
 }) {
@@ -121,7 +122,7 @@ export function TaskDrawer({
   const [dueDate, setDueDate] = useState('')
   const [contactId, setContactId] = useState('')
   const [assignedTo, setAssignedTo] = useState('')
-  const [contacts, setContacts] = useState<CrmContact[]>([])
+  const [contacts, setContacts] = useState<Client[]>([])
   const [agents, setAgents] = useState<Profile[]>([])
   const [touched, setTouched] = useState(false)
   const [submitting, setSubmitting] = useState(false)
