@@ -5,11 +5,21 @@ import { listClients } from '../../../lib/api/clients'
 import { listProfilesByTenant } from '../../../lib/api/users'
 import { getAttachmentSignedUrl, listAttachmentsForTask, uploadTaskAttachment, validateTaskAttachmentFile } from '../../../lib/api/attachments'
 import type { Attachment, Client, Profile, TaskPriority } from '../../../types/domain'
-import { Button, FieldError, Input, Label, Select, Textarea } from '@/components/atoms'
+import { FieldError } from '@/components/atoms'
+import { ComboboxFilter } from '@/components/molecules'
 import { Drawer } from '@/components/organisms'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { FileIcon, ImageIcon, PaperclipIcon } from '@/components/atoms/icons'
 import { isNotBlank } from '../../../lib/validation'
 import { useLanguage } from '../../../contexts/LanguageContext'
+
+const FIELD_CLASS = '!h-7 !rounded-lg !text-xs'
+const TEXTAREA_CLASS = '!rounded-lg !py-1.5 !text-xs'
+const COMBOBOX_TRIGGER_CLASS = 'flex-1 !rounded-lg'
 
 function formatFileSize(bytes: number): string {
   if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`
@@ -65,10 +75,10 @@ function TaskAttachments({ tenantId, taskId }: { tenantId: string; taskId: strin
   return (
     <div>
       <Label>{t('tasks.attachments.label')}</Label>
-      {attachments === null && <p className="text-xs text-brand-400">{t('common.status.loading')}</p>}
-      {attachments && attachments.length === 0 && <p className="text-xs text-brand-400">{t('tasks.attachments.empty')}</p>}
+      {attachments === null && <p className="mt-1 text-xs text-brand-400">{t('common.status.loading')}</p>}
+      {attachments && attachments.length === 0 && <p className="mt-1 text-xs text-brand-400">{t('tasks.attachments.empty')}</p>}
       {attachments && attachments.length > 0 && (
-        <ul className="space-y-1.5">
+        <ul className="mt-1 space-y-1.5">
           {attachments.map((a) => (
             <li key={a.id}>
               <button
@@ -89,7 +99,7 @@ function TaskAttachments({ tenantId, taskId }: { tenantId: string; taskId: strin
         </ul>
       )}
       <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp,application/pdf" className="hidden" onChange={handleSelect} />
-      <Button type="button" variant="ghost" onClick={() => inputRef.current?.click()} disabled={uploading} className="!mt-2 !px-3 !py-1.5 text-xs">
+      <Button type="button" variant="ghost" size="sm" className="mt-2" onClick={() => inputRef.current?.click()} disabled={uploading}>
         <PaperclipIcon width={13} height={13} /> {uploading ? t('tasks.attachments.uploading') : t('tasks.attachments.attach')}
       </Button>
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
@@ -120,8 +130,8 @@ export function TaskDrawer({
   const [description, setDescription] = useState('')
   const [priority, setPriority] = useState<TaskPriority>('media')
   const [dueDate, setDueDate] = useState('')
-  const [contactId, setContactId] = useState('')
-  const [assignedTo, setAssignedTo] = useState('')
+  const [contactId, setContactId] = useState<string | null>(null)
+  const [assignedTo, setAssignedTo] = useState<string | null>(null)
   const [contacts, setContacts] = useState<Client[]>([])
   const [agents, setAgents] = useState<Profile[]>([])
   const [touched, setTouched] = useState(false)
@@ -134,8 +144,8 @@ export function TaskDrawer({
     setDescription(task?.description ?? '')
     setPriority(task?.priority ?? 'media')
     setDueDate(task?.due_date ? task.due_date.slice(0, 16) : '')
-    setContactId(task?.contact_id ?? '')
-    setAssignedTo(task?.assigned_to ?? '')
+    setContactId(task?.contact_id ?? null)
+    setAssignedTo(task?.assigned_to ?? null)
     setTouched(false)
     setFormError(null)
   }, [open, task])
@@ -162,8 +172,8 @@ export function TaskDrawer({
         description: description.trim() || null,
         priority,
         due_date: dueDate ? new Date(dueDate).toISOString() : null,
-        contact_id: contactId || null,
-        assigned_to: assignedTo || null,
+        contact_id: contactId,
+        assigned_to: assignedTo,
         ...(task ? {} : { opportunity_id: defaultOpportunityId ?? null }),
       }
       if (task) await updateTask(task.id, input)
@@ -182,62 +192,75 @@ export function TaskDrawer({
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <div>
           <Label htmlFor="task-title">{t('tasks.field.title')}</Label>
-          <Input id="task-title" value={title} invalid={!!titleError} onChange={(e) => setTitle(e.target.value)} placeholder={t('tasks.field.titlePlaceholder')} />
+          <Input id="task-title" value={title} aria-invalid={!!titleError} onChange={(e) => setTitle(e.target.value)} placeholder={t('tasks.field.titlePlaceholder')} className={`mt-1 ${FIELD_CLASS}`} />
           <FieldError message={titleError} />
         </div>
 
         <div>
           <Label htmlFor="task-description">{t('tasks.field.description')}</Label>
-          <Textarea id="task-description" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
+          <Textarea id="task-description" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} className={`mt-1 ${TEXTAREA_CLASS}`} />
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-3">
           <div>
             <Label htmlFor="task-priority">{t('tasks.field.priority')}</Label>
-            <Select id="task-priority" value={priority} onChange={(e) => setPriority(e.target.value as TaskPriority)}>
-              {(Object.keys(TASK_PRIORITY_KEY) as TaskPriority[]).map((p) => (
-                <option key={p} value={p}>
-                  {t(TASK_PRIORITY_KEY[p])}
-                </option>
-              ))}
+            <Select value={priority} onValueChange={(v) => setPriority(v as TaskPriority)}>
+              <SelectTrigger id="task-priority" className={`mt-1 w-full ${FIELD_CLASS}`}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.keys(TASK_PRIORITY_KEY) as TaskPriority[]).map((p) => (
+                  <SelectItem key={p} value={p} className="text-xs">
+                    {t(TASK_PRIORITY_KEY[p])}
+                  </SelectItem>
+                ))}
+              </SelectContent>
             </Select>
           </div>
           <div>
             <Label htmlFor="task-due">{t('tasks.field.dueDate')}</Label>
-            <Input id="task-due" type="datetime-local" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+            <Input id="task-due" type="datetime-local" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
           </div>
         </div>
 
         <div>
-          <Label htmlFor="task-contact">{t('tasks.field.contact')}</Label>
-          <Select id="task-contact" value={contactId} onChange={(e) => setContactId(e.target.value)}>
-            <option value="">{t('tasks.field.noContact')}</option>
-            {contacts.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.full_name}
-              </option>
-            ))}
-          </Select>
+          <Label>{t('tasks.field.contact')}</Label>
+          <div className="mt-1">
+            <ComboboxFilter
+              options={contacts.map((c) => ({ id: c.id, label: c.full_name }))}
+              value={contactId}
+              onChange={setContactId}
+              placeholder={t('tasks.field.noContact')}
+              searchPlaceholder={t('contacts.search.placeholder')}
+              emptyLabel={t('tasks.filter.noResults')}
+              className="w-full"
+              triggerClassName={COMBOBOX_TRIGGER_CLASS}
+            />
+          </div>
         </div>
 
         <div>
-          <Label htmlFor="task-assigned">{t('tasks.field.assignedTo')}</Label>
-          <Select id="task-assigned" value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)}>
-            <option value="">{t('tasks.field.unassigned')}</option>
-            {agents.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.full_name}
-              </option>
-            ))}
-          </Select>
+          <Label>{t('tasks.field.assignedTo')}</Label>
+          <div className="mt-1">
+            <ComboboxFilter
+              options={agents.map((a) => ({ id: a.id, label: a.full_name }))}
+              value={assignedTo}
+              onChange={setAssignedTo}
+              placeholder={t('tasks.field.unassigned')}
+              searchPlaceholder={t('contacts.filters.agent.search')}
+              emptyLabel={t('contacts.filters.agent.noResults')}
+              className="w-full"
+              triggerClassName={COMBOBOX_TRIGGER_CLASS}
+            />
+          </div>
         </div>
 
         {task && <TaskAttachments tenantId={tenantId} taskId={task.id} />}
 
         {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
 
-        <div className="flex gap-2 border-t border-brand-100 pt-5">
-          <Button type="submit" variant="secondary" disabled={submitting}>
+        <div className="flex gap-2 border-t border-brand-100 pt-4">
+          <Button type="submit" disabled={submitting}>
             {submitting ? t('common.actions.saving') : t('common.actions.save')}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>

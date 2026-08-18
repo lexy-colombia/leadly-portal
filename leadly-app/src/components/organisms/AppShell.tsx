@@ -241,6 +241,17 @@ export function AppShell({
     [location.pathname, navItems, t],
   )
   const isLight = theme === 'light'
+  // Inbox (the tenant's index route, "/app") is the one page that manages
+  // its own internal scrolling -- a two-pane chat layout with an
+  // independently scrollable conversation list and message thread, each
+  // capped to the available height. Every other route just wants to grow
+  // naturally and let this wrapper be the one scrollbar for the whole
+  // page, so the padded/auto-scroll treatment stays the default; this is
+  // the single opt-out. Without it, this wrapper's own overflow-y-auto
+  // was the only scroll container, so the whole page (sidebar list +
+  // every message) scrolled together as one long column instead of the
+  // list and the thread scrolling independently (explicit bug report).
+  const isFullBleed = location.pathname === '/app'
 
   // Same leadly:-prefixed localStorage key the hand-rolled shell already
   // used -- kept as the single source of truth for collapse persistence
@@ -311,7 +322,7 @@ export function AppShell({
               </div>
             </div>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto p-5 lg:p-8">
+          <div className={isFullBleed ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : 'min-h-0 flex-1 overflow-y-auto p-5 lg:p-8'}>
             <PageOutlet />
           </div>
         </SidebarInset>

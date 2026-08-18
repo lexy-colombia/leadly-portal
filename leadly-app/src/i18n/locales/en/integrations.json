@@ -1,5 +1,4 @@
 {
-  "integrations.title": "Integrations",
   "integrations.category.invoicing": "E-invoicing",
   "integrations.category.accounting": "Accounting",
   "integrations.category.messaging": "Messaging",
@@ -23,6 +22,8 @@
   "integrations.replaceValue": "Replace…",
   "integrations.connected": "Connected",
   "integrations.notConnected": "Not connected",
+  "integrations.actions.connect": "Connect",
+  "integrations.actions.manage": "Manage",
   "integrations.adminOnly": "Only the account administrator can configure integrations.",
 
   "integrations.wompi.connected": "Wompi is configured and ready to use.",

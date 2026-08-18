@@ -4,8 +4,9 @@ import { useLanguage } from '../../contexts/LanguageContext'
 import type { TranslationKey } from '../../i18n/translations'
 import { listAppointmentsForTenantRange } from '../../lib/api/appointments'
 import type { AppointmentStatus, AppointmentWithContact } from '../../types/domain'
-import { Button, PageSpinner } from '@/components/atoms'
+import { PageSpinner } from '@/components/atoms'
 import { Card } from '@/components/molecules'
+import { Button } from '@/components/ui/button'
 import { ChevronLeftIcon, PlusIcon } from '@/components/atoms/icons'
 import { AppointmentFormDrawer } from './calendar/AppointmentFormDrawer'
 import { AppointmentDetailDrawer } from './calendar/AppointmentDetailDrawer'
@@ -116,16 +117,16 @@ export function Calendar() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-bold capitalize text-brand-800 sm:text-2xl">{monthLabel}</h1>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" onClick={() => setMonth(addMonths(month, -1))} className="!px-2.5 !py-1.5" aria-label={t('calendar.aria.prevMonth')}>
+          <Button variant="outline" size="icon-sm" onClick={() => setMonth(addMonths(month, -1))} aria-label={t('calendar.aria.prevMonth')}>
             <ChevronLeftIcon width={16} height={16} />
           </Button>
-          <Button variant="ghost" onClick={() => setMonth(startOfMonth(new Date()))} className="!px-3 !py-1.5 text-xs">
+          <Button variant="outline" size="sm" onClick={() => setMonth(startOfMonth(new Date()))}>
             {t('calendar.today')}
           </Button>
-          <Button variant="ghost" onClick={() => setMonth(addMonths(month, 1))} className="!px-2.5 !py-1.5" aria-label={t('calendar.aria.nextMonth')}>
+          <Button variant="outline" size="icon-sm" onClick={() => setMonth(addMonths(month, 1))} aria-label={t('calendar.aria.nextMonth')}>
             <ChevronLeftIcon width={16} height={16} className="rotate-180" />
           </Button>
-          <Button variant="secondary" onClick={() => setFormDrawer({ open: true })} className="!px-3 !py-1.5 text-xs">
+          <Button size="sm" onClick={() => setFormDrawer({ open: true })}>
             <PlusIcon width={14} height={14} /> {t('calendar.actions.new')}
           </Button>
         </div>

@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
-import { deleteSupplier, listSuppliers } from '../../../lib/api/suppliers'
+import { deleteSupplier, listSuppliers, updateSupplier } from '../../../lib/api/suppliers'
 import type { Supplier } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { Badge, Button, PageSpinner, Table, TBody, TD, TH, THead, TRow } from '@/components/atoms'
+import { PageSpinner } from '@/components/atoms'
 import { Card, EmptyState, Pagination } from '@/components/molecules'
 import { PencilIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
+import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { SupplierDrawer } from './SupplierDrawer'
 
 const PAGE_SIZE = 10
@@ -17,6 +20,7 @@ export function SuppliersTab({ tenantId }: { tenantId: string }) {
   const [drawer, setDrawer] = useState<{ open: boolean; supplier: Supplier | null }>({ open: false, supplier: null })
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [togglingId, setTogglingId] = useState<string | null>(null)
 
   function reload() {
     listSuppliers(tenantId)
@@ -28,6 +32,19 @@ export function SuppliersTab({ tenantId }: { tenantId: string }) {
 
   const totalPages = suppliers ? Math.max(1, Math.ceil(suppliers.length / PAGE_SIZE)) : 1
   const pageItems = suppliers ? suppliers.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE) : null
+
+  async function handleToggleActive(supplier: Supplier, checked: boolean) {
+    setTogglingId(supplier.id)
+    setSuppliers((list) => (list ? list.map((s) => (s.id === supplier.id ? { ...s, is_active: checked } : s)) : list))
+    try {
+      await updateSupplier(supplier.id, { is_active: checked })
+    } catch (err) {
+      setSuppliers((list) => (list ? list.map((s) => (s.id === supplier.id ? { ...s, is_active: !checked } : s)) : list))
+      setError(err instanceof Error ? err.message : t('products.suppliers.errors.save'))
+    } finally {
+      setTogglingId(null)
+    }
+  }
 
   async function handleDelete(id: string) {
     setDeleting(true)
@@ -49,7 +66,7 @@ export function SuppliersTab({ tenantId }: { tenantId: string }) {
         <span className="text-xs text-brand-400">
           {suppliers?.length ?? 0} {t((suppliers?.length ?? 0) === 1 ? 'products.suppliers.count.singular' : 'products.suppliers.count.plural')}
         </span>
-        <Button variant="secondary" onClick={() => setDrawer({ open: true, supplier: null })} className="!ml-auto !py-1 !text-xs">
+        <Button onClick={() => setDrawer({ open: true, supplier: null })} size="sm" className="ml-auto">
           <PlusIcon width={14} height={14} /> {t('products.suppliers.actions.new')}
         </Button>
       </div>
@@ -65,50 +82,57 @@ export function SuppliersTab({ tenantId }: { tenantId: string }) {
 
       {pageItems && pageItems.length > 0 && (
         <>
-          <Table>
-            <THead>
-              <tr>
-                <TH>{t('products.suppliers.table.supplier')}</TH>
-                <TH>{t('products.suppliers.table.contact')}</TH>
-                <TH>{t('products.suppliers.table.phone')}</TH>
-                <TH>{t('products.suppliers.table.status')}</TH>
-                <TH className="text-right">{t('products.suppliers.table.actions')}</TH>
-              </tr>
-            </THead>
-            <TBody>
-              {pageItems.map((supplier) => (
-                <TRow key={supplier.id}>
-                  <TD className="text-xs font-medium text-brand-800">{supplier.name}</TD>
-                  <TD className="text-xs text-brand-500">{supplier.contact_name ?? '-'}</TD>
-                  <TD className="text-xs text-brand-500">{supplier.phone ?? '-'}</TD>
-                  <TD>
-                    <Badge tone={supplier.is_active ? 'success' : 'neutral'}>{t(supplier.is_active ? 'common.status.active' : 'common.status.inactive')}</Badge>
-                  </TD>
-                  <TD className="text-right">
-                    {deletingId === supplier.id ? (
-                      <span className="inline-flex items-center gap-1.5">
-                        <Button variant="danger" onClick={() => handleDelete(supplier.id)} disabled={deleting} className="!px-2 !py-1 text-xs">
-                          {deleting ? t('common.actions.deleting') : t('common.actions.confirm')}
-                        </Button>
-                        <Button variant="ghost" onClick={() => setDeletingId(null)} disabled={deleting} className="!px-2 !py-1 text-xs">
-                          {t('common.actions.cancel')}
-                        </Button>
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1">
-                        <Button variant="ghost" onClick={() => setDrawer({ open: true, supplier })} className="!px-2 !py-1 text-xs">
-                          <PencilIcon width={12} height={12} />
-                        </Button>
-                        <Button variant="ghost" onClick={() => setDeletingId(supplier.id)} className="!px-2 !py-1 text-xs !text-red-600 hover:!bg-red-50">
-                          <TrashIcon width={12} height={12} />
-                        </Button>
-                      </span>
-                    )}
-                  </TD>
-                </TRow>
-              ))}
-            </TBody>
-          </Table>
+          <div className="overflow-hidden rounded-2xl border border-brand-100 bg-white">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t('products.suppliers.table.supplier')}</TableHead>
+                  <TableHead>{t('products.suppliers.table.contact')}</TableHead>
+                  <TableHead>{t('products.suppliers.table.phone')}</TableHead>
+                  <TableHead>{t('products.suppliers.table.status')}</TableHead>
+                  <TableHead className="text-right">{t('products.suppliers.table.actions')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pageItems.map((supplier) => (
+                  <TableRow key={supplier.id}>
+                    <TableCell className="text-xs font-medium text-brand-800">{supplier.name}</TableCell>
+                    <TableCell className="text-xs text-brand-500">{supplier.contact_name ?? '-'}</TableCell>
+                    <TableCell className="text-xs text-brand-500">{supplier.phone ?? '-'}</TableCell>
+                    <TableCell>
+                      <Switch
+                        checked={supplier.is_active}
+                        disabled={togglingId === supplier.id}
+                        onCheckedChange={(checked) => handleToggleActive(supplier, checked)}
+                        aria-label={t(supplier.is_active ? 'common.status.active' : 'common.status.inactive')}
+                      />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {deletingId === supplier.id ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <Button variant="destructive" size="xs" onClick={() => handleDelete(supplier.id)} disabled={deleting}>
+                            {deleting ? t('common.actions.deleting') : t('common.actions.confirm')}
+                          </Button>
+                          <Button variant="ghost" size="xs" onClick={() => setDeletingId(null)} disabled={deleting}>
+                            {t('common.actions.cancel')}
+                          </Button>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1">
+                          <Button variant="ghost" size="icon-xs" onClick={() => setDrawer({ open: true, supplier })}>
+                            <PencilIcon width={12} height={12} />
+                          </Button>
+                          <Button variant="ghost" size="icon-xs" className="text-red-600 hover:bg-red-50" onClick={() => setDeletingId(supplier.id)}>
+                            <TrashIcon width={12} height={12} />
+                          </Button>
+                        </span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
           <Pagination page={page} totalPages={totalPages} onChange={setPage} />
         </>
       )}

@@ -23,6 +23,7 @@
   "products.empty.noMatch": "No product matches the filter.",
   "products.empty.none": "You don't have any products in your catalog yet.",
   "products.table.product": "Product",
+  "products.table.brand": "Brand",
   "products.table.category": "Category",
   "products.table.price": "Sale price",
   "products.table.stock": "Stock",

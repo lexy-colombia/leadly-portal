@@ -30,6 +30,22 @@ export async function listClients(tenantId: string): Promise<Client[]> {
   return data
 }
 
+/** Server-side typeahead search (name or phone) instead of `listClients`'s
+ * full-tenant fetch -- used by the "vincular cliente" picker on an inbound
+ * WhatsApp conversation (see ChatPanel/LinkClientDrawer), which can't assume
+ * a tenant's client list stays small the way categories/brands realistically
+ * do. Empty query short-circuits to "most recently updated" instead of
+ * matching everything, so the picker isn't empty before the agent types
+ * anything. */
+export async function searchClients(tenantId: string, query: string, limit = 8): Promise<Client[]> {
+  let request = supabase.from('clients').select('*').eq('tenant_id', tenantId).is('deleted_at', null)
+  const term = query.trim()
+  if (term) request = request.or(`full_name.ilike.%${term}%,phone.ilike.%${term}%`)
+  const { data, error } = await request.order('updated_at', { ascending: false }).limit(limit)
+  if (error) throw error
+  return data
+}
+
 export async function getClient(id: string): Promise<Client | null> {
   const { data, error } = await supabase.from('clients').select('*').eq('id', id).is('deleted_at', null).maybeSingle()
   if (error) throw error

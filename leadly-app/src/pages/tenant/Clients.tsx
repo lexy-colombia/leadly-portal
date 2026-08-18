@@ -1,25 +1,37 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
+import { useHeaderSearchSlot } from '@/contexts/HeaderSearchSlotContext'
 import type { Language } from '../../i18n/translations'
 import { deleteClient, listClients } from '../../lib/api/clients'
 import { listLastContactTimesByTenant } from '../../lib/api/conversations'
 import { listProfilesByTenant } from '../../lib/api/users'
 import type { ClientStage, Client, Profile } from '../../types/domain'
-import { Badge, Button, InitialsAvatar, PageSpinner, Select, Table, TBody, TD, TH, THead, TRow } from '@/components/atoms'
-import { Card, EmptyState, IconInput, Pagination } from '@/components/molecules'
-import { FilterIcon, PencilIcon, PlusIcon, SearchIcon, TrashIcon } from '@/components/atoms/icons'
+import { PageSpinner, InitialsAvatar } from '@/components/atoms'
+import { Card, ComboboxFilter, EmptyState, IconInput, Pagination } from '@/components/molecules'
+import { PencilIcon, PlusIcon, SearchIcon, TrashIcon } from '@/components/atoms/icons'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ContactDrawer, STAGE_LABEL } from './clients/ContactDrawer'
 
 const PAGE_SIZE = 8
 
-const STAGE_TONE: Record<ClientStage, 'neutral' | 'success' | 'warning' | 'danger'> = {
-  lead: 'neutral',
-  contactado: 'warning',
-  negociacion: 'warning',
-  cliente: 'success',
-  perdido: 'danger',
+// Same trigger sizing convention as Products.tsx's filter pills, so this
+// list doesn't feel like a separate design system from the rest of the app.
+const FILTER_TRIGGER_CLASS = 'w-40 rounded-lg text-xs'
+
+// bg/text pair on top of shadcn Badge's `outline` variant -- shadcn's own
+// variants (default/secondary/destructive/outline/ghost) have no "warning"/
+// "success" tone, unlike the legacy atoms Badge this replaces.
+const STAGE_BADGE_CLASS: Record<ClientStage, string> = {
+  lead: 'border-transparent bg-slate-100 text-slate-600',
+  contactado: 'border-transparent bg-amber-100 text-amber-700',
+  negociacion: 'border-transparent bg-amber-100 text-amber-700',
+  cliente: 'border-transparent bg-emerald-100 text-emerald-700',
+  perdido: 'border-transparent bg-red-100 text-red-700',
 }
 
 function formatLastContact(iso: string | undefined, language: Language): string {
@@ -34,23 +46,30 @@ function formatLastContact(iso: string | undefined, language: Language): string 
 }
 
 export function Clients() {
-  const { profile } = useAuth()
+  const { profile, enabledModules } = useAuth()
   const { t, language } = useLanguage()
   const navigate = useNavigate()
+  const { slot: headerSearchSlot } = useHeaderSearchSlot()
+  // "Etapa" is the client-side pipeline concept (lead/contactado/.../perdido)
+  // -- only worth a column/filter when the tenant actually has the Pipeline
+  // module enabled (see lib/modules.ts). Without it, every row would show
+  // the same meaningless default and the filter would have nothing real to
+  // filter by (explicit user call: a column nobody can act on is clutter,
+  // not information).
+  const showStage = enabledModules?.has('pipeline') ?? false
+
   const [contacts, setContacts] = useState<Client[] | null>(null)
   const [agents, setAgents] = useState<Profile[]>([])
   const [lastContact, setLastContact] = useState<Map<string, string>>(new Map())
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
-  const [stageFilter, setStageFilter] = useState<ClientStage | ''>('')
-  const [tagFilter, setTagFilter] = useState('')
-  const [agentFilter, setAgentFilter] = useState('')
+  const [stageFilter, setStageFilter] = useState<ClientStage | null>(null)
+  const [tagFilter, setTagFilter] = useState<string | null>(null)
+  const [agentFilter, setAgentFilter] = useState<string | null>(null)
   const [page, setPage] = useState(1)
-  const [filtersOpen, setFiltersOpen] = useState(false)
   const [drawer, setDrawer] = useState<{ open: boolean; contact: Client | null }>({ open: false, contact: null })
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
-  const filtersRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!profile?.tenant_id) return
@@ -62,15 +81,6 @@ export function Clients() {
     listLastContactTimesByTenant(tenantId).then(setLastContact).catch(() => {})
   }, [profile?.tenant_id])
 
-  useEffect(() => {
-    if (!filtersOpen) return
-    function handleClick(e: MouseEvent) {
-      if (filtersRef.current && !filtersRef.current.contains(e.target as Node)) setFiltersOpen(false)
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [filtersOpen])
-
   const allTags = useMemo(() => {
     if (!contacts) return []
     return Array.from(new Set(contacts.flatMap((c) => c.tags))).sort()
@@ -80,7 +90,7 @@ export function Clients() {
     if (!contacts) return null
     const term = search.trim().toLowerCase()
     return contacts.filter((c) => {
-      if (stageFilter && c.stage !== stageFilter) return false
+      if (showStage && stageFilter && c.stage !== stageFilter) return false
       if (tagFilter && !c.tags.includes(tagFilter)) return false
       if (agentFilter && c.assigned_to !== agentFilter) return false
       if (!term) return true
@@ -92,7 +102,7 @@ export function Clients() {
         c.tags.some((tag) => tag.toLowerCase().includes(term))
       )
     })
-  }, [contacts, search, stageFilter, tagFilter, agentFilter])
+  }, [contacts, search, showStage, stageFilter, tagFilter, agentFilter])
 
   useEffect(() => {
     setPage(1)
@@ -100,8 +110,6 @@ export function Clients() {
 
   const totalPages = filtered ? Math.max(1, Math.ceil(filtered.length / PAGE_SIZE)) : 1
   const pageItems = filtered ? filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE) : null
-
-  const hasActiveFilters = !!search || !!stageFilter || !!tagFilter || !!agentFilter
 
   async function handleDelete(id: string) {
     setDeleting(true)
@@ -121,95 +129,61 @@ export function Clients() {
 
   return (
     <div className="animate-fade-in space-y-3">
-      <h1 className="text-xl font-bold text-brand-800 sm:text-2xl">{t('contacts.title')}</h1>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="w-full max-w-[220px] sm:w-auto">
+      {headerSearchSlot &&
+        createPortal(
           <IconInput
             icon={<SearchIcon width={14} height={14} />}
-            placeholder={t('contacts.search.placeholder')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="!py-1.5 !pl-8 text-sm"
+            placeholder={t('contacts.search.placeholder')}
+            className="!w-64 !rounded-lg !py-1.5 text-xs"
+          />,
+          headerSearchSlot,
+        )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        {showStage && (
+          <ComboboxFilter
+            options={(Object.keys(STAGE_LABEL) as ClientStage[]).map((s) => ({ id: s, label: t(STAGE_LABEL[s]) }))}
+            value={stageFilter}
+            onChange={(id) => setStageFilter(id as ClientStage | null)}
+            placeholder={t('contacts.filters.stage.all')}
+            searchPlaceholder={t('contacts.filters.stage.search')}
+            emptyLabel={t('contacts.filters.stage.noResults')}
+            triggerClassName={FILTER_TRIGGER_CLASS}
           />
-        </div>
+        )}
 
-        <div ref={filtersRef} className="relative">
-          <button
-            type="button"
-            onClick={() => setFiltersOpen((o) => !o)}
-            className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
-              hasActiveFilters ? 'border-accent-300 bg-accent-50 text-accent-700' : 'border-brand-200 text-brand-600 hover:bg-brand-50'
-            }`}
-          >
-            <FilterIcon width={14} height={14} />
-            {t('contacts.filters.label')}
-            {hasActiveFilters && <span className="h-1.5 w-1.5 rounded-full bg-accent-500" />}
-          </button>
+        {agents.length > 0 && (
+          <ComboboxFilter
+            options={agents.map((a) => ({ id: a.id, label: a.full_name }))}
+            value={agentFilter}
+            onChange={setAgentFilter}
+            placeholder={t('contacts.filters.agent.all')}
+            searchPlaceholder={t('contacts.filters.agent.search')}
+            emptyLabel={t('contacts.filters.agent.noResults')}
+            triggerClassName={FILTER_TRIGGER_CLASS}
+          />
+        )}
 
-          {filtersOpen && (
-            <div className="absolute left-0 top-full z-40 mt-2 w-64 max-w-[calc(100vw-2rem)] space-y-3 rounded-2xl border border-brand-100 bg-white p-4 shadow-lg">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-brand-400">{t('contacts.filters.stage.label')}</label>
-                <Select value={stageFilter} onChange={(e) => setStageFilter(e.target.value as ClientStage | '')} className="!py-1.5 text-sm">
-                  <option value="">{t('contacts.filters.stage.all')}</option>
-                  {(Object.keys(STAGE_LABEL) as ClientStage[]).map((s) => (
-                    <option key={s} value={s}>
-                      {t(STAGE_LABEL[s])}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              {agents.length > 0 && (
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-brand-400">{t('contacts.filters.agent.label')}</label>
-                  <Select value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)} className="!py-1.5 text-sm">
-                    <option value="">{t('contacts.filters.agent.all')}</option>
-                    {agents.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.full_name}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              )}
-              {allTags.length > 0 && (
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-brand-400">{t('contacts.filters.tag.label')}</label>
-                  <Select value={tagFilter} onChange={(e) => setTagFilter(e.target.value)} className="!py-1.5 text-sm">
-                    <option value="">{t('contacts.filters.tag.all')}</option>
-                    {allTags.map((tag) => (
-                      <option key={tag} value={tag}>
-                        {tag}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              )}
-              {hasActiveFilters && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearch('')
-                    setStageFilter('')
-                    setTagFilter('')
-                    setAgentFilter('')
-                  }}
-                  className="text-xs font-medium text-brand-400 hover:text-brand-700"
-                >
-                  {t('contacts.filters.clear')}
-                </button>
-              )}
-            </div>
-          )}
-        </div>
+        {allTags.length > 0 && (
+          <ComboboxFilter
+            options={allTags.map((tag) => ({ id: tag, label: tag }))}
+            value={tagFilter}
+            onChange={setTagFilter}
+            placeholder={t('contacts.filters.tag.all')}
+            searchPlaceholder={t('contacts.filters.tag.search')}
+            emptyLabel={t('contacts.filters.tag.noResults')}
+            triggerClassName={FILTER_TRIGGER_CLASS}
+          />
+        )}
 
         <span className="shrink-0 text-xs text-brand-400">
           {filtered?.length ?? 0} {t((filtered?.length ?? 0) === 1 ? 'contacts.count.singular' : 'contacts.count.plural')}
         </span>
 
-        <Button variant="secondary" onClick={() => setDrawer({ open: true, contact: null })} className="!ml-auto !py-1.5 !text-sm">
-          <PlusIcon width={16} height={16} /> {t('contacts.actions.new')}
+        <Button onClick={() => setDrawer({ open: true, contact: null })} size="sm" className="ml-auto">
+          <PlusIcon width={14} height={14} /> {t('contacts.actions.new')}
         </Button>
       </div>
 
@@ -226,70 +200,72 @@ export function Clients() {
 
       {pageItems && pageItems.length > 0 && (
         <>
-          <Table>
-            <THead>
-              <tr>
-                <TH>{t('contacts.table.contact')}</TH>
-                <TH>{t('contacts.table.phone')}</TH>
-                <TH>{t('contacts.table.stage')}</TH>
-                <TH>{t('contacts.table.agent')}</TH>
-                <TH>{t('contacts.table.lastContact')}</TH>
-                <TH className="text-right">{t('contacts.table.actions')}</TH>
-              </tr>
-            </THead>
-            <TBody>
-              {pageItems.map((contact) => (
-                <TRow key={contact.id} onClick={() => navigate(`/app/clients/${contact.id}`)} clickable>
-                  <TD className="font-medium text-brand-800">
-                    <span className="flex items-center gap-3">
-                      <InitialsAvatar name={contact.full_name} size="sm" />
-                      <span>
-                        {contact.full_name}
-                        {contact.company && <span className="block text-xs font-normal text-brand-400">{contact.company}</span>}
+          <div className="overflow-hidden rounded-2xl border border-brand-100 bg-white">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t('contacts.table.contact')}</TableHead>
+                  <TableHead>{t('contacts.table.phone')}</TableHead>
+                  {showStage && <TableHead>{t('contacts.table.stage')}</TableHead>}
+                  <TableHead>{t('contacts.table.agent')}</TableHead>
+                  <TableHead>{t('contacts.table.lastContact')}</TableHead>
+                  <TableHead className="text-right">{t('contacts.table.actions')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pageItems.map((contact) => (
+                  <TableRow key={contact.id} onClick={() => navigate(`/app/clients/${contact.id}`)} className="cursor-pointer">
+                    <TableCell className="text-xs font-medium text-brand-800">
+                      <span className="flex items-center gap-3">
+                        <InitialsAvatar name={contact.full_name} size="sm" />
+                        <span>
+                          {contact.full_name}
+                          {contact.company && <span className="block text-[11px] font-normal text-brand-400">{contact.company}</span>}
+                        </span>
                       </span>
-                    </span>
-                  </TD>
-                  <TD>{contact.phone}</TD>
-                  <TD>
-                    <Badge tone={STAGE_TONE[contact.stage]}>{t(STAGE_LABEL[contact.stage])}</Badge>
-                  </TD>
-                  <TD className="text-brand-500">{agents.find((a) => a.id === contact.assigned_to)?.full_name ?? '-'}</TD>
-                  <TD className="text-brand-500">{formatLastContact(lastContact.get(contact.id), language)}</TD>
-                  <TD className="text-right" onClick={(e) => e.stopPropagation()}>
-                    {deletingId === contact.id ? (
-                      <span className="inline-flex items-center gap-1.5">
-                        <Button variant="danger" onClick={() => handleDelete(contact.id)} disabled={deleting} className="!px-2.5 !py-1.5 text-xs">
-                          {deleting ? t('common.actions.deleting') : t('common.actions.confirm')}
-                        </Button>
-                        <Button variant="ghost" onClick={() => setDeletingId(null)} disabled={deleting} className="!px-2.5 !py-1.5 text-xs">
-                          {t('common.actions.cancel')}
-                        </Button>
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          onClick={() => setDrawer({ open: true, contact })}
-                          className="!px-2.5 !py-1.5 text-xs"
-                          aria-label={t('contacts.table.aria.edit')}
-                        >
-                          <PencilIcon width={13} height={13} />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          onClick={() => setDeletingId(contact.id)}
-                          className="!px-2.5 !py-1.5 text-xs !text-red-600 hover:!bg-red-50"
-                          aria-label={t('contacts.table.aria.delete')}
-                        >
-                          <TrashIcon width={13} height={13} />
-                        </Button>
-                      </span>
+                    </TableCell>
+                    <TableCell className="text-xs text-brand-700">{contact.phone}</TableCell>
+                    {showStage && (
+                      <TableCell>
+                        <Badge variant="outline" className={STAGE_BADGE_CLASS[contact.stage]}>
+                          {t(STAGE_LABEL[contact.stage])}
+                        </Badge>
+                      </TableCell>
                     )}
-                  </TD>
-                </TRow>
-              ))}
-            </TBody>
-          </Table>
+                    <TableCell className="text-xs text-brand-500">{agents.find((a) => a.id === contact.assigned_to)?.full_name ?? '-'}</TableCell>
+                    <TableCell className="text-xs text-brand-500">{formatLastContact(lastContact.get(contact.id), language)}</TableCell>
+                    <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                      {deletingId === contact.id ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <Button variant="destructive" size="xs" onClick={() => handleDelete(contact.id)} disabled={deleting}>
+                            {deleting ? t('common.actions.deleting') : t('common.actions.confirm')}
+                          </Button>
+                          <Button variant="ghost" size="xs" onClick={() => setDeletingId(null)} disabled={deleting}>
+                            {t('common.actions.cancel')}
+                          </Button>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1">
+                          <Button variant="ghost" size="icon-xs" aria-label={t('contacts.table.aria.edit')} onClick={() => setDrawer({ open: true, contact })}>
+                            <PencilIcon width={12} height={12} />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="text-red-600 hover:bg-red-50"
+                            aria-label={t('contacts.table.aria.delete')}
+                            onClick={() => setDeletingId(contact.id)}
+                          >
+                            <TrashIcon width={12} height={12} />
+                          </Button>
+                        </span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
           <Pagination page={page} totalPages={totalPages} onChange={setPage} />
         </>
       )}

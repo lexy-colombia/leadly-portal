@@ -83,10 +83,7 @@ export function CategoriesTab({ tenantId }: { tenantId: string }) {
               {tree.map(({ category, depth }) => (
                 <TableRow key={category.id}>
                   <TableCell className="text-xs font-medium text-brand-800">
-                    <span className="inline-flex items-center gap-2" style={{ paddingLeft: `${depth * 18}px` }}>
-                      <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: category.color ?? '#94A3B8' }} />
-                      {category.name}
-                    </span>
+                    <span style={{ paddingLeft: `${depth * 18}px` }}>{category.name}</span>
                   </TableCell>
                   <TableCell className="text-xs text-brand-500">{category.description ?? '-'}</TableCell>
                   <TableCell className="text-right">

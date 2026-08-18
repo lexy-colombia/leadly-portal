@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { Label } from '@/components/ui/label'
 
 /** Label + "Configurado" badge on one row, badge right-aligned -- putting a
  * Badge as a child of the shared `Label` component (block-level) made it
@@ -6,9 +7,7 @@ import type { ReactNode } from 'react'
 export function IntegrationFieldLabel({ htmlFor, label, badge }: { htmlFor?: string; label: string; badge?: ReactNode }) {
   return (
     <div className="mb-1 flex items-center justify-between gap-2">
-      <label htmlFor={htmlFor} className="text-sm font-medium text-brand-700">
-        {label}
-      </label>
+      <Label htmlFor={htmlFor}>{label}</Label>
       {badge}
     </div>
   )

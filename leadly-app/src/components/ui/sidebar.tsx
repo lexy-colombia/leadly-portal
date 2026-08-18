@@ -135,7 +135,16 @@ function SidebarProvider({
           } as React.CSSProperties
         }
         className={cn(
-          "group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar",
+          // h-svh + overflow-hidden (not the original min-h-svh, a floor
+          // with no ceiling) -- caps the whole shell to the viewport so a
+          // page whose own content grows taller than that (Inbox's chat
+          // thread) scrolls inside its own bounded region instead of the
+          // <body> itself growing and becoming the single scrollbar for
+          // the entire app, sidebar included (explicit bug report: "todo
+          // es un solo contenedor"). Every route's content wrapper already
+          // has its own overflow-y-auto, so this was always the intended
+          // shape -- chrome stays put, only content scrolls.
+          "group/sidebar-wrapper flex h-svh w-full overflow-hidden has-data-[variant=inset]:bg-sidebar",
           className
         )}
         {...props}

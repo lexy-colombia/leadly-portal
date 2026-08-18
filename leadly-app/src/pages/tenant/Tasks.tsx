@@ -5,13 +5,23 @@ import type { Language, TranslationKey } from '../../i18n/translations'
 import { deleteTask, listTasks, TASK_PRIORITY_KEY, updateTask } from '../../lib/api/tasks'
 import type { TaskWithRelations } from '../../lib/api/tasks'
 import type { TaskPriority, TaskStatus } from '../../types/domain'
-import { Badge, Button, PageSpinner, Select, Table, TBody, TD, TH, THead, TRow } from '@/components/atoms'
-import { Card, EmptyState, Pagination } from '@/components/molecules'
+import { PageSpinner } from '@/components/atoms'
+import { Card, ComboboxFilter, EmptyState, Pagination } from '@/components/molecules'
 import { CheckIcon, PencilIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { TaskDrawer } from './tasks/TaskDrawer'
 
 const PAGE_SIZE = 10
-const PRIORITY_TONE: Record<TaskPriority, 'neutral' | 'warning' | 'danger'> = { baja: 'neutral', media: 'warning', alta: 'danger' }
+const FILTER_TRIGGER_CLASS = 'w-40 rounded-lg text-xs'
+
+const PRIORITY_BADGE_CLASS: Record<TaskPriority, string> = {
+  baja: 'border-transparent bg-slate-100 text-slate-600',
+  media: 'border-transparent bg-amber-100 text-amber-700',
+  alta: 'border-transparent bg-red-100 text-red-700',
+}
+
 const STATUS_KEY: Record<TaskStatus, TranslationKey> = {
   pendiente: 'tasks.status.pendiente',
   en_proceso: 'tasks.status.en_proceso',
@@ -33,7 +43,7 @@ export function Tasks() {
   const { t, language } = useLanguage()
   const [tasks, setTasks] = useState<TaskWithRelations[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [statusFilter, setStatusFilter] = useState<TaskStatus | ''>('')
+  const [statusFilter, setStatusFilter] = useState<TaskStatus | null>(null)
   const [page, setPage] = useState(1)
   const [drawer, setDrawer] = useState<{ open: boolean; task: TaskWithRelations | null }>({ open: false, task: null })
   const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -92,20 +102,19 @@ export function Tasks() {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as TaskStatus | '')} className="!w-auto !py-1 text-xs">
-          <option value="">{t('tasks.filter.all')}</option>
-          {(Object.keys(STATUS_KEY) as TaskStatus[]).map((s) => (
-            <option key={s} value={s}>
-              {t(STATUS_KEY[s])}
-            </option>
-          ))}
-        </Select>
+        <ComboboxFilter
+          options={(Object.keys(STATUS_KEY) as TaskStatus[]).map((s) => ({ id: s, label: t(STATUS_KEY[s]) }))}
+          value={statusFilter}
+          onChange={(id) => setStatusFilter(id as TaskStatus | null)}
+          placeholder={t('tasks.filter.all')}
+          searchPlaceholder={t('tasks.filter.search')}
+          emptyLabel={t('tasks.filter.noResults')}
+          triggerClassName={FILTER_TRIGGER_CLASS}
+        />
 
-        <span className="shrink-0 text-xs text-brand-400">
-          {t((filtered?.length ?? 0) === 1 ? 'tasks.count.singular' : 'tasks.count.plural', { count: filtered?.length ?? 0 })}
-        </span>
+        <span className="shrink-0 text-xs text-brand-400">{t((filtered?.length ?? 0) === 1 ? 'tasks.count.singular' : 'tasks.count.plural', { count: filtered?.length ?? 0 })}</span>
 
-        <Button variant="secondary" onClick={() => setDrawer({ open: true, task: null })} className="!ml-auto !py-1 !text-xs">
+        <Button onClick={() => setDrawer({ open: true, task: null })} size="sm" className="ml-auto">
           <PlusIcon width={14} height={14} /> {t('tasks.actions.new')}
         </Button>
       </div>
@@ -121,78 +130,80 @@ export function Tasks() {
 
       {pageItems && pageItems.length > 0 && (
         <>
-        <Table>
-          <THead>
-            <tr>
-              <TH></TH>
-              <TH>{t('tasks.table.task')}</TH>
-              <TH>{t('tasks.table.priority')}</TH>
-              <TH>{t('tasks.table.due')}</TH>
-              <TH>{t('tasks.table.assignedTo')}</TH>
-              <TH className="text-right">{t('tasks.table.actions')}</TH>
-            </tr>
-          </THead>
-          <TBody>
-            {pageItems.map((task) => {
-              const done = task.status === 'completada'
-              return (
-                <TRow key={task.id}>
-                  <TD>
-                    <button
-                      type="button"
-                      onClick={() => handleToggleComplete(task)}
-                      disabled={togglingId === task.id}
-                      aria-label={done ? t('tasks.aria.markPending') : t('tasks.aria.markCompleted')}
-                      className={`flex h-5 w-5 items-center justify-center rounded-full border transition-colors ${
-                        done ? 'border-accent-500 bg-accent-500 text-white' : 'border-brand-300 text-transparent hover:border-accent-400'
-                      }`}
-                    >
-                      <CheckIcon width={12} height={12} />
-                    </button>
-                  </TD>
-                  <TD className={`text-xs font-medium ${done ? 'text-brand-400 line-through' : 'text-brand-800'}`}>
-                    {task.title}
-                    {task.opportunity && <span className="block text-[11px] font-normal text-brand-400">{task.opportunity.title}</span>}
-                    {task.contact && !task.opportunity && <span className="block text-[11px] font-normal text-brand-400">{task.contact.full_name}</span>}
-                  </TD>
-                  <TD>
-                    <Badge tone={PRIORITY_TONE[task.priority]}>{t(TASK_PRIORITY_KEY[task.priority])}</Badge>
-                  </TD>
-                  <TD className="text-xs text-brand-500">{formatDueDate(task.due_date, language, t)}</TD>
-                  <TD className="text-xs text-brand-500">{task.assignee?.full_name ?? '-'}</TD>
-                  <TD className="text-right">
-                    {deletingId === task.id ? (
-                      <span className="inline-flex items-center gap-1.5">
-                        <Button variant="danger" onClick={() => handleDelete(task.id)} disabled={deleting} className="!px-2 !py-1 text-xs">
-                          {deleting ? t('common.actions.deleting') : t('common.actions.confirm')}
-                        </Button>
-                        <Button variant="ghost" onClick={() => setDeletingId(null)} disabled={deleting} className="!px-2 !py-1 text-xs">
-                          {t('common.actions.cancel')}
-                        </Button>
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1">
-                        <Button variant="ghost" onClick={() => setDrawer({ open: true, task })} className="!px-2 !py-1 text-xs">
-                          <PencilIcon width={12} height={12} />
-                        </Button>
-                        <Button variant="ghost" onClick={() => setDeletingId(task.id)} className="!px-2 !py-1 text-xs !text-red-600 hover:!bg-red-50">
-                          <TrashIcon width={12} height={12} />
-                        </Button>
-                      </span>
-                    )}
-                  </TD>
-                </TRow>
-              )
-            })}
-          </TBody>
-        </Table>
-        <Pagination page={page} totalPages={totalPages} onChange={setPage} />
+          <div className="overflow-hidden rounded-2xl border border-brand-100 bg-white">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead></TableHead>
+                  <TableHead>{t('tasks.table.task')}</TableHead>
+                  <TableHead>{t('tasks.table.priority')}</TableHead>
+                  <TableHead>{t('tasks.table.due')}</TableHead>
+                  <TableHead>{t('tasks.table.assignedTo')}</TableHead>
+                  <TableHead className="text-right">{t('tasks.table.actions')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pageItems.map((task) => {
+                  const done = task.status === 'completada'
+                  return (
+                    <TableRow key={task.id}>
+                      <TableCell>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleComplete(task)}
+                          disabled={togglingId === task.id}
+                          aria-label={done ? t('tasks.aria.markPending') : t('tasks.aria.markCompleted')}
+                          className={`flex h-5 w-5 items-center justify-center rounded-full border transition-colors ${
+                            done ? 'border-accent-500 bg-accent-500 text-white' : 'border-brand-300 text-transparent hover:border-accent-400'
+                          }`}
+                        >
+                          <CheckIcon width={12} height={12} />
+                        </button>
+                      </TableCell>
+                      <TableCell className={`text-xs font-medium ${done ? 'text-brand-400 line-through' : 'text-brand-800'}`}>
+                        {task.title}
+                        {task.opportunity && <span className="block text-[11px] font-normal text-brand-400">{task.opportunity.title}</span>}
+                        {task.contact && !task.opportunity && <span className="block text-[11px] font-normal text-brand-400">{task.contact.full_name}</span>}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className={PRIORITY_BADGE_CLASS[task.priority]}>
+                          {t(TASK_PRIORITY_KEY[task.priority])}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-brand-500">{formatDueDate(task.due_date, language, t)}</TableCell>
+                      <TableCell className="text-xs text-brand-500">{task.assignee?.full_name ?? '-'}</TableCell>
+                      <TableCell className="text-right">
+                        {deletingId === task.id ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            <Button variant="destructive" size="xs" onClick={() => handleDelete(task.id)} disabled={deleting}>
+                              {deleting ? t('common.actions.deleting') : t('common.actions.confirm')}
+                            </Button>
+                            <Button variant="ghost" size="xs" onClick={() => setDeletingId(null)} disabled={deleting}>
+                              {t('common.actions.cancel')}
+                            </Button>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1">
+                            <Button variant="ghost" size="icon-xs" onClick={() => setDrawer({ open: true, task })}>
+                              <PencilIcon width={12} height={12} />
+                            </Button>
+                            <Button variant="ghost" size="icon-xs" className="text-red-600 hover:bg-red-50" onClick={() => setDeletingId(task.id)}>
+                              <TrashIcon width={12} height={12} />
+                            </Button>
+                          </span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </div>
+          <Pagination page={page} totalPages={totalPages} onChange={setPage} />
         </>
       )}
 
-      {profile?.tenant_id && (
-        <TaskDrawer open={drawer.open} onClose={() => setDrawer({ open: false, task: null })} tenantId={profile.tenant_id} task={drawer.task} onSaved={reload} />
-      )}
+      {profile?.tenant_id && <TaskDrawer open={drawer.open} onClose={() => setDrawer({ open: false, task: null })} tenantId={profile.tenant_id} task={drawer.task} onSaved={reload} />}
     </div>
   )
 }

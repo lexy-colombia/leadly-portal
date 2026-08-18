@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { updateAppointmentStatus } from '../../../lib/api/appointments'
 import type { AppointmentStatus, AppointmentWithContact } from '../../../types/domain'
-import { Badge, Button } from '@/components/atoms'
 import { Drawer } from '@/components/organisms'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import type { Language, TranslationKey } from '../../../i18n/translations'
 
@@ -13,10 +14,10 @@ const STATUS_KEY: Record<AppointmentStatus, TranslationKey> = {
   cancelada: 'calendar.status.cancelada',
 }
 
-const STATUS_TONE: Record<AppointmentStatus, 'neutral' | 'success' | 'warning' | 'danger'> = {
-  activa: 'warning',
-  completada: 'success',
-  cancelada: 'danger',
+const STATUS_BADGE_CLASS: Record<AppointmentStatus, string> = {
+  activa: 'border-transparent bg-amber-100 text-amber-700',
+  completada: 'border-transparent bg-emerald-100 text-emerald-700',
+  cancelada: 'border-transparent bg-red-100 text-red-700',
 }
 
 function formatDateTime(iso: string, language: Language): string {
@@ -63,7 +64,9 @@ export function AppointmentDetailDrawer({
           <Link to={`/app/clients/${appointment.contact_id}`} className="text-base font-semibold text-accent-600 hover:underline">
             {appointment.contact_full_name ?? t('calendar.detail.contactFallback')}
           </Link>
-          <Badge tone={STATUS_TONE[appointment.status]}>{t(STATUS_KEY[appointment.status])}</Badge>
+          <Badge variant="outline" className={STATUS_BADGE_CLASS[appointment.status]}>
+            {t(STATUS_KEY[appointment.status])}
+          </Badge>
         </div>
 
         <p className="text-sm capitalize text-brand-700">{formatDateTime(appointment.scheduled_at, language)}</p>
@@ -74,10 +77,10 @@ export function AppointmentDetailDrawer({
 
         {appointment.status === 'activa' && (
           <div className="flex gap-2 border-t border-brand-100 pt-4">
-            <Button variant="secondary" onClick={() => handleStatus('completada')} disabled={updating}>
+            <Button onClick={() => handleStatus('completada')} disabled={updating}>
               {updating ? t('common.actions.saving') : t('calendar.detail.markCompleted')}
             </Button>
-            <Button variant="danger" onClick={() => handleStatus('cancelada')} disabled={updating}>
+            <Button variant="destructive" onClick={() => handleStatus('cancelada')} disabled={updating}>
               {t('calendar.detail.cancelAppointment')}
             </Button>
           </div>

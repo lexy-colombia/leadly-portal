@@ -1,14 +1,22 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { listClients, createClient } from '../../../lib/api/clients'
 import { createConversation } from '../../../lib/api/conversations'
 import { listWhatsappLinesByTenant } from '../../../lib/api/whatsappLines'
 import type { Client, WhatsappLine } from '../../../types/domain'
-import { Button, FieldError, Input, Label, Select } from '@/components/atoms'
-import { IconInput } from '@/components/molecules'
+import { FieldError } from '@/components/atoms'
 import { Drawer } from '@/components/organisms'
-import { SearchIcon, UserIcon } from '@/components/atoms/icons'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { isNotBlank, isValidE164Phone } from '../../../lib/validation'
 import { useLanguage } from '../../../contexts/LanguageContext'
+
+const FIELD_CLASS = '!h-7 !rounded-lg !text-xs'
+
+type Mode = 'existing' | 'new'
 
 export function NewConversationDrawer({
   open,
@@ -24,8 +32,7 @@ export function NewConversationDrawer({
   const { t } = useLanguage()
   const [contacts, setContacts] = useState<Client[]>([])
   const [lines, setLines] = useState<WhatsappLine[]>([])
-  const [mode, setMode] = useState<'existing' | 'new'>('existing')
-  const [search, setSearch] = useState('')
+  const [mode, setMode] = useState<Mode>('existing')
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null)
   const [newName, setNewName] = useState('')
   const [newPhone, setNewPhone] = useState('')
@@ -37,7 +44,6 @@ export function NewConversationDrawer({
   useEffect(() => {
     if (!open) return
     setMode('existing')
-    setSearch('')
     setSelectedContactId(null)
     setNewName('')
     setNewPhone('')
@@ -50,12 +56,6 @@ export function NewConversationDrawer({
       setLineId(active[0]?.id ?? '')
     })
   }, [open, tenantId])
-
-  const filteredContacts = useMemo(() => {
-    const term = search.trim().toLowerCase()
-    if (!term) return contacts
-    return contacts.filter((c) => c.full_name.toLowerCase().includes(term) || c.phone.includes(term))
-  }, [contacts, search])
 
   const newNameError = touched && mode === 'new' && !isNotBlank(newName) ? t('inbox.newConv.errors.nameRequired') : undefined
   const newPhoneError = touched && mode === 'new' && !isValidE164Phone(newPhone) ? t('inbox.newConv.errors.invalidPhone') : undefined
@@ -99,50 +99,41 @@ export function NewConversationDrawer({
 
   return (
     <Drawer open={open} onClose={onClose} title={t('inbox.newConv.title')} description={t('inbox.newConv.description')}>
-      <div className="space-y-5">
-        <div className="flex gap-2 rounded-xl bg-brand-50 p-1">
-          <button
-            type="button"
-            onClick={() => setMode('existing')}
-            className={`flex-1 rounded-lg py-1.5 text-sm font-medium transition-colors ${mode === 'existing' ? 'bg-white text-brand-800 shadow-sm' : 'text-brand-400'}`}
-          >
-            {t('inbox.newConv.existingContact')}
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('new')}
-            className={`flex-1 rounded-lg py-1.5 text-sm font-medium transition-colors ${mode === 'new' ? 'bg-white text-brand-800 shadow-sm' : 'text-brand-400'}`}
-          >
-            {t('inbox.newConv.newContact')}
-          </button>
-        </div>
+      <div className="space-y-4">
+        <Tabs value={mode} onValueChange={(v) => setMode(v as Mode)}>
+          <TabsList className="w-full">
+            <TabsTrigger value="existing" className="text-xs">
+              {t('inbox.newConv.existingContact')}
+            </TabsTrigger>
+            <TabsTrigger value="new" className="text-xs">
+              {t('inbox.newConv.newContact')}
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         {mode === 'existing' ? (
-          <div className="space-y-2">
-            <IconInput
-              icon={<SearchIcon width={16} height={16} />}
-              placeholder={t('inbox.newConv.searchContact')}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            <div className="max-h-64 space-y-1 overflow-y-auto">
-              {filteredContacts.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => setSelectedContactId(c.id)}
-                  className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
-                    selectedContactId === c.id ? 'bg-accent-50 text-brand-800' : 'hover:bg-brand-50 text-brand-600'
-                  }`}
-                >
-                  <UserIcon width={14} height={14} className="shrink-0 text-brand-300" />
-                  <span className="truncate">
-                    {c.full_name} <span className="text-brand-300">· {c.phone}</span>
-                  </span>
-                </button>
-              ))}
-              {filteredContacts.length === 0 && <p className="px-3 py-2 text-sm text-brand-400">{t('common.status.noResults')}</p>}
+          <div>
+            <div className="overflow-hidden rounded-lg border border-input">
+              <Command>
+                <CommandInput placeholder={t('inbox.newConv.searchContact')} className="text-xs" />
+                <CommandList className="max-h-56">
+                  <CommandEmpty className="text-xs">{t('common.status.noResults')}</CommandEmpty>
+                  <CommandGroup>
+                    {contacts.map((c) => (
+                      <CommandItem key={c.id} value={`${c.full_name} ${c.phone}`} onSelect={() => setSelectedContactId(c.id)} className="text-xs">
+                        <span className="flex-1 truncate">{c.full_name}</span>
+                        <span className="shrink-0 text-brand-400">{c.phone}</span>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
             </div>
+            {selectedContactId && (
+              <p className="mt-1.5 text-xs text-brand-500">
+                {t('inbox.newConv.selected', { name: contacts.find((c) => c.id === selectedContactId)?.full_name ?? '' })}
+              </p>
+            )}
             <FieldError message={contactMissingError} />
           </div>
         ) : (
@@ -152,15 +143,23 @@ export function NewConversationDrawer({
               <Input
                 id="new-conv-name"
                 value={newName}
-                invalid={!!newNameError}
+                aria-invalid={!!newNameError}
                 onChange={(e) => setNewName(e.target.value)}
                 placeholder={t('inbox.newConv.fullNamePlaceholder')}
+                className={`mt-1 ${FIELD_CLASS}`}
               />
               <FieldError message={newNameError} />
             </div>
             <div>
               <Label htmlFor="new-conv-phone">{t('inbox.newConv.phone')}</Label>
-              <Input id="new-conv-phone" value={newPhone} invalid={!!newPhoneError} onChange={(e) => setNewPhone(e.target.value)} placeholder="+573001234567" />
+              <Input
+                id="new-conv-phone"
+                value={newPhone}
+                aria-invalid={!!newPhoneError}
+                onChange={(e) => setNewPhone(e.target.value)}
+                placeholder="+573001234567"
+                className={`mt-1 ${FIELD_CLASS}`}
+              />
               <FieldError message={newPhoneError} />
             </div>
           </div>
@@ -168,20 +167,24 @@ export function NewConversationDrawer({
 
         <div>
           <Label htmlFor="new-conv-line">{t('inbox.newConv.line')}</Label>
-          <Select id="new-conv-line" value={lineId} onChange={(e) => setLineId(e.target.value)} disabled={lines.length === 0}>
-            {lines.length === 0 && <option value="">{t('inbox.newConv.noActiveLines')}</option>}
-            {lines.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.display_name}
-              </option>
-            ))}
+          <Select value={lineId} onValueChange={setLineId} disabled={lines.length === 0}>
+            <SelectTrigger id="new-conv-line" className={`mt-1 w-full ${FIELD_CLASS}`}>
+              <SelectValue placeholder={t('inbox.newConv.noActiveLines')} />
+            </SelectTrigger>
+            <SelectContent>
+              {lines.map((l) => (
+                <SelectItem key={l.id} value={l.id} className="text-xs">
+                  {l.display_name}
+                </SelectItem>
+              ))}
+            </SelectContent>
           </Select>
         </div>
 
         {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
 
-        <div className="flex gap-2 border-t border-brand-100 pt-5">
-          <Button type="button" variant="secondary" onClick={handleSubmit} disabled={submitting}>
+        <div className="flex gap-2 border-t border-brand-100 pt-4">
+          <Button type="button" onClick={handleSubmit} disabled={submitting}>
             {submitting ? t('common.actions.creating') : t('inbox.newConv.submit')}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>

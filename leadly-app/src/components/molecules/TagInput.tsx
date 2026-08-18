@@ -4,7 +4,17 @@ import { useState, type KeyboardEvent } from 'react'
  * x (or backspace on an empty field) removes the last one. Replaces the old
  * "type comma-separated text" input -- same underlying `string[]` value,
  * just a nicer way to build it. */
-export function TagInput({ value, onChange, placeholder }: { value: string[]; onChange: (tags: string[]) => void; placeholder?: string }) {
+export function TagInput({
+  value,
+  onChange,
+  placeholder,
+  className = '',
+}: {
+  value: string[]
+  onChange: (tags: string[]) => void
+  placeholder?: string
+  className?: string
+}) {
   const [draft, setDraft] = useState('')
 
   function commitDraft() {
@@ -27,7 +37,7 @@ export function TagInput({ value, onChange, placeholder }: { value: string[]; on
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-brand-200 px-2.5 py-2 focus-within:border-accent-400 focus-within:ring-2 focus-within:ring-accent-400/60">
+    <div className={`flex flex-wrap items-center gap-1.5 rounded-xl border border-brand-200 px-2.5 py-2 focus-within:border-accent-400 focus-within:ring-2 focus-within:ring-accent-400/60 ${className}`}>
       {value.map((tag) => (
         <span key={tag} className="flex items-center gap-1 rounded-full bg-accent-50 py-1 pl-2.5 pr-1.5 text-xs font-medium text-accent-700">
           {tag}

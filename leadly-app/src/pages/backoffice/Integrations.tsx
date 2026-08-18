@@ -10,7 +10,6 @@ export function Integrations() {
 
   return (
     <div className="animate-fade-in space-y-4">
-      <h1 className="text-xl font-bold text-brand-800 sm:text-2xl">{t('integrations.title')}</h1>
       <IntegrationsGrid tenantId={null} drawerDescription={t('integrations.drawer.scopePlatform')} />
     </div>
   )

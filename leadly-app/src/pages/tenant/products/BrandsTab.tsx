@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
-import { deleteBrand, listBrands } from '../../../lib/api/brands'
+import { deleteBrand, listBrands, updateBrand } from '../../../lib/api/brands'
 import type { Brand } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { Badge, Button, InitialsAvatar, PageSpinner, Table, TBody, TD, TH, THead, TRow } from '@/components/atoms'
+import { InitialsAvatar, PageSpinner } from '@/components/atoms'
 import { Card, EmptyState, Pagination } from '@/components/molecules'
 import { PencilIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
+import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { BrandDrawer } from './BrandDrawer'
 
 const PAGE_SIZE = 10
@@ -17,6 +20,7 @@ export function BrandsTab({ tenantId }: { tenantId: string }) {
   const [drawer, setDrawer] = useState<{ open: boolean; brand: Brand | null }>({ open: false, brand: null })
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [togglingId, setTogglingId] = useState<string | null>(null)
 
   function reload() {
     listBrands(tenantId)
@@ -34,6 +38,19 @@ export function BrandsTab({ tenantId }: { tenantId: string }) {
 
   const totalPages = brands ? Math.max(1, Math.ceil(brands.length / PAGE_SIZE)) : 1
   const pageItems = brands ? brands.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE) : null
+
+  async function handleToggleActive(brand: Brand, checked: boolean) {
+    setTogglingId(brand.id)
+    setBrands((list) => (list ? list.map((b) => (b.id === brand.id ? { ...b, is_active: checked } : b)) : list))
+    try {
+      await updateBrand(brand.id, { is_active: checked })
+    } catch (err) {
+      setBrands((list) => (list ? list.map((b) => (b.id === brand.id ? { ...b, is_active: !checked } : b)) : list))
+      setError(err instanceof Error ? err.message : t('products.brands.errors.save'))
+    } finally {
+      setTogglingId(null)
+    }
+  }
 
   async function handleDelete(id: string) {
     setDeleting(true)
@@ -55,7 +72,7 @@ export function BrandsTab({ tenantId }: { tenantId: string }) {
         <span className="text-xs text-brand-400">
           {brands?.length ?? 0} {t((brands?.length ?? 0) === 1 ? 'products.brands.count.singular' : 'products.brands.count.plural')}
         </span>
-        <Button variant="secondary" onClick={() => setDrawer({ open: true, brand: null })} className="!ml-auto !py-1 !text-xs">
+        <Button onClick={() => setDrawer({ open: true, brand: null })} size="sm" className="ml-auto">
           <PlusIcon width={14} height={14} /> {t('products.brands.actions.new')}
         </Button>
       </div>
@@ -71,55 +88,62 @@ export function BrandsTab({ tenantId }: { tenantId: string }) {
 
       {pageItems && pageItems.length > 0 && (
         <>
-          <Table>
-            <THead>
-              <tr>
-                <TH>{t('products.brands.table.brand')}</TH>
-                <TH>{t('products.brands.table.status')}</TH>
-                <TH className="text-right">{t('products.brands.table.actions')}</TH>
-              </tr>
-            </THead>
-            <TBody>
-              {pageItems.map((brand) => (
-                <TRow key={brand.id}>
-                  <TD className="text-xs font-medium text-brand-800">
-                    <span className="flex items-center gap-2.5">
-                      {brand.logo_url ? (
-                        <img src={brand.logo_url} alt="" className="h-7 w-7 rounded-full object-cover" />
+          <div className="overflow-hidden rounded-2xl border border-brand-100 bg-white">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t('products.brands.table.brand')}</TableHead>
+                  <TableHead>{t('products.brands.table.status')}</TableHead>
+                  <TableHead className="text-right">{t('products.brands.table.actions')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pageItems.map((brand) => (
+                  <TableRow key={brand.id}>
+                    <TableCell className="text-xs font-medium text-brand-800">
+                      <span className="flex items-center gap-2.5">
+                        {brand.logo_url ? (
+                          <img src={brand.logo_url} alt="" className="h-7 w-7 rounded-full object-cover" />
+                        ) : (
+                          <InitialsAvatar name={brand.name} size="sm" />
+                        )}
+                        {brand.name}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <Switch
+                        checked={brand.is_active}
+                        disabled={togglingId === brand.id}
+                        onCheckedChange={(checked) => handleToggleActive(brand, checked)}
+                        aria-label={t(brand.is_active ? 'common.status.active' : 'common.status.inactive')}
+                      />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {deletingId === brand.id ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <Button variant="destructive" size="xs" onClick={() => handleDelete(brand.id)} disabled={deleting}>
+                            {deleting ? t('common.actions.deleting') : t('common.actions.confirm')}
+                          </Button>
+                          <Button variant="ghost" size="xs" onClick={() => setDeletingId(null)} disabled={deleting}>
+                            {t('common.actions.cancel')}
+                          </Button>
+                        </span>
                       ) : (
-                        <InitialsAvatar name={brand.name} size="sm" />
+                        <span className="inline-flex items-center gap-1">
+                          <Button variant="ghost" size="icon-xs" onClick={() => setDrawer({ open: true, brand })}>
+                            <PencilIcon width={12} height={12} />
+                          </Button>
+                          <Button variant="ghost" size="icon-xs" className="text-red-600 hover:bg-red-50" onClick={() => setDeletingId(brand.id)}>
+                            <TrashIcon width={12} height={12} />
+                          </Button>
+                        </span>
                       )}
-                      {brand.name}
-                    </span>
-                  </TD>
-                  <TD>
-                    <Badge tone={brand.is_active ? 'success' : 'neutral'}>{t(brand.is_active ? 'common.status.active' : 'common.status.inactive')}</Badge>
-                  </TD>
-                  <TD className="text-right">
-                    {deletingId === brand.id ? (
-                      <span className="inline-flex items-center gap-1.5">
-                        <Button variant="danger" onClick={() => handleDelete(brand.id)} disabled={deleting} className="!px-2 !py-1 text-xs">
-                          {deleting ? t('common.actions.deleting') : t('common.actions.confirm')}
-                        </Button>
-                        <Button variant="ghost" onClick={() => setDeletingId(null)} disabled={deleting} className="!px-2 !py-1 text-xs">
-                          {t('common.actions.cancel')}
-                        </Button>
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1">
-                        <Button variant="ghost" onClick={() => setDrawer({ open: true, brand })} className="!px-2 !py-1 text-xs">
-                          <PencilIcon width={12} height={12} />
-                        </Button>
-                        <Button variant="ghost" onClick={() => setDeletingId(brand.id)} className="!px-2 !py-1 text-xs !text-red-600 hover:!bg-red-50">
-                          <TrashIcon width={12} height={12} />
-                        </Button>
-                      </span>
-                    )}
-                  </TD>
-                </TRow>
-              ))}
-            </TBody>
-          </Table>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
           <Pagination page={page} totalPages={totalPages} onChange={setPage} />
         </>
       )}

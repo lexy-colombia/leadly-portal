@@ -15,8 +15,14 @@ import { listTasks } from '../../lib/api/tasks'
 import type { TaskWithRelations } from '../../lib/api/tasks'
 import { listProfilesByTenant } from '../../lib/api/users'
 import type { Pipeline, PipelineStage, OpportunityPriority, Profile } from '../../types/domain'
-import { Badge, Button, Input, InitialsAvatar, PageSpinner, Select } from '@/components/atoms'
+import { InitialsAvatar, PageSpinner } from '@/components/atoms'
+import { ComboboxFilter } from '@/components/molecules'
 import { CalendarIcon, CheckIcon, ChevronLeftIcon, FilterIcon, MailIcon, PhoneIcon, PlusIcon, SettingsIcon } from '@/components/atoms/icons'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { OpportunityDrawer } from './opportunities/OpportunityDrawer'
 import { OpportunityListView } from './opportunities/OpportunityListView'
 import { OpportunityPanel } from './opportunities/OpportunityPanel'
@@ -29,7 +35,16 @@ const PRIORITY_LABEL: Record<OpportunityPriority, TranslationKey> = {
 }
 type SortBy = 'recent' | 'value_desc' | 'value_asc' | 'close_date'
 
-const PRIORITY_TONE: Record<OpportunityPriority, 'neutral' | 'warning' | 'danger'> = { baja: 'neutral', media: 'warning', alta: 'danger' }
+// shadcn Select can't take an empty string as an item value -- every "all"
+// option in this page's filters uses this sentinel instead, converted back
+// to '' at the filter boundary.
+const ALL = '__all'
+
+const PRIORITY_BADGE_CLASS: Record<OpportunityPriority, string> = {
+  baja: 'border-transparent bg-slate-100 text-slate-600',
+  media: 'border-transparent bg-amber-100 text-amber-700',
+  alta: 'border-transparent bg-red-100 text-red-700',
+}
 
 const VIEW_MODE_LABEL: Record<'kanban' | 'lista', TranslationKey> = {
   kanban: 'opportunities.view.kanban',
@@ -260,14 +275,10 @@ export function Opportunities() {
     <div className="flex h-[calc(100vh-8rem)] min-w-0 flex-col space-y-2.5 lg:h-[calc(100vh-6.5rem)]">
       <div className="flex flex-wrap items-center gap-2">
         <div ref={pipelinePopoverRef} className="relative">
-          <button
-            type="button"
-            onClick={() => setPipelinePopoverOpen((o) => !o)}
-            className="flex items-center gap-1.5 rounded-full border border-brand-200 px-2.5 py-1 text-xs font-medium text-brand-700 hover:border-brand-300"
-          >
+          <Button type="button" variant="outline" size="sm" className="rounded-full" onClick={() => setPipelinePopoverOpen((o) => !o)}>
             {t('opportunities.pipeline.label', { name: pipeline?.name ?? t('opportunities.pipeline.none') })}
             <ChevronLeftIcon width={12} height={12} className="-rotate-90 text-brand-300" />
-          </button>
+          </Button>
 
           {pipelinePopoverOpen && (
             <div className="absolute left-0 top-full z-40 mt-2 w-64 max-w-[calc(100vw-2rem)] space-y-1 rounded-2xl border border-brand-100 bg-white p-2 shadow-lg">
@@ -293,9 +304,9 @@ export function Opportunities() {
                     value={newPipelineName}
                     onChange={(e) => setNewPipelineName(e.target.value)}
                     placeholder={t('opportunities.pipeline.newPlaceholder')}
-                    className="!py-1.5 text-xs"
+                    className="!h-7 !rounded-lg !text-xs"
                   />
-                  <Button type="submit" variant="secondary" disabled={creatingPipeline || !newPipelineName.trim()} className="!px-2.5 !py-1.5 text-xs shrink-0">
+                  <Button type="submit" size="icon-sm" disabled={creatingPipeline || !newPipelineName.trim()} className="shrink-0">
                     <PlusIcon width={13} height={13} />
                   </Button>
                 </form>
@@ -305,82 +316,94 @@ export function Opportunities() {
         </div>
 
         {isAdmin && pipeline && (
-          <button
-            type="button"
-            onClick={() => setSettingsOpen(true)}
-            aria-label={t('opportunities.pipeline.configureAria')}
-            className="rounded-full border border-brand-200 p-1 text-brand-500 hover:border-brand-300 hover:bg-brand-50"
-          >
+          <Button variant="outline" size="icon-sm" onClick={() => setSettingsOpen(true)} aria-label={t('opportunities.pipeline.configureAria')} className="rounded-full">
             <SettingsIcon width={14} height={14} />
-          </button>
+          </Button>
         )}
 
-        <div className="flex gap-1 rounded-full bg-brand-50 p-0.5">
-          {(['kanban', 'lista'] as const).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              onClick={() => setViewMode(mode)}
-              className={`rounded-full px-2.5 py-1 text-xs font-medium capitalize transition-colors ${
-                viewMode === mode ? 'bg-white text-brand-800 shadow-sm' : 'text-brand-400 hover:text-brand-700'
-              }`}
-            >
-              {t(VIEW_MODE_LABEL[mode])}
-            </button>
-          ))}
-        </div>
+        <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as typeof viewMode)}>
+          <TabsList>
+            {(['kanban', 'lista'] as const).map((mode) => (
+              <TabsTrigger key={mode} value={mode} className="text-xs capitalize">
+                {t(VIEW_MODE_LABEL[mode])}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
 
-        <Select value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)} className="!w-auto !py-1 text-xs">
-          <option value="">{t('opportunities.filters.owner.all')}</option>
-          {agents.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.full_name}
-            </option>
-          ))}
-        </Select>
+        <ComboboxFilter
+          options={agents.map((a) => ({ id: a.id, label: a.full_name }))}
+          value={ownerFilter || null}
+          onChange={(id) => setOwnerFilter(id ?? '')}
+          placeholder={t('opportunities.filters.owner.all')}
+          searchPlaceholder={t('contacts.filters.agent.search')}
+          emptyLabel={t('contacts.filters.agent.noResults')}
+          triggerClassName="w-40 rounded-lg text-xs"
+        />
 
-        <Select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)} className="!w-auto !py-1 text-xs">
-          <option value="recent">{t('opportunities.sort.recent')}</option>
-          <option value="value_desc">{t('opportunities.sort.valueDesc')}</option>
-          <option value="value_asc">{t('opportunities.sort.valueAsc')}</option>
-          <option value="close_date">{t('opportunities.sort.closeDate')}</option>
+        <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortBy)}>
+          <SelectTrigger className="!h-7 w-auto !rounded-lg !text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="recent" className="text-xs">
+              {t('opportunities.sort.recent')}
+            </SelectItem>
+            <SelectItem value="value_desc" className="text-xs">
+              {t('opportunities.sort.valueDesc')}
+            </SelectItem>
+            <SelectItem value="value_asc" className="text-xs">
+              {t('opportunities.sort.valueAsc')}
+            </SelectItem>
+            <SelectItem value="close_date" className="text-xs">
+              {t('opportunities.sort.closeDate')}
+            </SelectItem>
+          </SelectContent>
         </Select>
 
         <div ref={filtersRef} className="relative">
-          <button
-            type="button"
-            onClick={() => setFiltersOpen((o) => !o)}
-            className={`flex items-center gap-1 rounded-full border px-2 py-1 text-xs font-medium transition-colors ${
-              hasActiveFilters ? 'border-accent-300 bg-accent-50 text-accent-700' : 'border-brand-200 text-brand-600 hover:bg-brand-50'
-            }`}
-          >
+          <Button type="button" variant={hasActiveFilters ? 'secondary' : 'outline'} size="sm" onClick={() => setFiltersOpen((o) => !o)}>
             <FilterIcon width={13} height={13} />
             {t('opportunities.filters.toggle')}
             {hasActiveFilters && <span className="h-1.5 w-1.5 rounded-full bg-accent-500" />}
-          </button>
+          </Button>
 
           {filtersOpen && (
             <div className="absolute left-0 top-full z-40 mt-2 w-56 max-w-[calc(100vw-2rem)] space-y-3 rounded-2xl border border-brand-100 bg-white p-4 shadow-lg">
               <div>
                 <label className="mb-1 block text-xs font-medium text-brand-400">{t('opportunities.filters.stage.label')}</label>
-                <Select value={stageFilter} onChange={(e) => setStageFilter(e.target.value)} className="!py-1.5 text-sm">
-                  <option value="">{t('opportunities.filters.stage.all')}</option>
-                  {stages.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
+                <Select value={stageFilter || ALL} onValueChange={(v) => setStageFilter(v === ALL ? '' : v)}>
+                  <SelectTrigger className="w-full !h-7 !rounded-lg !text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL} className="text-xs">
+                      {t('opportunities.filters.stage.all')}
+                    </SelectItem>
+                    {stages.map((s) => (
+                      <SelectItem key={s.id} value={s.id} className="text-xs">
+                        {s.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
                 </Select>
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium text-brand-400">{t('opportunities.filters.priority.label')}</label>
-                <Select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value as OpportunityPriority | '')} className="!py-1.5 text-sm">
-                  <option value="">{t('opportunities.filters.priority.all')}</option>
-                  {(Object.keys(PRIORITY_LABEL) as OpportunityPriority[]).map((p) => (
-                    <option key={p} value={p}>
-                      {t(PRIORITY_LABEL[p])}
-                    </option>
-                  ))}
+                <Select value={priorityFilter || ALL} onValueChange={(v) => setPriorityFilter(v === ALL ? '' : (v as OpportunityPriority))}>
+                  <SelectTrigger className="w-full !h-7 !rounded-lg !text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL} className="text-xs">
+                      {t('opportunities.filters.priority.all')}
+                    </SelectItem>
+                    {(Object.keys(PRIORITY_LABEL) as OpportunityPriority[]).map((p) => (
+                      <SelectItem key={p} value={p} className="text-xs">
+                        {t(PRIORITY_LABEL[p])}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
                 </Select>
               </div>
               {hasActiveFilters && (
@@ -400,7 +423,7 @@ export function Opportunities() {
           )}
         </div>
 
-        <Button variant="primary" onClick={() => setDrawer({ open: true, opportunity: null })} disabled={!pipeline} className="!ml-auto !py-1 !text-xs">
+        <Button onClick={() => setDrawer({ open: true, opportunity: null })} disabled={!pipeline} size="sm" className="ml-auto">
           <PlusIcon width={14} height={14} /> {t('opportunities.actions.new')}
         </Button>
       </div>
@@ -493,7 +516,9 @@ export function Opportunities() {
 
                       <div className="mt-1.5 flex items-center justify-between">
                         <span className="flex items-center gap-1.5">
-                          <Badge tone={PRIORITY_TONE[opp.priority]}>{t(PRIORITY_LABEL[opp.priority])}</Badge>
+                          <Badge variant="outline" className={PRIORITY_BADGE_CLASS[opp.priority]}>
+                            {t(PRIORITY_LABEL[opp.priority])}
+                          </Badge>
                           {!!pendingTaskCountByOpportunity.get(opp.id) && (
                             <button
                               type="button"

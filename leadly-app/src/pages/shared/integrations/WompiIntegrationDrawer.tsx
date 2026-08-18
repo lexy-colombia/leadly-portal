@@ -1,10 +1,16 @@
 import { useEffect, useState } from 'react'
 import { getPaymentCredentialStatus, setPaymentCredentialSecret, setPaymentMode } from '../../../lib/api/billing'
-import { Badge, Button, FieldError, Input, Select } from '@/components/atoms'
+import { FieldError } from '@/components/atoms'
 import { Drawer } from '@/components/organisms'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { IntegrationStatusBanner } from './IntegrationStatusBanner'
 import { IntegrationFieldLabel, IntegrationSection } from './IntegrationFieldLabel'
 import { useLanguage } from '../../../contexts/LanguageContext'
+
+const FIELD_CLASS = '!h-7 !rounded-lg !text-xs'
 
 /** Wompi is not mapped-only like the others -- it's the real, working
  * payment system already powering invoice checkout/webhooks. It reads/writes
@@ -106,7 +112,13 @@ export function WompiIntegrationDrawer({
                 <IntegrationFieldLabel
                   htmlFor="wompi-integration-private-key"
                   label={t('integrations.privateKey')}
-                  badge={privateKeyConfigured && <Badge tone="success">{t('integrations.configured')}</Badge>}
+                  badge={
+                    privateKeyConfigured && (
+                      <Badge variant="outline" className="border-transparent bg-emerald-100 text-emerald-700">
+                        {t('integrations.configured')}
+                      </Badge>
+                    )
+                  }
                 />
                 <Input
                   id="wompi-integration-private-key"
@@ -115,13 +127,20 @@ export function WompiIntegrationDrawer({
                   onChange={(e) => setPrivateKey(e.target.value)}
                   placeholder={privateKeyConfigured ? t('integrations.replaceValue') : 'prv_...'}
                   autoComplete="off"
+                  className={FIELD_CLASS}
                 />
               </div>
               <div>
                 <IntegrationFieldLabel
                   htmlFor="wompi-integration-integrity-key"
                   label={t('integrations.integrityKey')}
-                  badge={integrityKeyConfigured && <Badge tone="success">{t('integrations.configured')}</Badge>}
+                  badge={
+                    integrityKeyConfigured && (
+                      <Badge variant="outline" className="border-transparent bg-emerald-100 text-emerald-700">
+                        {t('integrations.configured')}
+                      </Badge>
+                    )
+                  }
                 />
                 <Input
                   id="wompi-integration-integrity-key"
@@ -130,6 +149,7 @@ export function WompiIntegrationDrawer({
                   onChange={(e) => setIntegrityKey(e.target.value)}
                   placeholder={integrityKeyConfigured ? t('integrations.replaceValue') : undefined}
                   autoComplete="off"
+                  className={FIELD_CLASS}
                 />
               </div>
             </div>
@@ -138,9 +158,18 @@ export function WompiIntegrationDrawer({
           <IntegrationSection title={t('integrations.section.settings')}>
             <div className="max-w-[200px]">
               <IntegrationFieldLabel htmlFor="wompi-integration-mode" label={t('integrations.mode')} />
-              <Select id="wompi-integration-mode" value={mode} onChange={(e) => handleModeChange(e.target.value as 'sandbox' | 'production')}>
-                <option value="sandbox">{t('integrations.mode.sandbox')}</option>
-                <option value="production">{t('integrations.mode.production')}</option>
+              <Select value={mode} onValueChange={(v) => handleModeChange(v as 'sandbox' | 'production')}>
+                <SelectTrigger id="wompi-integration-mode" className={`w-full ${FIELD_CLASS}`}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="sandbox" className="text-xs">
+                    {t('integrations.mode.sandbox')}
+                  </SelectItem>
+                  <SelectItem value="production" className="text-xs">
+                    {t('integrations.mode.production')}
+                  </SelectItem>
+                </SelectContent>
               </Select>
             </div>
           </IntegrationSection>
@@ -148,7 +177,7 @@ export function WompiIntegrationDrawer({
           {error && <FieldError message={error} />}
 
           <div className="flex items-center gap-2 border-t border-brand-100 pt-4">
-            <Button type="button" variant="secondary" onClick={handleSubmit} disabled={submitting || (!privateKey.trim() && !integrityKey.trim())}>
+            <Button type="button" onClick={handleSubmit} disabled={submitting || (!privateKey.trim() && !integrityKey.trim())}>
               {submitting ? t('common.actions.saving') : t('common.actions.save')}
             </Button>
             {saved && <span className="text-xs text-emerald-600">{t('integrations.configSaved')}</span>}

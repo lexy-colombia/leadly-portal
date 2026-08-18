@@ -17,8 +17,6 @@ export function Integrations() {
 
   return (
     <div className="animate-fade-in space-y-4">
-      <h1 className="text-xl font-bold text-brand-800 sm:text-2xl">{t('integrations.title')}</h1>
-
       {isAdmin && profile?.tenant_id ? (
         <IntegrationsGrid tenantId={profile.tenant_id} drawerDescription={t('integrations.drawer.scopeTenant')} />
       ) : (

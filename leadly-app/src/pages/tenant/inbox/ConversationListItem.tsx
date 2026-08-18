@@ -49,6 +49,11 @@ export function ConversationListItem({
         <span className="flex shrink-0 flex-col items-end gap-1">
           <span className="text-[11px] text-brand-400">{formatTime(conversation.last_message_at, language)}</span>
           <span className="flex items-center gap-1">
+            {!conversation.contact_id && (
+              <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-amber-600" title={t('inbox.chat.noClientLinked')}>
+                {t('inbox.list.noClient')}
+              </span>
+            )}
             {conversation.category && (
               <span className="rounded-full bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-brand-500">
                 {t(CONVERSATION_CATEGORY_KEY[conversation.category])}

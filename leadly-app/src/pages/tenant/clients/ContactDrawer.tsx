@@ -1,12 +1,19 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { createClient, updateClient } from '../../../lib/api/clients'
 import { listProfilesByTenant } from '../../../lib/api/users'
 import type { ClientStage, Client, Profile } from '../../../types/domain'
-import { Button, FieldError, Input, Label, Select, Switch, Textarea } from '@/components/atoms'
-import { TagInput } from '@/components/molecules'
+import { FieldError } from '@/components/atoms'
+import { ComboboxFilter, TagInput } from '@/components/molecules'
 import { Drawer } from '@/components/organisms'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Switch } from '@/components/ui/switch'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { isNotBlank, isValidE164Phone, isValidEmail } from '../../../lib/validation'
 import { useLanguage } from '../../../contexts/LanguageContext'
+import { useAuth } from '../../../contexts/AuthContext'
 import type { TranslationKey } from '../../../i18n/translations'
 
 export const STAGE_LABEL: Record<ClientStage, TranslationKey> = {
@@ -15,6 +22,22 @@ export const STAGE_LABEL: Record<ClientStage, TranslationKey> = {
   negociacion: 'contacts.stage.negociacion',
   cliente: 'contacts.stage.cliente',
   perdido: 'contacts.stage.perdido',
+}
+
+// Same compact sizing as ProductDrawer/CategoryDrawer -- every field in this
+// form is pinned to it so it doesn't feel like a visually separate, bigger
+// design system from the rest of the app.
+const FIELD_CLASS = '!h-7 !rounded-lg !text-xs'
+const TEXTAREA_CLASS = '!rounded-lg !py-1.5 !text-xs'
+const COMBOBOX_TRIGGER_CLASS = 'flex-1 !rounded-lg'
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="space-y-2.5">
+      <p className="text-[11px] font-semibold tracking-wide text-brand-400 uppercase">{title}</p>
+      {children}
+    </div>
+  )
 }
 
 export function ContactDrawer({
@@ -32,13 +55,18 @@ export function ContactDrawer({
   onSaved: (contact: Client) => void
 }) {
   const { t } = useLanguage()
+  const { enabledModules } = useAuth()
+  // Same criterion as the Clients list/detail: "etapa" only shows up where
+  // the Pipeline module is actually enabled for the tenant -- otherwise
+  // it's a field nobody downstream can see or filter by.
+  const showStage = enabledModules?.has('pipeline') ?? false
   const [fullName, setFullName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
   const [company, setCompany] = useState('')
   const [stage, setStage] = useState<ClientStage>('lead')
   const [tags, setTags] = useState<string[]>([])
-  const [assignedTo, setAssignedTo] = useState('')
+  const [assignedTo, setAssignedTo] = useState<string | null>(null)
   const [agents, setAgents] = useState<Profile[]>([])
   const [nit, setNit] = useState('')
   const [industry, setIndustry] = useState('')
@@ -47,7 +75,6 @@ export function ContactDrawer({
   const [city, setCity] = useState('')
   const [notes, setNotes] = useState('')
   const [isActive, setIsActive] = useState(true)
-  const [detailsOpen, setDetailsOpen] = useState(false)
   const [touched, setTouched] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -60,7 +87,7 @@ export function ContactDrawer({
     setCompany(contact?.company ?? '')
     setStage(contact?.stage ?? 'lead')
     setTags(contact?.tags ?? [])
-    setAssignedTo(contact?.assigned_to ?? '')
+    setAssignedTo(contact?.assigned_to ?? null)
     setNit(contact?.nit ?? '')
     setIndustry(contact?.industry ?? '')
     setWebsite(contact?.website ?? '')
@@ -68,7 +95,6 @@ export function ContactDrawer({
     setCity(contact?.city ?? '')
     setNotes(contact?.notes ?? '')
     setIsActive(contact?.is_active ?? true)
-    setDetailsOpen(false)
     setTouched(false)
     setFormError(null)
   }, [open, contact])
@@ -98,7 +124,7 @@ export function ContactDrawer({
         company: company.trim() || null,
         stage,
         tags,
-        assigned_to: assignedTo || null,
+        assigned_to: assignedTo,
         nit: nit.trim() || null,
         industry: industry.trim() || null,
         website: website.trim() || null,
@@ -123,128 +149,156 @@ export function ContactDrawer({
       onClose={onClose}
       title={contact ? t('contacts.drawer.editTitle') : t('contacts.drawer.newTitle')}
       description={t('contacts.drawer.description')}
+      size="lg"
     >
-      <form onSubmit={handleSubmit} noValidate className="space-y-4">
-        <div>
-          <Label htmlFor="contact-name">{t('contacts.drawer.fields.fullName')}</Label>
-          <Input
-            id="contact-name"
-            value={fullName}
-            invalid={!!nameError}
-            onChange={(e) => setFullName(e.target.value)}
-            placeholder={t('contacts.drawer.fields.fullNamePlaceholder')}
-          />
-          <FieldError message={nameError} />
-        </div>
-
-        <div>
-          <Label htmlFor="contact-phone">{t('contacts.drawer.fields.phone')}</Label>
-          <Input id="contact-phone" value={phone} invalid={!!phoneError} onChange={(e) => setPhone(e.target.value)} placeholder="+573001234567" />
-          <FieldError message={phoneError} />
-        </div>
-
-        <div>
-          <Label htmlFor="contact-email">{t('contacts.drawer.fields.email')}</Label>
-          <Input
-            id="contact-email"
-            type="email"
-            value={email}
-            invalid={!!emailError}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder={t('contacts.drawer.fields.emailPlaceholder')}
-          />
-          <FieldError message={emailError} />
-        </div>
-
-        <div>
-          <Label htmlFor="contact-company">{t('contacts.drawer.fields.company')}</Label>
-          <Input
-            id="contact-company"
-            value={company}
-            onChange={(e) => setCompany(e.target.value)}
-            placeholder={t('contacts.drawer.fields.companyPlaceholder')}
-          />
-        </div>
-
-        <div>
-          <Label htmlFor="contact-stage">{t('contacts.drawer.fields.stage')}</Label>
-          <Select id="contact-stage" value={stage} onChange={(e) => setStage(e.target.value as ClientStage)}>
-            {(Object.keys(STAGE_LABEL) as ClientStage[]).map((s) => (
-              <option key={s} value={s}>
-                {t(STAGE_LABEL[s])}
-              </option>
-            ))}
-          </Select>
-        </div>
-
-        <div>
-          <Label htmlFor="contact-tags">{t('contacts.drawer.fields.tags')}</Label>
-          <TagInput value={tags} onChange={setTags} placeholder={t('contacts.drawer.fields.tagsPlaceholder')} />
-        </div>
-
-        <div>
-          <Label htmlFor="contact-assigned">{t('contacts.drawer.fields.assignedAgent')}</Label>
-          <Select id="contact-assigned" value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)}>
-            <option value="">{t('contacts.drawer.fields.unassigned')}</option>
-            {agents.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.full_name}
-              </option>
-            ))}
-          </Select>
-        </div>
-
-        <div className="border-t border-brand-100 pt-4">
-          <button type="button" onClick={() => setDetailsOpen((o) => !o)} className="text-xs font-medium text-accent-600 hover:underline">
-            {detailsOpen ? t('contacts.drawer.hideDetails') : t('contacts.drawer.showDetails')}
-          </button>
-        </div>
-
-        {detailsOpen && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="contact-nit">{t('contacts.drawer.fields.nit')}</Label>
-                <Input id="contact-nit" value={nit} onChange={(e) => setNit(e.target.value)} />
-              </div>
-              <div>
-                <Label htmlFor="contact-industry">{t('contacts.drawer.fields.industry')}</Label>
-                <Input id="contact-industry" value={industry} onChange={(e) => setIndustry(e.target.value)} />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="contact-city">{t('contacts.drawer.fields.city')}</Label>
-                <Input id="contact-city" value={city} onChange={(e) => setCity(e.target.value)} />
-              </div>
-              <div>
-                <Label htmlFor="contact-website">{t('contacts.drawer.fields.website')}</Label>
-                <Input id="contact-website" value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="https://" />
-              </div>
-            </div>
-
+      <form onSubmit={handleSubmit} noValidate className="space-y-5">
+        <Section title={t('contacts.drawer.sections.basics')}>
+          <div>
+            <Label htmlFor="contact-name">{t('contacts.drawer.fields.fullName')}</Label>
+            <Input
+              id="contact-name"
+              value={fullName}
+              aria-invalid={!!nameError}
+              onChange={(e) => setFullName(e.target.value)}
+              placeholder={t('contacts.drawer.fields.fullNamePlaceholder')}
+              className={`mt-1 ${FIELD_CLASS}`}
+            />
+            <FieldError message={nameError} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label htmlFor="contact-address">{t('contacts.drawer.fields.address')}</Label>
-              <Input id="contact-address" value={address} onChange={(e) => setAddress(e.target.value)} />
+              <Label htmlFor="contact-phone">{t('contacts.drawer.fields.phone')}</Label>
+              <Input id="contact-phone" value={phone} aria-invalid={!!phoneError} onChange={(e) => setPhone(e.target.value)} placeholder="+573001234567" className={`mt-1 ${FIELD_CLASS}`} />
+              <FieldError message={phoneError} />
             </div>
-
             <div>
-              <Label htmlFor="contact-notes">{t('contacts.drawer.fields.notes')}</Label>
-              <Textarea id="contact-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
-            </div>
-
-            <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
-              <span className="text-sm text-brand-700">{t('contacts.drawer.fields.active')}</span>
-              <Switch checked={isActive} onChange={setIsActive} />
+              <Label htmlFor="contact-email">{t('contacts.drawer.fields.email')}</Label>
+              <Input
+                id="contact-email"
+                type="email"
+                value={email}
+                aria-invalid={!!emailError}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder={t('contacts.drawer.fields.emailPlaceholder')}
+                className={`mt-1 ${FIELD_CLASS}`}
+              />
+              <FieldError message={emailError} />
             </div>
           </div>
-        )}
+        </Section>
+
+        <Section title={t('contacts.drawer.sections.classification')}>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="contact-company">{t('contacts.drawer.fields.company')}</Label>
+              <Input
+                id="contact-company"
+                value={company}
+                onChange={(e) => setCompany(e.target.value)}
+                placeholder={t('contacts.drawer.fields.companyPlaceholder')}
+                className={`mt-1 ${FIELD_CLASS}`}
+              />
+            </div>
+            {showStage ? (
+              <div>
+                <Label htmlFor="contact-stage">{t('contacts.drawer.fields.stage')}</Label>
+                <Select value={stage} onValueChange={(v) => setStage(v as ClientStage)}>
+                  <SelectTrigger id="contact-stage" className={`mt-1 w-full ${FIELD_CLASS}`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(STAGE_LABEL) as ClientStage[]).map((s) => (
+                      <SelectItem key={s} value={s} className="text-xs">
+                        {t(STAGE_LABEL[s])}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <div>
+                <Label>{t('contacts.drawer.fields.assignedAgent')}</Label>
+                <div className="mt-1">
+                  <ComboboxFilter
+                    options={agents.map((a) => ({ id: a.id, label: a.full_name }))}
+                    value={assignedTo}
+                    onChange={setAssignedTo}
+                    placeholder={t('contacts.drawer.fields.unassigned')}
+                    searchPlaceholder={t('contacts.filters.agent.search')}
+                    emptyLabel={t('contacts.filters.agent.noResults')}
+                    className="w-full"
+                    triggerClassName={COMBOBOX_TRIGGER_CLASS}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {showStage && (
+            <div>
+              <Label>{t('contacts.drawer.fields.assignedAgent')}</Label>
+              <div className="mt-1">
+                <ComboboxFilter
+                  options={agents.map((a) => ({ id: a.id, label: a.full_name }))}
+                  value={assignedTo}
+                  onChange={setAssignedTo}
+                  placeholder={t('contacts.drawer.fields.unassigned')}
+                  searchPlaceholder={t('contacts.filters.agent.search')}
+                  emptyLabel={t('contacts.filters.agent.noResults')}
+                  className="w-full"
+                  triggerClassName={COMBOBOX_TRIGGER_CLASS}
+                />
+              </div>
+            </div>
+          )}
+
+          <div>
+            <Label htmlFor="contact-tags">{t('contacts.drawer.fields.tags')}</Label>
+            <TagInput value={tags} onChange={setTags} placeholder={t('contacts.drawer.fields.tagsPlaceholder')} className="mt-1 !rounded-lg !py-1 text-xs" />
+          </div>
+        </Section>
+
+        <Section title={t('contacts.drawer.sections.additional')}>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="contact-nit">{t('contacts.drawer.fields.nit')}</Label>
+              <Input id="contact-nit" value={nit} onChange={(e) => setNit(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
+            </div>
+            <div>
+              <Label htmlFor="contact-industry">{t('contacts.drawer.fields.industry')}</Label>
+              <Input id="contact-industry" value={industry} onChange={(e) => setIndustry(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="contact-city">{t('contacts.drawer.fields.city')}</Label>
+              <Input id="contact-city" value={city} onChange={(e) => setCity(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
+            </div>
+            <div>
+              <Label htmlFor="contact-website">{t('contacts.drawer.fields.website')}</Label>
+              <Input id="contact-website" value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="https://" className={`mt-1 ${FIELD_CLASS}`} />
+            </div>
+          </div>
+          <div>
+            <Label htmlFor="contact-address">{t('contacts.drawer.fields.address')}</Label>
+            <Input id="contact-address" value={address} onChange={(e) => setAddress(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
+          </div>
+          <div>
+            <Label htmlFor="contact-notes">{t('contacts.drawer.fields.notes')}</Label>
+            <Textarea id="contact-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className={`mt-1 ${TEXTAREA_CLASS}`} />
+          </div>
+          <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
+            <Label htmlFor="contact-active" className="font-normal text-brand-700">
+              {t('contacts.drawer.fields.active')}
+            </Label>
+            <Switch id="contact-active" checked={isActive} onCheckedChange={setIsActive} />
+          </div>
+        </Section>
 
         {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
 
-        <div className="flex gap-2 border-t border-brand-100 pt-5">
-          <Button type="submit" variant="secondary" disabled={submitting}>
+        <div className="flex gap-2 border-t border-brand-100 pt-4">
+          <Button type="submit" disabled={submitting}>
             {submitting ? t('common.actions.saving') : t('common.actions.save')}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>

@@ -2,9 +2,15 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { createBrand, removeBrandLogo, updateBrand, uploadBrandLogo, validateBrandLogoFile } from '../../../lib/api/brands'
 import type { Brand } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { Button, FieldError, Input, Label, Switch } from '@/components/atoms'
+import { FieldError } from '@/components/atoms'
 import { Drawer } from '@/components/organisms'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { isNotBlank } from '../../../lib/validation'
+
+const FIELD_CLASS = '!h-7 !rounded-lg !text-xs'
 
 /** Storage-only picker -- doesn't persist `logo_url` itself, just uploads/
  * removes the file and reports the resulting URL up via onUploaded/onRemoved.
@@ -71,7 +77,7 @@ function BrandLogoPicker({
   return (
     <div>
       <Label>{t('products.brands.logo.label')}</Label>
-      <div className="flex items-center gap-3">
+      <div className="mt-1 flex items-center gap-3">
         <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-brand-100 bg-brand-50">
           {logoUrl ? (
             <img src={logoUrl} alt={name} className="max-h-full max-w-full object-contain" />
@@ -80,11 +86,11 @@ function BrandLogoPicker({
           )}
         </div>
         <div className="flex flex-col gap-1.5">
-          <Button type="button" variant="secondary" onClick={() => inputRef.current?.click()} disabled={busy} className="!px-3 !py-1.5 text-xs">
+          <Button type="button" variant="outline" size="sm" onClick={() => inputRef.current?.click()} disabled={busy}>
             {busy ? t('products.brands.logo.uploading') : t(logoUrl ? 'products.brands.logo.change' : 'products.brands.logo.upload')}
           </Button>
           {logoUrl && (
-            <Button type="button" variant="ghost" onClick={handleRemove} disabled={busy} className="!px-3 !py-1 text-xs !text-red-600 hover:!bg-red-50">
+            <Button type="button" variant="ghost" size="sm" className="text-red-600 hover:bg-red-50" onClick={handleRemove} disabled={busy}>
               {t('products.brands.logo.remove')}
             </Button>
           )}
@@ -168,16 +174,19 @@ export function BrandDrawer({
           <Input
             id="brand-name"
             value={name}
-            invalid={!!nameError}
+            aria-invalid={!!nameError}
             onChange={(e) => setName(e.target.value)}
             placeholder={t('products.brands.fields.namePlaceholder')}
+            className={`mt-1 ${FIELD_CLASS}`}
           />
           <FieldError message={nameError} />
         </div>
 
         <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
-          <span className="text-sm text-brand-700">{t('products.brands.fields.isActive')}</span>
-          <Switch checked={isActive} onChange={setIsActive} />
+          <Label htmlFor="brand-active" className="font-normal text-brand-700">
+            {t('products.brands.fields.isActive')}
+          </Label>
+          <Switch id="brand-active" checked={isActive} onCheckedChange={setIsActive} />
         </div>
 
         {pendingId && (
@@ -193,8 +202,8 @@ export function BrandDrawer({
 
         {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
 
-        <div className="flex gap-2 border-t border-brand-100 pt-5">
-          <Button type="submit" variant="secondary" disabled={submitting}>
+        <div className="flex gap-2 border-t border-brand-100 pt-4">
+          <Button type="submit" disabled={submitting}>
             {submitting ? t('common.actions.saving') : t('common.actions.save')}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>

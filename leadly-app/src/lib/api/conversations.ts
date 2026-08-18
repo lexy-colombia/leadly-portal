@@ -60,6 +60,19 @@ export async function listLastContactTimesByTenant(tenantId: string): Promise<Ma
   return result
 }
 
+/** Links (or re-links) a conversation to a client -- used from the Inbox
+ * when a conversation came in unlinked (see whatsapp-webhook: it stopped
+ * auto-creating a client per inbound number, since not every sender is
+ * actually a client) and an agent decides the sender is worth tracking as
+ * one, whether by picking an existing client or creating a new one first
+ * (see LinkClientDrawer). Doesn't touch `contact_phone`/`contact_name` --
+ * those stay whatever WhatsApp reported, independent of the linked client's
+ * own editable name. */
+export async function linkConversationContact(conversationId: string, contactId: string): Promise<void> {
+  const { error } = await supabase.from('whatsapp_conversations').update({ contact_id: contactId }).eq('id', conversationId)
+  if (error) throw error
+}
+
 export async function setConversationAssignee(conversationId: string, agentId: string | null): Promise<void> {
   const { error } = await supabase.from('whatsapp_conversations').update({ assigned_agent_id: agentId }).eq('id', conversationId)
   if (error) throw error

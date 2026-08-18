@@ -362,7 +362,12 @@ export function ProductDrawer({
               <Label>{t('products.drawer.fields.brand')}</Label>
               <div className="mt-1">
                 <ComboboxFilter
-                  options={brands.map((b) => ({ id: b.id, label: b.name }))}
+                  // Marcas inactivas no son elegibles para un producto nuevo
+                  // -- salvo la que el producto ya tuviera asignada, para
+                  // que editarlo no la borre en silencio del selector (sigue
+                  // viéndose, solo no aparece como opción para asignarla de
+                  // nuevo desde otro producto).
+                  options={brands.filter((b) => b.is_active || b.id === brandId).map((b) => ({ id: b.id, label: b.name }))}
                   value={brandId || null}
                   onChange={(id) => setBrandId(id ?? '')}
                   placeholder={t('products.drawer.fields.noBrand')}
@@ -377,7 +382,8 @@ export function ProductDrawer({
               <Label>{t('products.drawer.fields.supplier')}</Label>
               <div className="mt-1">
                 <ComboboxFilter
-                  options={suppliers.map((s) => ({ id: s.id, label: s.name }))}
+                  // Mismo criterio que Marca -- ver comentario arriba.
+                  options={suppliers.filter((s) => s.is_active || s.id === supplierId).map((s) => ({ id: s.id, label: s.name }))}
                   value={supplierId || null}
                   onChange={(id) => setSupplierId(id ?? '')}
                   placeholder={t('products.drawer.fields.noSupplier')}

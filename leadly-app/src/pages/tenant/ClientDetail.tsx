@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { MoreHorizontalIcon } from 'lucide-react'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { Language, TranslationKey } from '../../i18n/translations'
-import { getClient, createNote, listNotes } from '../../lib/api/clients'
+import { deleteClient, getClient, createNote, listNotes } from '../../lib/api/clients'
 import { listAppointmentsForContact, updateAppointmentStatus } from '../../lib/api/appointments'
 import { listConversationsForContact } from '../../lib/api/conversations'
 import type { ConversationWithLine } from '../../lib/api/conversations'
@@ -22,10 +23,15 @@ import type {
   Profile,
 } from '../../types/domain'
 import { useAuth } from '../../contexts/AuthContext'
-import { Badge, Button, InitialsAvatar, PageSpinner, Textarea } from '@/components/atoms'
-import { Card, EmptyState, Pagination } from '@/components/molecules'
+import { InitialsAvatar, PageSpinner } from '@/components/atoms'
+import { Pagination } from '@/components/molecules'
 import { ConfirmDialog } from '@/components/organisms'
-import { BuildingIcon, CalendarIcon, ChatBubbleIcon, CheckIcon, ClockIcon, MailIcon, MapPinIcon, PencilIcon, PhoneIcon, PlusIcon, TrashIcon, UserIcon, XCircleIcon } from '@/components/atoms/icons'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Textarea } from '@/components/ui/textarea'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { CalendarIcon, CheckIcon, ChatBubbleIcon, PencilIcon, PlusIcon, TrashIcon, XCircleIcon } from '@/components/atoms/icons'
 import { ContactDrawer, STAGE_LABEL } from './clients/ContactDrawer'
 import { AppointmentDrawer } from './clients/AppointmentDrawer'
 import { AddressDrawer } from './clients/AddressDrawer'
@@ -42,12 +48,12 @@ const ORDER_STATUS_LABEL: Record<OrderStatus, TranslationKey> = {
   cancelada: 'contacts.order.status.cancelada',
 }
 
-const ORDER_STATUS_TONE: Record<OrderStatus, 'neutral' | 'success' | 'warning' | 'danger'> = {
-  cotizacion: 'neutral',
-  confirmada: 'success',
-  en_proceso: 'warning',
-  entregada: 'success',
-  cancelada: 'danger',
+const ORDER_STATUS_BADGE_CLASS: Record<OrderStatus, string> = {
+  cotizacion: 'border-transparent bg-slate-100 text-slate-600',
+  confirmada: 'border-transparent bg-emerald-100 text-emerald-700',
+  en_proceso: 'border-transparent bg-amber-100 text-amber-700',
+  entregada: 'border-transparent bg-emerald-100 text-emerald-700',
+  cancelada: 'border-transparent bg-red-100 text-red-700',
 }
 
 // Currency stays Colombian-peso-formatted regardless of the active UI
@@ -56,12 +62,12 @@ function formatCurrency(value: number, currency = 'COP'): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 }
 
-const STAGE_TONE: Record<ClientStage, 'neutral' | 'success' | 'warning' | 'danger'> = {
-  lead: 'neutral',
-  contactado: 'warning',
-  negociacion: 'warning',
-  cliente: 'success',
-  perdido: 'danger',
+const STAGE_BADGE_CLASS: Record<ClientStage, string> = {
+  lead: 'border-transparent bg-slate-100 text-slate-600',
+  contactado: 'border-transparent bg-amber-100 text-amber-700',
+  negociacion: 'border-transparent bg-amber-100 text-amber-700',
+  cliente: 'border-transparent bg-emerald-100 text-emerald-700',
+  perdido: 'border-transparent bg-red-100 text-red-700',
 }
 
 const APPOINTMENT_STATUS_LABEL: Record<AppointmentStatus, TranslationKey> = {
@@ -70,10 +76,10 @@ const APPOINTMENT_STATUS_LABEL: Record<AppointmentStatus, TranslationKey> = {
   cancelada: 'contacts.appointment.status.cancelada',
 }
 
-const APPOINTMENT_STATUS_TONE: Record<AppointmentStatus, 'neutral' | 'success' | 'warning' | 'danger'> = {
-  activa: 'warning',
-  completada: 'success',
-  cancelada: 'danger',
+const APPOINTMENT_STATUS_BADGE_CLASS: Record<AppointmentStatus, string> = {
+  activa: 'border-transparent bg-amber-100 text-amber-700',
+  completada: 'border-transparent bg-emerald-100 text-emerald-700',
+  cancelada: 'border-transparent bg-red-100 text-red-700',
 }
 
 const PAGE_SIZE = 8
@@ -93,35 +99,31 @@ function formatDate(iso: string, language: Language): string {
   return new Date(iso).toLocaleDateString(locale, { day: '2-digit', month: 'long', year: 'numeric' })
 }
 
-/** Label-above-value field, used throughout the sidebar's data sheet -- one
- * shape for every fact about the contact (fecha de creación, último
- * contacto, teléfono, ...) instead of mixing different layouts per field. */
-function Field({ icon, label, value }: { icon: ReactNode; label: string; value: ReactNode }) {
+/** Label-above-value field -- the one fact-display shape used across both
+ * header StatCards (Resumen/Detalles), same pattern as ProductDetail. */
+function Field({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="flex items-start gap-2.5">
-      <span className="mt-0.5 shrink-0 text-brand-300">{icon}</span>
-      <div className="min-w-0">
-        <dt className="text-xs text-brand-400">{label}</dt>
-        <dd className="truncate text-brand-700">{value}</dd>
-      </div>
+    <div className="min-w-0">
+      <dt className="text-xs text-brand-400">{label}</dt>
+      <dd className="truncate text-sm font-semibold text-brand-800">{value}</dd>
     </div>
   )
 }
 
-/** One tile per loggable activity type (nota/cita) -- gives both the same
- * one-click access instead of only "Agendar cita" having a shortcut and
- * notes being buried inside the Actividad tab. */
-function QuickAction({ icon, label, onClick }: { icon: ReactNode; label: string; onClick: () => void }) {
+function StatCard({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex flex-col items-center gap-1 rounded-xl border border-brand-100 py-2.5 text-brand-500 transition-colors hover:border-accent-200 hover:bg-accent-50 hover:text-accent-700"
-    >
-      {icon}
-      <span className="text-[11px] font-medium">{label}</span>
-    </button>
+    <div className="rounded-xl border border-brand-100 p-4">
+      <h3 className="mb-3 text-sm font-semibold text-brand-800">{title}</h3>
+      {children}
+    </div>
   )
+}
+
+/** Bordered panel used for each tab's content -- flat, no shadow, matches
+ * every other list container introduced this session (Products, Categories,
+ * ProductDetail) instead of the old shadowed Card. */
+function Panel({ children }: { children: ReactNode }) {
+  return <div className="rounded-2xl border border-brand-100 bg-white p-4">{children}</div>
 }
 
 /** Small pill marking something the AI created/changed on its own, so an
@@ -161,24 +163,28 @@ export function ClientDetail() {
     )
   }
 
-  return <ContactoDetalleContent contact={contact} onContactChange={setContact} />
+  return <ClientDetailContent contact={contact} onContactChange={setContact} />
 }
 
 type ActivityItem =
   | { kind: 'appointment'; date: string; appointment: Appointment }
   | { kind: 'note'; date: string; note: Note }
 
-function ContactoDetalleContent({
+function ClientDetailContent({
   contact,
   onContactChange,
 }: {
   contact: Client
   onContactChange: (c: Client) => void
 }) {
-  const { profile } = useAuth()
+  const { profile, enabledModules } = useAuth()
   const { t, language } = useLanguage()
   const navigate = useNavigate()
-  const [tab, setTab] = useState<'resumen' | 'actividad' | 'oportunidades' | 'ventas' | 'conversaciones' | 'direcciones'>('resumen')
+  // Same rule as the Clientes list: "etapa" only means something when the
+  // tenant has the Pipeline module on -- otherwise it's a badge nobody can
+  // act on (explicit user call, see Clients.tsx).
+  const showStage = enabledModules?.has('pipeline') ?? false
+  const [tab, setTab] = useState('actividad')
   const [page, setPage] = useState(1)
   const [notes, setNotes] = useState<Note[] | null>(null)
   const [appointments, setAppointments] = useState<Appointment[] | null>(null)
@@ -201,6 +207,9 @@ function ContactoDetalleContent({
   const [orderDrawer, setOrderDrawer] = useState<{ open: boolean; order: OrderWithRelations | null }>({ open: false, order: null })
   const [addressDrawer, setAddressDrawer] = useState<{ open: boolean; address: ContactAddress | null }>({ open: false, address: null })
   const [deleteAddressId, setDeleteAddressId] = useState<string | null>(null)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   function reloadAppointments() {
     listAppointmentsForContact(contact.id).then(setAppointments).catch(() => setAppointments([]))
@@ -282,6 +291,18 @@ function ContactoDetalleContent({
     }
   }
 
+  async function handleDeleteClient() {
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      await deleteClient(contact.id)
+      navigate('/app/clients')
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : t('contacts.detail.deleteConfirm.error'))
+      setDeleting(false)
+    }
+  }
+
   const nextAppointment = useMemo(() => {
     if (!appointments) return null
     const now = Date.now()
@@ -327,369 +348,341 @@ function ContactoDetalleContent({
   const pipelineNameById = useMemo(() => Object.fromEntries(pipelines.map((p) => [p.id, p.name])), [pipelines])
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-        <Card className="lg:w-72 lg:shrink-0">
-          <div className="flex items-start justify-between gap-2 pb-4">
-            <div className="flex min-w-0 items-center gap-2.5">
-              <InitialsAvatar name={contact.full_name} size="md" />
-              <div className="min-w-0">
-                <p className="truncate text-sm font-bold text-brand-800">{contact.full_name}</p>
-                <Badge tone={STAGE_TONE[contact.stage]}>{t(STAGE_LABEL[contact.stage])}</Badge>
-              </div>
+    <div className="space-y-5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <InitialsAvatar name={contact.full_name} size="lg" />
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-xl font-bold text-brand-800">{contact.full_name}</h1>
+              {showStage && (
+                <Badge variant="outline" className={STAGE_BADGE_CLASS[contact.stage]}>
+                  {t(STAGE_LABEL[contact.stage])}
+                </Badge>
+              )}
+              {!contact.is_active && <Badge variant="outline">{t('common.status.inactive')}</Badge>}
             </div>
-            <button
-              type="button"
-              onClick={() => setEditOpen(true)}
-              className="shrink-0 rounded-lg p-1.5 text-brand-400 transition-colors hover:bg-brand-50 hover:text-brand-700"
-              aria-label={t('contacts.detail.aria.edit')}
-            >
-              <PencilIcon width={15} height={15} />
-            </button>
-          </div>
-
-          <dl className="space-y-3 border-t border-brand-100 py-4 text-sm">
-            <Field icon={<CalendarIcon width={14} height={14} />} label={t('contacts.detail.fields.createdAt')} value={formatDate(contact.created_at, language)} />
-            <Field
-              icon={<ClockIcon width={14} height={14} />}
-              label={t('contacts.detail.fields.lastContact')}
-              value={lastContactAt ? formatDateTime(lastContactAt, language) : t('contacts.detail.fields.lastContact.none')}
-            />
-            <Field icon={<PhoneIcon width={14} height={14} />} label={t('contacts.detail.fields.phone')} value={contact.phone} />
-            {contact.email && <Field icon={<MailIcon width={14} height={14} />} label={t('contacts.detail.fields.email')} value={contact.email} />}
-            {contact.company && <Field icon={<BuildingIcon width={14} height={14} />} label={t('contacts.detail.fields.company')} value={contact.company} />}
-            {contact.city && <Field icon={<MapPinIcon width={14} height={14} />} label={t('contacts.detail.fields.city')} value={contact.city} />}
-            <Field
-              icon={<UserIcon width={14} height={14} />}
-              label={t('contacts.detail.fields.assignedAgent')}
-              value={assignedAgentName ?? t('contacts.detail.fields.unassigned')}
-            />
-          </dl>
-
-          {contact.tags.length > 0 && (
-            <div className="border-t border-brand-100 py-4">
-              <p className="mb-2 text-xs font-medium text-brand-400">{t('contacts.detail.tags.label')}</p>
-              <div className="flex flex-wrap gap-1.5">
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-brand-400">
+              <span>{contact.phone}</span>
+              {contact.email && <span>{contact.email}</span>}
+              {contact.company && <span>{contact.company}</span>}
+              {contact.city && <span>{contact.city}</span>}
+            </div>
+            {contact.tags.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
                 {contact.tags.map((tag) => (
-                  <span key={tag} className="rounded-full bg-brand-50 px-2.5 py-1 text-xs text-brand-500">
+                  <span key={tag} className="rounded-full bg-brand-50 px-2.5 py-0.5 text-xs text-brand-500">
                     {tag}
                   </span>
                 ))}
               </div>
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-2 border-t border-brand-100 pt-4">
-            <QuickAction icon={<PencilIcon width={16} height={16} />} label={t('contacts.detail.quickActions.note')} onClick={() => setTab('actividad')} />
-            <QuickAction icon={<CalendarIcon width={16} height={16} />} label={t('contacts.detail.quickActions.appointment')} onClick={() => setApptDrawerOpen(true)} />
+            )}
           </div>
-        </Card>
+        </div>
 
-        <div className="min-w-0 flex-1 space-y-4">
-          {nextAppointment && (
-            <Card className="border-accent-200 bg-accent-50/50">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent-100 text-accent-700">
-                    <CalendarIcon width={18} height={18} />
-                  </span>
-                  <div>
-                    <p className="text-sm font-semibold text-brand-800">
-                      {t('contacts.detail.nextAppointment.title', { date: formatDateTime(nextAppointment.scheduled_at, language) })}
-                    </p>
-                    {nextAppointment.notes && <p className="text-xs text-brand-500">{nextAppointment.notes}</p>}
-                    <p className="text-xs text-accent-700">
-                      {nextAppointment.reminder_sent_at
-                        ? t('contacts.detail.nextAppointment.reminderSent')
-                        : t('contacts.detail.nextAppointment.reminderPending')}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Button variant="ghost" onClick={() => handleAppointmentStatus(nextAppointment.id, 'completada')} className="!px-3 !py-1.5 text-xs">
-                    <CheckIcon width={13} height={13} /> {t('contacts.detail.nextAppointment.complete')}
-                  </Button>
-                  <Button variant="ghost" onClick={() => handleAppointmentStatus(nextAppointment.id, 'cancelada')} className="!px-3 !py-1.5 text-xs">
-                    <XCircleIcon width={13} height={13} /> {t('contacts.detail.nextAppointment.cancel')}
-                  </Button>
-                </div>
-              </div>
-            </Card>
-          )}
-
-          <div className="flex flex-wrap gap-1 border-b border-brand-100">
-            {(
-              [
-                ['resumen', t('contacts.detail.tabs.summary')],
-                ['actividad', t('contacts.detail.tabs.activity')],
-                ['oportunidades', `${t('contacts.detail.tabs.opportunities')}${opportunities ? ` (${opportunities.length})` : ''}`],
-                ['ventas', `${t('contacts.detail.tabs.sales')}${orders ? ` (${orders.length})` : ''}`],
-                ['conversaciones', t('contacts.detail.tabs.conversations')],
-                ['direcciones', `${t('contacts.detail.tabs.addresses')}${addresses ? ` (${addresses.length})` : ''}`],
-              ] as const
-            ).map(([value, label]) => (
-              <button
-                key={value}
-                onClick={() => setTab(value)}
-                className={`-mb-px border-b-2 px-3 py-2.5 text-sm font-medium transition-colors ${
-                  tab === value ? 'border-accent-500 text-accent-700' : 'border-transparent text-brand-400 hover:text-brand-700'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {tab === 'resumen' && (
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <Card className="!p-4">
-                <p className="text-xs text-brand-400">{t('contacts.detail.summary.openOpportunities')}</p>
-                <p className="mt-1 text-lg font-bold text-brand-800">{opportunities ? openOpportunities.length : '—'}</p>
-                {opportunities && openOpportunities.length > 0 && (
-                  <p className="text-xs text-brand-500">{formatCurrency(openOpportunitiesValue)}</p>
-                )}
-              </Card>
-              <Card className="!p-4">
-                <p className="text-xs text-brand-400">{t('contacts.detail.summary.confirmedSales')}</p>
-                <p className="mt-1 text-lg font-bold text-brand-800">{orders ? formatCurrency(confirmedOrdersValue) : '—'}</p>
-                {orders && <p className="text-xs text-brand-500">{t('contacts.detail.summary.salesCount', { count: confirmedOrders.length })}</p>}
-              </Card>
-              <Card className="!p-4">
-                <p className="text-xs text-brand-400">{t('contacts.detail.summary.pendingQuotes')}</p>
-                <p className="mt-1 text-lg font-bold text-brand-800">{orders ? pendingQuotes.length : '—'}</p>
-              </Card>
-              <Card className="!p-4">
-                <p className="text-xs text-brand-400">{t('contacts.detail.summary.pendingTasks')}</p>
-                <p className="mt-1 text-lg font-bold text-brand-800">{tasks ? pendingTasks.length : '—'}</p>
-              </Card>
-              {nextAppointment && (
-                <Card className="col-span-2 !p-4 lg:col-span-4">
-                  <p className="text-xs text-brand-400">{t('contacts.detail.summary.nextAppointment')}</p>
-                  <p className="mt-1 text-sm font-semibold text-brand-800">{formatDateTime(nextAppointment.scheduled_at, language)}</p>
-                </Card>
-              )}
-            </div>
-          )}
-
-          {tab === 'actividad' && (
-            <Card>
-              <form onSubmit={handleAddNote} className="mb-6 rounded-xl border border-brand-100 bg-brand-50/40 p-3 focus-within:border-accent-300">
-                <Textarea
-                  value={noteDraft}
-                  onChange={(e) => setNoteDraft(e.target.value)}
-                  placeholder={t('contacts.detail.activity.notePlaceholder')}
-                  rows={2}
-                  className="!resize-none !border-0 !bg-transparent !p-0 !shadow-none focus:!ring-0"
-                />
-                <div className="mt-2 flex justify-end">
-                  <Button type="submit" variant="secondary" disabled={savingNote || !noteDraft.trim()} className="!px-3.5 !py-1.5 text-xs">
-                    <PlusIcon width={13} height={13} /> {savingNote ? t('common.actions.saving') : t('contacts.detail.activity.addNote')}
-                  </Button>
-                </div>
-              </form>
-
-              {(!notes || !appointments) && <PageSpinner />}
-              {notes && appointments && timeline.length === 0 && <EmptyState>{t('contacts.detail.activity.empty')}</EmptyState>}
-              {notes && appointments && timeline.length > 0 && (
-                <ul>
-                  {timelinePage.items.map((item, idx) => (
-                    <li
-                      key={`${item.kind}-${item.kind === 'appointment' ? item.appointment.id : item.note.id}`}
-                      className="relative flex gap-3 pb-4 last:pb-0"
-                    >
-                      {idx < timelinePage.items.length - 1 && (
-                        <span aria-hidden="true" className="absolute left-3.5 top-7 bottom-0 w-px bg-brand-100" />
-                      )}
-                      <span
-                        className={`relative z-10 mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
-                          item.kind === 'appointment' ? 'bg-accent-100 text-accent-700' : 'bg-brand-100 text-brand-500'
-                        }`}
-                      >
-                        {item.kind === 'appointment' ? <CalendarIcon width={14} height={14} /> : <PencilIcon width={13} height={13} />}
-                      </span>
-                      <div className="min-w-0 flex-1 rounded-xl bg-brand-50 px-4 py-3">
-                        {item.kind === 'appointment' ? (
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-sm font-medium text-brand-700">
-                              {t('contacts.detail.activity.appointmentLabel', { date: formatDateTime(item.appointment.scheduled_at, language) })}
-                            </p>
-                            <Badge tone={APPOINTMENT_STATUS_TONE[item.appointment.status]}>
-                              {t(APPOINTMENT_STATUS_LABEL[item.appointment.status])}
-                            </Badge>
-                          </div>
-                        ) : (
-                          <div className="flex items-start gap-1.5">
-                            <p className="whitespace-pre-wrap text-sm text-brand-700">{item.note.content}</p>
-                            {item.note.created_by_ai && <AiBadge />}
-                          </div>
-                        )}
-                        {item.kind === 'appointment' && item.appointment.notes && (
-                          <p className="mt-0.5 text-sm text-brand-500">{item.appointment.notes}</p>
-                        )}
-                        <p className="mt-1.5 text-xs text-brand-400">{formatDateTime(item.date, language)}</p>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <Pagination page={page} totalPages={timelinePage.totalPages} onChange={setPage} />
-            </Card>
-          )}
-
-          {tab === 'oportunidades' && (
-            <Card>
-              {!opportunities && <PageSpinner />}
-              {opportunities && opportunities.length === 0 && <EmptyState>{t('contacts.detail.opportunities.empty')}</EmptyState>}
-              {opportunities && opportunities.length > 0 && (
-                <ul className="space-y-2">
-                  {opportunitiesPage.items.map((o) => (
-                    <li key={o.id}>
-                      <button
-                        onClick={() => setSelectedOpportunity(o)}
-                        className="flex w-full items-center justify-between gap-3 rounded-xl border border-brand-100 px-4 py-3 text-left transition-colors hover:bg-brand-50"
-                      >
-                        <span className="min-w-0">
-                          <span className="block truncate text-sm font-medium text-brand-800">{o.title}</span>
-                          <span className="block text-xs text-brand-400">{o.stage?.name ?? '—'}</span>
-                        </span>
-                        <span className="shrink-0 text-sm font-semibold text-brand-700">{formatCurrency(o.value, o.currency)}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <Pagination page={page} totalPages={opportunitiesPage.totalPages} onChange={setPage} />
-            </Card>
-          )}
-
-          {tab === 'ventas' && (
-            <Card>
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <p className="text-sm text-brand-400">{t('contacts.detail.sales.description')}</p>
-                <Button variant="secondary" onClick={() => setOrderDrawer({ open: true, order: null })} className="!px-3 !py-1.5 text-xs">
-                  <PlusIcon width={13} height={13} /> {t('contacts.detail.sales.new')}
-                </Button>
-              </div>
-              {!orders && <PageSpinner />}
-              {orders && orders.length === 0 && <EmptyState>{t('contacts.detail.sales.empty')}</EmptyState>}
-              {orders && orders.length > 0 && (
-                <ul className="space-y-2">
-                  {ordersPage.items.map((o) => (
-                    <li key={o.id}>
-                      <button
-                        onClick={() => navigate(`/app/sales/${o.id}`)}
-                        className="flex w-full items-center justify-between gap-3 rounded-xl border border-brand-100 px-4 py-3 text-left transition-colors hover:bg-brand-50"
-                      >
-                        <span className="min-w-0">
-                          <span className="font-mono text-xs font-semibold text-brand-400">ORD-{o.number}</span>
-                          {o.opportunity && <span className="ml-2 truncate text-xs text-brand-400">{o.opportunity.title}</span>}
-                        </span>
-                        <span className="flex shrink-0 items-center gap-2">
-                          <Badge tone={ORDER_STATUS_TONE[o.status]}>{t(ORDER_STATUS_LABEL[o.status])}</Badge>
-                          <span className="text-sm font-semibold text-brand-700">{formatCurrency(o.total, o.currency)}</span>
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <Pagination page={page} totalPages={ordersPage.totalPages} onChange={setPage} />
-            </Card>
-          )}
-
-          {tab === 'conversaciones' && (
-            <Card>
-              {!conversations && <PageSpinner />}
-              {conversations && conversations.length === 0 && <EmptyState>{t('contacts.detail.conversations.empty')}</EmptyState>}
-              {conversations && conversations.length > 0 && (
-                <div className="space-y-2">
-                  {conversationsPage.items.map((conv) => (
-                    <button
-                      key={conv.id}
-                      onClick={() => navigate(`/app?c=${conv.id}`)}
-                      className="flex w-full items-center justify-between gap-3 rounded-xl border border-brand-100 px-4 py-3 text-left transition-colors hover:bg-brand-50"
-                    >
-                      <span className="flex min-w-0 items-center gap-3">
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-50 text-accent-600">
-                          <ChatBubbleIcon width={14} height={14} />
-                        </span>
-                        <span className="min-w-0">
-                          <span className="flex items-center gap-1.5">
-                            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${conv.mode === 'ia' ? 'bg-accent-500' : 'bg-amber-500'}`} />
-                            <span className="text-sm font-medium text-brand-800">
-                              {conv.mode === 'ia' ? t('contacts.detail.conversations.modeIa') : t('contacts.detail.conversations.modeHuman')}
-                            </span>
-                            {conv.status === 'closed' && <Badge tone="danger">{t('contacts.detail.conversations.closed')}</Badge>}
-                          </span>
-                          <span className="block truncate text-xs text-brand-400">
-                            {conv.whatsapp_line?.display_name ?? t('contacts.detail.conversations.line')}
-                          </span>
-                        </span>
-                      </span>
-                      {conv.last_message_at && <span className="text-xs text-brand-300">{formatDateTime(conv.last_message_at, language)}</span>}
-                    </button>
-                  ))}
-                </div>
-              )}
-              <Pagination page={page} totalPages={conversationsPage.totalPages} onChange={setPage} />
-            </Card>
-          )}
-
-          {tab === 'direcciones' && (
-            <Card>
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <p className="text-sm text-brand-400">{t('contacts.detail.addresses.description')}</p>
-                <Button variant="secondary" onClick={() => setAddressDrawer({ open: true, address: null })} className="!px-3 !py-1.5 text-xs">
-                  <PlusIcon width={13} height={13} /> {t('contacts.detail.addresses.new')}
-                </Button>
-              </div>
-              {!addresses && <PageSpinner />}
-              {addresses && addresses.length === 0 && <EmptyState>{t('contacts.detail.addresses.empty')}</EmptyState>}
-              {addresses && addresses.length > 0 && (
-                <ul className="space-y-2">
-                  {addressesPage.items.map((a) => (
-                    <li key={a.id} className="flex items-start justify-between gap-3 rounded-xl border border-brand-100 px-4 py-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          {a.label && <p className="text-sm font-semibold text-brand-800">{a.label}</p>}
-                          {a.is_default && <Badge tone="success">{t('contacts.detail.addresses.default')}</Badge>}
-                          {a.is_shipping && <Badge tone="neutral">{t('contacts.detail.addresses.shipping')}</Badge>}
-                          {a.is_billing && <Badge tone="neutral">{t('contacts.detail.addresses.billing')}</Badge>}
-                        </div>
-                        <p className="mt-1 text-sm text-brand-700">
-                          {a.line1}
-                          {a.line2 ? `, ${a.line2}` : ''}
-                          {a.city ? `, ${a.city}` : ''}
-                        </p>
-                        {a.notes && <p className="mt-0.5 text-xs text-brand-400">{a.notes}</p>}
-                      </div>
-                      <div className="flex shrink-0 gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setAddressDrawer({ open: true, address: a })}
-                          className="rounded-lg p-1.5 text-brand-400 transition-colors hover:bg-brand-50 hover:text-brand-700"
-                          aria-label={t('contacts.detail.addresses.aria.edit')}
-                        >
-                          <PencilIcon width={14} height={14} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeleteAddressId(a.id)}
-                          className="rounded-lg p-1.5 text-brand-400 transition-colors hover:bg-red-50 hover:text-red-600"
-                          aria-label={t('contacts.detail.addresses.aria.delete')}
-                        >
-                          <TrashIcon width={14} height={14} />
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <Pagination page={page} totalPages={addressesPage.totalPages} onChange={setPage} />
-            </Card>
-          )}
+        <div className="flex shrink-0 items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
+            <PencilIcon width={13} height={13} /> {t('common.actions.edit')}
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon-sm" aria-label={t('contacts.detail.actions.moreActions')}>
+                <MoreHorizontalIcon className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuItem onSelect={() => setApptDrawerOpen(true)}>{t('contacts.detail.actions.scheduleAppointment')}</DropdownMenuItem>
+              <DropdownMenuItem variant="destructive" onSelect={() => setDeleteOpen(true)}>
+                {t('contacts.detail.actions.delete')}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <StatCard title={t('contacts.detail.sections.summary')}>
+          <div className="grid grid-cols-2 gap-3">
+            {showStage && (
+              <Field
+                label={t('contacts.detail.summary.openOpportunities')}
+                value={opportunities ? `${openOpportunities.length}${openOpportunities.length > 0 ? ` · ${formatCurrency(openOpportunitiesValue)}` : ''}` : '—'}
+              />
+            )}
+            <Field label={t('contacts.detail.summary.confirmedSales')} value={orders ? formatCurrency(confirmedOrdersValue) : '—'} />
+            <Field label={t('contacts.detail.summary.pendingQuotes')} value={orders ? pendingQuotes.length : '—'} />
+            <Field label={t('contacts.detail.summary.pendingTasks')} value={tasks ? pendingTasks.length : '—'} />
+          </div>
+        </StatCard>
+
+        <StatCard title={t('contacts.detail.sections.details')}>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={t('contacts.detail.fields.createdAt')} value={formatDate(contact.created_at, language)} />
+            <Field label={t('contacts.detail.fields.lastContact')} value={lastContactAt ? formatDateTime(lastContactAt, language) : t('contacts.detail.fields.lastContact.none')} />
+            <Field label={t('contacts.detail.fields.assignedAgent')} value={assignedAgentName ?? t('contacts.detail.fields.unassigned')} />
+          </div>
+        </StatCard>
+      </div>
+
+      {nextAppointment && (
+        <div className="rounded-xl border border-accent-200 bg-accent-50/50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent-100 text-accent-700">
+                <CalendarIcon width={18} height={18} />
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-brand-800">
+                  {t('contacts.detail.nextAppointment.title', { date: formatDateTime(nextAppointment.scheduled_at, language) })}
+                </p>
+                {nextAppointment.notes && <p className="text-xs text-brand-500">{nextAppointment.notes}</p>}
+                <p className="text-xs text-accent-700">
+                  {nextAppointment.reminder_sent_at ? t('contacts.detail.nextAppointment.reminderSent') : t('contacts.detail.nextAppointment.reminderPending')}
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="ghost" size="sm" onClick={() => handleAppointmentStatus(nextAppointment.id, 'completada')}>
+                <CheckIcon width={13} height={13} /> {t('contacts.detail.nextAppointment.complete')}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => handleAppointmentStatus(nextAppointment.id, 'cancelada')}>
+                <XCircleIcon width={13} height={13} /> {t('contacts.detail.nextAppointment.cancel')}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList>
+          <TabsTrigger value="actividad">{t('contacts.detail.tabs.activity')}</TabsTrigger>
+          <TabsTrigger value="oportunidades">{`${t('contacts.detail.tabs.opportunities')}${opportunities ? ` (${opportunities.length})` : ''}`}</TabsTrigger>
+          <TabsTrigger value="ventas">{`${t('contacts.detail.tabs.sales')}${orders ? ` (${orders.length})` : ''}`}</TabsTrigger>
+          <TabsTrigger value="conversaciones">{t('contacts.detail.tabs.conversations')}</TabsTrigger>
+          <TabsTrigger value="direcciones">{`${t('contacts.detail.tabs.addresses')}${addresses ? ` (${addresses.length})` : ''}`}</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="actividad">
+          <Panel>
+            <form onSubmit={handleAddNote} className="mb-4 rounded-xl border border-brand-100 bg-brand-50/40 p-3 focus-within:border-accent-300">
+              <Textarea
+                value={noteDraft}
+                onChange={(e) => setNoteDraft(e.target.value)}
+                placeholder={t('contacts.detail.activity.notePlaceholder')}
+                rows={2}
+                className="!resize-none !border-0 !bg-transparent !p-0 !shadow-none focus-visible:!ring-0"
+              />
+              <div className="mt-2 flex justify-end">
+                <Button type="submit" size="sm" disabled={savingNote || !noteDraft.trim()}>
+                  <PlusIcon width={13} height={13} /> {savingNote ? t('common.actions.saving') : t('contacts.detail.activity.addNote')}
+                </Button>
+              </div>
+            </form>
+
+            {(!notes || !appointments) && <PageSpinner />}
+            {notes && appointments && timeline.length === 0 && <p className="py-6 text-center text-sm text-brand-400">{t('contacts.detail.activity.empty')}</p>}
+            {notes && appointments && timeline.length > 0 && (
+              <ul>
+                {timelinePage.items.map((item, idx) => (
+                  <li key={`${item.kind}-${item.kind === 'appointment' ? item.appointment.id : item.note.id}`} className="relative flex gap-3 pb-4 last:pb-0">
+                    {idx < timelinePage.items.length - 1 && <span aria-hidden="true" className="absolute left-3.5 top-7 bottom-0 w-px bg-brand-100" />}
+                    <span
+                      className={`relative z-10 mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
+                        item.kind === 'appointment' ? 'bg-accent-100 text-accent-700' : 'bg-brand-100 text-brand-500'
+                      }`}
+                    >
+                      {item.kind === 'appointment' ? <CalendarIcon width={14} height={14} /> : <PencilIcon width={13} height={13} />}
+                    </span>
+                    <div className="min-w-0 flex-1 rounded-xl bg-brand-50 px-4 py-3">
+                      {item.kind === 'appointment' ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-medium text-brand-700">
+                            {t('contacts.detail.activity.appointmentLabel', { date: formatDateTime(item.appointment.scheduled_at, language) })}
+                          </p>
+                          <Badge variant="outline" className={APPOINTMENT_STATUS_BADGE_CLASS[item.appointment.status]}>
+                            {t(APPOINTMENT_STATUS_LABEL[item.appointment.status])}
+                          </Badge>
+                        </div>
+                      ) : (
+                        <div className="flex items-start gap-1.5">
+                          <p className="whitespace-pre-wrap text-sm text-brand-700">{item.note.content}</p>
+                          {item.note.created_by_ai && <AiBadge />}
+                        </div>
+                      )}
+                      {item.kind === 'appointment' && item.appointment.notes && <p className="mt-0.5 text-sm text-brand-500">{item.appointment.notes}</p>}
+                      <p className="mt-1.5 text-xs text-brand-400">{formatDateTime(item.date, language)}</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <Pagination page={page} totalPages={timelinePage.totalPages} onChange={setPage} />
+          </Panel>
+        </TabsContent>
+
+        <TabsContent value="oportunidades">
+          <Panel>
+            {!opportunities && <PageSpinner />}
+            {opportunities && opportunities.length === 0 && <p className="py-6 text-center text-sm text-brand-400">{t('contacts.detail.opportunities.empty')}</p>}
+            {opportunities && opportunities.length > 0 && (
+              <ul className="space-y-2">
+                {opportunitiesPage.items.map((o) => (
+                  <li key={o.id}>
+                    <button
+                      onClick={() => setSelectedOpportunity(o)}
+                      className="flex w-full items-center justify-between gap-3 rounded-xl border border-brand-100 px-4 py-3 text-left transition-colors hover:bg-brand-50"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-medium text-brand-800">{o.title}</span>
+                        <span className="block text-xs text-brand-400">{o.stage?.name ?? '—'}</span>
+                      </span>
+                      <span className="shrink-0 text-sm font-semibold text-brand-700">{formatCurrency(o.value, o.currency)}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <Pagination page={page} totalPages={opportunitiesPage.totalPages} onChange={setPage} />
+          </Panel>
+        </TabsContent>
+
+        <TabsContent value="ventas">
+          <Panel>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-brand-400">{t('contacts.detail.sales.description')}</p>
+              <Button size="sm" onClick={() => setOrderDrawer({ open: true, order: null })}>
+                <PlusIcon width={13} height={13} /> {t('contacts.detail.sales.new')}
+              </Button>
+            </div>
+            {!orders && <PageSpinner />}
+            {orders && orders.length === 0 && <p className="py-6 text-center text-sm text-brand-400">{t('contacts.detail.sales.empty')}</p>}
+            {orders && orders.length > 0 && (
+              <ul className="space-y-2">
+                {ordersPage.items.map((o) => (
+                  <li key={o.id}>
+                    <button
+                      onClick={() => navigate(`/app/sales/${o.id}`)}
+                      className="flex w-full items-center justify-between gap-3 rounded-xl border border-brand-100 px-4 py-3 text-left transition-colors hover:bg-brand-50"
+                    >
+                      <span className="min-w-0">
+                        <span className="font-mono text-xs font-semibold text-brand-400">ORD-{o.number}</span>
+                        {o.opportunity && <span className="ml-2 truncate text-xs text-brand-400">{o.opportunity.title}</span>}
+                      </span>
+                      <span className="flex shrink-0 items-center gap-2">
+                        <Badge variant="outline" className={ORDER_STATUS_BADGE_CLASS[o.status]}>
+                          {t(ORDER_STATUS_LABEL[o.status])}
+                        </Badge>
+                        <span className="text-sm font-semibold text-brand-700">{formatCurrency(o.total, o.currency)}</span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <Pagination page={page} totalPages={ordersPage.totalPages} onChange={setPage} />
+          </Panel>
+        </TabsContent>
+
+        <TabsContent value="conversaciones">
+          <Panel>
+            {!conversations && <PageSpinner />}
+            {conversations && conversations.length === 0 && <p className="py-6 text-center text-sm text-brand-400">{t('contacts.detail.conversations.empty')}</p>}
+            {conversations && conversations.length > 0 && (
+              <div className="space-y-2">
+                {conversationsPage.items.map((conv) => (
+                  <button
+                    key={conv.id}
+                    onClick={() => navigate(`/app?c=${conv.id}`)}
+                    className="flex w-full items-center justify-between gap-3 rounded-xl border border-brand-100 px-4 py-3 text-left transition-colors hover:bg-brand-50"
+                  >
+                    <span className="flex min-w-0 items-center gap-3">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-50 text-accent-600">
+                        <ChatBubbleIcon width={14} height={14} />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="flex items-center gap-1.5">
+                          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${conv.mode === 'ia' ? 'bg-accent-500' : 'bg-amber-500'}`} />
+                          <span className="text-sm font-medium text-brand-800">{conv.mode === 'ia' ? t('contacts.detail.conversations.modeIa') : t('contacts.detail.conversations.modeHuman')}</span>
+                          {conv.status === 'closed' && (
+                            <Badge variant="outline" className="border-transparent bg-red-100 text-red-700">
+                              {t('contacts.detail.conversations.closed')}
+                            </Badge>
+                          )}
+                        </span>
+                        <span className="block truncate text-xs text-brand-400">{conv.whatsapp_line?.display_name ?? t('contacts.detail.conversations.line')}</span>
+                      </span>
+                    </span>
+                    {conv.last_message_at && <span className="text-xs text-brand-300">{formatDateTime(conv.last_message_at, language)}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+            <Pagination page={page} totalPages={conversationsPage.totalPages} onChange={setPage} />
+          </Panel>
+        </TabsContent>
+
+        <TabsContent value="direcciones">
+          <Panel>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-brand-400">{t('contacts.detail.addresses.description')}</p>
+              <Button size="sm" onClick={() => setAddressDrawer({ open: true, address: null })}>
+                <PlusIcon width={13} height={13} /> {t('contacts.detail.addresses.new')}
+              </Button>
+            </div>
+            {!addresses && <PageSpinner />}
+            {addresses && addresses.length === 0 && <p className="py-6 text-center text-sm text-brand-400">{t('contacts.detail.addresses.empty')}</p>}
+            {addresses && addresses.length > 0 && (
+              <ul className="space-y-2">
+                {addressesPage.items.map((a) => (
+                  <li key={a.id} className="flex items-start justify-between gap-3 rounded-xl border border-brand-100 px-4 py-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {a.label && <p className="text-sm font-semibold text-brand-800">{a.label}</p>}
+                        {a.is_default && (
+                          <Badge variant="outline" className="border-transparent bg-emerald-100 text-emerald-700">
+                            {t('contacts.detail.addresses.default')}
+                          </Badge>
+                        )}
+                        {a.is_shipping && (
+                          <Badge variant="outline" className="border-transparent bg-sky-100 text-sky-700">
+                            {t('contacts.detail.addresses.shipping')}
+                          </Badge>
+                        )}
+                        {a.is_billing && (
+                          <Badge variant="outline" className="border-transparent bg-violet-100 text-violet-700">
+                            {t('contacts.detail.addresses.billing')}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="mt-1 text-sm text-brand-700">
+                        {a.line1}
+                        {a.line2 ? `, ${a.line2}` : ''}
+                        {a.city ? `, ${a.city}` : ''}
+                      </p>
+                      {a.notes && <p className="mt-0.5 text-xs text-brand-400">{a.notes}</p>}
+                    </div>
+                    <div className="flex shrink-0 gap-1">
+                      <Button variant="ghost" size="icon-xs" aria-label={t('contacts.detail.addresses.aria.edit')} onClick={() => setAddressDrawer({ open: true, address: a })}>
+                        <PencilIcon width={13} height={13} />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        className="text-red-600 hover:bg-red-50"
+                        aria-label={t('contacts.detail.addresses.aria.delete')}
+                        onClick={() => setDeleteAddressId(a.id)}
+                      >
+                        <TrashIcon width={13} height={13} />
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <Pagination page={page} totalPages={addressesPage.totalPages} onChange={setPage} />
+          </Panel>
+        </TabsContent>
+      </Tabs>
 
       {profile?.tenant_id && (
         <>
@@ -746,6 +739,17 @@ function ContactoDetalleContent({
           />
         </>
       )}
+
+      <ConfirmDialog
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        onConfirm={handleDeleteClient}
+        title={t('contacts.detail.deleteConfirm.title')}
+        description={t('contacts.detail.deleteConfirm.description')}
+        confirmLabel={t('contacts.detail.deleteConfirm.confirmLabel')}
+        loading={deleting}
+        error={deleteError}
+      />
     </div>
   )
 }

@@ -1,11 +1,17 @@
 import type { OpportunityWithRelations } from '../../../lib/api/opportunities'
 import type { PipelineStage, OpportunityPriority } from '../../../types/domain'
-import { Badge, Select, TBody, TD, TH, THead, Table, TRow } from '@/components/atoms'
 import { EmptyState } from '@/components/molecules'
+import { Badge } from '@/components/ui/badge'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import type { TranslationKey } from '../../../i18n/translations'
 
-const PRIORITY_TONE: Record<OpportunityPriority, 'neutral' | 'warning' | 'danger'> = { baja: 'neutral', media: 'warning', alta: 'danger' }
+const PRIORITY_BADGE_CLASS: Record<OpportunityPriority, string> = {
+  baja: 'border-transparent bg-slate-100 text-slate-600',
+  media: 'border-transparent bg-amber-100 text-amber-700',
+  alta: 'border-transparent bg-red-100 text-red-700',
+}
 const PRIORITY_LABEL: Record<OpportunityPriority, TranslationKey> = {
   baja: 'opportunities.priority.low',
   media: 'opportunities.priority.medium',
@@ -45,48 +51,56 @@ export function OpportunityListView({
   }
 
   return (
-    <Table>
-      <THead>
-        <tr>
-          <TH>{t('opportunities.list.columns.title')}</TH>
-          <TH>{t('opportunities.list.columns.contact')}</TH>
-          <TH>{t('opportunities.list.columns.stage')}</TH>
-          <TH>{t('opportunities.list.columns.value')}</TH>
-          <TH>{t('opportunities.list.columns.priority')}</TH>
-          <TH>{t('opportunities.list.columns.owner')}</TH>
-          <TH>{t('opportunities.list.columns.closeDate')}</TH>
-        </tr>
-      </THead>
-      <TBody>
-        {opportunities.map((opp) => (
-          <TRow key={opp.id} clickable onClick={() => onOpen(opp)}>
-            <TD className="font-medium text-brand-800">{opp.title}</TD>
-            <TD>{opp.contact?.full_name ?? '—'}</TD>
-            <TD onClick={(e) => e.stopPropagation()}>
-              <Select
-                value={opp.stage_id}
-                onChange={(e) => {
-                  const stage = stages.find((s) => s.id === e.target.value)
-                  if (stage) onStageChange(opp, stage)
-                }}
-                className="!w-auto !py-1.5 text-xs"
-              >
-                {stages.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </Select>
-            </TD>
-            <TD>{formatCurrency(opp.value, opp.currency)}</TD>
-            <TD>
-              <Badge tone={PRIORITY_TONE[opp.priority]}>{t(PRIORITY_LABEL[opp.priority])}</Badge>
-            </TD>
-            <TD>{opp.owner?.full_name ?? t('opportunities.list.unassigned')}</TD>
-            <TD>{formatDate(opp.expected_close_date, locale)}</TD>
-          </TRow>
-        ))}
-      </TBody>
-    </Table>
+    <div className="overflow-hidden rounded-2xl border border-brand-100 bg-white">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>{t('opportunities.list.columns.title')}</TableHead>
+            <TableHead>{t('opportunities.list.columns.contact')}</TableHead>
+            <TableHead>{t('opportunities.list.columns.stage')}</TableHead>
+            <TableHead>{t('opportunities.list.columns.value')}</TableHead>
+            <TableHead>{t('opportunities.list.columns.priority')}</TableHead>
+            <TableHead>{t('opportunities.list.columns.owner')}</TableHead>
+            <TableHead>{t('opportunities.list.columns.closeDate')}</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {opportunities.map((opp) => (
+            <TableRow key={opp.id} className="cursor-pointer" onClick={() => onOpen(opp)}>
+              <TableCell className="text-xs font-medium text-brand-800">{opp.title}</TableCell>
+              <TableCell className="text-xs text-brand-700">{opp.contact?.full_name ?? '—'}</TableCell>
+              <TableCell onClick={(e) => e.stopPropagation()}>
+                <Select
+                  value={opp.stage_id}
+                  onValueChange={(v) => {
+                    const stage = stages.find((s) => s.id === v)
+                    if (stage) onStageChange(opp, stage)
+                  }}
+                >
+                  <SelectTrigger className="!h-7 w-auto !rounded-lg !text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {stages.map((s) => (
+                      <SelectItem key={s.id} value={s.id} className="text-xs">
+                        {s.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </TableCell>
+              <TableCell className="text-xs text-brand-700">{formatCurrency(opp.value, opp.currency)}</TableCell>
+              <TableCell>
+                <Badge variant="outline" className={PRIORITY_BADGE_CLASS[opp.priority]}>
+                  {t(PRIORITY_LABEL[opp.priority])}
+                </Badge>
+              </TableCell>
+              <TableCell className="text-xs text-brand-500">{opp.owner?.full_name ?? t('opportunities.list.unassigned')}</TableCell>
+              <TableCell className="text-xs text-brand-500">{formatDate(opp.expected_close_date, locale)}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
   )
 }

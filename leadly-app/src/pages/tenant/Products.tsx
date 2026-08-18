@@ -247,6 +247,7 @@ export function Products() {
                 <TableRow>
                   <TableHead></TableHead>
                   <TableHead>{t('products.table.product')}</TableHead>
+                  <TableHead>{t('products.table.brand')}</TableHead>
                   <TableHead>{t('products.table.category')}</TableHead>
                   <TableHead>{t('products.table.price')}</TableHead>
                   <TableHead>{t('products.table.stock')}</TableHead>
@@ -272,12 +273,19 @@ export function Products() {
                         </Link>
                         {product.sku && <span className="block text-[11px] font-normal text-brand-400">{t('products.table.sku', { sku: product.sku })}</span>}
                       </TableCell>
+                      <TableCell className="text-xs text-brand-500">{product.brand?.name ?? '-'}</TableCell>
                       <TableCell className="text-xs text-brand-500">
                         {product.categories.length > 0 ? (
-                          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          // Sin punto de color por categoría por ahora -- con
+                          // la cadena completa de ancestros (raíz→hoja) un
+                          // producto normalmente trae 2-3 categorías, y un
+                          // color distinto por cada una se veía cargado sin
+                          // aportar información real (pedido explícito del
+                          // usuario). Chips de texto plano, más legibles en
+                          // una celda angosta.
+                          <span className="flex flex-wrap gap-1">
                             {product.categories.map((c) => (
-                              <span key={c.id} className="inline-flex items-center gap-1.5">
-                                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: c.color ?? '#94A3B8' }} />
+                              <span key={c.id} className="rounded-full bg-brand-50 px-2 py-0.5 text-[11px] whitespace-nowrap text-brand-500">
                                 {c.name}
                               </span>
                             ))}

@@ -6,8 +6,16 @@ import type { AiAssistant, AiModel, AiProvider, AiSkill } from '../../types/doma
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { TranslationKey } from '../../i18n/translations'
-import { Badge, Button, FieldError, Input, Label, PageSpinner, Select, Switch, Textarea } from '@/components/atoms'
+import { FieldError, PageSpinner } from '@/components/atoms'
+import { ComboboxFilter } from '@/components/molecules'
 import { Drawer } from '@/components/organisms'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Switch } from '@/components/ui/switch'
+import { Badge } from '@/components/ui/badge'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useAiAssistantForm } from './useAiAssistantForm'
 
 const PROVIDER_KEY: Record<AiProvider, TranslationKey> = {
@@ -16,6 +24,9 @@ const PROVIDER_KEY: Record<AiProvider, TranslationKey> = {
 }
 
 const FORM_ID = 'ai-assistant-form'
+const FIELD_CLASS = '!h-7 !rounded-lg !text-xs'
+const TEXTAREA_CLASS = '!rounded-lg !py-1.5 !text-xs'
+const COMBOBOX_TRIGGER_CLASS = 'flex-1 !rounded-lg'
 
 /** Small section label used to visually group the form instead of one long
  * flat list of fields -- makes it scannable at a glance (what provider/model,
@@ -97,7 +108,7 @@ export function AiAssistantDrawer({
       footer={
         ready ? (
           <div className="flex gap-2">
-            <Button type="submit" form={FORM_ID} variant="secondary" disabled={submitting}>
+            <Button type="submit" form={FORM_ID} disabled={submitting}>
               {submitting ? t('common.actions.saving') : isCreating ? t('settings.assistant.create') : t('common.actions.saveChanges')}
             </Button>
             <Button type="button" variant="ghost" onClick={onClose} disabled={submitting}>
@@ -197,9 +208,11 @@ function SkillsSection({ assistantId, updatedBy, readOnly }: { assistantId: stri
                       <p className="mt-0.5 text-xs text-brand-400">{skill.description}</p>
                     </div>
                     {readOnly ? (
-                      <Badge tone="success">{t('settings.assistant.skills.activeBadge')}</Badge>
+                      <Badge variant="outline" className="border-transparent bg-emerald-100 text-emerald-700">
+                        {t('settings.assistant.skills.activeBadge')}
+                      </Badge>
                     ) : (
-                      <Switch checked={enabled} disabled={togglingKey === skill.key} onChange={(v) => handleToggle(skill.key, v)} />
+                      <Switch checked={enabled} disabled={togglingKey === skill.key} onCheckedChange={(v) => handleToggle(skill.key, v)} />
                     )}
                   </div>
                 )
@@ -254,56 +267,62 @@ function AiAssistantDrawerForm({
   }
 
   return (
-    <form id={FORM_ID} onSubmit={handleSubmit} noValidate className="space-y-6">
+    <form id={FORM_ID} onSubmit={handleSubmit} noValidate className="space-y-5">
       <FormSection title={t('settings.assistant.form.sectionName')}>
         <div>
           <Label htmlFor="ai-name">{t('settings.assistant.form.nameLabel')}</Label>
           <Input
             id="ai-name"
             value={form.name}
-            invalid={!!form.nameError}
+            aria-invalid={!!form.nameError}
             onChange={(e) => form.setName(e.target.value)}
             placeholder={t('settings.assistant.form.namePlaceholder')}
+            className={`mt-1 ${FIELD_CLASS}`}
           />
           <FieldError message={form.nameError && t(form.nameError)} />
         </div>
       </FormSection>
 
-      <div className="flex items-center justify-between rounded-xl bg-brand-50 px-4 py-3">
+      <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
         <div>
-          <p className="text-sm font-medium text-brand-800">
-            {form.isActive ? t('settings.assistant.form.activeLabel') : t('settings.assistant.form.inactiveLabel')}
-          </p>
-          <p className="text-xs text-brand-400">
-            {form.isActive ? t('settings.assistant.form.activeDescription') : t('settings.assistant.form.inactiveDescription')}
-          </p>
+          <Label className="font-normal text-brand-700">{form.isActive ? t('settings.assistant.form.activeLabel') : t('settings.assistant.form.inactiveLabel')}</Label>
+          <p className="text-xs text-brand-400">{form.isActive ? t('settings.assistant.form.activeDescription') : t('settings.assistant.form.inactiveDescription')}</p>
         </div>
-        <Switch checked={form.isActive} onChange={form.setIsActive} />
+        <Switch checked={form.isActive} onCheckedChange={form.setIsActive} />
       </div>
 
       <FormSection title={t('settings.assistant.form.sectionModel')}>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-3">
           <div>
             <Label htmlFor="ai-provider">{t('settings.assistant.form.providerLabel')}</Label>
-            <Select id="ai-provider" value={form.provider} onChange={(e) => form.setProvider(e.target.value as typeof form.provider)}>
-              {(['openai', 'gemini'] as const).map((p) => (
-                <option key={p} value={p}>
-                  {t(PROVIDER_KEY[p])}
-                </option>
-              ))}
+            <Select value={form.provider} onValueChange={(v) => form.setProvider(v as typeof form.provider)}>
+              <SelectTrigger id="ai-provider" className={`mt-1 w-full ${FIELD_CLASS}`}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(['openai', 'gemini'] as const).map((p) => (
+                  <SelectItem key={p} value={p} className="text-xs">
+                    {t(PROVIDER_KEY[p])}
+                  </SelectItem>
+                ))}
+              </SelectContent>
             </Select>
           </div>
 
           <div>
-            <Label htmlFor="ai-model">{t('settings.assistant.form.modelLabel')}</Label>
-            <Select id="ai-model" value={form.model} invalid={!!form.modelError} onChange={(e) => form.setModel(e.target.value)}>
-              <option value="">{t('common.form.selectPlaceholder')}</option>
-              {form.modelsForProvider.map((m) => (
-                <option key={m.model_code} value={m.model_code}>
-                  {m.display_name}
-                </option>
-              ))}
-            </Select>
+            <Label>{t('settings.assistant.form.modelLabel')}</Label>
+            <div className="mt-1">
+              <ComboboxFilter
+                options={form.modelsForProvider.map((m) => ({ id: m.model_code, label: m.display_name }))}
+                value={form.model || null}
+                onChange={(id) => form.setModel(id ?? '')}
+                placeholder={t('common.form.selectPlaceholder')}
+                searchPlaceholder={t('common.form.selectPlaceholder')}
+                emptyLabel={t('tasks.filter.noResults')}
+                className="w-full"
+                triggerClassName={COMBOBOX_TRIGGER_CLASS}
+              />
+            </div>
             <FieldError message={form.modelError && t(form.modelError)} />
           </div>
         </div>
@@ -314,11 +333,12 @@ function AiAssistantDrawerForm({
           <Label htmlFor="ai-system-prompt">{t('settings.assistant.form.systemPromptLabel')}</Label>
           <Textarea
             id="ai-system-prompt"
-            rows={8}
+            rows={6}
             value={form.systemPrompt}
-            invalid={!!form.systemPromptError}
+            aria-invalid={!!form.systemPromptError}
             onChange={(e) => form.setSystemPrompt(e.target.value)}
             placeholder={t('settings.assistant.form.systemPromptPlaceholder')}
+            className={`mt-1 ${TEXTAREA_CLASS}`}
           />
           <FieldError message={form.systemPromptError && t(form.systemPromptError)} />
           <p className="mt-1.5 text-xs text-brand-400">{t('settings.assistant.form.systemPromptHint')}</p>
@@ -326,7 +346,7 @@ function AiAssistantDrawerForm({
       </FormSection>
 
       <FormSection title={t('settings.assistant.form.sectionBehavior')}>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-3">
           <div>
             <Label htmlFor="ai-temperature">{t('settings.assistant.form.temperatureLabel')}</Label>
             <Input
@@ -336,8 +356,9 @@ function AiAssistantDrawerForm({
               max={2}
               step={0.1}
               value={form.temperature}
-              invalid={!!form.temperatureError}
+              aria-invalid={!!form.temperatureError}
               onChange={(e) => form.setTemperature(Number(e.target.value))}
+              className={`mt-1 ${FIELD_CLASS}`}
             />
             <FieldError message={form.temperatureError && t(form.temperatureError)} />
             <p className="mt-1 text-xs text-brand-400">{t('settings.assistant.form.temperatureHint')}</p>
@@ -352,8 +373,9 @@ function AiAssistantDrawerForm({
               max={8192}
               step={1}
               value={form.maxTokens}
-              invalid={!!form.maxTokensError}
+              aria-invalid={!!form.maxTokensError}
               onChange={(e) => form.setMaxTokens(Number(e.target.value))}
+              className={`mt-1 ${FIELD_CLASS}`}
             />
             <FieldError message={form.maxTokensError && t(form.maxTokensError)} />
           </div>

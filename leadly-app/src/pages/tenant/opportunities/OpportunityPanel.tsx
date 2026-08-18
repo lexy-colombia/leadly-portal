@@ -5,9 +5,12 @@ import { listConversationsForContact, type ConversationWithLine } from '../../..
 import { listTasksForOpportunity, updateTask, type TaskWithRelations } from '../../../lib/api/tasks'
 import { listOrdersForOpportunity, type OrderWithRelations } from '../../../lib/api/orders'
 import type { OpportunityPriority, OrderStatus } from '../../../types/domain'
-import { Badge, Button, PageSpinner } from '@/components/atoms'
+import { PageSpinner } from '@/components/atoms'
 import { Card, EmptyState } from '@/components/molecules'
 import { ConfirmDialog, Drawer } from '@/components/organisms'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ChatBubbleIcon, CheckIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
 import { TaskDrawer } from '../tasks/TaskDrawer'
 import { useLanguage } from '../../../contexts/LanguageContext'
@@ -18,7 +21,11 @@ const PRIORITY_LABEL: Record<OpportunityPriority, TranslationKey> = {
   media: 'opportunities.priority.medium',
   alta: 'opportunities.priority.high',
 }
-const PRIORITY_TONE: Record<OpportunityPriority, 'neutral' | 'warning' | 'danger'> = { baja: 'neutral', media: 'warning', alta: 'danger' }
+const PRIORITY_BADGE_CLASS: Record<OpportunityPriority, string> = {
+  baja: 'border-transparent bg-slate-100 text-slate-600',
+  media: 'border-transparent bg-amber-100 text-amber-700',
+  alta: 'border-transparent bg-red-100 text-red-700',
+}
 // Local key set (not shared with lib/api/orders.ts, which doesn't export one
 // yet) -- same pattern as contacts.json's "contacts.order.status.*" keys.
 const ORDER_STATUS_LABEL: Record<OrderStatus, TranslationKey> = {
@@ -28,12 +35,12 @@ const ORDER_STATUS_LABEL: Record<OrderStatus, TranslationKey> = {
   entregada: 'opportunities.order.status.entregada',
   cancelada: 'opportunities.order.status.cancelada',
 }
-const ORDER_STATUS_TONE: Record<OrderStatus, 'neutral' | 'success' | 'warning' | 'danger'> = {
-  cotizacion: 'neutral',
-  confirmada: 'success',
-  en_proceso: 'warning',
-  entregada: 'success',
-  cancelada: 'danger',
+const ORDER_STATUS_BADGE_CLASS: Record<OrderStatus, string> = {
+  cotizacion: 'border-transparent bg-slate-100 text-slate-600',
+  confirmada: 'border-transparent bg-emerald-100 text-emerald-700',
+  en_proceso: 'border-transparent bg-amber-100 text-amber-700',
+  entregada: 'border-transparent bg-emerald-100 text-emerald-700',
+  cancelada: 'border-transparent bg-red-100 text-red-700',
 }
 
 // Currency stays Colombian formatting regardless of UI language.
@@ -160,7 +167,11 @@ export function OpportunityPanel({
     : opportunity.stage?.is_lost
       ? t('opportunities.panel.outcome.lost')
       : t('opportunities.panel.outcome.open')
-  const outcomeTone = opportunity.stage?.is_won ? 'success' : opportunity.stage?.is_lost ? 'danger' : 'neutral'
+  const outcomeBadgeClass = opportunity.stage?.is_won
+    ? 'border-transparent bg-emerald-100 text-emerald-700'
+    : opportunity.stage?.is_lost
+      ? 'border-transparent bg-red-100 text-red-700'
+      : 'border-transparent bg-slate-100 text-slate-600'
 
   return (
     <>
@@ -171,10 +182,10 @@ export function OpportunityPanel({
         description={`${formatCurrency(opportunity.value, opportunity.currency)} · ${outcome}`}
         footer={
           <div className="flex items-center gap-2">
-            <Button variant="secondary" onClick={() => onEdit(opportunity)} className="!py-1.5 text-xs">
+            <Button size="sm" onClick={() => onEdit(opportunity)}>
               {t('common.actions.edit')}
             </Button>
-            <Button variant="ghost" onClick={() => setDeleteOpen(true)} className="!py-1.5 text-xs">
+            <Button variant="ghost" size="sm" onClick={() => setDeleteOpen(true)}>
               <TrashIcon width={13} height={13} /> {t('common.actions.delete')}
             </Button>
           </div>
@@ -184,171 +195,166 @@ export function OpportunityPanel({
           {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
           <div className="flex flex-wrap items-center gap-2">
-            <Badge tone={outcomeTone}>{outcome}</Badge>
+            <Badge variant="outline" className={outcomeBadgeClass}>
+              {outcome}
+            </Badge>
           </div>
 
-          <div className="flex flex-wrap gap-1 border-b border-brand-100">
-            {(
-              [
-                ['resumen', t('opportunities.panel.tabs.summary')],
-                ['conversaciones', t('opportunities.panel.tabs.conversations')],
-                ['tareas', t('opportunities.panel.tabs.tasks')],
-              ] as const
-            ).map(([value, label]) => (
-              <button
-                key={value}
-                onClick={() => setTab(value)}
-                className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
-                  tab === value ? 'border-accent-500 text-accent-700' : 'border-transparent text-brand-400 hover:text-brand-700'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
+            <TabsList>
+              <TabsTrigger value="resumen" className="text-xs">
+                {t('opportunities.panel.tabs.summary')}
+              </TabsTrigger>
+              <TabsTrigger value="conversaciones" className="text-xs">
+                {t('opportunities.panel.tabs.conversations')}
+              </TabsTrigger>
+              <TabsTrigger value="tareas" className="text-xs">
+                {t('opportunities.panel.tabs.tasks')}
+              </TabsTrigger>
+            </TabsList>
 
-          {tab === 'resumen' && (
-            <div className="space-y-4">
-              <dl className="grid grid-cols-2 gap-3">
-                <Field label={t('opportunities.panel.fields.pipeline')} value={pipelineName} />
-                <Field
-                  label={t('opportunities.panel.fields.stage')}
-                  value={opportunity.stage?.name ?? '—'}
-                />
-                <Field label={t('opportunities.panel.fields.owner')} value={opportunity.owner?.full_name ?? t('opportunities.panel.fields.unassigned')} />
-                <Field label={t('opportunities.panel.fields.probability')} value={opportunity.stage ? `${opportunity.stage.probability}%` : '—'} />
-                <Field label={t('opportunities.panel.fields.closeDate')} value={formatDate(opportunity.expected_close_date, locale)} />
-                <Field label={t('opportunities.panel.fields.source')} value={opportunity.source ?? '—'} />
-                <Field label={t('opportunities.panel.fields.createdAt')} value={formatDate(opportunity.created_at, locale)} />
-                <div>
-                  <dt className="text-xs text-brand-400">{t('opportunities.panel.fields.priority')}</dt>
-                  <dd className="mt-0.5">
-                    <Badge tone={PRIORITY_TONE[opportunity.priority]}>{t(PRIORITY_LABEL[opportunity.priority])}</Badge>
-                  </dd>
+            <TabsContent value="resumen">
+              <div className="space-y-4">
+                <dl className="grid grid-cols-2 gap-3">
+                  <Field label={t('opportunities.panel.fields.pipeline')} value={pipelineName} />
+                  <Field label={t('opportunities.panel.fields.stage')} value={opportunity.stage?.name ?? '—'} />
+                  <Field label={t('opportunities.panel.fields.owner')} value={opportunity.owner?.full_name ?? t('opportunities.panel.fields.unassigned')} />
+                  <Field label={t('opportunities.panel.fields.probability')} value={opportunity.stage ? `${opportunity.stage.probability}%` : '—'} />
+                  <Field label={t('opportunities.panel.fields.closeDate')} value={formatDate(opportunity.expected_close_date, locale)} />
+                  <Field label={t('opportunities.panel.fields.source')} value={opportunity.source ?? '—'} />
+                  <Field label={t('opportunities.panel.fields.createdAt')} value={formatDate(opportunity.created_at, locale)} />
+                  <div>
+                    <dt className="text-xs text-brand-400">{t('opportunities.panel.fields.priority')}</dt>
+                    <dd className="mt-0.5">
+                      <Badge variant="outline" className={PRIORITY_BADGE_CLASS[opportunity.priority]}>
+                        {t(PRIORITY_LABEL[opportunity.priority])}
+                      </Badge>
+                    </dd>
+                  </div>
+                </dl>
+
+                {opportunity.description && (
+                  <div>
+                    <p className="mb-1 text-xs text-brand-400">{t('opportunities.panel.fields.description')}</p>
+                    <p className="whitespace-pre-wrap text-sm text-brand-700">{opportunity.description}</p>
+                  </div>
+                )}
+
+                <div className="border-t border-brand-100 pt-4">
+                  <p className="mb-2 text-xs text-brand-400">{t('opportunities.panel.orders.label')}</p>
+                  {orders === null && <PageSpinner />}
+                  {orders && orders.length === 0 && <p className="text-sm text-brand-400">{t('opportunities.panel.orders.empty')}</p>}
+                  {orders && orders.length > 0 && (
+                    <ul className="space-y-1.5">
+                      {orders.map((o) => (
+                        <li key={o.id}>
+                          <button
+                            onClick={() => navigate(`/app/sales/${o.id}`)}
+                            className="flex w-full items-center justify-between gap-2 rounded-lg border border-brand-100 px-3 py-2 text-left text-sm transition-colors hover:bg-brand-50"
+                          >
+                            <span className="font-mono text-xs font-semibold text-brand-400">ORD-{o.number}</span>
+                            <Badge variant="outline" className={ORDER_STATUS_BADGE_CLASS[o.status]}>
+                              {t(ORDER_STATUS_LABEL[o.status])}
+                            </Badge>
+                            <span className="ml-auto text-brand-700">{formatCurrency(o.total, o.currency)}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
-              </dl>
+              </div>
+            </TabsContent>
 
-              {opportunity.description && (
-                <div>
-                  <p className="mb-1 text-xs text-brand-400">{t('opportunities.panel.fields.description')}</p>
-                  <p className="whitespace-pre-wrap text-sm text-brand-700">{opportunity.description}</p>
+            <TabsContent value="conversaciones">
+              <Card>
+                {!conversations && <PageSpinner />}
+                {conversations && conversations.length === 0 && <EmptyState>{t('opportunities.panel.conversations.empty')}</EmptyState>}
+                {conversations && conversations.length > 0 && (
+                  <div className="space-y-2">
+                    {conversations.map((conv) => (
+                      <button
+                        key={conv.id}
+                        onClick={() => navigate(`/app?c=${conv.id}`)}
+                        className="flex w-full items-center justify-between gap-3 rounded-xl border border-brand-100 px-4 py-3 text-left transition-colors hover:bg-brand-50"
+                      >
+                        <span className="flex min-w-0 items-center gap-3">
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-50 text-accent-600">
+                            <ChatBubbleIcon width={14} height={14} />
+                          </span>
+                          <span className="min-w-0">
+                            <span className="flex items-center gap-1.5">
+                              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${conv.mode === 'ia' ? 'bg-accent-500' : 'bg-amber-500'}`} />
+                              <span className="text-sm font-medium text-brand-800">
+                                {conv.mode === 'ia' ? t('opportunities.panel.conversations.modeIa') : t('opportunities.panel.conversations.modeHuman')}
+                              </span>
+                              {conv.status === 'closed' && (
+                                <Badge variant="outline" className="border-transparent bg-red-100 text-red-700">
+                                  {t('opportunities.panel.conversations.closed')}
+                                </Badge>
+                              )}
+                            </span>
+                            <span className="block truncate text-xs text-brand-400">{conv.whatsapp_line?.display_name ?? t('opportunities.panel.conversations.line')}</span>
+                          </span>
+                        </span>
+                        {conv.last_message_at && <span className="text-xs text-brand-300">{formatDateTime(conv.last_message_at, locale)}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="tareas">
+              <Card>
+                <div className="mb-3 flex items-center justify-between">
+                  <p className="text-sm text-brand-400">
+                    {tasks && tasks.length > 0
+                      ? t('opportunities.panel.tasks.countLabel', {
+                          done: tasks.filter((task) => task.status === 'completada').length,
+                          total: tasks.length,
+                        })
+                      : t('opportunities.panel.tasks.subtitle')}
+                  </p>
+                  <Button size="sm" onClick={() => setTaskDrawer({ open: true, task: null })}>
+                    <PlusIcon width={13} height={13} /> {t('opportunities.panel.tasks.new')}
+                  </Button>
                 </div>
-              )}
-
-              <div className="border-t border-brand-100 pt-4">
-                <p className="mb-2 text-xs text-brand-400">{t('opportunities.panel.orders.label')}</p>
-                {orders === null && <PageSpinner />}
-                {orders && orders.length === 0 && <p className="text-sm text-brand-400">{t('opportunities.panel.orders.empty')}</p>}
-                {orders && orders.length > 0 && (
-                  <ul className="space-y-1.5">
-                    {orders.map((o) => (
-                      <li key={o.id}>
+                {tasks && tasks.length > 0 && (
+                  <div className="mb-3 h-1.5 w-full overflow-hidden rounded-full bg-brand-100">
+                    <div
+                      className="h-full rounded-full bg-accent-500 transition-all"
+                      style={{ width: `${Math.round((tasks.filter((task) => task.status === 'completada').length / tasks.length) * 100)}%` }}
+                    />
+                  </div>
+                )}
+                {!tasks && <PageSpinner />}
+                {tasks && tasks.length === 0 && <EmptyState>{t('opportunities.panel.tasks.empty')}</EmptyState>}
+                {tasks && tasks.length > 0 && (
+                  <ul className="space-y-2">
+                    {tasks.map((task) => (
+                      <li key={task.id} className="flex items-start gap-2.5 rounded-xl border border-brand-100 px-3.5 py-2.5 hover:border-accent-200">
                         <button
-                          onClick={() => navigate(`/app/sales/${o.id}`)}
-                          className="flex w-full items-center justify-between gap-2 rounded-lg border border-brand-100 px-3 py-2 text-left text-sm transition-colors hover:bg-brand-50"
+                          type="button"
+                          onClick={() => handleToggleTask(task)}
+                          aria-label={task.status === 'completada' ? t('opportunities.panel.tasks.aria.markPending') : t('opportunities.panel.tasks.aria.markDone')}
+                          className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
+                            task.status === 'completada' ? 'border-accent-500 bg-accent-500 text-white' : 'border-brand-300 text-transparent hover:border-accent-400'
+                          }`}
                         >
-                          <span className="font-mono text-xs font-semibold text-brand-400">ORD-{o.number}</span>
-                          <Badge tone={ORDER_STATUS_TONE[o.status]}>{t(ORDER_STATUS_LABEL[o.status])}</Badge>
-                          <span className="ml-auto text-brand-700">{formatCurrency(o.total, o.currency)}</span>
+                          <CheckIcon width={11} height={11} />
+                        </button>
+                        <button type="button" onClick={() => setTaskDrawer({ open: true, task })} className="min-w-0 flex-1 text-left">
+                          <p className={`text-sm ${task.status === 'completada' ? 'text-brand-400 line-through' : 'text-brand-800'}`}>{task.title}</p>
+                          {task.due_date && <p className="text-xs text-brand-400">{formatDateTime(task.due_date, locale)}</p>}
                         </button>
                       </li>
                     ))}
                   </ul>
                 )}
-              </div>
-            </div>
-          )}
-
-          {tab === 'conversaciones' && (
-            <Card>
-              {!conversations && <PageSpinner />}
-              {conversations && conversations.length === 0 && <EmptyState>{t('opportunities.panel.conversations.empty')}</EmptyState>}
-              {conversations && conversations.length > 0 && (
-                <div className="space-y-2">
-                  {conversations.map((conv) => (
-                    <button
-                      key={conv.id}
-                      onClick={() => navigate(`/app?c=${conv.id}`)}
-                      className="flex w-full items-center justify-between gap-3 rounded-xl border border-brand-100 px-4 py-3 text-left transition-colors hover:bg-brand-50"
-                    >
-                      <span className="flex min-w-0 items-center gap-3">
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-50 text-accent-600">
-                          <ChatBubbleIcon width={14} height={14} />
-                        </span>
-                        <span className="min-w-0">
-                          <span className="flex items-center gap-1.5">
-                            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${conv.mode === 'ia' ? 'bg-accent-500' : 'bg-amber-500'}`} />
-                            <span className="text-sm font-medium text-brand-800">
-                              {conv.mode === 'ia' ? t('opportunities.panel.conversations.modeIa') : t('opportunities.panel.conversations.modeHuman')}
-                            </span>
-                            {conv.status === 'closed' && <Badge tone="danger">{t('opportunities.panel.conversations.closed')}</Badge>}
-                          </span>
-                          <span className="block truncate text-xs text-brand-400">
-                            {conv.whatsapp_line?.display_name ?? t('opportunities.panel.conversations.line')}
-                          </span>
-                        </span>
-                      </span>
-                      {conv.last_message_at && <span className="text-xs text-brand-300">{formatDateTime(conv.last_message_at, locale)}</span>}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </Card>
-          )}
-
-          {tab === 'tareas' && (
-            <Card>
-              <div className="mb-3 flex items-center justify-between">
-                <p className="text-sm text-brand-400">
-                  {tasks && tasks.length > 0
-                    ? t('opportunities.panel.tasks.countLabel', {
-                        done: tasks.filter((task) => task.status === 'completada').length,
-                        total: tasks.length,
-                      })
-                    : t('opportunities.panel.tasks.subtitle')}
-                </p>
-                <Button variant="secondary" onClick={() => setTaskDrawer({ open: true, task: null })} className="!px-3 !py-1.5 text-xs">
-                  <PlusIcon width={13} height={13} /> {t('opportunities.panel.tasks.new')}
-                </Button>
-              </div>
-              {tasks && tasks.length > 0 && (
-                <div className="mb-3 h-1.5 w-full overflow-hidden rounded-full bg-brand-100">
-                  <div
-                    className="h-full rounded-full bg-accent-500 transition-all"
-                    style={{ width: `${Math.round((tasks.filter((task) => task.status === 'completada').length / tasks.length) * 100)}%` }}
-                  />
-                </div>
-              )}
-              {!tasks && <PageSpinner />}
-              {tasks && tasks.length === 0 && <EmptyState>{t('opportunities.panel.tasks.empty')}</EmptyState>}
-              {tasks && tasks.length > 0 && (
-                <ul className="space-y-2">
-                  {tasks.map((task) => (
-                    <li key={task.id} className="flex items-start gap-2.5 rounded-xl border border-brand-100 px-3.5 py-2.5 hover:border-accent-200">
-                      <button
-                        type="button"
-                        onClick={() => handleToggleTask(task)}
-                        aria-label={
-                          task.status === 'completada'
-                            ? t('opportunities.panel.tasks.aria.markPending')
-                            : t('opportunities.panel.tasks.aria.markDone')
-                        }
-                        className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
-                          task.status === 'completada' ? 'border-accent-500 bg-accent-500 text-white' : 'border-brand-300 text-transparent hover:border-accent-400'
-                        }`}
-                      >
-                        <CheckIcon width={11} height={11} />
-                      </button>
-                      <button type="button" onClick={() => setTaskDrawer({ open: true, task })} className="min-w-0 flex-1 text-left">
-                        <p className={`text-sm ${task.status === 'completada' ? 'text-brand-400 line-through' : 'text-brand-800'}`}>{task.title}</p>
-                        {task.due_date && <p className="text-xs text-brand-400">{formatDateTime(task.due_date, locale)}</p>}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Card>
-          )}
+              </Card>
+            </TabsContent>
+          </Tabs>
         </div>
       </Drawer>
 
