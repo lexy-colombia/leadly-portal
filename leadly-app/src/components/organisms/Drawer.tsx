@@ -7,6 +7,11 @@ import { useLanguage } from '@/contexts/LanguageContext'
  * centered dialog or dedicating a full route to a form. Closes on backdrop
  * click or Escape. Always mounted at <body> level via a portal so it stacks
  * above layout scroll containers correctly. */
+const SIZE_CLASSES = {
+  md: 'max-w-md',
+  lg: 'max-w-xl',
+}
+
 export function Drawer({
   open,
   onClose,
@@ -14,6 +19,7 @@ export function Drawer({
   description,
   children,
   footer,
+  size = 'md',
 }: {
   open: boolean
   onClose: () => void
@@ -21,6 +27,10 @@ export function Drawer({
   description?: string
   children: ReactNode
   footer?: ReactNode
+  /** 'lg' for forms with more going on than a single-column stack of fields
+   * (e.g. ProductDrawer's pricing grid + image gallery) -- opt-in per
+   * caller, every other drawer in the app keeps the original 'md' width. */
+  size?: keyof typeof SIZE_CLASSES
 }) {
   const { t } = useLanguage()
 
@@ -43,7 +53,7 @@ export function Drawer({
   return createPortal(
     <div className="fixed inset-0 z-[60]">
       <div className="absolute inset-0 animate-fade-in bg-brand-900/40" onClick={onClose} aria-hidden="true" />
-      <div className="animate-slide-in-right absolute inset-y-0 right-0 flex w-full max-w-md flex-col bg-white shadow-2xl">
+      <div className={`animate-slide-in-right absolute inset-y-0 right-0 flex w-full ${SIZE_CLASSES[size]} flex-col bg-white shadow-2xl`}>
         <div className="flex items-start justify-between gap-4 border-b border-brand-100 px-6 py-5">
           <div>
             <h2 className="text-lg font-bold text-brand-800">{title}</h2>

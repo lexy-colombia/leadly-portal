@@ -56,7 +56,7 @@ export function TenantDetail() {
     return (
       <div className="space-y-4">
         <p className="text-brand-500">{t('backoffice.clienteDetalle.notFound')}</p>
-        <Link to="/backoffice/clientes" className="text-sm font-medium text-accent-600 hover:text-accent-700">
+        <Link to="/backoffice/clients" className="text-sm font-medium text-accent-600 hover:text-accent-700">
           {t('backoffice.clienteDetalle.backToClients')}
         </Link>
       </div>
@@ -151,7 +151,7 @@ function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onT
             <InitialsAvatar name={tenant.name} size="md" />
           )}
           <div>
-            <Link to="/backoffice/clientes" className="text-[11px] font-medium text-brand-400 hover:text-brand-600">
+            <Link to="/backoffice/clients" className="text-[11px] font-medium text-brand-400 hover:text-brand-600">
               {t('backoffice.clienteDetalle.breadcrumb')}
             </Link>
             <div className="mt-0.5 flex items-center gap-2">

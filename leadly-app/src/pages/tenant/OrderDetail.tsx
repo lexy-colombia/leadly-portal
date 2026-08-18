@@ -11,7 +11,7 @@ import type { OrderCommentWithAuthor } from '../../lib/api/orderComments'
 import { listAttachmentsForOrderComments, uploadOrderCommentAttachment } from '../../lib/api/attachments'
 import { listTasksForOpportunity } from '../../lib/api/tasks'
 import type { TaskWithRelations } from '../../lib/api/tasks'
-import type { CrmContactAddress, SalesOrderPayment, Attachment, OrderStatus } from '../../types/domain'
+import type { ContactAddress, SalesOrderPayment, Attachment, OrderStatus } from '../../types/domain'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { Language } from '../../i18n/translations'
@@ -33,7 +33,7 @@ const STATUS_TONE: Record<OrderStatus, 'neutral' | 'success' | 'warning' | 'dang
   cancelada: 'danger',
 }
 
-function addressLabel(a: CrmContactAddress): string {
+function addressLabel(a: ContactAddress): string {
   return `${a.label ? `${a.label} — ` : ''}${a.line1}${a.city ? `, ${a.city}` : ''}`
 }
 
@@ -63,7 +63,7 @@ function formatDateTime(iso: string, language: Language): string {
   return new Date(iso).toLocaleString(locale, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-/** Bold label above its value -- the repeating unit of the seeri-style info
+/** Bold label above its value -- the repeating unit of the detail-page info
  * grid (Cliente / Direcciones / Pagos columns), replicated field by field.
  * `action` is an optional small control next to the label (e.g. "+ nueva
  * dirección"). */
@@ -100,7 +100,7 @@ export function OrderDetail() {
   const [savedItems, setSavedItems] = useState<OrderItemInput[] | null>(null)
   const [products, setProducts] = useState<ProductWithImages[]>([])
   const [savingItems, setSavingItems] = useState(false)
-  const [addresses, setAddresses] = useState<CrmContactAddress[]>([])
+  const [addresses, setAddresses] = useState<ContactAddress[]>([])
   const [savingAddress, setSavingAddress] = useState<'shipping' | 'billing' | null>(null)
   const [notesDraft, setNotesDraft] = useState('')
   const [savingNotes, setSavingNotes] = useState(false)
@@ -183,7 +183,10 @@ export function OrderDetail() {
   useEffect(() => {
     if (order === undefined || order === null) return
     if (order.opportunity_id) listTasksForOpportunity(order.opportunity_id).then(setRelatedTasks).catch(() => setRelatedTasks([]))
-    if (profile?.tenant_id) listProducts(profile.tenant_id).then(setProducts).catch(() => {})
+    if (profile?.tenant_id)
+      listProducts(profile.tenant_id, { page: 1, pageSize: 1000 })
+        .then(({ data }) => setProducts(data))
+        .catch(() => {})
     if (order.contact_id) listAddressesForContact(order.contact_id).then(setAddresses).catch(() => setAddresses([]))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order, profile?.tenant_id])
@@ -248,7 +251,7 @@ export function OrderDetail() {
    * auto-applies it to whichever role(s) it was flagged for (is_shipping/
    * is_billing) if that role is still unset on this order, so creating a
    * shipping address is normally a single action instead of create-then-pick. */
-  async function handleAddressCreated(newAddress: CrmContactAddress) {
+  async function handleAddressCreated(newAddress: ContactAddress) {
     setAddresses((prev) => [newAddress, ...prev])
     if (!id) return
     const patch: { shipping_address_id?: string; billing_address_id?: string } = {}
@@ -311,7 +314,7 @@ export function OrderDetail() {
     return (
       <div className="space-y-4">
         <p className="text-brand-500">{t('orders.detail.notFound')}</p>
-        <Link to="/app/ventas" className="text-sm font-medium text-accent-600 hover:text-accent-700">
+        <Link to="/app/sales" className="text-sm font-medium text-accent-600 hover:text-accent-700">
           {t('orders.detail.backToList')}
         </Link>
       </div>
@@ -350,7 +353,7 @@ export function OrderDetail() {
             <InfoField label={t('orders.detail.client')}>
               {order.contact ? (
                 <>
-                  <Link to={`/app/clientes/${order.contact.id}`} className="font-medium text-accent-600 hover:underline">
+                  <Link to={`/app/clients/${order.contact.id}`} className="font-medium text-accent-600 hover:underline">
                     {order.contact.full_name}
                   </Link>
                   <span className="text-brand-400"> · {order.contact.phone}</span>

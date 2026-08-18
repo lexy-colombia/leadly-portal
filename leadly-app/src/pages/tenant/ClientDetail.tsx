@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 're
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { Language, TranslationKey } from '../../i18n/translations'
-import { getContact, createNote, listNotes } from '../../lib/api/contacts'
+import { getClient, createNote, listNotes } from '../../lib/api/clients'
 import { listAppointmentsForContact, updateAppointmentStatus } from '../../lib/api/appointments'
 import { listConversationsForContact } from '../../lib/api/conversations'
 import type { ConversationWithLine } from '../../lib/api/conversations'
@@ -13,10 +13,10 @@ import { listAddressesForContact, deleteAddress } from '../../lib/api/addresses'
 import { listTasksForAccount, type TaskWithRelations } from '../../lib/api/tasks'
 import { listPipelinesByTenant } from '../../lib/api/pipelines'
 import type {
-  CrmAppointment,
+  Appointment,
   Client,
-  CrmContactAddress,
-  CrmNote,
+  ContactAddress,
+  Note,
   Pipeline,
   OrderStatus,
   Profile,
@@ -32,7 +32,7 @@ import { AddressDrawer } from './clients/AddressDrawer'
 import { OpportunityPanel } from './opportunities/OpportunityPanel'
 import { OpportunityDrawer } from './opportunities/OpportunityDrawer'
 import { OrderDrawer } from './orders/OrderDrawer'
-import type { AppointmentStatus, ContactStage } from '../../types/domain'
+import type { AppointmentStatus, ClientStage } from '../../types/domain'
 
 const ORDER_STATUS_LABEL: Record<OrderStatus, TranslationKey> = {
   cotizacion: 'contacts.order.status.cotizacion',
@@ -56,7 +56,7 @@ function formatCurrency(value: number, currency = 'COP'): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 }
 
-const STAGE_TONE: Record<ContactStage, 'neutral' | 'success' | 'warning' | 'danger'> = {
+const STAGE_TONE: Record<ClientStage, 'neutral' | 'success' | 'warning' | 'danger'> = {
   lead: 'neutral',
   contactado: 'warning',
   negociacion: 'warning',
@@ -139,7 +139,7 @@ export function ClientDetail() {
   useEffect(() => {
     if (!id) return
     let active = true
-    getContact(id)
+    getClient(id)
       .then((data) => active && setContact(data))
       .catch((err) => active && setError(err.message ?? t('contacts.detail.errors.load')))
     return () => {
@@ -154,7 +154,7 @@ export function ClientDetail() {
     return (
       <div className="space-y-4">
         <p className="text-brand-500">{t('contacts.detail.notFound')}</p>
-        <Link to="/app/clientes" className="text-sm font-medium text-accent-600 hover:text-accent-700">
+        <Link to="/app/clients" className="text-sm font-medium text-accent-600 hover:text-accent-700">
           {t('contacts.detail.backToContacts')}
         </Link>
       </div>
@@ -165,8 +165,8 @@ export function ClientDetail() {
 }
 
 type ActivityItem =
-  | { kind: 'appointment'; date: string; appointment: CrmAppointment }
-  | { kind: 'note'; date: string; note: CrmNote }
+  | { kind: 'appointment'; date: string; appointment: Appointment }
+  | { kind: 'note'; date: string; note: Note }
 
 function ContactoDetalleContent({
   contact,
@@ -180,13 +180,13 @@ function ContactoDetalleContent({
   const navigate = useNavigate()
   const [tab, setTab] = useState<'resumen' | 'actividad' | 'oportunidades' | 'ventas' | 'conversaciones' | 'direcciones'>('resumen')
   const [page, setPage] = useState(1)
-  const [notes, setNotes] = useState<CrmNote[] | null>(null)
-  const [appointments, setAppointments] = useState<CrmAppointment[] | null>(null)
+  const [notes, setNotes] = useState<Note[] | null>(null)
+  const [appointments, setAppointments] = useState<Appointment[] | null>(null)
   const [conversations, setConversations] = useState<ConversationWithLine[] | null>(null)
   const [agents, setAgents] = useState<Profile[]>([])
   const [opportunities, setOpportunities] = useState<OpportunityWithRelations[] | null>(null)
   const [orders, setOrders] = useState<OrderWithRelations[] | null>(null)
-  const [addresses, setAddresses] = useState<CrmContactAddress[] | null>(null)
+  const [addresses, setAddresses] = useState<ContactAddress[] | null>(null)
   const [tasks, setTasks] = useState<TaskWithRelations[] | null>(null)
   const [pipelines, setPipelines] = useState<Pipeline[]>([])
   const [noteDraft, setNoteDraft] = useState('')
@@ -199,7 +199,7 @@ function ContactoDetalleContent({
     opportunity: null,
   })
   const [orderDrawer, setOrderDrawer] = useState<{ open: boolean; order: OrderWithRelations | null }>({ open: false, order: null })
-  const [addressDrawer, setAddressDrawer] = useState<{ open: boolean; address: CrmContactAddress | null }>({ open: false, address: null })
+  const [addressDrawer, setAddressDrawer] = useState<{ open: boolean; address: ContactAddress | null }>({ open: false, address: null })
   const [deleteAddressId, setDeleteAddressId] = useState<string | null>(null)
 
   function reloadAppointments() {
@@ -577,7 +577,7 @@ function ContactoDetalleContent({
                   {ordersPage.items.map((o) => (
                     <li key={o.id}>
                       <button
-                        onClick={() => navigate(`/app/ventas/${o.id}`)}
+                        onClick={() => navigate(`/app/sales/${o.id}`)}
                         className="flex w-full items-center justify-between gap-3 rounded-xl border border-brand-100 px-4 py-3 text-left transition-colors hover:bg-brand-50"
                       >
                         <span className="min-w-0">

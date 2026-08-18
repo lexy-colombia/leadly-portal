@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient'
-import type { ContactStage, Client, CrmNote } from '../../types/domain'
+import type { ClientStage, Client, Note } from '../../types/domain'
 
 export interface ClientInput {
   tenant_id: string
@@ -14,12 +14,12 @@ export interface ClientInput {
   city?: string | null
   notes?: string | null
   is_active?: boolean
-  stage: ContactStage
+  stage: ClientStage
   tags: string[]
   assigned_to?: string | null
 }
 
-export async function listContacts(tenantId: string): Promise<Client[]> {
+export async function listClients(tenantId: string): Promise<Client[]> {
   const { data, error } = await supabase
     .from('clients')
     .select('*')
@@ -30,19 +30,19 @@ export async function listContacts(tenantId: string): Promise<Client[]> {
   return data
 }
 
-export async function getContact(id: string): Promise<Client | null> {
+export async function getClient(id: string): Promise<Client | null> {
   const { data, error } = await supabase.from('clients').select('*').eq('id', id).is('deleted_at', null).maybeSingle()
   if (error) throw error
   return data
 }
 
-export async function createContact(input: ClientInput): Promise<Client> {
+export async function createClient(input: ClientInput): Promise<Client> {
   const { data, error } = await supabase.from('clients').insert(input).select().single()
   if (error) throw error
   return data
 }
 
-export async function updateContact(id: string, input: Partial<ClientInput>): Promise<Client> {
+export async function updateClient(id: string, input: Partial<ClientInput>): Promise<Client> {
   const { data, error } = await supabase.from('clients').update(input).eq('id', id).select().single()
   if (error) throw error
   return data
@@ -50,9 +50,9 @@ export async function updateContact(id: string, input: Partial<ClientInput>): Pr
 
 /** Soft delete (see CLAUDE.md section 3) -- stamps deleted_at/deleted_by
  * instead of removing the row, so conversations/notes/etc. that reference
- * this client keep their history. `listContacts`/`getContact` both filter
+ * this client keep their history. `listClients`/`getClient` both filter
  * `deleted_at is null`, so it just disappears from the CRM. */
-export async function deleteContact(id: string): Promise<void> {
+export async function deleteClient(id: string): Promise<void> {
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -60,26 +60,27 @@ export async function deleteContact(id: string): Promise<void> {
   if (error) throw error
 }
 
-/** ROTO a propósito desde 2026-08-17: crm_notes se borró junto con el resto
- * de las tablas crm_* -- el usuario aceptó explícitamente perder las notas
- * manuales de la pestaña "Actividad" al pedir ese borrado. No se arregla acá. */
-export async function listNotes(contactId: string): Promise<CrmNote[]> {
+/** Usa `notes` (sin prefijo) -- repunteado 2026-08-17. `crm_notes` se había
+ * dropeado sin migrar datos junto con el resto de las tablas crm_*, así que
+ * las notas manuales previas a esa fecha se perdieron; la bitácora arranca
+ * vacía desde acá en adelante. */
+export async function listNotes(clientId: string): Promise<Note[]> {
   const { data, error } = await supabase
-    .from('crm_notes')
+    .from('notes')
     .select('*')
-    .eq('contact_id', contactId)
+    .eq('contact_id', clientId)
     .order('created_at', { ascending: false })
   if (error) throw error
   return data
 }
 
-export async function createNote(tenantId: string, contactId: string, content: string): Promise<CrmNote> {
+export async function createNote(tenantId: string, clientId: string, content: string): Promise<Note> {
   const {
     data: { user },
   } = await supabase.auth.getUser()
   const { data, error } = await supabase
-    .from('crm_notes')
-    .insert({ tenant_id: tenantId, contact_id: contactId, content, author_id: user?.id ?? null })
+    .from('notes')
+    .insert({ tenant_id: tenantId, contact_id: clientId, content, author_id: user?.id ?? null })
     .select()
     .single()
   if (error) throw error

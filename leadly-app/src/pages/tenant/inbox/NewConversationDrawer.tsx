@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { listContacts, createContact } from '../../../lib/api/contacts'
+import { listClients, createClient } from '../../../lib/api/clients'
 import { createConversation } from '../../../lib/api/conversations'
 import { listWhatsappLinesByTenant } from '../../../lib/api/whatsappLines'
 import type { Client, WhatsappLine } from '../../../types/domain'
@@ -43,7 +43,7 @@ export function NewConversationDrawer({
     setNewPhone('')
     setTouched(false)
     setFormError(null)
-    listContacts(tenantId).then(setContacts).catch(() => setContacts([]))
+    listClients(tenantId).then(setContacts).catch(() => setContacts([]))
     listWhatsappLinesByTenant(tenantId).then((all) => {
       const active = all.filter((l) => l.status === 'active')
       setLines(active)
@@ -78,7 +78,7 @@ export function NewConversationDrawer({
       if (mode === 'existing') {
         contact = contacts.find((c) => c.id === selectedContactId)!
       } else {
-        contact = await createContact({
+        contact = await createClient({
           tenant_id: tenantId,
           full_name: newName.trim(),
           phone: newPhone.trim(),

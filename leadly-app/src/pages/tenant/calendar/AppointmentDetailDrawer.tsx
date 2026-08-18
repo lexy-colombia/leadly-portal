@@ -60,7 +60,7 @@ export function AppointmentDetailDrawer({
     <Drawer open={open} onClose={onClose} title={t('calendar.detail.title')}>
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <Link to={`/app/clientes/${appointment.contact_id}`} className="text-base font-semibold text-accent-600 hover:underline">
+          <Link to={`/app/clients/${appointment.contact_id}`} className="text-base font-semibold text-accent-600 hover:underline">
             {appointment.contact_full_name ?? t('calendar.detail.contactFallback')}
           </Link>
           <Badge tone={STATUS_TONE[appointment.status]}>{t(STATUS_KEY[appointment.status])}</Badge>

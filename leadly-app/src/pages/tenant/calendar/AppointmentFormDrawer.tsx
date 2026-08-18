@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { createAppointment } from '../../../lib/api/appointments'
-import { listContacts } from '../../../lib/api/contacts'
+import { listClients } from '../../../lib/api/clients'
 import type { AppointmentWithContact, Client } from '../../../types/domain'
 import { Button, FieldError, Input, Label, Textarea } from '@/components/atoms'
 import { Drawer } from '@/components/organisms'
@@ -46,7 +46,7 @@ export function AppointmentFormDrawer({
     setSelectedContact(null)
     setTouched(false)
     setFormError(null)
-    listContacts(tenantId).then(setContacts).catch(() => setContacts([]))
+    listClients(tenantId).then(setContacts).catch(() => setContacts([]))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, tenantId, prefillDate])
 

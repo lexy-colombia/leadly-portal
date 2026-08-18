@@ -123,7 +123,7 @@ export interface ConversationTag {
   created_at: string
 }
 
-export type ContactStage = 'lead' | 'contactado' | 'negociacion' | 'cliente' | 'perdido'
+export type ClientStage = 'lead' | 'contactado' | 'negociacion' | 'cliente' | 'perdido'
 
 export interface Client {
   id: string
@@ -139,7 +139,7 @@ export interface Client {
   city: string | null
   notes: string | null
   is_active: boolean
-  stage: ContactStage
+  stage: ClientStage
   tags: string[]
   assigned_to: string | null
   hubspot_contact_id: string | null
@@ -233,7 +233,6 @@ export interface Product {
   description: string | null
   sku: string | null
   slug: string | null
-  category_id: string | null
   supplier_id: string | null
   brand_id: string | null
   purchase_price: number | null
@@ -264,6 +263,7 @@ export interface ProductCategory {
   name: string
   description: string | null
   color: string | null
+  parent_category_id: string | null
   deleted_at: string | null
   deleted_by: string | null
   created_at: string
@@ -323,7 +323,7 @@ export interface SalesOrder {
   updated_at: string
 }
 
-export interface CrmContactAddress {
+export interface ContactAddress {
   id: string
   tenant_id: string
   contact_id: string
@@ -391,7 +391,7 @@ export interface SalesOrderComment {
   created_at: string
 }
 
-export interface CrmNote {
+export interface Note {
   id: string
   tenant_id: string
   contact_id: string
@@ -403,7 +403,7 @@ export interface CrmNote {
 
 export type AppointmentStatus = 'activa' | 'completada' | 'cancelada'
 
-export interface CrmAppointment {
+export interface Appointment {
   id: string
   tenant_id: string
   contact_id: string
@@ -417,9 +417,9 @@ export interface CrmAppointment {
   updated_at: string
 }
 
-/** CrmAppointment + the contact's display name, for tenant-wide views (the
+/** Appointment + the contact's display name, for tenant-wide views (the
  * calendar) that aren't already scoped to one contact. */
-export interface AppointmentWithContact extends CrmAppointment {
+export interface AppointmentWithContact extends Appointment {
   contact_full_name: string | null
 }
 
@@ -438,21 +438,8 @@ export interface WhatsappMessage {
   created_at: string
 }
 
-export interface CrmAttachment {
-  id: string
-  tenant_id: string
-  task_id: string | null
-  storage_path: string
-  mime_type: string
-  size_bytes: number
-  original_filename: string | null
-  created_by: string | null
-  created_by_ai: boolean
-  created_at: string
-}
-
-/** `attachments` (sin prefijo) -- usada para comentarios de venta
- * (sales_order_comment_id); Tasks se queda en crm_attachments. */
+/** `attachments` -- shared by task attachments (task_id) and sales order
+ * comment attachments (sales_order_comment_id), mutually exclusive per row. */
 export interface Attachment {
   id: string
   tenant_id: string

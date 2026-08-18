@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { createContact, updateContact } from '../../../lib/api/contacts'
+import { createClient, updateClient } from '../../../lib/api/clients'
 import { listProfilesByTenant } from '../../../lib/api/users'
-import type { ContactStage, Client, Profile } from '../../../types/domain'
+import type { ClientStage, Client, Profile } from '../../../types/domain'
 import { Button, FieldError, Input, Label, Select, Switch, Textarea } from '@/components/atoms'
 import { TagInput } from '@/components/molecules'
 import { Drawer } from '@/components/organisms'
@@ -9,7 +9,7 @@ import { isNotBlank, isValidE164Phone, isValidEmail } from '../../../lib/validat
 import { useLanguage } from '../../../contexts/LanguageContext'
 import type { TranslationKey } from '../../../i18n/translations'
 
-export const STAGE_LABEL: Record<ContactStage, TranslationKey> = {
+export const STAGE_LABEL: Record<ClientStage, TranslationKey> = {
   lead: 'contacts.stage.lead',
   contactado: 'contacts.stage.contactado',
   negociacion: 'contacts.stage.negociacion',
@@ -36,7 +36,7 @@ export function ContactDrawer({
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
   const [company, setCompany] = useState('')
-  const [stage, setStage] = useState<ContactStage>('lead')
+  const [stage, setStage] = useState<ClientStage>('lead')
   const [tags, setTags] = useState<string[]>([])
   const [assignedTo, setAssignedTo] = useState('')
   const [agents, setAgents] = useState<Profile[]>([])
@@ -107,7 +107,7 @@ export function ContactDrawer({
         notes: notes.trim() || null,
         is_active: isActive,
       }
-      const saved = contact ? await updateContact(contact.id, input) : await createContact(input)
+      const saved = contact ? await updateClient(contact.id, input) : await createClient(input)
       onSaved(saved)
       onClose()
     } catch (err) {
@@ -168,8 +168,8 @@ export function ContactDrawer({
 
         <div>
           <Label htmlFor="contact-stage">{t('contacts.drawer.fields.stage')}</Label>
-          <Select id="contact-stage" value={stage} onChange={(e) => setStage(e.target.value as ContactStage)}>
-            {(Object.keys(STAGE_LABEL) as ContactStage[]).map((s) => (
+          <Select id="contact-stage" value={stage} onChange={(e) => setStage(e.target.value as ClientStage)}>
+            {(Object.keys(STAGE_LABEL) as ClientStage[]).map((s) => (
               <option key={s} value={s}>
                 {t(STAGE_LABEL[s])}
               </option>

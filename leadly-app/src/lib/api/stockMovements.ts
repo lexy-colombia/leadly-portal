@@ -69,6 +69,21 @@ export async function listStockTotalsByTenant(tenantId: string): Promise<Map<str
   return totals
 }
 
+/** Product ids that have stock (quantity > 0) in one specific warehouse --
+ * used to prefilter the products list when the "bodega" filter is set (see
+ * Products.tsx). A product with stock in other warehouses but not this one
+ * is correctly excluded, unlike listStockTotalsByTenant's tenant-wide sum. */
+export async function listProductIdsWithWarehouseStock(tenantId: string, warehouseId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('product_stock')
+    .select('product_id')
+    .eq('tenant_id', tenantId)
+    .eq('warehouse_id', warehouseId)
+    .gt('quantity', 0)
+  if (error) throw error
+  return Array.from(new Set((data as { product_id: string }[]).map((r) => r.product_id)))
+}
+
 export async function listMovementsForProduct(productId: string, limit = 20): Promise<StockMovementWithWarehouse[]> {
   const { data, error } = await supabase
     .from('stock_movements')
@@ -101,4 +116,77 @@ export async function recordStockMovement(input: StockMovementInput): Promise<St
     .single()
   if (error) throw error
   return data
+}
+
+export interface StockTransferInput {
+  tenant_id: string
+  product_id: string
+  from_warehouse_id: string
+  to_warehouse_id: string
+  quantity: number
+  notes?: string | null
+}
+
+/** Moves stock from one warehouse to another -- calls the `transfer_stock`
+ * DB function (not two separate inserts) so both sides of the move (the
+ * salida at origin, the entrada at destination) either both apply or
+ * neither does, and can't be split by a failure between them. The function
+ * itself also rejects moving more than what's actually available at the
+ * origin. Returns the shared reference_id both resulting stock_movements
+ * rows carry (reference_type='transferencia') -- combineTransferHistory
+ * uses it to show the pair as one entry instead of two. */
+export async function transferStock(input: StockTransferInput): Promise<string> {
+  const { data, error } = await supabase.rpc('transfer_stock', {
+    p_tenant_id: input.tenant_id,
+    p_product_id: input.product_id,
+    p_from_warehouse_id: input.from_warehouse_id,
+    p_to_warehouse_id: input.to_warehouse_id,
+    p_quantity: input.quantity,
+    p_notes: input.notes ?? null,
+  })
+  if (error) throw error
+  return data as string
+}
+
+export type MovementHistoryEntry =
+  | { kind: 'movement'; movement: StockMovementWithWarehouse }
+  | { kind: 'transfer'; id: string; from: StockMovementWithWarehouse; to: StockMovementWithWarehouse; created_at: string }
+
+/** Pairs up transferencia_salida/transferencia_entrada rows that share a
+ * reference_id (see transferStock) into one `transfer` entry, so the
+ * history reads as "10 unidades: Bodega A → Bodega B" instead of two
+ * unrelated-looking salida/entrada lines. A transfer row that somehow has
+ * no matching counterpart (shouldn't happen given transfer_stock's
+ * atomicity, but a raw/legacy row is possible) falls back to rendering on
+ * its own like any other movement, instead of silently disappearing. */
+export function combineTransferHistory(movements: StockMovementWithWarehouse[]): MovementHistoryEntry[] {
+  const byReference = new Map<string, StockMovementWithWarehouse[]>()
+  const entries: MovementHistoryEntry[] = []
+
+  for (const movement of movements) {
+    if (movement.reference_type === 'transferencia' && movement.reference_id) {
+      const group = byReference.get(movement.reference_id) ?? []
+      group.push(movement)
+      byReference.set(movement.reference_id, group)
+    } else {
+      entries.push({ kind: 'movement', movement })
+    }
+  }
+
+  for (const [referenceId, group] of byReference) {
+    const from = group.find((m) => m.movement_type === 'transferencia_salida')
+    const to = group.find((m) => m.movement_type === 'transferencia_entrada')
+    if (from && to) {
+      entries.push({ kind: 'transfer', id: referenceId, from, to, created_at: from.created_at })
+    } else {
+      group.forEach((movement) => entries.push({ kind: 'movement', movement }))
+    }
+  }
+
+  entries.sort((a, b) => {
+    const dateA = a.kind === 'movement' ? a.movement.created_at : a.created_at
+    const dateB = b.kind === 'movement' ? b.movement.created_at : b.created_at
+    return dateB.localeCompare(dateA)
+  })
+  return entries
 }

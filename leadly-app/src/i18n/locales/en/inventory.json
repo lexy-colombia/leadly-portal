@@ -58,13 +58,27 @@
   "inventory.movementType.reversion_dano": "Damage reversal",
 
   "inventory.movementDrawer.title": "Register stock movement",
-  "inventory.movementDrawer.description": "Manually adjust this product's stock in a warehouse.",
+  "inventory.movementDrawer.description": "Manually adjust this product's stock, or move it between warehouses.",
+  "inventory.movementDrawer.tabs.adjustment": "Adjustment",
+  "inventory.movementDrawer.tabs.transfer": "Transfer",
   "inventory.movementDrawer.field.warehouse": "Warehouse",
   "inventory.movementDrawer.field.type": "Movement type",
   "inventory.movementDrawer.field.quantity": "Quantity",
   "inventory.movementDrawer.field.quantityRequired": "Quantity must be greater than 0.",
   "inventory.movementDrawer.field.notes": "Notes",
   "inventory.movementDrawer.field.notesPlaceholder": "E.g: physical count, damaged product, etc.",
+  "inventory.movementDrawer.field.fromWarehouse": "Origin warehouse",
+  "inventory.movementDrawer.field.toWarehouse": "Destination warehouse",
+  "inventory.movementDrawer.field.availableAtOrigin": "Available at origin: {quantity}",
   "inventory.movementDrawer.errors.save": "Couldn't record the movement.",
-  "inventory.movementDrawer.errors.noWarehouses": "You need at least one active warehouse to record a movement."
+  "inventory.movementDrawer.errors.transferSave": "Couldn't record the transfer.",
+  "inventory.movementDrawer.errors.noWarehouses": "You need at least one active warehouse to record a movement.",
+  "inventory.movementDrawer.errors.needTwoWarehouses": "You need at least two active warehouses to transfer stock.",
+  "inventory.movementDrawer.errors.sameWarehouse": "Origin and destination warehouse can't be the same.",
+
+  "inventory.product.history.transfer": "Transfer",
+  "inventory.product.history.transferDetail": "{quantity} from {from} to {to}",
+  "inventory.product.table.type": "Type",
+  "inventory.product.table.date": "Date",
+  "inventory.product.table.quantity": "Quantity"
 }

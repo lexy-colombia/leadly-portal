@@ -244,7 +244,7 @@ export function OpportunityPanel({
                     {orders.map((o) => (
                       <li key={o.id}>
                         <button
-                          onClick={() => navigate(`/app/ventas/${o.id}`)}
+                          onClick={() => navigate(`/app/sales/${o.id}`)}
                           className="flex w-full items-center justify-between gap-2 rounded-lg border border-brand-100 px-3 py-2 text-left text-sm transition-colors hover:bg-brand-50"
                         >
                           <span className="font-mono text-xs font-semibold text-brand-400">ORD-{o.number}</span>

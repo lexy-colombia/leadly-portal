@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { createTask, TASK_PRIORITY_KEY, updateTask } from '../../../lib/api/tasks'
 import type { TaskWithRelations } from '../../../lib/api/tasks'
-import { listContacts } from '../../../lib/api/contacts'
+import { listClients } from '../../../lib/api/clients'
 import { listProfilesByTenant } from '../../../lib/api/users'
 import { getAttachmentSignedUrl, listAttachmentsForTask, uploadTaskAttachment, validateTaskAttachmentFile } from '../../../lib/api/attachments'
-import type { CrmAttachment, Client, Profile, TaskPriority } from '../../../types/domain'
+import type { Attachment, Client, Profile, TaskPriority } from '../../../types/domain'
 import { Button, FieldError, Input, Label, Select, Textarea } from '@/components/atoms'
 import { Drawer } from '@/components/organisms'
 import { FileIcon, ImageIcon, PaperclipIcon } from '@/components/atoms/icons'
@@ -17,12 +17,12 @@ function formatFileSize(bytes: number): string {
 }
 
 /** Attachments only make sense once a task actually exists in the DB
- * (crm_attachments.task_id needs a real row to point at) -- so this section
+ * (attachments.task_id needs a real row to point at) -- so this section
  * only renders for an existing task, never in the "create" form. */
 function TaskAttachments({ tenantId, taskId }: { tenantId: string; taskId: string }) {
   const { t } = useLanguage()
   const inputRef = useRef<HTMLInputElement>(null)
-  const [attachments, setAttachments] = useState<CrmAttachment[] | null>(null)
+  const [attachments, setAttachments] = useState<Attachment[] | null>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -53,7 +53,7 @@ function TaskAttachments({ tenantId, taskId }: { tenantId: string; taskId: strin
     }
   }
 
-  async function handleOpen(attachment: CrmAttachment) {
+  async function handleOpen(attachment: Attachment) {
     try {
       const url = await getAttachmentSignedUrl(attachment.storage_path)
       window.open(url, '_blank', 'noopener,noreferrer')
@@ -142,7 +142,7 @@ export function TaskDrawer({
 
   useEffect(() => {
     if (!open) return
-    listContacts(tenantId).then(setContacts).catch(() => {})
+    listClients(tenantId).then(setContacts).catch(() => {})
     listProfilesByTenant(tenantId).then(setAgents).catch(() => {})
   }, [open, tenantId])
 

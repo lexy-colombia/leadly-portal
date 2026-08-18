@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { deleteBrand, listBrands } from '../../../lib/api/brands'
 import type { Brand } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { Badge, Button, PageSpinner, Table, TBody, TD, TH, THead, TRow } from '@/components/atoms'
+import { Badge, Button, InitialsAvatar, PageSpinner, Table, TBody, TD, TH, THead, TRow } from '@/components/atoms'
 import { Card, EmptyState, Pagination } from '@/components/molecules'
 import { PencilIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
 import { BrandDrawer } from './BrandDrawer'
@@ -20,7 +20,13 @@ export function BrandsTab({ tenantId }: { tenantId: string }) {
 
   function reload() {
     listBrands(tenantId)
-      .then(setBrands)
+      .then((data) => {
+        setBrands(data)
+        // Keeps an open edit drawer in sync (e.g. right after a logo upload) --
+        // the drawer's `brand` prop is separate state from this list, so a
+        // plain reload alone wouldn't reach it. Same pattern as Products.tsx.
+        setDrawer((prev) => (prev.brand ? { ...prev, brand: data.find((b) => b.id === prev.brand!.id) ?? prev.brand } : prev))
+      })
       .catch((err) => setError(err.message ?? t('products.brands.errors.load')))
   }
 
@@ -76,7 +82,16 @@ export function BrandsTab({ tenantId }: { tenantId: string }) {
             <TBody>
               {pageItems.map((brand) => (
                 <TRow key={brand.id}>
-                  <TD className="text-xs font-medium text-brand-800">{brand.name}</TD>
+                  <TD className="text-xs font-medium text-brand-800">
+                    <span className="flex items-center gap-2.5">
+                      {brand.logo_url ? (
+                        <img src={brand.logo_url} alt="" className="h-7 w-7 rounded-full object-cover" />
+                      ) : (
+                        <InitialsAvatar name={brand.name} size="sm" />
+                      )}
+                      {brand.name}
+                    </span>
+                  </TD>
                   <TD>
                     <Badge tone={brand.is_active ? 'success' : 'neutral'}>{t(brand.is_active ? 'common.status.active' : 'common.status.inactive')}</Badge>
                   </TD>

@@ -1,27 +1,27 @@
 import { supabase } from '../supabaseClient'
-import type { AppointmentStatus, AppointmentWithContact, CrmAppointment } from '../../types/domain'
+import type { AppointmentStatus, AppointmentWithContact, Appointment } from '../../types/domain'
 
 /** Tenant-wide appointments in a date range (calendar month view) -- unlike
  * listAppointmentsForContact, this isn't scoped to one contact, so it joins
- * crm_contacts for the display name. `rangeEnd` is exclusive. */
+ * clients for the display name. `rangeEnd` is exclusive. */
 export async function listAppointmentsForTenantRange(tenantId: string, rangeStart: string, rangeEnd: string): Promise<AppointmentWithContact[]> {
   const { data, error } = await supabase
-    .from('crm_appointments')
-    .select('*, crm_contacts(full_name)')
+    .from('appointments')
+    .select('*, clients(full_name)')
     .eq('tenant_id', tenantId)
     .gte('scheduled_at', rangeStart)
     .lt('scheduled_at', rangeEnd)
     .order('scheduled_at', { ascending: true })
   if (error) throw error
-  return data.map(({ crm_contacts, ...appointment }) => ({
+  return data.map(({ clients, ...appointment }) => ({
     ...appointment,
-    contact_full_name: (crm_contacts as { full_name: string } | null)?.full_name ?? null,
+    contact_full_name: (clients as { full_name: string } | null)?.full_name ?? null,
   }))
 }
 
-export async function listAppointmentsForContact(contactId: string): Promise<CrmAppointment[]> {
+export async function listAppointmentsForContact(contactId: string): Promise<Appointment[]> {
   const { data, error } = await supabase
-    .from('crm_appointments')
+    .from('appointments')
     .select('*')
     .eq('contact_id', contactId)
     .order('scheduled_at', { ascending: true })
@@ -38,7 +38,7 @@ export async function createAppointment(
   contactId: string,
   scheduledAt: string,
   notes: string,
-): Promise<CrmAppointment> {
+): Promise<Appointment> {
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -52,7 +52,7 @@ export async function createAppointment(
     .maybeSingle()
 
   const { data, error } = await supabase
-    .from('crm_appointments')
+    .from('appointments')
     .insert({
       tenant_id: tenantId,
       contact_id: contactId,
@@ -67,8 +67,8 @@ export async function createAppointment(
   return data
 }
 
-export async function updateAppointmentStatus(id: string, status: AppointmentStatus): Promise<CrmAppointment> {
-  const { data, error } = await supabase.from('crm_appointments').update({ status }).eq('id', id).select().single()
+export async function updateAppointmentStatus(id: string, status: AppointmentStatus): Promise<Appointment> {
+  const { data, error } = await supabase.from('appointments').update({ status }).eq('id', id).select().single()
   if (error) throw error
   return data
 }

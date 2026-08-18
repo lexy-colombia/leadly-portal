@@ -1,14 +1,27 @@
-import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import changelogRaw from '../../../CHANGELOG.md?raw'
 import { useAuth } from '@/contexts/AuthContext'
 import { useLanguage } from '@/contexts/LanguageContext'
-import { SidebarNavItem } from './SidebarNavItem'
+import { HeaderSearchSlotProvider, useHeaderSearchSlot } from '@/contexts/HeaderSearchSlotContext'
+import { AppSidebarNav, type NavItem } from './AppSidebarNav'
 import { NotificationsBell } from './NotificationsBell'
 import { LanguageSwitcher } from './LanguageSwitcher'
 import { Button, InitialsAvatar } from '@/components/atoms'
 import { Logo } from '@/components/atoms/Logo'
 import { ChevronLeftIcon, LogoutIcon, MenuIcon } from '@/components/atoms/icons'
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarHeader,
+  SidebarInset,
+  SidebarProvider,
+  useSidebar,
+} from '@/components/ui/sidebar'
+import { TooltipProvider } from '@/components/ui/tooltip'
+
+export type { NavItem }
 
 // "Novedades" used to be its own nav entry -- moved here as a quiet version
 // link under "Cerrar sesión" instead, since it's a "check when curious" page,
@@ -21,42 +34,26 @@ const CURRENT_VERSION = (() => {
   return match ? match[1].trim() : ''
 })()
 
-export interface NavItem {
-  to: string
-  label: string
-  icon: ComponentType<{ width?: number; height?: number }>
-  /** Small pill after the label, e.g. "BETA" for features that are visible
-   * but intentionally locked (Campañas, Catálogo) -- signals "coming soon",
-   * not a permissions error. */
-  badge?: string
-  /** One level of nested items, rendered as a collapsible group (e.g. "CRM").
-   * A parent with children is a pure grouping label, not a page of its own
-   * -- its `to` is only used to decide which group to auto-expand and is
-   * excluded from page-title resolution below, so it never competes with
-   * one of its children for the header title. */
-  children?: NavItem[]
-}
-
 const COLLAPSE_STORAGE_KEY = 'leadly:sidebar-collapsed'
 
 // Every page used to render its own "<h1>Title</h1><p>description</p>" block,
 // which duplicated the nav label right below it and added a lot of repeated
 // boilerplate across every page. Pages no longer render a title at all --
 // this derives it from whichever nav item's route path is the longest match
-// for the current URL (so a detail route like /app/clientes/:id still shows
-// "Clientes", the nav item it lives under), with the two routes that aren't
-// in the nav (perfil, novedades) special-cased since they're shared between
+// for the current URL (so a detail route like /app/clients/:id still shows
+// "Clients", the nav item it lives under), with the two routes that aren't
+// in the nav (account, changelog) special-cased since they're shared between
 // both layouts. When the match is a nested route (a "detail" page one level
-// below its list, e.g. /app/clientes/:id under /app/clientes), `backTo` is
-// set so the header renders a clickable "← Clientes" instead of a plain
+// below its list, e.g. /app/clients/:id under /app/clients), `backTo` is
+// set so the header renders a clickable "← Clients" instead of a plain
 // title -- pages no longer need their own "Volver a ..." link in the body.
 function resolvePageTitle(
   pathname: string,
   navItems: NavItem[],
   specialTitles: { account: string; whatsNew: string },
 ): { title: string; badge?: string; backTo?: string } {
-  if (pathname.endsWith('/perfil')) return { title: specialTitles.account }
-  if (pathname.endsWith('/novedades')) return { title: specialTitles.whatsNew }
+  if (pathname.endsWith('/account')) return { title: specialTitles.account }
+  if (pathname.endsWith('/changelog')) return { title: specialTitles.whatsNew }
 
   // Flatten one level so a grouped item's children (e.g. "Clients" inside
   // "CRM") still resolve to a real page title -- only leaf items (no
@@ -69,16 +66,162 @@ function resolvePageTitle(
   return { title: best.label, badge: best.badge, backTo: pathname !== best.to ? best.to : undefined }
 }
 
-/** Shared responsive shell for both BackofficeLayout and TenantLayout: a
- * desktop sidebar that can collapse to icon-only (persisted across reloads)
- * and slides into an off-canvas drawer on mobile. Content area is fluid
- * (no max-width) so it uses all the space next to the sidebar.
+/** Fixed top bar, mobile only -- its hamburger opens the shadcn Sidebar's
+ * built-in offcanvas Sheet via `toggleSidebar()` (branches to mobile mode
+ * automatically inside useSidebar, same call the desktop collapse button
+ * uses). Rendered as a sibling of <Sidebar>/<SidebarInset>, both of which
+ * are direct children of SidebarProvider, so needs its own small component
+ * to reach `useSidebar()` -- AppShell itself renders the Provider and can't
+ * call the hook above it.
  *
- * `theme` flips the sidebar between the original dark-navy chrome
- * (backoffice) and a light/white one (tenant panel, matching a reference
- * design the user asked to adopt for their own client-facing side first,
- * 2026-08-04) -- the accent pill on the active nav item stays Leadly's
- * turquoise in both, only the surrounding chrome changes. */
+ * Hidden via the same `isMobile` the Sidebar component itself switches on
+ * (shadcn's useIsMobile hook, a fixed 768px/Tailwind-`md` check), not a
+ * `lg:hidden` class -- the desktop icon-rail is already visible from `md`
+ * up (collapsible="icon" never fully hides it), so a `lg:`-gated (1024px)
+ * bar would float redundantly on top of it between 768-1024px. */
+function MobileTopBar({ isLight }: { isLight: boolean }) {
+  const { toggleSidebar, isMobile } = useSidebar()
+  const { t } = useLanguage()
+  if (!isMobile) return null
+  return (
+    <div
+      className={`fixed inset-x-0 top-0 z-40 flex h-14 items-center justify-between border-b px-4 ${
+        isLight ? 'border-brand-100 bg-white' : 'border-brand-800 bg-brand-700'
+      }`}
+    >
+      <Logo size="sm" onDark={!isLight} />
+      <button
+        type="button"
+        onClick={toggleSidebar}
+        aria-label={t('common.shell.openMenu')}
+        className={isLight ? '-mr-2 p-2 text-brand-500 hover:text-brand-800' : '-mr-2 p-2 text-brand-100 hover:text-white'}
+      >
+        <MenuIcon />
+      </button>
+    </div>
+  )
+}
+
+/** Desktop-only icon-collapse toggle, inside the sidebar's own header --
+ * same `toggleSidebar()` as the mobile hamburger. `Sidebar` renders this
+ * same header inside the mobile Sheet too (same `children`), so this needs
+ * its own `isMobile` check to hide there -- collapsing to an icon rail
+ * makes no sense inside a full-width mobile overlay panel. Checked in JS
+ * (not a `lg:hidden` class) for the same reason as MobileTopBar: it has to
+ * match Sidebar's own 768px/`md` breakpoint exactly, not float on a
+ * different one. */
+function CollapseToggle({ isLight }: { isLight: boolean }) {
+  const { toggleSidebar, state, isMobile } = useSidebar()
+  const { t } = useLanguage()
+  if (isMobile) return null
+  const collapsed = state === 'collapsed'
+  return (
+    <button
+      type="button"
+      onClick={toggleSidebar}
+      aria-label={collapsed ? t('common.shell.expandMenu') : t('common.shell.collapseMenu')}
+      className={`ml-auto rounded-lg p-1.5 ${
+        isLight ? 'text-brand-400 hover:bg-brand-50 hover:text-brand-800' : 'text-brand-300 hover:bg-brand-600 hover:text-white'
+      }`}
+    >
+      <ChevronLeftIcon className={`transition-transform duration-200 ${collapsed ? 'rotate-180' : ''}`} />
+    </button>
+  )
+}
+
+/** Sign-out + version link, in the sidebar footer -- reads `state`/`isMobile`
+ * for the same collapsed-icon-only layout tweaks the original hand-rolled
+ * shell had (hide labels, center icons). The account name/avatar link used
+ * to live here too; moved to the header (see HeaderAccountLink) so profile
+ * identity reads as "who's using this session" at the top of every page,
+ * not tucked away below the nav -- 2026-08-17. */
+function AccountFooter({
+  isLight,
+  changelogPath,
+}: {
+  isLight: boolean
+  changelogPath: string
+}) {
+  const { signOut } = useAuth()
+  const { t } = useLanguage()
+  const { state, isMobile, setOpenMobile } = useSidebar()
+  const collapsed = state === 'collapsed'
+  // Same reasoning as AppSidebarNav's onNavigate: Radix's Sheet needs an
+  // explicit close call on internal link clicks.
+  const onNavigate = () => {
+    if (isMobile) setOpenMobile(false)
+  }
+
+  return (
+    <>
+      <Button
+        variant={isLight ? 'ghost' : 'ghost-dark'}
+        onClick={() => signOut()}
+        title={collapsed ? t('common.shell.logout') : undefined}
+        className={`w-full !py-1.5 text-xs ${collapsed ? 'lg:justify-center lg:px-0' : 'justify-start'}`}
+      >
+        <LogoutIcon width={13} height={13} />
+        <span className={collapsed ? 'lg:hidden' : ''}>{t('common.shell.logout')}</span>
+      </Button>
+      {CURRENT_VERSION && (
+        <Link
+          to={changelogPath}
+          onClick={onNavigate}
+          title={collapsed ? `${t('common.shell.version')} ${CURRENT_VERSION} · ${t('common.shell.whatsNew')}` : undefined}
+          className={`mt-1.5 block truncate text-center text-[10px] ${collapsed ? 'lg:hidden' : ''} ${
+            isLight ? 'text-brand-300 hover:text-brand-600' : 'text-brand-400 hover:text-brand-200'
+          }`}
+        >
+          v{CURRENT_VERSION} · {t('common.shell.whatsNew')}
+        </Link>
+      )}
+    </>
+  )
+}
+
+/** Empty by default -- a routed page (see useHeaderSearchSlot) can portal
+ * its search box in here so it lives in the fixed header bar instead of the
+ * page's own scrolling content, without AppShell needing to know which page
+ * that is. Centered between the title and the account/notifications group;
+ * collapses back to zero width itself once its content (the portaled input)
+ * unmounts, e.g. navigating off a page that uses it. */
+function HeaderSearchSlot() {
+  const { setSlot } = useHeaderSearchSlot()
+  return <div ref={setSlot} className="flex min-w-0 flex-1 justify-center px-2 sm:px-4" />
+}
+
+/** Profile identity in the header bar, next to the language switcher and
+ * notification bell -- replaces the old sidebar-footer account link.
+ * Header bg is always white regardless of sidebar theme (see NotificationsBell's
+ * hardcoded theme="light" a few lines down), so this doesn't need an
+ * isLight branch of its own. Name hides below `sm` to leave room for the
+ * page title on narrow phones -- the avatar alone still links to /account. */
+function HeaderAccountLink({ profilePath }: { profilePath: string }) {
+  const { profile } = useAuth()
+  return (
+    <Link to={profilePath} className="flex shrink-0 items-center gap-2 rounded-lg py-1 pl-1 pr-2 hover:bg-brand-50">
+      <InitialsAvatar name={profile?.full_name ?? '?'} size="sm" />
+      <span className="hidden max-w-[10rem] truncate text-xs font-semibold text-brand-800 sm:block">{profile?.full_name}</span>
+    </Link>
+  )
+}
+
+/** Shared responsive shell for both BackofficeLayout and TenantLayout, built
+ * on shadcn's Sidebar primitive (migrated 2026-08-17, previously a fully
+ * hand-rolled <aside>). Desktop icon-collapse and mobile offcanvas both come
+ * from SidebarProvider/useSidebar instead of two separate hand-rolled state
+ * machines; content area is fluid (no max-width) so it uses all the space
+ * next to the sidebar.
+ *
+ * `theme` still exists for API compatibility (TenantLayout/BackofficeLayout
+ * pass it unchanged), but only the dark-navy chrome is actually reachable
+ * from the UI today (both layouts pass "dark") -- the shadcn Sidebar itself
+ * is pinned to the navy `--sidebar-*` tokens in index.css regardless of this
+ * prop, since building real light/dark theming was explicitly out of scope
+ * for this migration. `isLight` below only adjusts the few chrome pieces
+ * that live outside the token-driven Sidebar (mobile top bar, footer text).
+ * The accent pill on the active nav item stays Leadly's turquoise either
+ * way -- see AppSidebarNav's ACTIVE_CLASSES. */
 export function AppShell({
   subtitle,
   navItems,
@@ -88,163 +231,93 @@ export function AppShell({
   navItems: NavItem[]
   theme?: 'dark' | 'light'
 }) {
-  const { profile, signOut } = useAuth()
   const { t } = useLanguage()
   const location = useLocation()
   const basePath = location.pathname.startsWith('/backoffice') ? '/backoffice' : '/app'
-  const profilePath = `${basePath}/perfil`
-  const changelogPath = `${basePath}/novedades`
+  const profilePath = `${basePath}/account`
+  const changelogPath = `${basePath}/changelog`
   const pageHeader = useMemo(
     () => resolvePageTitle(location.pathname, navItems, { account: t('common.shell.myAccount'), whatsNew: t('common.shell.whatsNew') }),
     [location.pathname, navItems, t],
   )
-  const [mobileOpen, setMobileOpen] = useState(false)
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_STORAGE_KEY) === '1')
   const isLight = theme === 'light'
 
+  // Same leadly:-prefixed localStorage key the hand-rolled shell already
+  // used -- kept as the single source of truth for collapse persistence
+  // instead of also adopting shadcn's own cookie-based default, so there's
+  // one persistence mechanism, not two disagreeing ones. `open` here means
+  // *expanded* (shadcn's naming), the inverse of the old `collapsed` bit.
+  const [open, setOpen] = useState(() => localStorage.getItem(COLLAPSE_STORAGE_KEY) !== '1')
   useEffect(() => {
-    localStorage.setItem(COLLAPSE_STORAGE_KEY, collapsed ? '1' : '0')
-  }, [collapsed])
+    localStorage.setItem(COLLAPSE_STORAGE_KEY, open ? '0' : '1')
+  }, [open])
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[var(--color-surface)]">
-      <div
-        className={`fixed inset-x-0 top-0 z-40 flex h-14 items-center justify-between border-b px-4 lg:hidden ${
-          isLight ? 'border-brand-100 bg-white' : 'border-brand-800 bg-brand-700'
-        }`}
-      >
-        <Logo size="sm" onDark={!isLight} />
-        <button
-          type="button"
-          onClick={() => setMobileOpen(true)}
-          aria-label={t('common.shell.openMenu')}
-          className={isLight ? '-mr-2 p-2 text-brand-500 hover:text-brand-800' : '-mr-2 p-2 text-brand-100 hover:text-white'}
-        >
-          <MenuIcon />
-        </button>
-      </div>
+    <TooltipProvider delayDuration={300}>
+      <HeaderSearchSlotProvider>
+      <SidebarProvider open={open} onOpenChange={setOpen} className="bg-[var(--color-surface)]">
+        <MobileTopBar isLight={isLight} />
 
-      {mobileOpen && (
-        <div
-          className="animate-fade-in fixed inset-0 z-40 bg-brand-900/40 lg:hidden"
-          onClick={() => setMobileOpen(false)}
-          aria-hidden="true"
-        />
-      )}
-
-      <aside
-        className={`fixed inset-y-0 left-0 z-50 flex shrink-0 flex-col transition-[width,transform] duration-200 lg:static lg:translate-x-0 ${
-          isLight ? 'border-r border-brand-100 bg-white text-brand-700' : 'bg-brand-700 text-brand-100'
-        } ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} ${collapsed ? 'lg:w-20' : 'lg:w-64'} w-64`}
-      >
-        <div
-          className={`flex items-center gap-2 border-b px-4 py-3.5 ${isLight ? 'border-brand-100' : 'border-brand-800'} ${collapsed ? 'lg:justify-center lg:px-0' : ''}`}
-        >
-          <div className={collapsed ? 'lg:hidden' : ''}>
-            <Logo size="sm" onDark={!isLight} />
-          </div>
-          <button
-            type="button"
-            onClick={() => setCollapsed((c) => !c)}
-            aria-label={collapsed ? t('common.shell.expandMenu') : t('common.shell.collapseMenu')}
-            className={`hidden rounded-lg p-1.5 lg:ml-auto lg:block ${
-              isLight ? 'text-brand-400 hover:bg-brand-50 hover:text-brand-800' : 'text-brand-300 hover:bg-brand-600 hover:text-white'
-            }`}
-          >
-            <ChevronLeftIcon className={`transition-transform duration-200 ${collapsed ? 'rotate-180' : ''}`} />
-          </button>
-        </div>
-
-        <p className={`px-4 pb-2 pt-3 text-[11px] leading-tight ${isLight ? 'text-brand-300' : 'text-brand-300'} ${collapsed ? 'lg:hidden' : ''}`}>
-          {subtitle}
-        </p>
-
-        <nav className="flex-1 space-y-0.5 overflow-y-auto px-2.5 py-2">
-          {navItems.map((item, i) => (
-            <div key={item.to} className="animate-sidebar-item-in" style={{ animationDelay: `${i * 30}ms` }}>
-              <SidebarNavItem
-                to={item.to}
-                label={item.label}
-                icon={item.icon}
-                badge={item.badge}
-                children={item.children}
-                collapsed={collapsed}
-                theme={theme}
-                onClick={() => setMobileOpen(false)}
-              />
+        <Sidebar collapsible="icon">
+          <SidebarHeader className={`flex-row items-center gap-2 border-b px-4 py-3.5 ${isLight ? 'border-brand-100' : 'border-brand-800'} group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0`}>
+            <div className="group-data-[collapsible=icon]:hidden">
+              <Logo size="sm" onDark={!isLight} />
             </div>
-          ))}
-        </nav>
+            <CollapseToggle isLight={isLight} />
+          </SidebarHeader>
 
-        <div className={`border-t px-2.5 py-2.5 ${isLight ? 'border-brand-100' : 'border-brand-800'} ${collapsed ? 'lg:px-2' : ''}`}>
-          <Link
-            to={profilePath}
-            title={collapsed ? profile?.full_name : undefined}
-            onClick={() => setMobileOpen(false)}
-            className={`flex items-center gap-2 rounded-lg px-1.5 py-1 ${collapsed ? 'lg:justify-center lg:px-0' : ''} ${
-              isLight ? 'hover:bg-brand-50' : 'hover:bg-white/5'
-            }`}
-          >
-            <InitialsAvatar name={profile?.full_name ?? '?'} size="sm" />
-            <span className={`min-w-0 flex-1 ${collapsed ? 'lg:hidden' : ''}`}>
-              <span className={`block truncate text-xs font-semibold ${isLight ? 'text-brand-800' : 'text-white'}`}>{profile?.full_name}</span>
-              <span className={`block truncate text-[11px] ${isLight ? 'text-brand-400' : 'text-brand-300'}`}>{profile?.email}</span>
-            </span>
-          </Link>
-          <Button
-            variant={isLight ? 'ghost' : 'ghost-dark'}
-            onClick={() => signOut()}
-            title={collapsed ? t('common.shell.logout') : undefined}
-            className={`mt-1.5 w-full !py-1.5 text-xs ${collapsed ? 'lg:justify-center lg:px-0' : 'justify-start'}`}
-          >
-            <LogoutIcon width={13} height={13} />
-            <span className={collapsed ? 'lg:hidden' : ''}>{t('common.shell.logout')}</span>
-          </Button>
-          {CURRENT_VERSION && (
-            <Link
-              to={changelogPath}
-              onClick={() => setMobileOpen(false)}
-              title={collapsed ? `${t('common.shell.version')} ${CURRENT_VERSION} · ${t('common.shell.whatsNew')}` : undefined}
-              className={`mt-1.5 block truncate text-center text-[10px] ${collapsed ? 'lg:hidden' : ''} ${
-                isLight ? 'text-brand-300 hover:text-brand-600' : 'text-brand-400 hover:text-brand-200'
-              }`}
-            >
-              v{CURRENT_VERSION} · {t('common.shell.whatsNew')}
-            </Link>
-          )}
-        </div>
-      </aside>
+          <p className="px-4 pb-2 pt-3 text-[11px] leading-tight text-brand-300 group-data-[collapsible=icon]:hidden">{subtitle}</p>
 
-      <main className="flex min-w-0 flex-1 flex-col overflow-hidden pt-14 lg:pt-0">
-        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-brand-100 bg-white px-5 py-2.5 lg:px-8">
-          <div className="flex min-w-0 items-center gap-2">
-            {pageHeader.backTo ? (
-              <Link
-                to={pageHeader.backTo}
-                className="flex min-w-0 items-center gap-1 truncate text-base font-semibold text-brand-800 transition-colors hover:text-accent-700 sm:text-lg"
-              >
-                <ChevronLeftIcon width={18} height={18} className="shrink-0" />
-                <span className="truncate">{pageHeader.title}</span>
-              </Link>
-            ) : (
-              <h1 className="truncate text-base font-semibold text-brand-800 sm:text-lg">{pageHeader.title}</h1>
-            )}
-            {pageHeader.badge && (
-              <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-700">
-                {pageHeader.badge}
-              </span>
-            )}
+          <SidebarContent className="px-2.5 py-2">
+            <AppSidebarNav navItems={navItems} />
+          </SidebarContent>
+
+          <SidebarFooter className={`border-t px-2.5 py-2.5 ${isLight ? 'border-brand-100' : 'border-brand-800'} group-data-[collapsible=icon]:px-2`}>
+            <AccountFooter isLight={isLight} changelogPath={changelogPath} />
+          </SidebarFooter>
+        </Sidebar>
+
+        <SidebarInset className="overflow-hidden pt-14 md:pt-0">
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-brand-100 bg-white px-5 py-2.5 lg:px-8">
+            <div className="flex min-w-0 items-center gap-2">
+              {pageHeader.backTo ? (
+                <Link
+                  to={pageHeader.backTo}
+                  className="flex min-w-0 items-center gap-1 truncate text-sm font-semibold text-brand-800 transition-colors hover:text-accent-700 sm:text-base"
+                >
+                  <ChevronLeftIcon width={16} height={16} className="shrink-0" />
+                  <span className="truncate">{pageHeader.title}</span>
+                </Link>
+              ) : (
+                <h1 className="truncate text-sm font-semibold text-brand-800 sm:text-base">{pageHeader.title}</h1>
+              )}
+              {pageHeader.badge && (
+                <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+                  {pageHeader.badge}
+                </span>
+              )}
+            </div>
+            <HeaderSearchSlot />
+            {/* Two groups instead of three loose icons in a row: app-level
+                settings (language) on one side of a divider, "about me"
+                (notifications, identity) on the other -- reads as
+                intentional grouping instead of an unordered icon strip. */}
+            <div className="flex shrink-0 items-center gap-2.5">
+              <LanguageSwitcher />
+              <div className="h-5 w-px bg-brand-100" aria-hidden="true" />
+              <div className="flex items-center gap-1">
+                <NotificationsBell theme="light" />
+                <HeaderAccountLink profilePath={profilePath} />
+              </div>
+            </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <LanguageSwitcher />
-            <NotificationsBell theme="light" />
+          <div className="min-h-0 flex-1 overflow-y-auto p-5 lg:p-8">
+            <PageOutlet />
           </div>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-5 lg:p-8">
-          <PageOutlet />
-        </div>
-      </main>
-    </div>
+        </SidebarInset>
+      </SidebarProvider>
+      </HeaderSearchSlotProvider>
+    </TooltipProvider>
   )
 }
 

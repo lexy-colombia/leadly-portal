@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { createAddress, updateAddress } from '../../../lib/api/addresses'
-import type { CrmContactAddress } from '../../../types/domain'
+import type { ContactAddress } from '../../../types/domain'
 import { Button, FieldError, Input, Label, Switch, Textarea } from '@/components/atoms'
 import { Drawer } from '@/components/organisms'
 import { isNotBlank } from '../../../lib/validation'
@@ -19,8 +19,8 @@ export function AddressDrawer({
   tenantId: string
   contactId: string
   /** Present when editing an existing address; omitted when creating a new one. */
-  address?: CrmContactAddress | null
-  onSaved: (address: CrmContactAddress) => void
+  address?: ContactAddress | null
+  onSaved: (address: ContactAddress) => void
 }) {
   const { t } = useLanguage()
   const [label, setLabel] = useState('')

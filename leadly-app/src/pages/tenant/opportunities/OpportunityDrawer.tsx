@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { createOpportunity, listStages, updateOpportunity, type OpportunityWithRelations } from '../../../lib/api/opportunities'
-import { listContacts } from '../../../lib/api/contacts'
+import { listClients } from '../../../lib/api/clients'
 import type { Client, PipelineStage, OpportunityPriority } from '../../../types/domain'
 import { Button, FieldError, Input, Label, Select, Textarea } from '@/components/atoms'
 import { CurrencyInput } from '@/components/molecules'
@@ -60,7 +60,7 @@ export function OpportunityDrawer({
 
   useEffect(() => {
     if (!open) return
-    listContacts(tenantId).then(setContacts).catch(() => {})
+    listClients(tenantId).then(setContacts).catch(() => {})
   }, [open, tenantId])
 
   useEffect(() => {

@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient'
-import type { CrmContactAddress } from '../../types/domain'
+import type { ContactAddress } from '../../types/domain'
 
 export interface AddressInput {
   tenant_id: string
@@ -20,9 +20,9 @@ export interface AddressInput {
   is_default?: boolean
 }
 
-export async function listAddressesForContact(contactId: string): Promise<CrmContactAddress[]> {
+export async function listAddressesForContact(contactId: string): Promise<ContactAddress[]> {
   const { data, error } = await supabase
-    .from('crm_contact_addresses')
+    .from('contact_addresses')
     .select('*')
     .eq('contact_id', contactId)
     .is('deleted_at', null)
@@ -32,16 +32,16 @@ export async function listAddressesForContact(contactId: string): Promise<CrmCon
   return data
 }
 
-export async function createAddress(input: AddressInput): Promise<CrmContactAddress> {
+export async function createAddress(input: AddressInput): Promise<ContactAddress> {
   if (input.is_default) await clearDefaultAddress(input.contact_id)
-  const { data, error } = await supabase.from('crm_contact_addresses').insert(input).select().single()
+  const { data, error } = await supabase.from('contact_addresses').insert(input).select().single()
   if (error) throw error
   return data
 }
 
-export async function updateAddress(id: string, contactId: string, input: Partial<AddressInput>): Promise<CrmContactAddress> {
+export async function updateAddress(id: string, contactId: string, input: Partial<AddressInput>): Promise<ContactAddress> {
   if (input.is_default) await clearDefaultAddress(contactId)
-  const { data, error } = await supabase.from('crm_contact_addresses').update(input).eq('id', id).select().single()
+  const { data, error } = await supabase.from('contact_addresses').update(input).eq('id', id).select().single()
   if (error) throw error
   return data
 }
@@ -50,7 +50,7 @@ export async function deleteAddress(id: string): Promise<void> {
   const {
     data: { user },
   } = await supabase.auth.getUser()
-  const { error } = await supabase.from('crm_contact_addresses').update({ deleted_at: new Date().toISOString(), deleted_by: user?.id ?? null }).eq('id', id)
+  const { error } = await supabase.from('contact_addresses').update({ deleted_at: new Date().toISOString(), deleted_by: user?.id ?? null }).eq('id', id)
   if (error) throw error
 }
 
@@ -59,6 +59,6 @@ export async function deleteAddress(id: string): Promise<void> {
  * this at the DB layer (kept simple, same level of enforcement as the rest
  * of this CRM). */
 async function clearDefaultAddress(contactId: string): Promise<void> {
-  const { error } = await supabase.from('crm_contact_addresses').update({ is_default: false }).eq('contact_id', contactId).eq('is_default', true)
+  const { error } = await supabase.from('contact_addresses').update({ is_default: false }).eq('contact_id', contactId).eq('is_default', true)
   if (error) throw error
 }

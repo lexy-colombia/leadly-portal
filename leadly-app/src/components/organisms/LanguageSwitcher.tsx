@@ -24,7 +24,7 @@ export function LanguageSwitcher() {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-sm font-medium text-brand-500 transition-colors hover:bg-brand-50 hover:text-brand-800"
+        className="flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-medium text-brand-500 transition-colors hover:bg-brand-50 hover:text-brand-800"
       >
         <GlobeIcon width={16} height={16} />
         {LABEL[language]}

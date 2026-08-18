@@ -3,10 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { Language } from '../../i18n/translations'
-import { deleteContact, listContacts } from '../../lib/api/contacts'
+import { deleteClient, listClients } from '../../lib/api/clients'
 import { listLastContactTimesByTenant } from '../../lib/api/conversations'
 import { listProfilesByTenant } from '../../lib/api/users'
-import type { ContactStage, Client, Profile } from '../../types/domain'
+import type { ClientStage, Client, Profile } from '../../types/domain'
 import { Badge, Button, InitialsAvatar, PageSpinner, Select, Table, TBody, TD, TH, THead, TRow } from '@/components/atoms'
 import { Card, EmptyState, IconInput, Pagination } from '@/components/molecules'
 import { FilterIcon, PencilIcon, PlusIcon, SearchIcon, TrashIcon } from '@/components/atoms/icons'
@@ -14,7 +14,7 @@ import { ContactDrawer, STAGE_LABEL } from './clients/ContactDrawer'
 
 const PAGE_SIZE = 8
 
-const STAGE_TONE: Record<ContactStage, 'neutral' | 'success' | 'warning' | 'danger'> = {
+const STAGE_TONE: Record<ClientStage, 'neutral' | 'success' | 'warning' | 'danger'> = {
   lead: 'neutral',
   contactado: 'warning',
   negociacion: 'warning',
@@ -42,7 +42,7 @@ export function Clients() {
   const [lastContact, setLastContact] = useState<Map<string, string>>(new Map())
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
-  const [stageFilter, setStageFilter] = useState<ContactStage | ''>('')
+  const [stageFilter, setStageFilter] = useState<ClientStage | ''>('')
   const [tagFilter, setTagFilter] = useState('')
   const [agentFilter, setAgentFilter] = useState('')
   const [page, setPage] = useState(1)
@@ -55,7 +55,7 @@ export function Clients() {
   useEffect(() => {
     if (!profile?.tenant_id) return
     const tenantId = profile.tenant_id
-    listContacts(tenantId)
+    listClients(tenantId)
       .then(setContacts)
       .catch((err) => setError(err.message ?? t('contacts.errors.load')))
     listProfilesByTenant(tenantId).then(setAgents).catch(() => {})
@@ -107,7 +107,7 @@ export function Clients() {
     setDeleting(true)
     setError(null)
     try {
-      await deleteContact(id)
+      await deleteClient(id)
       setContacts((prev) => (prev ? prev.filter((c) => c.id !== id) : prev))
       setDeletingId(null)
     } catch (err) {
@@ -151,9 +151,9 @@ export function Clients() {
             <div className="absolute left-0 top-full z-40 mt-2 w-64 max-w-[calc(100vw-2rem)] space-y-3 rounded-2xl border border-brand-100 bg-white p-4 shadow-lg">
               <div>
                 <label className="mb-1 block text-xs font-medium text-brand-400">{t('contacts.filters.stage.label')}</label>
-                <Select value={stageFilter} onChange={(e) => setStageFilter(e.target.value as ContactStage | '')} className="!py-1.5 text-sm">
+                <Select value={stageFilter} onChange={(e) => setStageFilter(e.target.value as ClientStage | '')} className="!py-1.5 text-sm">
                   <option value="">{t('contacts.filters.stage.all')}</option>
-                  {(Object.keys(STAGE_LABEL) as ContactStage[]).map((s) => (
+                  {(Object.keys(STAGE_LABEL) as ClientStage[]).map((s) => (
                     <option key={s} value={s}>
                       {t(STAGE_LABEL[s])}
                     </option>
@@ -239,7 +239,7 @@ export function Clients() {
             </THead>
             <TBody>
               {pageItems.map((contact) => (
-                <TRow key={contact.id} onClick={() => navigate(`/app/clientes/${contact.id}`)} clickable>
+                <TRow key={contact.id} onClick={() => navigate(`/app/clients/${contact.id}`)} clickable>
                   <TD className="font-medium text-brand-800">
                     <span className="flex items-center gap-3">
                       <InitialsAvatar name={contact.full_name} size="sm" />

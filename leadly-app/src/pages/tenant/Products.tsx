@@ -1,18 +1,36 @@
 import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
-import { deleteProduct, getProductImageUrl, listProducts } from '../../lib/api/products'
+import { useHeaderSearchSlot } from '@/contexts/HeaderSearchSlotContext'
+import { deleteProduct, getProductImageUrl, listProducts, updateProduct } from '../../lib/api/products'
 import type { ProductWithImages } from '../../lib/api/products'
 import { listStockTotalsByTenant } from '../../lib/api/stockMovements'
 import type { ProductStockTotal } from '../../lib/api/stockMovements'
-import { Badge, Button, PageSpinner, Select, Table, TBody, TD, TH, THead, TRow } from '@/components/atoms'
-import { Card, EmptyState, IconInput, Pagination } from '@/components/molecules'
-import { AlertIcon, BoxIcon, PencilIcon, PlusIcon, SearchIcon, TrashIcon } from '@/components/atoms/icons'
+import { descendantIds, listProductCategories } from '../../lib/api/productCategories'
+import { listBrands } from '../../lib/api/brands'
+import { listWarehouses } from '../../lib/api/warehouses'
+import type { Brand, ProductCategory, Warehouse } from '../../types/domain'
+import { PageSpinner, ProductImage } from '@/components/atoms'
+import { Card, CategoryTreeFilter, ComboboxFilter, EmptyState, IconInput, Pagination } from '@/components/molecules'
+import { AlertIcon, PencilIcon, PlusIcon, SearchIcon, TrashIcon } from '@/components/atoms/icons'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ProductDrawer } from './products/ProductDrawer'
-import { SuppliersTab } from './products/SuppliersTab'
 
 const PAGE_SIZE = 10
+// Shared by every filter trigger (category/brand/warehouse/low-stock) so
+// they line up as one uniform row of pills instead of each auto-sizing to
+// its own label. Warehouse uses ComboboxFilter (not a shadcn Select) for the
+// same reason -- Select's trigger has its own hardcoded border/background/
+// hover tokens (border-input, bg-transparent, no hover state) completely
+// separate from Button's "outline" variant, so no shared className could
+// ever make the two look alike; reusing the exact same Button-based trigger
+// component is what actually guarantees it.
+const FILTER_TRIGGER_CLASS = 'w-40 rounded-lg text-xs'
 
 function formatCurrency(value: number | null, currency: string): string {
   if (value == null) return '-'
@@ -32,23 +50,83 @@ function isLowStock(product: ProductWithImages, stockTotals: Map<string, Product
   return product.track_inventory && availableStock(product, stockTotals) <= product.low_stock_threshold
 }
 
-function ProductsTab({ tenantId }: { tenantId: string }) {
+/** Proveedores se sacó de acá el 2026-08-17 (ruta propia
+ * /app/products/suppliers, ver Suppliers.tsx/modules.ts) -- pedido
+ * explícito del usuario de que "Productos" sea solo el catálogo, no un
+ * contenedor de tabs. La columna Proveedor también se sacó de la tabla por
+ * el mismo pedido (sigue siendo un campo editable en ProductDrawer, solo
+ * dejó de mostrarse acá). Paginación y filtros pasaron a ser server-side
+ * (listProducts ahora pide de a PAGE_SIZE con `.range()`, no trae el
+ * catálogo completo) -- necesario apenas el catálogo de un tenant real
+ * empieza a tener cientos de productos (ver seed de 100 productos de
+ * Tenant QA Uno). */
+export function Products() {
+  const { profile } = useAuth()
   const { t } = useLanguage()
+  const tenantId = profile?.tenant_id
+  const { slot: headerSearchSlot } = useHeaderSearchSlot()
+
   const [products, setProducts] = useState<ProductWithImages[] | null>(null)
+  const [totalCount, setTotalCount] = useState(0)
   const [stockTotals, setStockTotals] = useState<Map<string, ProductStockTotal>>(new Map())
+  const [categories, setCategories] = useState<ProductCategory[]>([])
+  const [brands, setBrands] = useState<Brand[]>([])
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
   const [search, setSearch] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [categoryId, setCategoryId] = useState<string | null>(null)
+  const [brandId, setBrandId] = useState<string | null>(null)
+  const [warehouseId, setWarehouseId] = useState<string | null>(null)
   const [lowStockOnly, setLowStockOnly] = useState(false)
   const [page, setPage] = useState(1)
+
   const [drawer, setDrawer] = useState<{ open: boolean; product: ProductWithImages | null }>({ open: false, product: null })
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [togglingId, setTogglingId] = useState<string | null>(null)
+
+  // Debounced so typing a search term doesn't fire a DB round trip per
+  // keystroke -- the query only runs 350ms after the user stops typing.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 350)
+    return () => clearTimeout(timer)
+  }, [search])
+
+  // Reference lists for the filter pickers -- small enough (a tenant's
+  // categories/brands/warehouses realistically never run into the hundreds)
+  // to load in full once, unlike the products list itself.
+  useEffect(() => {
+    if (!tenantId) return
+    listProductCategories(tenantId).then(setCategories).catch(() => {})
+    listBrands(tenantId).then(setBrands).catch(() => {})
+    listWarehouses(tenantId).then(setWarehouses).catch(() => {})
+  }, [tenantId])
+
+  // Picking a category filters its whole subtree, not just that exact row --
+  // browsing "Audio" should show every audífono/parlante/micrófono under it,
+  // not require drilling all the way to a leaf first.
+  const categoryIds = useMemo(() => {
+    if (!categoryId) return undefined
+    return [categoryId, ...Array.from(descendantIds(categories, categoryId))]
+  }, [categoryId, categories])
+
+  const hasActiveFilters = Boolean(debouncedSearch || categoryId || brandId || warehouseId || lowStockOnly)
+
+  useEffect(() => {
+    setPage(1)
+  }, [debouncedSearch, categoryIds, brandId, warehouseId, lowStockOnly])
 
   function reload() {
-    listProducts(tenantId)
-      .then((data) => {
+    if (!tenantId) return
+    setLoading(true)
+    setError(null)
+    listProducts(tenantId, { page, pageSize: PAGE_SIZE, search: debouncedSearch, categoryIds, brandId, warehouseId, lowStockOnly })
+      .then(({ data, count }) => {
         setProducts(data)
+        setTotalCount(count)
         // Keeps an open edit drawer in sync (e.g. right after an image
         // upload/removal) instead of holding on to the stale snapshot it was
         // opened with -- the drawer's `product` prop is separate state from
@@ -56,48 +134,21 @@ function ProductsTab({ tenantId }: { tenantId: string }) {
         setDrawer((prev) => (prev.product ? { ...prev, product: data.find((p) => p.id === prev.product!.id) ?? prev.product } : prev))
       })
       .catch((err) => setError(err.message ?? t('products.errors.load')))
+      .finally(() => setLoading(false))
     listStockTotalsByTenant(tenantId).then(setStockTotals).catch(() => {})
   }
 
-  useEffect(reload, [tenantId])
+  useEffect(reload, [tenantId, page, debouncedSearch, categoryIds, brandId, warehouseId, lowStockOnly])
 
-  const categories = useMemo(() => {
-    if (!products) return []
-    const map = new Map<string, string>()
-    products.forEach((p) => p.category && map.set(p.category.id, p.category.name))
-    return Array.from(map.entries())
-  }, [products])
-
-  const lowStockCount = useMemo(
-    () => (products ? products.filter((p) => isLowStock(p, stockTotals)).length : 0),
-    [products, stockTotals],
-  )
-
-  const filtered = useMemo(() => {
-    if (!products) return null
-    const term = search.trim().toLowerCase()
-    return products.filter((p) => {
-      if (categoryFilter && p.category_id !== categoryFilter) return false
-      if (lowStockOnly && !isLowStock(p, stockTotals)) return false
-      if (!term) return true
-      return p.name.toLowerCase().includes(term) || (p.sku ?? '').toLowerCase().includes(term)
-    })
-  }, [products, search, categoryFilter, lowStockOnly, stockTotals])
-
-  useEffect(() => {
-    setPage(1)
-  }, [search, categoryFilter, lowStockOnly])
-
-  const totalPages = filtered ? Math.max(1, Math.ceil(filtered.length / PAGE_SIZE)) : 1
-  const pageItems = filtered ? filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE) : null
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
 
   async function handleDelete(id: string) {
     setDeleting(true)
     setError(null)
     try {
       await deleteProduct(id)
-      setProducts((prev) => (prev ? prev.filter((p) => p.id !== id) : prev))
       setDeletingId(null)
+      reload()
     } catch (err) {
       setError(err instanceof Error ? err.message : t('products.errors.delete'))
     } finally {
@@ -105,183 +156,187 @@ function ProductsTab({ tenantId }: { tenantId: string }) {
     }
   }
 
+  async function handleToggleActive(product: ProductWithImages, checked: boolean) {
+    setTogglingId(product.id)
+    setProducts((list) => (list ? list.map((p) => (p.id === product.id ? { ...p, is_active: checked } : p)) : list))
+    try {
+      await updateProduct(product.id, { is_active: checked })
+    } catch (err) {
+      setProducts((list) => (list ? list.map((p) => (p.id === product.id ? { ...p, is_active: !checked } : p)) : list))
+      setError(err instanceof Error ? err.message : t('products.errors.save'))
+    } finally {
+      setTogglingId(null)
+    }
+  }
+
+  if (!tenantId) return <PageSpinner />
+
   return (
     <div className="space-y-3">
+      {headerSearchSlot &&
+        createPortal(
+          <IconInput
+            icon={<SearchIcon width={14} height={14} />}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t('products.list.searchPlaceholder')}
+            className="!w-64 !rounded-lg !py-1.5 text-xs"
+          />,
+          headerSearchSlot,
+        )}
+
       <div className="flex flex-wrap items-center gap-2">
-        <IconInput
-          icon={<SearchIcon width={14} height={14} />}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder={t('products.list.searchPlaceholder')}
-          className="!w-56 !py-1 text-xs"
+        <CategoryTreeFilter
+          categories={categories}
+          value={categoryId}
+          onChange={setCategoryId}
+          placeholder={t('products.list.allCategories')}
+          searchPlaceholder={t('products.list.searchCategory')}
+          emptyLabel={t('products.list.noCategoryResults')}
+          rootLabel={t('products.list.allCategories')}
+          triggerClassName={FILTER_TRIGGER_CLASS}
         />
 
-        <Select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="!w-auto !py-1 text-xs">
-          <option value="">{t('products.list.allCategories')}</option>
-          {categories.map(([id, name]) => (
-            <option key={id} value={id}>
-              {name}
-            </option>
-          ))}
-        </Select>
+        <ComboboxFilter
+          options={brands.map((b) => ({ id: b.id, label: b.name }))}
+          value={brandId}
+          onChange={setBrandId}
+          placeholder={t('products.list.allBrands')}
+          searchPlaceholder={t('products.list.searchBrand')}
+          emptyLabel={t('products.list.noBrandResults')}
+          triggerClassName={FILTER_TRIGGER_CLASS}
+        />
 
-        <button
-          type="button"
-          onClick={() => setLowStockOnly((v) => !v)}
-          className={`flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs transition-colors ${
-            lowStockOnly ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-brand-200 text-brand-500 hover:bg-brand-50'
-          }`}
-        >
-          <AlertIcon width={13} height={13} />
-          {t('products.list.lowStockFilter')} {lowStockCount > 0 && `(${lowStockCount})`}
-        </button>
+        <ComboboxFilter
+          options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
+          value={warehouseId}
+          onChange={setWarehouseId}
+          placeholder={t('products.list.allWarehouses')}
+          searchPlaceholder={t('products.list.searchWarehouse')}
+          emptyLabel={t('products.list.noWarehouseResults')}
+          triggerClassName={FILTER_TRIGGER_CLASS}
+        />
+
+        <Button type="button" variant={lowStockOnly ? 'secondary' : 'outline'} size="sm" className={FILTER_TRIGGER_CLASS} onClick={() => setLowStockOnly((v) => !v)}>
+          <AlertIcon width={13} height={13} /> {t('products.list.lowStockFilter')}
+        </Button>
 
         <span className="shrink-0 text-xs text-brand-400">
-          {filtered?.length ?? 0} {t((filtered?.length ?? 0) === 1 ? 'products.count.singular' : 'products.count.plural')}
+          {totalCount} {t(totalCount === 1 ? 'products.count.singular' : 'products.count.plural')}
         </span>
 
-        <Button variant="secondary" onClick={() => setDrawer({ open: true, product: null })} className="!ml-auto !py-1 !text-xs">
+        <Button onClick={() => setDrawer({ open: true, product: null })} size="sm" className="ml-auto">
           <PlusIcon width={14} height={14} /> {t('products.actions.new')}
         </Button>
       </div>
 
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-      {!products && !error && <PageSpinner />}
+      {loading && !products && <PageSpinner />}
 
-      {filtered && filtered.length === 0 && (
+      {products && products.length === 0 && (
         <Card>
-          <EmptyState>{products && products.length > 0 ? t('products.empty.noMatch') : t('products.empty.none')}</EmptyState>
+          <EmptyState>{hasActiveFilters ? t('products.empty.noMatch') : t('products.empty.none')}</EmptyState>
         </Card>
       )}
 
-      {pageItems && pageItems.length > 0 && (
+      {products && products.length > 0 && (
         <>
-          <Table>
-            <THead>
-              <tr>
-                <TH></TH>
-                <TH>{t('products.table.product')}</TH>
-                <TH>{t('products.table.category')}</TH>
-                <TH>{t('products.table.supplier')}</TH>
-                <TH>{t('products.table.price')}</TH>
-                <TH>{t('products.table.stock')}</TH>
-                <TH>{t('products.table.status')}</TH>
-                <TH className="text-right">{t('products.table.actions')}</TH>
-              </tr>
-            </THead>
-            <TBody>
-              {pageItems.map((product) => {
-                const lowStock = isLowStock(product, stockTotals)
-                const reserved = stockTotals.get(product.id)?.reserved ?? 0
-                const cover = product.images[0]
-                return (
-                  <TRow key={product.id}>
-                    <TD>
-                      <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-lg border border-brand-100 bg-brand-50 text-brand-300">
-                        {cover ? <img src={getProductImageUrl(cover.storage_path)} alt="" className="h-full w-full object-cover" /> : <BoxIcon width={16} height={16} />}
-                      </div>
-                    </TD>
-                    <TD className="text-xs font-medium text-brand-800">
-                      <Link to={`/app/productos/${product.id}`} className="hover:text-accent-600 hover:underline">
-                        {product.name}
-                      </Link>
-                      {product.sku && <span className="block text-[11px] font-normal text-brand-400">{t('products.table.sku', { sku: product.sku })}</span>}
-                    </TD>
-                    <TD className="text-xs text-brand-500">
-                      {product.category ? (
-                        <span className="inline-flex items-center gap-1.5">
-                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: product.category.color ?? '#94A3B8' }} />
-                          {product.category.name}
-                        </span>
-                      ) : (
-                        '-'
-                      )}
-                    </TD>
-                    <TD className="text-xs text-brand-500">{product.supplier?.name ?? '-'}</TD>
-                    <TD className="text-xs text-brand-700">{formatCurrency(product.retail_price, product.currency)}</TD>
-                    <TD>
-                      {product.track_inventory ? (
-                        <Badge tone={lowStock ? 'danger' : 'neutral'}>
-                          {t('products.table.available', { count: availableStock(product, stockTotals) })} {lowStock && t('products.table.low')}
-                        </Badge>
-                      ) : (
-                        <span className="text-xs text-brand-400">{t('products.table.noControl')}</span>
-                      )}
-                      {reserved > 0 && <span className="ml-1.5 text-[11px] text-brand-400">{t('products.table.reserved', { count: reserved })}</span>}
-                    </TD>
-                    <TD>
-                      <Badge tone={product.is_active ? 'success' : 'neutral'}>{t(product.is_active ? 'common.status.active' : 'common.status.inactive')}</Badge>
-                    </TD>
-                    <TD className="text-right">
-                      {deletingId === product.id ? (
-                        <span className="inline-flex items-center gap-1.5">
-                          <Button variant="danger" onClick={() => handleDelete(product.id)} disabled={deleting} className="!px-2 !py-1 text-xs">
-                            {deleting ? t('common.actions.deleting') : t('common.actions.confirm')}
-                          </Button>
-                          <Button variant="ghost" onClick={() => setDeletingId(null)} disabled={deleting} className="!px-2 !py-1 text-xs">
-                            {t('common.actions.cancel')}
-                          </Button>
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1">
-                          <Button variant="ghost" onClick={() => setDrawer({ open: true, product })} className="!px-2 !py-1 text-xs">
-                            <PencilIcon width={12} height={12} />
-                          </Button>
-                          <Button variant="ghost" onClick={() => setDeletingId(product.id)} className="!px-2 !py-1 text-xs !text-red-600 hover:!bg-red-50">
-                            <TrashIcon width={12} height={12} />
-                          </Button>
-                        </span>
-                      )}
-                    </TD>
-                  </TRow>
-                )
-              })}
-            </TBody>
-          </Table>
+          <div className="overflow-hidden rounded-2xl border border-brand-100 bg-white">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead></TableHead>
+                  <TableHead>{t('products.table.product')}</TableHead>
+                  <TableHead>{t('products.table.category')}</TableHead>
+                  <TableHead>{t('products.table.price')}</TableHead>
+                  <TableHead>{t('products.table.stock')}</TableHead>
+                  <TableHead>{t('products.table.active')}</TableHead>
+                  <TableHead className="text-right">{t('products.table.actions')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {products.map((product) => {
+                  const lowStock = isLowStock(product, stockTotals)
+                  const reserved = stockTotals.get(product.id)?.reserved ?? 0
+                  const cover = product.images[0]
+                  return (
+                    <TableRow key={product.id}>
+                      <TableCell>
+                        <div className="h-9 w-9 overflow-hidden rounded-lg border border-brand-100">
+                          <ProductImage src={cover ? getProductImageUrl(cover.storage_path) : null} name={product.name} className="h-full w-full" iconSize={16} />
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-xs font-medium text-brand-800">
+                        <Link to={`/app/products/${product.id}`} className="hover:text-accent-600 hover:underline">
+                          {product.name}
+                        </Link>
+                        {product.sku && <span className="block text-[11px] font-normal text-brand-400">{t('products.table.sku', { sku: product.sku })}</span>}
+                      </TableCell>
+                      <TableCell className="text-xs text-brand-500">
+                        {product.categories.length > 0 ? (
+                          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                            {product.categories.map((c) => (
+                              <span key={c.id} className="inline-flex items-center gap-1.5">
+                                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: c.color ?? '#94A3B8' }} />
+                                {c.name}
+                              </span>
+                            ))}
+                          </span>
+                        ) : (
+                          '-'
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs text-brand-700">{formatCurrency(product.retail_price, product.currency)}</TableCell>
+                      <TableCell>
+                        {product.track_inventory ? (
+                          <Badge variant={lowStock ? 'destructive' : 'secondary'}>
+                            {t('products.table.available', { count: availableStock(product, stockTotals) })} {lowStock && t('products.table.low')}
+                          </Badge>
+                        ) : (
+                          <span className="text-xs text-brand-400">{t('products.table.noControl')}</span>
+                        )}
+                        {reserved > 0 && <span className="ml-1.5 text-[11px] text-brand-400">{t('products.table.reserved', { count: reserved })}</span>}
+                      </TableCell>
+                      <TableCell>
+                        <Switch
+                          checked={product.is_active}
+                          disabled={togglingId === product.id}
+                          onCheckedChange={(checked) => handleToggleActive(product, checked)}
+                          aria-label={t(product.is_active ? 'common.status.active' : 'common.status.inactive')}
+                        />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {deletingId === product.id ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            <Button variant="destructive" size="xs" onClick={() => handleDelete(product.id)} disabled={deleting}>
+                              {deleting ? t('common.actions.deleting') : t('common.actions.confirm')}
+                            </Button>
+                            <Button variant="ghost" size="xs" onClick={() => setDeletingId(null)} disabled={deleting}>
+                              {t('common.actions.cancel')}
+                            </Button>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1">
+                            <Button variant="ghost" size="icon-xs" onClick={() => setDrawer({ open: true, product })}>
+                              <PencilIcon width={12} height={12} />
+                            </Button>
+                            <Button variant="ghost" size="icon-xs" className="text-red-600 hover:bg-red-50" onClick={() => setDeletingId(product.id)}>
+                              <TrashIcon width={12} height={12} />
+                            </Button>
+                          </span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </div>
           <Pagination page={page} totalPages={totalPages} onChange={setPage} />
         </>
       )}
 
       <ProductDrawer open={drawer.open} onClose={() => setDrawer({ open: false, product: null })} tenantId={tenantId} product={drawer.product} onSaved={reload} />
-    </div>
-  )
-}
-
-// Categorías y Brands se movieron a rutas propias (/app/productos/categorias,
-// /app/productos/marcas) el 2026-08-16 -- "Products" pasó a ser un ítem de
-// nav expandible con esas dos como hijos (ver modules.ts/TenantLayout.tsx),
-// así que ya no tiene sentido tenerlas también como tab acá. Proveedores no
-// se tocó, se queda como tab -- no se pidió sacarla también.
-export function Products() {
-  const { profile } = useAuth()
-  const { t } = useLanguage()
-  const [tab, setTab] = useState<'productos' | 'proveedores'>('productos')
-
-  if (!profile?.tenant_id) return <PageSpinner />
-
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-1 border-b border-brand-100">
-        {(
-          [
-            ['productos', t('products.tabs.products')],
-            ['proveedores', t('products.tabs.suppliers')],
-          ] as const
-        ).map(([value, label]) => (
-          <button
-            key={value}
-            onClick={() => setTab(value)}
-            className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
-              tab === value ? 'border-accent-500 text-accent-700' : 'border-transparent text-brand-400 hover:text-brand-700'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {tab === 'productos' && <ProductsTab tenantId={profile.tenant_id} />}
-      {tab === 'proveedores' && <SuppliersTab tenantId={profile.tenant_id} />}
     </div>
   )
 }

@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { CheckIcon, PlusIcon as PlusIconLucide, XIcon } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import {
   createProduct,
   deleteProductImage,
@@ -8,16 +10,52 @@ import {
   validateProductImageFile,
 } from '../../../lib/api/products'
 import type { ProductWithImages } from '../../../lib/api/products'
-import { listProductCategories } from '../../../lib/api/productCategories'
+import { listProductCategories, flattenCategoryTree } from '../../../lib/api/productCategories'
 import { listSuppliers } from '../../../lib/api/suppliers'
 import { listBrands } from '../../../lib/api/brands'
 import type { Brand, ProductCategory, Supplier } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { Button, FieldError, Input, Label, Select, Switch, Textarea } from '@/components/atoms'
-import { CurrencyInput } from '@/components/molecules'
+import { FieldError, ProductImage } from '@/components/atoms'
+import { ComboboxFilter, CurrencyInput } from '@/components/molecules'
 import { Drawer } from '@/components/organisms'
 import { PlusIcon, TrashIcon } from '@/components/atoms/icons'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
+import { Badge } from '@/components/ui/badge'
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { isNotBlank } from '../../../lib/validation'
+
+// The exact sizing the Products list's filter pills use (CategoryTreeFilter/
+// ComboboxFilter triggers, `size="sm"` on Button) -- every field in this
+// form is pinned to it so the drawer doesn't feel like a visually separate,
+// bigger design system from the list it edits. `!`-prefixed because Input/
+// Textarea/CurrencyInput each carry their own baked-in size (shadcn Input's
+// h-8, and a `md:text-sm` responsive override that would otherwise win back
+// over a plain `text-xs` at desktop widths) that a same-specificity class
+// can't reliably beat.
+const FIELD_CLASS = '!h-7 !rounded-lg !text-xs'
+const TEXTAREA_CLASS = '!rounded-lg !py-1.5 !text-xs'
+// ComboboxFilter's own trigger sits in a flex row *with* its clear button --
+// a plain `w-full` there would fight that sibling for space; `flex-1` grows
+// to fill what's left instead.
+const COMBOBOX_TRIGGER_CLASS = 'flex-1 !rounded-lg'
+
+/** Small uppercase label above a group of related fields -- breaks the form
+ * into scannable sections (Información básica / Categorización / Precios /
+ * Inventario) instead of one undifferentiated stack, the main thing that
+ * made the old version feel like a wall of fields. */
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="space-y-2.5">
+      <p className="text-[11px] font-semibold tracking-wide text-brand-400 uppercase">{title}</p>
+      {children}
+    </div>
+  )
+}
 
 /** Images only make sense once the product exists in the DB
  * (product_images.product_id needs a real row to point at) -- same
@@ -59,8 +97,7 @@ function ProductImages({ tenantId, product, onChanged }: { tenantId: string; pro
   }
 
   return (
-    <div>
-      <Label>{t('products.drawer.images.label')}</Label>
+    <Section title={t('products.drawer.images.label')}>
       <div className="flex flex-wrap gap-2">
         {product.images.map((img) => (
           <div key={img.id} className="group relative h-16 w-16 overflow-hidden rounded-lg border border-brand-100">
@@ -85,8 +122,91 @@ function ProductImages({ tenantId, product, onChanged }: { tenantId: string; pro
         </button>
       </div>
       <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={handleSelect} />
-      {uploading && <p className="mt-1 text-xs text-brand-400">{t('products.drawer.images.uploading')}</p>}
-      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+      {uploading && <p className="text-xs text-brand-400">{t('products.drawer.images.uploading')}</p>}
+      {error && <p className="text-xs text-red-600">{error}</p>}
+    </Section>
+  )
+}
+
+/** Multi-select combobox -- chips for whatever's picked plus an "Agregar"
+ * trigger live together in one bordered field (same shape as TagInput's
+ * chip-box, just picking from a fixed tree instead of typing free text)
+ * instead of a separate button-then-chips-below layout, so it visibly reads
+ * as "pick several" rather than a single-select dropdown that happens to
+ * hold a list. Each row in the popover shows an explicit checkbox (not a
+ * subtle built-in checkmark) so which categories are already picked stays
+ * visible while still browsing/searching the tenant's parent/child tree,
+ * not just after closing it. Clicking a row toggles it without closing the
+ * popover -- picking several in a row shouldn't need reopening it each time. */
+function CategoryMultiSelect({ categories, selectedIds, onChange }: { categories: ProductCategory[]; selectedIds: string[]; onChange: (ids: string[]) => void }) {
+  const { t } = useLanguage()
+  const [open, setOpen] = useState(false)
+  const nodes = flattenCategoryTree(categories)
+  const selected = categories.filter((c) => selectedIds.includes(c.id))
+
+  function toggle(id: string) {
+    onChange(selectedIds.includes(id) ? selectedIds.filter((i) => i !== id) : [...selectedIds, id])
+  }
+
+  return (
+    <div>
+      <Label>{t('products.drawer.fields.categories')}</Label>
+      {categories.length === 0 ? (
+        <p className="mt-1 text-xs text-brand-400">{t('products.drawer.fields.noCategories')}</p>
+      ) : (
+        <div className="mt-1 flex min-h-7 flex-wrap items-center gap-1.5 rounded-lg border border-input px-1.5 py-1">
+          {selected.map((c) => (
+            <Badge key={c.id} variant="secondary" className="gap-1 pr-1 text-xs font-normal">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: c.color ?? '#94A3B8' }} />
+              {c.name}
+              <button type="button" onClick={() => toggle(c.id)} aria-label={c.name} className="rounded-full p-0.5 hover:bg-black/10">
+                <XIcon className="size-3" />
+              </button>
+            </Badge>
+          ))}
+          <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+              <button type="button" className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
+                <PlusIconLucide className="size-3" />
+                {t('products.drawer.fields.addCategory')}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-72 p-0" align="start">
+              <Command>
+                <CommandInput placeholder={t('products.list.searchCategory')} className="text-xs" />
+                <CommandList>
+                  <CommandEmpty className="text-xs">{t('products.list.noCategoryResults')}</CommandEmpty>
+                  <CommandGroup>
+                    {nodes.map(({ category, depth }) => {
+                      const checked = selectedIds.includes(category.id)
+                      return (
+                        <CommandItem
+                          key={category.id}
+                          value={category.name}
+                          onSelect={() => toggle(category.id)}
+                          className="text-xs"
+                          style={{ paddingLeft: `${depth * 14 + 8}px` }}
+                        >
+                          <span
+                            className={cn(
+                              'flex size-3.5 shrink-0 items-center justify-center rounded-sm border',
+                              checked ? 'border-primary bg-primary text-primary-foreground' : 'border-input',
+                            )}
+                          >
+                            {checked && <CheckIcon className="size-2.5" />}
+                          </span>
+                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: category.color ?? '#94A3B8' }} />
+                          <span className="flex-1 truncate">{category.name}</span>
+                        </CommandItem>
+                      )
+                    })}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+        </div>
+      )}
     </div>
   )
 }
@@ -110,7 +230,7 @@ export function ProductDrawer({
   const [description, setDescription] = useState('')
   const [sku, setSku] = useState('')
   const [slug, setSlug] = useState('')
-  const [categoryId, setCategoryId] = useState('')
+  const [categoryIds, setCategoryIds] = useState<string[]>([])
   const [supplierId, setSupplierId] = useState('')
   const [brandId, setBrandId] = useState('')
   const [categories, setCategories] = useState<ProductCategory[]>([])
@@ -132,7 +252,7 @@ export function ProductDrawer({
     setDescription(product?.description ?? '')
     setSku(product?.sku ?? '')
     setSlug(product?.slug ?? '')
-    setCategoryId(product?.category_id ?? '')
+    setCategoryIds(product?.categories.map((c) => c.id) ?? [])
     setSupplierId(product?.supplier_id ?? '')
     setBrandId(product?.brand_id ?? '')
     setPurchasePrice(product?.purchase_price != null ? String(product.purchase_price) : '')
@@ -174,7 +294,6 @@ export function ProductDrawer({
         description: description.trim() || null,
         sku: sku.trim() || null,
         slug: slug.trim() || null,
-        category_id: categoryId || null,
         supplier_id: supplierId || null,
         brand_id: brandId || null,
         purchase_price: toNumberOrNull(purchasePrice),
@@ -184,8 +303,8 @@ export function ProductDrawer({
         low_stock_threshold: Math.max(0, Math.trunc(Number(lowStockThreshold) || 0)),
         is_active: isActive,
       }
-      if (product) await updateProduct(product.id, input)
-      else await createProduct(input)
+      if (product) await updateProduct(product.id, input, categoryIds)
+      else await createProduct(input, categoryIds)
       onSaved()
       onClose()
     } catch (err) {
@@ -196,119 +315,129 @@ export function ProductDrawer({
   }
 
   return (
-    <Drawer
-      open={open}
-      onClose={onClose}
-      title={product ? t('products.drawer.editTitle') : t('products.drawer.newTitle')}
-      description={t('products.drawer.description')}
-    >
-      <form onSubmit={handleSubmit} noValidate className="space-y-3">
-        <div>
-          <Label htmlFor="product-name">{t('products.drawer.fields.name')}</Label>
-          <Input id="product-name" value={name} invalid={!!nameError} onChange={(e) => setName(e.target.value)} placeholder={t('products.drawer.fields.namePlaceholder')} />
-          <FieldError message={nameError} />
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <Label htmlFor="product-sku">{t('products.drawer.fields.sku')}</Label>
-            <Input id="product-sku" value={sku} onChange={(e) => setSku(e.target.value)} placeholder={t('products.drawer.fields.skuPlaceholder')} />
+    <Drawer open={open} onClose={onClose} title={product ? t('products.drawer.editTitle') : t('products.drawer.newTitle')} description={t('products.drawer.description')} size="lg">
+      <form onSubmit={handleSubmit} noValidate className="space-y-5">
+        {/* Cover thumbnail + name -- puts a face on the product right away
+            (reuses the same colored-initials placeholder the list/detail
+            pages fall back to when there's no photo yet), instead of the
+            name field floating alone at the top like every other text field. */}
+        <div className="flex items-center gap-3">
+          <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-brand-100">
+            <ProductImage src={product?.images[0] ? getProductImageUrl(product.images[0].storage_path) : null} name={name || '?'} className="h-full w-full" iconSize={20} />
           </div>
-          <div>
-            <Label htmlFor="product-slug">{t('products.drawer.fields.slug')}</Label>
-            <Input id="product-slug" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder={t('products.drawer.fields.slugPlaceholder')} />
-          </div>
-        </div>
-
-        <div>
-          <Label htmlFor="product-description">{t('products.drawer.fields.description')}</Label>
-          <Textarea id="product-description" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
-        </div>
-
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <div>
-            <Label htmlFor="product-category">{t('products.drawer.fields.category')}</Label>
-            <Select id="product-category" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-              <option value="">{t('products.drawer.fields.noCategory')}</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="product-brand">{t('products.drawer.fields.brand')}</Label>
-            <Select id="product-brand" value={brandId} onChange={(e) => setBrandId(e.target.value)}>
-              <option value="">{t('products.drawer.fields.noBrand')}</option>
-              {brands.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="product-supplier">{t('products.drawer.fields.supplier')}</Label>
-            <Select id="product-supplier" value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-              <option value="">{t('products.drawer.fields.noSupplier')}</option>
-              {suppliers.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </Select>
+          <div className="min-w-0 flex-1">
+            <Label htmlFor="product-name">{t('products.drawer.fields.name')}</Label>
+            <Input
+              id="product-name"
+              value={name}
+              aria-invalid={!!nameError}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={t('products.drawer.fields.namePlaceholder')}
+              className={`mt-1 ${FIELD_CLASS}`}
+            />
+            <FieldError message={nameError} />
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
-          <div>
-            <Label htmlFor="product-purchase-price">{t('products.drawer.fields.purchasePrice')}</Label>
-            <CurrencyInput id="product-purchase-price" value={purchasePrice} onChange={(e) => setPurchasePrice(e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="product-wholesale-price">{t('products.drawer.fields.wholesalePrice')}</Label>
-            <CurrencyInput id="product-wholesale-price" value={wholesalePrice} onChange={(e) => setWholesalePrice(e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="product-retail-price">{t('products.drawer.fields.retailPrice')}</Label>
-            <CurrencyInput id="product-retail-price" value={retailPrice} onChange={(e) => setRetailPrice(e.target.value)} />
-          </div>
-        </div>
-
-        {/* Una sola tarjeta con las 3 configuraciones (antes 3 bloques con
-            borde propio cada uno) -- mismo contenido, mitad del alto. */}
-        <div className="divide-y divide-brand-100 rounded-lg border border-brand-100">
-          <div className="flex items-center justify-between px-3 py-2">
-            <span className="text-sm text-brand-700">{t('products.drawer.fields.trackInventory')}</span>
-            <Switch checked={trackInventory} onChange={setTrackInventory} />
-          </div>
-          {trackInventory && (
-            <div className="px-3 py-2">
-              <Label htmlFor="product-low-stock">{t('products.drawer.fields.lowStockAlert')}</Label>
-              <Input
-                id="product-low-stock"
-                type="number"
-                min="0"
-                step="1"
-                value={lowStockThreshold}
-                onChange={(e) => setLowStockThreshold(e.target.value)}
-                className="!py-1.5 text-sm"
-              />
+        <Section title={t('products.drawer.sections.basics')}>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="product-sku">{t('products.drawer.fields.sku')}</Label>
+              <Input id="product-sku" value={sku} onChange={(e) => setSku(e.target.value)} placeholder={t('products.drawer.fields.skuPlaceholder')} className={`mt-1 ${FIELD_CLASS}`} />
             </div>
-          )}
-          <div className="flex items-center justify-between px-3 py-2">
-            <span className="text-sm text-brand-700">{t('products.drawer.fields.active')}</span>
-            <Switch checked={isActive} onChange={setIsActive} />
+            <div>
+              <Label htmlFor="product-slug">{t('products.drawer.fields.slug')}</Label>
+              <Input id="product-slug" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder={t('products.drawer.fields.slugPlaceholder')} className={`mt-1 ${FIELD_CLASS}`} />
+            </div>
           </div>
-        </div>
+          <div>
+            <Label htmlFor="product-description">{t('products.drawer.fields.description')}</Label>
+            <Textarea id="product-description" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} className={`mt-1 ${TEXTAREA_CLASS}`} />
+          </div>
+        </Section>
+
+        <Section title={t('products.drawer.sections.classification')}>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>{t('products.drawer.fields.brand')}</Label>
+              <div className="mt-1">
+                <ComboboxFilter
+                  options={brands.map((b) => ({ id: b.id, label: b.name }))}
+                  value={brandId || null}
+                  onChange={(id) => setBrandId(id ?? '')}
+                  placeholder={t('products.drawer.fields.noBrand')}
+                  searchPlaceholder={t('products.list.searchBrand')}
+                  emptyLabel={t('products.list.noBrandResults')}
+                  className="w-full"
+                  triggerClassName={COMBOBOX_TRIGGER_CLASS}
+                />
+              </div>
+            </div>
+            <div>
+              <Label>{t('products.drawer.fields.supplier')}</Label>
+              <div className="mt-1">
+                <ComboboxFilter
+                  options={suppliers.map((s) => ({ id: s.id, label: s.name }))}
+                  value={supplierId || null}
+                  onChange={(id) => setSupplierId(id ?? '')}
+                  placeholder={t('products.drawer.fields.noSupplier')}
+                  searchPlaceholder={t('products.drawer.fields.searchSupplier')}
+                  emptyLabel={t('products.drawer.fields.noSupplierResults')}
+                  className="w-full"
+                  triggerClassName={COMBOBOX_TRIGGER_CLASS}
+                />
+              </div>
+            </div>
+          </div>
+          <CategoryMultiSelect categories={categories} selectedIds={categoryIds} onChange={setCategoryIds} />
+        </Section>
+
+        <Section title={t('products.drawer.sections.pricing')}>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <Label htmlFor="product-purchase-price">{t('products.drawer.fields.purchasePrice')}</Label>
+              <CurrencyInput id="product-purchase-price" value={purchasePrice} onChange={(e) => setPurchasePrice(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
+            </div>
+            <div>
+              <Label htmlFor="product-wholesale-price">{t('products.drawer.fields.wholesalePrice')}</Label>
+              <CurrencyInput id="product-wholesale-price" value={wholesalePrice} onChange={(e) => setWholesalePrice(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
+            </div>
+            <div>
+              <Label htmlFor="product-retail-price">{t('products.drawer.fields.retailPrice')}</Label>
+              <CurrencyInput id="product-retail-price" value={retailPrice} onChange={(e) => setRetailPrice(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
+            </div>
+          </div>
+        </Section>
+
+        <Section title={t('products.drawer.sections.inventory')}>
+          <div className="divide-y divide-brand-100 rounded-lg border border-brand-100">
+            <div className="flex items-center justify-between px-3 py-2.5">
+              <Label htmlFor="product-track-inventory" className="font-normal text-brand-700">
+                {t('products.drawer.fields.trackInventory')}
+              </Label>
+              <Switch id="product-track-inventory" checked={trackInventory} onCheckedChange={setTrackInventory} />
+            </div>
+            {trackInventory && (
+              <div className="px-3 py-2.5">
+                <Label htmlFor="product-low-stock">{t('products.drawer.fields.lowStockAlert')}</Label>
+                <Input id="product-low-stock" type="number" min="0" step="1" value={lowStockThreshold} onChange={(e) => setLowStockThreshold(e.target.value)} className={`mt-1 w-28 ${FIELD_CLASS}`} />
+              </div>
+            )}
+            <div className="flex items-center justify-between px-3 py-2.5">
+              <Label htmlFor="product-active" className="font-normal text-brand-700">
+                {t('products.drawer.fields.active')}
+              </Label>
+              <Switch id="product-active" checked={isActive} onCheckedChange={setIsActive} />
+            </div>
+          </div>
+        </Section>
 
         {product && <ProductImages tenantId={tenantId} product={product} onChanged={onSaved} />}
 
         {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
 
         <div className="flex gap-2 border-t border-brand-100 pt-4">
-          <Button type="submit" variant="secondary" disabled={submitting}>
+          <Button type="submit" disabled={submitting}>
             {submitting ? t('common.actions.saving') : t('common.actions.save')}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>

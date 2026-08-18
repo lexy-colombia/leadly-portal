@@ -184,7 +184,7 @@ export function TenantsList() {
               {pageItems.map((tenant) => (
                 <TRow key={tenant.id} clickable>
                   <TD>
-                    <Link to={`/backoffice/clientes/${tenant.id}`} className="flex items-center gap-3 font-medium text-brand-800 hover:text-accent-600">
+                    <Link to={`/backoffice/clients/${tenant.id}`} className="flex items-center gap-3 font-medium text-brand-800 hover:text-accent-600">
                       {tenant.logo_url ? (
                         <img src={tenant.logo_url} alt="" className="h-8 w-8 rounded-full object-cover" />
                       ) : (

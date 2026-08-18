@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { createAppointment } from '../../../lib/api/appointments'
-import type { CrmAppointment } from '../../../types/domain'
+import type { Appointment } from '../../../types/domain'
 import { Button, FieldError, Input, Label, Textarea } from '@/components/atoms'
 import { Drawer } from '@/components/organisms'
 import { useLanguage } from '../../../contexts/LanguageContext'
@@ -23,7 +23,7 @@ export function AppointmentDrawer({
   onClose: () => void
   tenantId: string
   contactId: string
-  onCreated: (appointment: CrmAppointment) => void
+  onCreated: (appointment: Appointment) => void
 }) {
   const { t } = useLanguage()
   const [dateTime, setDateTime] = useState(defaultDateTime())

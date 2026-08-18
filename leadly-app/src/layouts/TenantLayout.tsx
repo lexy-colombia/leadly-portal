@@ -40,5 +40,5 @@ export function TenantLayout() {
     navItems.unshift({ to: crmChildren[0].to, label: t('common.nav.crm'), icon: CRM_GROUP_ICON, children: crmChildren })
   }
 
-  return <AppShell subtitle={t('common.shell.tenantSubtitle')} navItems={navItems} theme="light" />
+  return <AppShell subtitle={t('common.shell.tenantSubtitle')} navItems={navItems} theme="dark" />
 }

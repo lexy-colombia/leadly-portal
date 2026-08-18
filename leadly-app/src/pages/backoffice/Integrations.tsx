@@ -3,7 +3,7 @@ import { useLanguage } from '../../contexts/LanguageContext'
 
 /** Platform-level only: everything configured here is Leadly's own account
  * with each provider (tenantId null), not a given tenant's -- see the
- * tenant's own /app/integraciones for that. The card grid + drawers
+ * tenant's own /app/integrations for that. The card grid + drawers
  * themselves live in IntegrationsGrid, shared between both screens. */
 export function Integrations() {
   const { t } = useLanguage()

@@ -58,13 +58,27 @@
   "inventory.movementType.reversion_dano": "Reversión de daño",
 
   "inventory.movementDrawer.title": "Registrar movimiento de stock",
-  "inventory.movementDrawer.description": "Ajustá manualmente el stock de este producto en una bodega.",
+  "inventory.movementDrawer.description": "Ajustá manualmente el stock de este producto o trasladalo entre bodegas.",
+  "inventory.movementDrawer.tabs.adjustment": "Ajuste",
+  "inventory.movementDrawer.tabs.transfer": "Traslado",
   "inventory.movementDrawer.field.warehouse": "Bodega",
   "inventory.movementDrawer.field.type": "Tipo de movimiento",
   "inventory.movementDrawer.field.quantity": "Cantidad",
   "inventory.movementDrawer.field.quantityRequired": "La cantidad debe ser mayor a 0.",
   "inventory.movementDrawer.field.notes": "Notas",
   "inventory.movementDrawer.field.notesPlaceholder": "Ej: conteo físico, producto dañado, etc.",
+  "inventory.movementDrawer.field.fromWarehouse": "Bodega de origen",
+  "inventory.movementDrawer.field.toWarehouse": "Bodega de destino",
+  "inventory.movementDrawer.field.availableAtOrigin": "Disponible en origen: {quantity}",
   "inventory.movementDrawer.errors.save": "No se pudo registrar el movimiento.",
-  "inventory.movementDrawer.errors.noWarehouses": "Necesitás al menos una bodega activa para registrar un movimiento."
+  "inventory.movementDrawer.errors.transferSave": "No se pudo registrar el traslado.",
+  "inventory.movementDrawer.errors.noWarehouses": "Necesitás al menos una bodega activa para registrar un movimiento.",
+  "inventory.movementDrawer.errors.needTwoWarehouses": "Necesitás al menos dos bodegas activas para trasladar stock.",
+  "inventory.movementDrawer.errors.sameWarehouse": "La bodega de origen y destino no pueden ser la misma.",
+
+  "inventory.product.history.transfer": "Traslado",
+  "inventory.product.history.transferDetail": "{quantity} de {from} a {to}",
+  "inventory.product.table.type": "Tipo",
+  "inventory.product.table.date": "Fecha",
+  "inventory.product.table.quantity": "Cantidad"
 }

@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient'
-import type { CrmContactAddress, SalesOrder, SalesOrderItem, OrderStatus } from '../../types/domain'
+import type { ContactAddress, SalesOrder, SalesOrderItem, OrderStatus } from '../../types/domain'
 import type { TranslationKey } from '../../i18n/translations'
 
 // Shared between Orders.tsx, OrderDetail.tsx, and OrderDrawer.tsx so the
@@ -43,13 +43,8 @@ export type OrderWithRelations = SalesOrder & {
   billing_address: { label: string | null; line1: string; city: string | null } | null
 }
 
-// contact -> `contacts` (migró en esta ronda); opportunity/shipping_address/
-// billing_address siguen en crm_opportunities/crm_contact_addresses --
-// Opportunities y Direcciones no migran todavía (ver plan de la ronda
-// 2026-08-16), sales_orders.opportunity_id/shipping_address_id/
-// billing_address_id fueron repunteadas hacia esas tablas viejas.
 const ORDER_SELECT =
-  '*, contact:clients(full_name, phone), opportunity:crm_opportunities(title), shipping_address:crm_contact_addresses!shipping_address_id(label, line1, city), billing_address:crm_contact_addresses!billing_address_id(label, line1, city)'
+  '*, contact:clients(full_name, phone), opportunity:opportunities(title), shipping_address:contact_addresses!shipping_address_id(label, line1, city), billing_address:contact_addresses!billing_address_id(label, line1, city)'
 
 /** Pure function: derives subtotal/discount_total/total from a set of line
  * items plus header-level shipping/tax -- the same shape both the drawer's
@@ -105,8 +100,8 @@ export async function listOrdersForOpportunity(opportunityId: string): Promise<O
 export type OrderDetail = SalesOrder & {
   contact: { id: string; full_name: string; phone: string } | null
   opportunity: { title: string } | null
-  shipping_address: CrmContactAddress | null
-  billing_address: CrmContactAddress | null
+  shipping_address: ContactAddress | null
+  billing_address: ContactAddress | null
   created_by_profile: { full_name: string } | null
 }
 
@@ -117,7 +112,7 @@ export async function getOrder(id: string): Promise<OrderDetail | null> {
   const { data, error } = await supabase
     .from('sales_orders')
     .select(
-      '*, contact:clients(id, full_name, phone), opportunity:crm_opportunities(title), shipping_address:crm_contact_addresses!shipping_address_id(*), billing_address:crm_contact_addresses!billing_address_id(*), created_by_profile:profiles!created_by(full_name)',
+      '*, contact:clients(id, full_name, phone), opportunity:opportunities(title), shipping_address:contact_addresses!shipping_address_id(*), billing_address:contact_addresses!billing_address_id(*), created_by_profile:profiles!created_by(full_name)',
     )
     .eq('id', id)
     .is('deleted_at', null)

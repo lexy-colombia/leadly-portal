@@ -3,7 +3,7 @@ import type { ButtonHTMLAttributes } from 'react'
 export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost' | 'ghost-dark'
 
 const BASE =
-  'inline-flex items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium transition-all duration-150 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100'
+  'inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all duration-150 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100'
 
 // Each variant is a self-contained, non-overlapping utility set (bg + text + border + hover).
 // Never fine-tune a variant's colors by appending conflicting utilities via `className` from a

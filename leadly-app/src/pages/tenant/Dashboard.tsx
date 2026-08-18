@@ -353,7 +353,7 @@ export function Dashboard() {
         <Card className="!p-3.5">
           <div className="mb-2.5 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-brand-800">{t('dashboard.upcomingTasks.title')}</h2>
-            <Link to="/app/tareas" className="text-xs font-medium text-accent-600 hover:text-accent-700">
+            <Link to="/app/tasks" className="text-xs font-medium text-accent-600 hover:text-accent-700">
               {t('common.actions.viewAll')}
             </Link>
           </div>

@@ -1,20 +1,27 @@
 import { useEffect, useState } from 'react'
-import { deleteProductCategory, listProductCategories } from '../../../lib/api/productCategories'
+import { deleteProductCategory, flattenCategoryTree, listProductCategories } from '../../../lib/api/productCategories'
 import type { ProductCategory } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { Button, PageSpinner, Table, TBody, TD, TH, THead, TRow } from '@/components/atoms'
-import { Card, EmptyState, Pagination } from '@/components/molecules'
+import { PageSpinner } from '@/components/atoms'
+import { Card, EmptyState } from '@/components/molecules'
 import { PencilIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
+import { Button } from '@/components/ui/button'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { CategoryDrawer } from './CategoryDrawer'
 
-const PAGE_SIZE = 10
-
+// No pagination here (unlike every other list in the app, see the project's
+// "all lists paginated" rule) -- a flattened tree loses its parent/child
+// grouping if a page boundary lands mid-subtree, and a tenant's category
+// tree realistically never gets deep enough to need it.
 export function CategoriesTab({ tenantId }: { tenantId: string }) {
   const { t } = useLanguage()
   const [categories, setCategories] = useState<ProductCategory[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [page, setPage] = useState(1)
-  const [drawer, setDrawer] = useState<{ open: boolean; category: ProductCategory | null }>({ open: false, category: null })
+  const [drawer, setDrawer] = useState<{ open: boolean; category: ProductCategory | null; parentId: string | null }>({
+    open: false,
+    category: null,
+    parentId: null,
+  })
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 
@@ -26,8 +33,7 @@ export function CategoriesTab({ tenantId }: { tenantId: string }) {
 
   useEffect(reload, [tenantId])
 
-  const totalPages = categories ? Math.max(1, Math.ceil(categories.length / PAGE_SIZE)) : 1
-  const pageItems = categories ? categories.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE) : null
+  const tree = categories ? flattenCategoryTree(categories) : null
 
   async function handleDelete(id: string) {
     setDeleting(true)
@@ -45,11 +51,11 @@ export function CategoriesTab({ tenantId }: { tenantId: string }) {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-brand-400">
           {categories?.length ?? 0} {t((categories?.length ?? 0) === 1 ? 'products.categories.count.singular' : 'products.categories.count.plural')}
         </span>
-        <Button variant="secondary" onClick={() => setDrawer({ open: true, category: null })} className="!ml-auto !py-1 !text-xs">
+        <Button onClick={() => setDrawer({ open: true, category: null, parentId: null })} size="sm" className="ml-auto">
           <PlusIcon width={14} height={14} /> {t('products.categories.actions.new')}
         </Button>
       </div>
@@ -63,56 +69,66 @@ export function CategoriesTab({ tenantId }: { tenantId: string }) {
         </Card>
       )}
 
-      {pageItems && pageItems.length > 0 && (
-        <>
+      {tree && tree.length > 0 && (
+        <div className="overflow-hidden rounded-2xl border border-brand-100 bg-white">
           <Table>
-            <THead>
-              <tr>
-                <TH>{t('products.categories.table.category')}</TH>
-                <TH>{t('products.categories.table.description')}</TH>
-                <TH className="text-right">{t('products.categories.table.actions')}</TH>
-              </tr>
-            </THead>
-            <TBody>
-              {pageItems.map((category) => (
-                <TRow key={category.id}>
-                  <TD className="text-xs font-medium text-brand-800">
-                    <span className="inline-flex items-center gap-2">
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t('products.categories.table.category')}</TableHead>
+                <TableHead>{t('products.categories.table.description')}</TableHead>
+                <TableHead className="text-right">{t('products.categories.table.actions')}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {tree.map(({ category, depth }) => (
+                <TableRow key={category.id}>
+                  <TableCell className="text-xs font-medium text-brand-800">
+                    <span className="inline-flex items-center gap-2" style={{ paddingLeft: `${depth * 18}px` }}>
                       <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: category.color ?? '#94A3B8' }} />
                       {category.name}
                     </span>
-                  </TD>
-                  <TD className="text-xs text-brand-500">{category.description ?? '-'}</TD>
-                  <TD className="text-right">
+                  </TableCell>
+                  <TableCell className="text-xs text-brand-500">{category.description ?? '-'}</TableCell>
+                  <TableCell className="text-right">
                     {deletingId === category.id ? (
                       <span className="inline-flex items-center gap-1.5">
-                        <Button variant="danger" onClick={() => handleDelete(category.id)} disabled={deleting} className="!px-2 !py-1 text-xs">
+                        <Button variant="destructive" size="xs" onClick={() => handleDelete(category.id)} disabled={deleting}>
                           {deleting ? t('common.actions.deleting') : t('common.actions.confirm')}
                         </Button>
-                        <Button variant="ghost" onClick={() => setDeletingId(null)} disabled={deleting} className="!px-2 !py-1 text-xs">
+                        <Button variant="ghost" size="xs" onClick={() => setDeletingId(null)} disabled={deleting}>
                           {t('common.actions.cancel')}
                         </Button>
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1">
-                        <Button variant="ghost" onClick={() => setDrawer({ open: true, category })} className="!px-2 !py-1 text-xs">
+                        <Button variant="ghost" size="icon-xs" title={t('products.categories.actions.newSubcategory')} onClick={() => setDrawer({ open: true, category: null, parentId: category.id })}>
+                          <PlusIcon width={12} height={12} />
+                        </Button>
+                        <Button variant="ghost" size="icon-xs" onClick={() => setDrawer({ open: true, category, parentId: null })}>
                           <PencilIcon width={12} height={12} />
                         </Button>
-                        <Button variant="ghost" onClick={() => setDeletingId(category.id)} className="!px-2 !py-1 text-xs !text-red-600 hover:!bg-red-50">
+                        <Button variant="ghost" size="icon-xs" className="text-red-600 hover:bg-red-50" onClick={() => setDeletingId(category.id)}>
                           <TrashIcon width={12} height={12} />
                         </Button>
                       </span>
                     )}
-                  </TD>
-                </TRow>
+                  </TableCell>
+                </TableRow>
               ))}
-            </TBody>
+            </TableBody>
           </Table>
-          <Pagination page={page} totalPages={totalPages} onChange={setPage} />
-        </>
+        </div>
       )}
 
-      <CategoryDrawer open={drawer.open} onClose={() => setDrawer({ open: false, category: null })} tenantId={tenantId} category={drawer.category} onSaved={reload} />
+      <CategoryDrawer
+        open={drawer.open}
+        onClose={() => setDrawer({ open: false, category: null, parentId: null })}
+        tenantId={tenantId}
+        category={drawer.category}
+        defaultParentId={drawer.parentId}
+        allCategories={categories ?? []}
+        onSaved={reload}
+      />
     </div>
   )
 }

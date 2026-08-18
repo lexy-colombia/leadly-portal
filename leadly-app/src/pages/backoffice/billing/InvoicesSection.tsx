@@ -205,7 +205,7 @@ export function InvoicesSection() {
                     {invoice.invoice_number ?? invoice.id.slice(0, 8)}
                   </TD>
                   <TD>
-                    <Link to={`/backoffice/clientes/${invoice.payer_tenant_id}`} className="text-brand-600 hover:text-accent-600">
+                    <Link to={`/backoffice/clients/${invoice.payer_tenant_id}`} className="text-brand-600 hover:text-accent-600">
                       {invoice.tenant?.name ?? '—'}
                     </Link>
                   </TD>

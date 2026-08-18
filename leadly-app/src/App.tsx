@@ -25,6 +25,7 @@ import { Opportunities } from './pages/tenant/Opportunities'
 import { Products } from './pages/tenant/Products'
 import { Categories } from './pages/tenant/Categories'
 import { Brands } from './pages/tenant/Brands'
+import { Suppliers } from './pages/tenant/Suppliers'
 import { ProductDetail } from './pages/tenant/ProductDetail'
 import { Orders } from './pages/tenant/Orders'
 import { OrderDetail } from './pages/tenant/OrderDetail'
@@ -63,14 +64,14 @@ export default function App() {
             }
           >
             <Route index element={<BackofficeDashboard />} />
-            <Route path="clientes" element={<TenantsList />} />
+            <Route path="clients" element={<TenantsList />} />
             {/* Líneas de WhatsApp lives inside TenantDetail, not as its own route. */}
-            <Route path="clientes/:id" element={<TenantDetail />} />
-            <Route path="facturacion" element={<Billing />} />
-            <Route path="integraciones" element={<Integrations />} />
-            <Route path="configuracion" element={<Settings />} />
-            <Route path="novedades" element={<Changelog />} />
-            <Route path="perfil" element={<MyAccount />} />
+            <Route path="clients/:id" element={<TenantDetail />} />
+            <Route path="billing" element={<Billing />} />
+            <Route path="integrations" element={<Integrations />} />
+            <Route path="settings" element={<Settings />} />
+            <Route path="changelog" element={<Changelog />} />
+            <Route path="account" element={<MyAccount />} />
           </Route>
 
           <Route
@@ -85,28 +86,31 @@ export default function App() {
           >
             <Route index element={<RequireModule moduleKey="conversations"><Inbox /></RequireModule>} />
             <Route path="dashboard" element={<RequireModule moduleKey="dashboard"><TenantDashboard /></RequireModule>} />
-            <Route path="clientes" element={<RequireModule moduleKey="contacts"><Clients /></RequireModule>} />
-            <Route path="clientes/:id" element={<RequireModule moduleKey="contacts"><ClientDetail /></RequireModule>} />
+            <Route path="clients" element={<RequireModule moduleKey="contacts"><Clients /></RequireModule>} />
+            <Route path="clients/:id" element={<RequireModule moduleKey="contacts"><ClientDetail /></RequireModule>} />
             {/* Empresas se fusionó dentro de Clients (crm_accounts fue
-                eliminada) -- este redirect solo cubre links/bookmarks viejos. */}
-            <Route path="empresas" element={<Navigate to="/app/clientes" replace />} />
-            <Route path="oportunidades" element={<RequireModule moduleKey="pipeline"><Opportunities /></RequireModule>} />
-            <Route path="productos" element={<RequireModule moduleKey="products"><Products /></RequireModule>} />
-            <Route path="productos/categorias" element={<RequireModule moduleKey="products"><Categories /></RequireModule>} />
-            <Route path="productos/marcas" element={<RequireModule moduleKey="products"><Brands /></RequireModule>} />
-            <Route path="productos/:id" element={<RequireModule moduleKey="products"><ProductDetail /></RequireModule>} />
+                eliminada) -- este redirect solo cubre links/bookmarks viejos,
+                se deja en español a propósito porque es lo que un bookmark
+                viejo real todavía puede traer. */}
+            <Route path="empresas" element={<Navigate to="/app/clients" replace />} />
+            <Route path="opportunities" element={<RequireModule moduleKey="pipeline"><Opportunities /></RequireModule>} />
+            <Route path="products" element={<RequireModule moduleKey="products"><Products /></RequireModule>} />
+            <Route path="products/categories" element={<RequireModule moduleKey="products"><Categories /></RequireModule>} />
+            <Route path="products/brands" element={<RequireModule moduleKey="products"><Brands /></RequireModule>} />
+            <Route path="products/suppliers" element={<RequireModule moduleKey="products"><Suppliers /></RequireModule>} />
+            <Route path="products/:id" element={<RequireModule moduleKey="products"><ProductDetail /></RequireModule>} />
             {/* Warehouses (Inventario Fase 1) se movió al perfil de la empresa
                 (Configuración) el 2026-08-16 -- ya no tiene ruta propia. */}
-            <Route path="inventario" element={<Navigate to="/app/configuracion" replace />} />
-            <Route path="ventas" element={<RequireModule moduleKey="sales"><Orders /></RequireModule>} />
-            <Route path="ventas/:id" element={<RequireModule moduleKey="sales"><OrderDetail /></RequireModule>} />
-            <Route path="tareas" element={<RequireModule moduleKey="tasks"><Tasks /></RequireModule>} />
-            <Route path="calendario" element={<RequireModule moduleKey="calendar"><Calendar /></RequireModule>} />
-            <Route path="ia-agentes" element={<RequireModule moduleKey="aiAgents"><AiAgents /></RequireModule>} />
-            <Route path="facturacion" element={<RequireModule moduleKey="billing"><TenantBilling /></RequireModule>} />
-            <Route path="integraciones" element={<RequireModule moduleKey="integrations"><TenantIntegrations /></RequireModule>} />
+            <Route path="inventario" element={<Navigate to="/app/settings" replace />} />
+            <Route path="sales" element={<RequireModule moduleKey="sales"><Orders /></RequireModule>} />
+            <Route path="sales/:id" element={<RequireModule moduleKey="sales"><OrderDetail /></RequireModule>} />
+            <Route path="tasks" element={<RequireModule moduleKey="tasks"><Tasks /></RequireModule>} />
+            <Route path="calendar" element={<RequireModule moduleKey="calendar"><Calendar /></RequireModule>} />
+            <Route path="ai-agents" element={<RequireModule moduleKey="aiAgents"><AiAgents /></RequireModule>} />
+            <Route path="billing" element={<RequireModule moduleKey="billing"><TenantBilling /></RequireModule>} />
+            <Route path="integrations" element={<RequireModule moduleKey="integrations"><TenantIntegrations /></RequireModule>} />
             <Route
-              path="campanas"
+              path="campaigns"
               element={
                 <RequireModule moduleKey="campaigns">
                   <LockedFeature icon={MegaphoneIcon} descriptionKey="account.locked.campaigns" />
@@ -115,10 +119,10 @@ export default function App() {
             />
             {/* Catálogo se fusionó dentro de Products (mismo catálogo, no dos
                 pantallas separadas) -- este redirect solo cubre links/bookmarks viejos. */}
-            <Route path="catalogo" element={<Navigate to="/app/productos" replace />} />
-            <Route path="configuracion" element={<RequireModule moduleKey="settings"><TenantSettings /></RequireModule>} />
-            <Route path="novedades" element={<Changelog />} />
-            <Route path="perfil" element={<MyAccount />} />
+            <Route path="catalogo" element={<Navigate to="/app/products" replace />} />
+            <Route path="settings" element={<RequireModule moduleKey="settings"><TenantSettings /></RequireModule>} />
+            <Route path="changelog" element={<Changelog />} />
+            <Route path="account" element={<MyAccount />} />
           </Route>
 
           <Route path="*" element={<RootRedirect />} />

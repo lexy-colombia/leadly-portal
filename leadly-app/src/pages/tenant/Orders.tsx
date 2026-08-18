@@ -180,10 +180,10 @@ export function Orders() {
             <TBody>
               {pageItems.map((order) => (
                 <TRow key={order.id}>
-                  <TD className="cursor-pointer text-xs font-medium text-brand-800" onClick={() => navigate(`/app/ventas/${order.id}`)}>
+                  <TD className="cursor-pointer text-xs font-medium text-brand-800" onClick={() => navigate(`/app/sales/${order.id}`)}>
                     ORD-{order.number}
                   </TD>
-                  <TD className="cursor-pointer text-xs text-brand-700" onClick={() => navigate(`/app/ventas/${order.id}`)}>
+                  <TD className="cursor-pointer text-xs text-brand-700" onClick={() => navigate(`/app/sales/${order.id}`)}>
                     {order.contact?.full_name ?? '-'}
                     {order.opportunity && <span className="block text-[11px] font-normal text-brand-400">{order.opportunity.title}</span>}
                   </TD>

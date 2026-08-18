@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient'
-import type { Attachment, CrmAttachment } from '../../types/domain'
+import type { Attachment } from '../../types/domain'
 import { PQR_ATTACHMENT_ALLOWED_TYPES, PQR_ATTACHMENT_MAX_BYTES, TASK_ATTACHMENT_ALLOWED_TYPES, TASK_ATTACHMENT_MAX_BYTES } from '../referenceData'
 
 const SIGNED_URL_TTL_SECONDS = 60 * 60
@@ -56,9 +56,9 @@ export async function uploadChatImage(tenantId: string, file: File): Promise<Upl
 
 /** Uploads a file (image or PDF -- a task attachment is very likely a
  * proposal/quote sent to a client) and links it to a task. Only meaningful
- * for an existing task: crm_attachments.task_id needs a real row to point
+ * for an existing task: attachments.task_id needs a real row to point
  * at, so TaskDrawer only offers this once the task has already been saved. */
-export async function uploadTaskAttachment(tenantId: string, file: File, taskId: string): Promise<CrmAttachment> {
+export async function uploadTaskAttachment(tenantId: string, file: File, taskId: string): Promise<Attachment> {
   const validationError = validateTaskAttachmentFile(file)
   if (validationError) throw new Error(validationError)
   const uploaded = await uploadAttachmentFile(tenantId, file)
@@ -68,7 +68,7 @@ export async function uploadTaskAttachment(tenantId: string, file: File, taskId:
   } = await supabase.auth.getUser()
 
   const { data, error } = await supabase
-    .from('crm_attachments')
+    .from('attachments')
     .insert({
       tenant_id: tenantId,
       task_id: taskId,
@@ -85,12 +85,10 @@ export async function uploadTaskAttachment(tenantId: string, file: File, taskId:
 }
 
 /** Uploads an agent-attached image and links it to a venta/cotización
- * comment -- same "images only" criterion as PQR seguimientos (evidence
- * photos, not documents), unlike task attachments which also allow PDF.
- * Uses `attachments` (sin prefijo), no `crm_attachments` -- desde el
- * cutover de Órdenes (2026-08-16) los comentarios de venta viven en
- * sales_order_comments, y attachments.sales_order_comment_id ya apunta ahí
- * (crm_attachments perdió esa columna en la misma migración). */
+ * comment -- same "images only" criterion as before, unlike task
+ * attachments which also allow PDF. Both this and uploadTaskAttachment
+ * share the same `attachments` table now (task_id/sales_order_comment_id
+ * are mutually exclusive columns on the same row shape). */
 export async function uploadOrderCommentAttachment(tenantId: string, file: File, commentId: string): Promise<Attachment> {
   const validationError = validatePqrAttachmentFile(file)
   if (validationError) throw new Error(validationError)
@@ -128,8 +126,8 @@ export async function listAttachmentsForOrderComments(commentIds: string[]): Pro
   return data
 }
 
-export async function listAttachmentsForTask(taskId: string): Promise<CrmAttachment[]> {
-  const { data, error } = await supabase.from('crm_attachments').select('*').eq('task_id', taskId).order('created_at', { ascending: true })
+export async function listAttachmentsForTask(taskId: string): Promise<Attachment[]> {
+  const { data, error } = await supabase.from('attachments').select('*').eq('task_id', taskId).order('created_at', { ascending: true })
   if (error) throw error
   return data
 }

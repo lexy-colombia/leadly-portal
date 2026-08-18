@@ -2,6 +2,8 @@ import { useEffect, useState, type ChangeEvent, type InputHTMLAttributes, type R
 import { useLanguage } from '@/contexts/LanguageContext'
 import { EyeIcon, EyeOffIcon } from '@/components/atoms/icons'
 import { FIELD_BASE } from '@/components/atoms/Input'
+import { Input as ShadcnInput } from '@/components/ui/input'
+import { cn } from '@/lib/utils'
 
 type BaseInputProps = InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean }
 
@@ -100,15 +102,8 @@ export function CurrencyInput({
 
   return (
     <div className="relative">
-      <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-sm text-brand-400">{currency}</span>
-      <input
-        type="text"
-        inputMode="decimal"
-        value={display}
-        onChange={handleChange}
-        className={`${FIELD_BASE} pl-7 ${invalid ? 'border-red-400' : 'border-brand-200'} ${className}`}
-        {...props}
-      />
+      <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2.5 text-sm text-muted-foreground">{currency}</span>
+      <ShadcnInput type="text" inputMode="decimal" value={display} onChange={handleChange} aria-invalid={invalid} className={cn('pl-6', className)} {...props} />
     </div>
   )
 }
