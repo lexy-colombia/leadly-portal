@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { createAppointment } from '../../../lib/api/appointments'
+import { createAppointment, updateAppointment } from '../../../lib/api/appointments'
 import { listClients } from '../../../lib/api/clients'
 import type { AppointmentWithContact, Client } from '../../../types/domain'
 import { FieldError } from '@/components/atoms'
@@ -21,21 +21,32 @@ function defaultDateTime(prefill?: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+export interface AppointmentEditInitial {
+  id: string
+  contactId: string
+  dateTime: string
+  notes: string
+}
+
 export function AppointmentFormDrawer({
   open,
   onClose,
   tenantId,
   prefillDate,
-  onCreated,
+  editing,
+  onSaved,
 }: {
   open: boolean
   onClose: () => void
   tenantId: string
-  /** Pre-fills the date when opened from an empty calendar cell. */
+  /** Pre-fills the date when opened from an empty calendar cell. Ignored in edit mode. */
   prefillDate?: Date
-  onCreated: (appointment: AppointmentWithContact) => void
+  /** Present -> the drawer edits/reschedules this appointment instead of creating a new one. */
+  editing?: AppointmentEditInitial | null
+  onSaved: (appointment: AppointmentWithContact) => void
 }) {
   const { t } = useLanguage()
+  const isEdit = !!editing
   const [contacts, setContacts] = useState<Client[]>([])
   const [contactId, setContactId] = useState<string | null>(null)
   const [dateTime, setDateTime] = useState(defaultDateTime())
@@ -46,14 +57,14 @@ export function AppointmentFormDrawer({
 
   useEffect(() => {
     if (!open) return
-    setDateTime(defaultDateTime(prefillDate))
-    setNotes('')
-    setContactId(null)
+    setDateTime(editing ? editing.dateTime : defaultDateTime(prefillDate))
+    setNotes(editing?.notes ?? '')
+    setContactId(editing?.contactId ?? null)
     setTouched(false)
     setFormError(null)
     listClients(tenantId).then(setContacts).catch(() => setContacts([]))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, tenantId, prefillDate])
+  }, [open, tenantId, prefillDate, editing])
 
   const dateError = touched && !dateTime ? t('calendar.form.dateRequired') : undefined
   const contactError = touched && !contactId ? t('calendar.form.contactRequired') : undefined
@@ -68,18 +79,20 @@ export function AppointmentFormDrawer({
 
     setSubmitting(true)
     try {
-      const appointment = await createAppointment(tenantId, selectedContact.id, new Date(dateTime).toISOString(), notes.trim())
-      onCreated({ ...appointment, contact_full_name: selectedContact.full_name })
+      const appointment = editing
+        ? await updateAppointment(editing.id, { contactId: selectedContact.id, scheduledAt: new Date(dateTime).toISOString(), notes: notes.trim() })
+        : await createAppointment(tenantId, selectedContact.id, new Date(dateTime).toISOString(), notes.trim())
+      onSaved({ ...appointment, contact_full_name: selectedContact.full_name })
       onClose()
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : t('calendar.errors.createFailed'))
+      setFormError(err instanceof Error ? err.message : t(isEdit ? 'calendar.errors.updateFailed' : 'calendar.errors.createFailed'))
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <Drawer open={open} onClose={onClose} title={t('calendar.form.title')} description={t('calendar.form.description')}>
+    <Drawer open={open} onClose={onClose} title={t(isEdit ? 'calendar.form.editTitle' : 'calendar.form.title')} description={t(isEdit ? 'calendar.form.editDescription' : 'calendar.form.description')}>
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <div>
           <Label>{t('calendar.form.contact')}</Label>
@@ -114,7 +127,7 @@ export function AppointmentFormDrawer({
 
         <div className="flex gap-2 border-t border-brand-100 pt-4">
           <Button type="submit" disabled={submitting}>
-            {submitting ? t('calendar.form.submitting') : t('calendar.form.submit')}
+            {submitting ? t(isEdit ? 'common.actions.saving' : 'calendar.form.submitting') : t(isEdit ? 'common.actions.saveChanges' : 'calendar.form.submit')}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>
             {t('common.actions.cancel')}

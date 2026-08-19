@@ -23,7 +23,6 @@ export interface ProductInput {
 export interface ProductCategoryRef {
   id: string
   name: string
-  color: string | null
 }
 
 export type ProductWithImages = Product & {
@@ -124,7 +123,7 @@ export async function listProducts(tenantId: string, params: ListProductsParams)
   let query = supabase
     .from('products')
     .select(
-      '*, images:product_images(*), categories:product_category_links(category:product_categories(id, name, color)), supplier:suppliers(id, name), brand:brands(id, name)',
+      '*, images:product_images(*), categories:product_category_links(category:product_categories(id, name)), supplier:suppliers(id, name), brand:brands(id, name)',
       { count: 'exact' },
     )
     .eq('tenant_id', tenantId)
@@ -168,7 +167,7 @@ export async function getProduct(id: string): Promise<ProductDetail | null> {
   const { data, error } = await supabase
     .from('products')
     .select(
-      '*, images:product_images(*), categories:product_category_links(category:product_categories(id, name, color)), supplier:suppliers(id, name, contact_name, phone, email), brand:brands(id, name, logo_url)',
+      '*, images:product_images(*), categories:product_category_links(category:product_categories(id, name)), supplier:suppliers(id, name, contact_name, phone, email), brand:brands(id, name, logo_url)',
     )
     .eq('id', id)
     .is('deleted_at', null)

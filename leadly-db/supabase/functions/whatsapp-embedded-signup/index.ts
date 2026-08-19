@@ -4,7 +4,7 @@
 // Business Account *they* connected. This function does everything that
 // must happen server-side (the App Secret can never reach the browser):
 //   1. Exchange the code for an access token, then a long-lived one.
-//   2. Create the whatsapp_lines + default ai_assistants row.
+//   2. Create the whatsapp_lines row (no assistant auto-assigned, see below).
 //   3. Store the token in Vault (write-only, same pattern as a manually
 //      entered token).
 //   4. Subscribe Leadly's app to that WABA's webhooks so inbound messages
@@ -103,8 +103,37 @@ Deno.serve(async (req: Request) => {
     console.error("Failed to fetch display_phone_number", err);
   }
 
-  // Step 2: create the line + default (inactive) assistant, mirroring
-  // leadly-app/src/lib/api/whatsappLines.ts::createWhatsappLine.
+  // Step 1.5: register the number for Cloud API sending. Embedded Signup
+  // only links the WABA/number to our app -- it does NOT flip the number
+  // into "can send messages via Cloud API" mode. Without this call every
+  // send fails with Meta error (#133010) "Account not registered". The PIN
+  // just becomes the number's two-step verification PIN; any 6-digit value
+  // works and nothing else depends on remembering it (a future re-register
+  // can pick a new random one). Best-effort like the webhook subscription
+  // below -- don't block line creation on it, but log loudly since a line
+  // that fails this is created but silently unusable for sending.
+  let registered = false;
+  try {
+    const registerResp = await fetch(`https://graph.facebook.com/${GRAPH_API_VERSION}/${phone_number_id}/register`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        pin: String(Math.floor(100000 + Math.random() * 900000)),
+      }),
+    });
+    const registerData = await registerResp.json().catch(() => null);
+    registered = registerResp.ok && registerData?.success === true;
+    if (!registered) console.error("Failed to register phone number for Cloud API sending", registerData);
+  } catch (err) {
+    console.error("Failed to register phone number for Cloud API sending", err);
+  }
+
+  // Step 2: create the line -- sin asistente asignado. Antes se
+  // auto-creaba uno privado (OpenAI, inactivo, sin prompt) por cada línea
+  // nueva; decisión explícita del usuario (2026-08-19) de dejar de hacerlo
+  // -- el tenant elige/crea el asistente que quiera desde "IA & Agentes"
+  // cuando esté listo, en vez de acumular asistentes vacíos sin usar.
   const { data: line, error: lineError } = await adminClient
     .from("whatsapp_lines")
     .insert({
@@ -120,33 +149,6 @@ Deno.serve(async (req: Request) => {
   if (lineError || !line) {
     console.error("Failed to create whatsapp_line", lineError);
     return json({ error: "No se pudo crear la línea de WhatsApp." }, 500);
-  }
-
-  const { data: defaultModel } = await adminClient
-    .from("ai_models")
-    .select("provider, model_code")
-    .eq("provider", "openai")
-    .eq("is_active", true)
-    .order("display_order", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (defaultModel) {
-    const { data: assistant } = await adminClient
-      .from("ai_assistants")
-      .insert({
-        tenant_id: tenantId,
-        name: `Asistente de ${line.display_name}`,
-        provider: defaultModel.provider,
-        model: defaultModel.model_code,
-        system_prompt: "",
-        is_active: false,
-      })
-      .select("id")
-      .single();
-    if (assistant) {
-      await adminClient.from("whatsapp_lines").update({ ai_assistant_id: assistant.id }).eq("id", line.id);
-    }
   }
 
   // Step 3: store the token (write-only Vault path, service_role-eligible
@@ -175,5 +177,5 @@ Deno.serve(async (req: Request) => {
     console.error("Failed to subscribe app to WABA webhooks", subscribeData);
   }
 
-  return json({ line, subscribed }, 200);
+  return json({ line, subscribed, registered }, 200);
 });

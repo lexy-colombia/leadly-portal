@@ -12,8 +12,13 @@ import { BrandDrawer } from './BrandDrawer'
 
 const PAGE_SIZE = 10
 
+function formatDate(iso: string, locale: string): string {
+  return new Date(iso).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
 export function BrandsTab({ tenantId }: { tenantId: string }) {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const locale = language === 'en' ? 'en-US' : 'es-CO'
   const [brands, setBrands] = useState<Brand[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [page, setPage] = useState(1)
@@ -93,7 +98,9 @@ export function BrandsTab({ tenantId }: { tenantId: string }) {
               <TableHeader>
                 <TableRow>
                   <TableHead>{t('products.brands.table.brand')}</TableHead>
+                  <TableHead>{t('products.brands.table.description')}</TableHead>
                   <TableHead>{t('products.brands.table.status')}</TableHead>
+                  <TableHead>{t('products.brands.table.createdAt')}</TableHead>
                   <TableHead className="text-right">{t('products.brands.table.actions')}</TableHead>
                 </TableRow>
               </TableHeader>
@@ -110,6 +117,7 @@ export function BrandsTab({ tenantId }: { tenantId: string }) {
                         {brand.name}
                       </span>
                     </TableCell>
+                    <TableCell className="text-xs text-brand-500">{brand.description || '—'}</TableCell>
                     <TableCell>
                       <Switch
                         checked={brand.is_active}
@@ -118,6 +126,7 @@ export function BrandsTab({ tenantId }: { tenantId: string }) {
                         aria-label={t(brand.is_active ? 'common.status.active' : 'common.status.inactive')}
                       />
                     </TableCell>
+                    <TableCell className="text-xs text-brand-500">{formatDate(brand.created_at, locale)}</TableCell>
                     <TableCell className="text-right">
                       {deletingId === brand.id ? (
                         <span className="inline-flex items-center gap-1.5">

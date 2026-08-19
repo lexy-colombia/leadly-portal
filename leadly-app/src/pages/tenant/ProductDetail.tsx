@@ -299,7 +299,6 @@ export function ProductDetail() {
                   {product.sku && <span>SKU: {product.sku}</span>}
                   {product.categories.map((c) => (
                     <span key={c.id} className="inline-flex items-center gap-1.5">
-                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: c.color ?? '#94A3B8' }} />
                       {c.name}
                     </span>
                   ))}

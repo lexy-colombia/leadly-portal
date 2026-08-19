@@ -169,10 +169,21 @@ export interface CampaignRecipient {
 
 export type WhatsappTemplateCategory = 'MARKETING' | 'UTILITY' | 'AUTHENTICATION'
 export type WhatsappTemplateStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'PAUSED' | 'DISABLED'
+export type WhatsappTemplateButtonType = 'QUICK_REPLY' | 'URL' | 'PHONE_NUMBER'
+
+/** Botón estático de una plantilla -- hasta 3 por plantilla (máx. 2 de tipo
+ * URL, máx. 1 de tipo PHONE_NUMBER), validado en profundidad en
+ * whatsapp-manage-templates. Sin URL dinámica con {{1}} todavía. */
+export interface WhatsappTemplateButton {
+  type: WhatsappTemplateButtonType
+  text: string
+  url?: string
+  phone_number?: string
+}
 
 /** Plantilla de WhatsApp (HSM) propia del tenant -- ver CLAUDE.md, Fase 1 de
- * "iniciar conversaciones". Fase 1: solo variables posicionales {{n}} en el
- * cuerpo, sin encabezado/imagen/botones. */
+ * "iniciar conversaciones". Cuerpo con variables posicionales {{n}},
+ * encabezado de imagen opcional, hasta 3 botones estáticos. */
 export interface WhatsappMessageTemplate {
   id: string
   tenant_id: string
@@ -184,6 +195,8 @@ export interface WhatsappMessageTemplate {
   status: WhatsappTemplateStatus
   body_text: string
   variable_count: number
+  header_image_path: string | null
+  buttons: WhatsappTemplateButton[]
   rejected_reason: string | null
   created_by: string | null
   created_at: string
@@ -285,7 +298,7 @@ export interface Task {
   description: string | null
   priority: TaskPriority
   status: TaskStatus
-  due_date: string | null
+  due_date: string
   deleted_at: string | null
   deleted_by: string | null
   created_at: string
@@ -338,8 +351,8 @@ export interface ProductCategory {
   tenant_id: string
   name: string
   description: string | null
-  color: string | null
   parent_category_id: string | null
+  is_active: boolean
   deleted_at: string | null
   deleted_by: string | null
   created_at: string
@@ -350,6 +363,7 @@ export interface Brand {
   id: string
   tenant_id: string
   name: string
+  description: string | null
   logo_url: string | null
   is_active: boolean
   deleted_at: string | null

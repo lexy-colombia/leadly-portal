@@ -30,11 +30,13 @@ export function AppointmentDetailDrawer({
   onClose,
   appointment,
   onChanged,
+  onReschedule,
 }: {
   open: boolean
   onClose: () => void
   appointment: AppointmentWithContact | null
   onChanged: (appointment: AppointmentWithContact) => void
+  onReschedule: (appointment: AppointmentWithContact) => void
 }) {
   const { t, language } = useLanguage()
   const [updating, setUpdating] = useState(false)
@@ -76,9 +78,12 @@ export function AppointmentDetailDrawer({
         {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
         {appointment.status === 'activa' && (
-          <div className="flex gap-2 border-t border-brand-100 pt-4">
+          <div className="flex flex-wrap gap-2 border-t border-brand-100 pt-4">
             <Button onClick={() => handleStatus('completada')} disabled={updating}>
               {updating ? t('common.actions.saving') : t('calendar.detail.markCompleted')}
+            </Button>
+            <Button variant="outline" onClick={() => onReschedule(appointment)} disabled={updating}>
+              {t('calendar.detail.reschedule')}
             </Button>
             <Button variant="destructive" onClick={() => handleStatus('cancelada')} disabled={updating}>
               {t('calendar.detail.cancelAppointment')}

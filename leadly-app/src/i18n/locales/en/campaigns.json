@@ -48,7 +48,7 @@
   "campaigns.newDrawer.searchContacts": "Search client...",
   "campaigns.newDrawer.manualNameLabel": "Name (optional)",
   "campaigns.newDrawer.manualPhoneLabel": "Phone",
-  "campaigns.newDrawer.manualPhonePlaceholder": "+1 555 1234567",
+  "campaigns.newDrawer.manualPhonePlaceholder": "555 1234567",
   "campaigns.newDrawer.manualAdd": "Add number",
   "campaigns.newDrawer.tableContact": "Contact",
   "campaigns.newDrawer.tableVariable": "Variable {n}",

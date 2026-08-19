@@ -1,5 +1,8 @@
 import { supabase } from '../supabaseClient'
-import type { WhatsappMessageTemplate, WhatsappTemplateCategory } from '../../types/domain'
+import type { WhatsappMessageTemplate, WhatsappTemplateButton, WhatsappTemplateCategory } from '../../types/domain'
+
+const TEMPLATE_MEDIA_BUCKET = 'whatsapp-template-media'
+const MAX_HEADER_IMAGE_BYTES = 5 * 1024 * 1024
 
 export interface CreateTemplateInput {
   tenant_id: string
@@ -12,6 +15,38 @@ export interface CreateTemplateInput {
    * ("Variables de plantilla sin texto de muestra"). Solo se usan para la
    * revisión, nunca se envían a los clientes. */
   body_variable_samples: string[]
+  /** Ruta ya subida a TEMPLATE_MEDIA_BUCKET (ver uploadTemplateHeaderImage)
+   * -- null/undefined si la plantilla no lleva encabezado de imagen. */
+  header_image_path?: string | null
+  buttons: WhatsappTemplateButton[]
+}
+
+function validateTemplateHeaderImageFile(file: File): string | null {
+  if (!['image/png', 'image/jpeg'].includes(file.type)) return 'La imagen debe ser JPG o PNG.'
+  if (file.size > MAX_HEADER_IMAGE_BYTES) return 'La imagen no puede superar los 5MB.'
+  return null
+}
+
+/** Sube la imagen del encabezado a whatsapp-template-media/{tenantId}/{ts}.ext
+ * y devuelve solo la ruta (no la sube todavía a Meta -- eso lo hace
+ * whatsapp-manage-templates en el paso de create/edit, una sola vez). */
+export async function uploadTemplateHeaderImage(tenantId: string, file: File): Promise<string> {
+  const validationError = validateTemplateHeaderImageFile(file)
+  if (validationError) throw new Error(validationError)
+
+  const ext = file.type === 'image/png' ? 'png' : 'jpg'
+  const path = `${tenantId}/${Date.now()}.${ext}`
+  const { error } = await supabase.storage.from(TEMPLATE_MEDIA_BUCKET).upload(path, file, { contentType: file.type })
+  if (error) throw error
+  return path
+}
+
+export function getTemplateHeaderImageUrl(path: string): string {
+  return supabase.storage.from(TEMPLATE_MEDIA_BUCKET).getPublicUrl(path).data.publicUrl
+}
+
+export async function removeTemplateHeaderImage(path: string): Promise<void> {
+  await supabase.storage.from(TEMPLATE_MEDIA_BUCKET).remove([path])
 }
 
 /** Cuenta las variables posicionales {{n}} de un cuerpo de plantilla --
@@ -85,6 +120,8 @@ export interface EditTemplateInput {
   template_id: string
   body_text: string
   body_variable_samples: string[]
+  header_image_path?: string | null
+  buttons: WhatsappTemplateButton[]
 }
 
 /** Solo el cuerpo (y sus muestras) se puede editar -- nombre/idioma son la
@@ -100,13 +137,20 @@ export async function editMessageTemplate(input: EditTemplateInput): Promise<Wha
   return data.template
 }
 
-export async function syncTemplateStatuses(tenantId: string): Promise<number> {
+export interface SyncTemplatesResult {
+  synced: number
+  /** Plantillas que existían en el WABA de Meta pero no en Leadly (creadas
+   * directo en Meta Business Manager) -- ahora quedan disponibles acá. */
+  imported: number
+}
+
+export async function syncTemplateStatuses(tenantId: string): Promise<SyncTemplatesResult> {
   const { data, error } = await supabase.functions.invoke('whatsapp-manage-templates', {
     body: { action: 'sync_status', tenant_id: tenantId },
   })
   if (error) return unwrapFunctionError(error)
   if (data?.error) throw new Error(data.error)
-  return data.synced ?? 0
+  return { synced: data.synced ?? 0, imported: data.imported ?? 0 }
 }
 
 export async function deleteMessageTemplate(templateId: string): Promise<void> {

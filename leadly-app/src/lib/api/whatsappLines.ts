@@ -35,54 +35,15 @@ export async function getWhatsappLine(id: string): Promise<WhatsappLineWithTenan
   return data as unknown as WhatsappLineWithTenant | null
 }
 
-/** Creates the line and a default (inactive) AI agent for it in the same
- * step -- a line should never exist without something to edit on the
- * "IA & Agentes" screen. Agents are no longer owned 1:1 by a line (an agent
- * can be reassigned to other lines, or shared across several), so this just
- * seeds a private starting point and links it back via the line's own
- * `ai_assistant_id` -- the tenant can swap it for a shared agent later.
- * Rolls back the line if the assistant insert fails, mirroring Bedly's
- * admin-create-user rollback-on-partial-failure pattern. */
+/** Creates the line without assigning any AI agent -- antes se
+ * auto-provisionaba un asistente privado (OpenAI, inactivo, sin prompt) por
+ * cada línea nueva; decisión explícita del usuario (2026-08-19) de dejar de
+ * hacerlo, para no acumular asistentes vacíos sin usar. El tenant elige o
+ * crea el asistente que quiera desde "IA & Agentes" cuando esté listo. */
 export async function createWhatsappLine(input: WhatsappLineInput): Promise<WhatsappLine> {
   const { data: line, error: lineError } = await supabase.from('whatsapp_lines').insert(input).select().single()
   if (lineError) throw lineError
-
-  const { data: defaultModel, error: modelError } = await supabase
-    .from('ai_models')
-    .select('provider, model_code')
-    .eq('provider', 'openai')
-    .eq('is_active', true)
-    .order('display_order', { ascending: true })
-    .limit(1)
-    .maybeSingle()
-
-  if (modelError || !defaultModel) {
-    await supabase.from('whatsapp_lines').delete().eq('id', line.id)
-    throw modelError ?? new Error('No hay un modelo de IA activo por defecto configurado.')
-  }
-
-  const { data: assistant, error: assistantError } = await supabase
-    .from('ai_assistants')
-    .insert({
-      tenant_id: input.tenant_id,
-      name: `Asistente de ${input.display_name}`,
-      provider: defaultModel.provider,
-      model: defaultModel.model_code,
-      system_prompt: '',
-      is_active: false,
-    })
-    .select('id')
-    .single()
-
-  if (assistantError) {
-    await supabase.from('whatsapp_lines').delete().eq('id', line.id)
-    throw assistantError
-  }
-
-  const { error: linkError } = await supabase.from('whatsapp_lines').update({ ai_assistant_id: assistant.id }).eq('id', line.id)
-  if (linkError) throw linkError
-
-  return { ...line, ai_assistant_id: assistant.id }
+  return line
 }
 
 export async function updateWhatsappLine(id: string, input: WhatsappLineInput): Promise<WhatsappLine> {

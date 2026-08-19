@@ -127,11 +127,7 @@ export function Campaigns() {
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="text-lg font-semibold text-brand-800">{t('campaigns.title')}</h1>
-          <p className="text-xs text-brand-400">{t('campaigns.subtitle')}</p>
-        </div>
+      <div className="flex justify-end">
         <Button onClick={openCreate} size="sm">
           <PlusIcon width={14} height={14} /> {t('campaigns.actions.new')}
         </Button>

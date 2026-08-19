@@ -8,10 +8,15 @@
   "calendar.weekday.sun": "Dom",
 
   "calendar.today": "Hoy",
-  "calendar.aria.prevMonth": "Mes anterior",
-  "calendar.aria.nextMonth": "Mes siguiente",
+  "calendar.aria.prev": "Anterior",
+  "calendar.aria.next": "Siguiente",
   "calendar.actions.new": "Nueva cita",
   "calendar.moreCount": "+{count} más",
+
+  "calendar.view.month": "Mes",
+  "calendar.view.week": "Semana",
+  "calendar.view.day": "Día",
+  "calendar.day.empty": "Sin citas este día.",
 
   "calendar.errors.loadFailed": "No se pudieron cargar las citas.",
   "calendar.errors.updateFailed": "No se pudo actualizar la cita.",
@@ -25,9 +30,12 @@
   "calendar.detail.contactFallback": "Contacto",
   "calendar.detail.markCompleted": "Marcar completada",
   "calendar.detail.cancelAppointment": "Cancelar cita",
+  "calendar.detail.reschedule": "Reagendar",
 
   "calendar.form.title": "Nueva cita",
   "calendar.form.description": "Le enviamos un recordatorio por WhatsApp una hora antes.",
+  "calendar.form.editTitle": "Reagendar cita",
+  "calendar.form.editDescription": "Actualiza la fecha, el contacto o las notas.",
   "calendar.form.contact": "Contacto",
   "calendar.form.change": "Cambiar",
   "calendar.form.searchPlaceholder": "Buscar por nombre o teléfono…",

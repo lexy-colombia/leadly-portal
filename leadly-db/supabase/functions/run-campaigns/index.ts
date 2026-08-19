@@ -62,7 +62,7 @@ async function processCampaignTick(
 ): Promise<number> {
   const { data: template } = await adminClient
     .from("whatsapp_message_templates")
-    .select("id, name, language, status, body_text, variable_count")
+    .select("id, name, language, status, body_text, variable_count, header_image_path")
     .eq("id", campaign.template_id)
     .maybeSingle();
   const { data: line } = await adminClient
@@ -125,7 +125,12 @@ async function processCampaignTick(
           whatsapp_line_id: campaign.whatsapp_line_id,
           contact_phone: recipient.contact_phone,
           contact_name: recipient.contact_name,
-          mode: "humano",
+          // "ia" y no "humano" (a diferencia de whatsapp-send-template, un
+          // envío 1:1 disparado por un agente): una campaña es un envío
+          // masivo sin agente detrás, así que si el contacto responde debe
+          // atenderlo el asistente configurado en la línea, no quedar en
+          // modo humano esperando a que alguien la vea.
+          mode: "ia",
           campaign_id: campaign.id,
         })
         .select("id")
@@ -138,8 +143,17 @@ async function processCampaignTick(
       conversationId = created.id;
     }
 
-    const components =
-      template.variable_count > 0 ? [{ type: "body", parameters: variables.map((v) => ({ type: "text", text: v })) }] : [];
+    // Mismo criterio que whatsapp-send-template: el encabezado de imagen no
+    // queda "horneado" en la plantilla aprobada, Meta exige mandarlo de
+    // nuevo en cada envío.
+    const components: Record<string, unknown>[] = [];
+    if (template.header_image_path) {
+      const headerImageUrl = adminClient.storage.from("whatsapp-template-media").getPublicUrl(template.header_image_path).data.publicUrl;
+      components.push({ type: "header", parameters: [{ type: "image", image: { link: headerImageUrl } }] });
+    }
+    if (template.variable_count > 0) {
+      components.push({ type: "body", parameters: variables.map((v) => ({ type: "text", text: v })) });
+    }
 
     const sendResult = await sendWhatsappTemplate(line.phone_number_id, accessToken, recipient.contact_phone, template.name, template.language, components);
 
@@ -155,7 +169,7 @@ async function processCampaignTick(
     // agente humano disparando el envío, es el cron, así que "ia" es el valor
     // correcto (mismo criterio que send-appointment-reminders, el otro cron
     // que loguea salientes automáticos sin agente real detrás).
-    const { data: message } = await adminClient
+    const { data: message, error: messageError } = await adminClient
       .from("whatsapp_messages")
       .insert({
         conversation_id: conversationId,
@@ -166,10 +180,24 @@ async function processCampaignTick(
       })
       .select("id")
       .single();
+    if (messageError) {
+      // El envío a Meta ya tuvo éxito (sendResult.wamid existe) -- marcar el
+      // destinatario como failed acá mentiría sobre si el cliente recibió el
+      // mensaje. Antes este error se descartaba en silencio (solo se leía
+      // `data`) y el recipiente quedaba "sent" con whatsapp_message_id null
+      // sin ninguna pista de qué pasó -- ahora al menos queda logueado y
+      // visible en error_message.
+      console.error(`Failed to log whatsapp_messages for campaign ${campaign.id} recipient ${recipient.id}`, messageError);
+    }
 
     await adminClient
       .from("campaign_recipients")
-      .update({ status: "sent", whatsapp_message_id: message?.id ?? null, sent_at: new Date().toISOString() })
+      .update({
+        status: "sent",
+        whatsapp_message_id: message?.id ?? null,
+        sent_at: new Date().toISOString(),
+        error_message: messageError ? `Enviado a Meta pero no se pudo registrar el mensaje: ${messageError.message}` : null,
+      })
       .eq("id", recipient.id);
     sentCount++;
   }
@@ -191,7 +219,13 @@ async function processCampaignTick(
     .eq("campaign_id", campaign.id)
     .eq("status", "pending");
   if (!remainingPending) {
-    await adminClient.from("campaigns").update({ status: "completed" }).eq("id", campaign.id);
+    // "completed" implicaba éxito aunque los envíos se hayan caído todos
+    // (ej. línea sin registrar en Meta) -- una campaña donde no se envió ni
+    // un solo mensaje se marca "failed" en vez de "completada" para que no
+    // se lea como que todo salió bien.
+    const { data: totals } = await adminClient.from("campaigns").select("sent_count, failed_count").eq("id", campaign.id).single();
+    const finalStatus = (totals?.sent_count ?? 0) === 0 && (totals?.failed_count ?? 0) > 0 ? "failed" : "completed";
+    await adminClient.from("campaigns").update({ status: finalStatus }).eq("id", campaign.id);
   }
 
   return sentCount + failedCount;

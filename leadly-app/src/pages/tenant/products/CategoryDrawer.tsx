@@ -11,8 +11,6 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { isNotBlank } from '../../../lib/validation'
 
-const DEFAULT_COLOR = '#2FA9A5'
-
 // Same compact sizing as ProductDrawer's FIELD_CLASS/TEXTAREA_CLASS -- every
 // field in this drawer is pinned to it so it doesn't feel like a visually
 // separate, bigger design system from the rest of Productos.
@@ -46,7 +44,6 @@ export function CategoryDrawer({
   const { t } = useLanguage()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [color, setColor] = useState(DEFAULT_COLOR)
   const [parentCategoryId, setParentCategoryId] = useState('')
   const [touched, setTouched] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -56,7 +53,6 @@ export function CategoryDrawer({
     if (!open) return
     setName(category?.name ?? '')
     setDescription(category?.description ?? '')
-    setColor(category?.color ?? DEFAULT_COLOR)
     setParentCategoryId(category?.parent_category_id ?? defaultParentId ?? '')
     setTouched(false)
     setFormError(null)
@@ -67,7 +63,7 @@ export function CategoryDrawer({
     if (category) excluded.add(category.id)
     return flattenCategoryTree(allCategories)
       .filter(({ category: c }) => !excluded.has(c.id))
-      .map(({ category: c, depth }) => ({ id: c.id, label: `${'—'.repeat(depth)}${depth > 0 ? ' ' : ''}${c.name}`, color: c.color }))
+      .map(({ category: c, depth }) => ({ id: c.id, label: `${'—'.repeat(depth)}${depth > 0 ? ' ' : ''}${c.name}` }))
   }, [allCategories, category])
 
   const nameError = touched && !isNotBlank(name) ? t('products.categories.errors.nameRequired') : undefined
@@ -84,7 +80,6 @@ export function CategoryDrawer({
         tenant_id: tenantId,
         name: name.trim(),
         description: description.trim() || null,
-        color,
         parent_category_id: parentCategoryId || null,
       }
       if (category) await updateProductCategory(category.id, input)
@@ -106,25 +101,17 @@ export function CategoryDrawer({
       description={t('products.categories.drawer.description')}
     >
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
-        <div className="flex gap-3">
-          <div className="flex-1">
-            <Label htmlFor="category-name">{t('products.categories.fields.name')}</Label>
-            <Input
-              id="category-name"
-              value={name}
-              aria-invalid={!!nameError}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t('products.categories.fields.namePlaceholder')}
-              className={`mt-1 ${FIELD_CLASS}`}
-            />
-            <FieldError message={nameError} />
-          </div>
-          <div>
-            <Label htmlFor="category-color">{t('products.categories.fields.color')}</Label>
-            <div className="mt-1 flex h-7 w-9 items-center justify-center overflow-hidden rounded-lg border border-input p-0.5">
-              <input id="category-color" type="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-full w-full cursor-pointer border-0 bg-transparent p-0" />
-            </div>
-          </div>
+        <div>
+          <Label htmlFor="category-name">{t('products.categories.fields.name')}</Label>
+          <Input
+            id="category-name"
+            value={name}
+            aria-invalid={!!nameError}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={t('products.categories.fields.namePlaceholder')}
+            className={`mt-1 ${FIELD_CLASS}`}
+          />
+          <FieldError message={nameError} />
         </div>
 
         <div>

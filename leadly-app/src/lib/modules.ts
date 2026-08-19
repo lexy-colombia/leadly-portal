@@ -48,7 +48,14 @@ export const TENANT_MODULES: TenantModuleDefinition[] = [
   },
   { key: 'inventory', labelKey: 'common.nav.inventory', to: '/app/settings', icon: ArchiveIcon, hideFromNav: true },
   { key: 'sales', labelKey: 'common.nav.sales', to: '/app/sales', icon: ReceiptIcon },
-  { key: 'tasks', labelKey: 'common.nav.tasks', to: '/app/tasks', icon: CheckIcon },
+  // Tareas se fusionó dentro de Calendario (2026-08-19, pedido explícito del
+  // usuario: "el calendario debería ser la matriz de mi CRM") -- mismo
+  // patrón que 'inventory': el module_key/gating por tenant se conserva
+  // (OpportunityPanel/ClientDetail siguen usando datos de tasks en sus tabs
+  // propias), pero ya no tiene ítem de nav propio y su ruta apunta al
+  // calendario, que solo renderiza la capa de tareas si este módulo sigue
+  // habilitado para el tenant (ver Calendar.tsx, enabledModules.has('tasks')).
+  { key: 'tasks', labelKey: 'common.nav.tasks', to: '/app/calendar', icon: CheckIcon, hideFromNav: true },
   { key: 'calendar', labelKey: 'common.nav.calendar', to: '/app/calendar', icon: CalendarIcon },
   { key: 'campaigns', labelKey: 'common.nav.campaigns', to: '/app/campaigns', icon: MegaphoneIcon },
   { key: 'aiAgents', labelKey: 'common.nav.aiAgents', to: '/app/ai-agents', icon: AiSparkleIcon },

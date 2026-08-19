@@ -26,6 +26,23 @@ const FIELD_CLASS = '!h-7 !rounded-lg !text-xs'
 const TEXTAREA_CLASS = '!rounded-lg !py-1.5 !text-xs'
 const FORM_ID = 'campaign-form'
 
+/** Indicativos para el tab "Número nuevo" -- lista corta a mano, no un
+ * catálogo exhaustivo de +200 países, cubre los mercados donde opera la
+ * base de tenants hoy. Colombia primero porque es el valor por defecto. */
+const DIAL_CODES = [
+  { code: '57', label: 'Colombia (+57)' },
+  { code: '1', label: 'Estados Unidos (+1)' },
+  { code: '52', label: 'México (+52)' },
+  { code: '34', label: 'España (+34)' },
+  { code: '54', label: 'Argentina (+54)' },
+  { code: '56', label: 'Chile (+56)' },
+  { code: '51', label: 'Perú (+51)' },
+  { code: '593', label: 'Ecuador (+593)' },
+  { code: '58', label: 'Venezuela (+58)' },
+  { code: '507', label: 'Panamá (+507)' },
+  { code: '506', label: 'Costa Rica (+506)' },
+]
+
 /** Un destinatario en construcción dentro del drawer -- `key` identifica la
  * fila en la UI: el id del cliente si vino del picker de contactos, o un
  * uuid generado si se agregó a mano (ver tab "Número nuevo"). No hay
@@ -99,6 +116,7 @@ export function CampaignFormDrawer({
   const [formError, setFormError] = useState<string | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [manualName, setManualName] = useState('')
+  const [manualDialCode, setManualDialCode] = useState(DIAL_CODES[0].code)
   const [manualPhone, setManualPhone] = useState('')
   const [manualError, setManualError] = useState<string | null>(null)
 
@@ -161,11 +179,12 @@ export function CampaignFormDrawer({
   }
 
   function handleAddManual() {
-    const phone = manualPhone.trim()
-    if (!phone) {
+    const localDigits = manualPhone.trim().replace(/\D/g, '')
+    if (!localDigits) {
       setManualError(t('campaigns.newDrawer.errors.manualPhoneRequired'))
       return
     }
+    const phone = `${manualDialCode}${localDigits}`
     if (recipients.some((r) => r.contact_phone === phone)) {
       setManualError(t('campaigns.newDrawer.errors.manualDuplicate'))
       return
@@ -362,13 +381,27 @@ export function CampaignFormDrawer({
                         <Label htmlFor="manual-phone" className="text-xs">
                           {t('campaigns.newDrawer.manualPhoneLabel')}
                         </Label>
-                        <Input
-                          id="manual-phone"
-                          value={manualPhone}
-                          onChange={(e) => setManualPhone(e.target.value)}
-                          placeholder={t('campaigns.newDrawer.manualPhonePlaceholder')}
-                          className={`mt-1 ${FIELD_CLASS}`}
-                        />
+                        <div className="mt-1 flex gap-1.5">
+                          <Select value={manualDialCode} onValueChange={setManualDialCode}>
+                            <SelectTrigger id="manual-dial-code" className={`w-24 shrink-0 ${FIELD_CLASS}`}>
+                              <SelectValue>{`+${manualDialCode}`}</SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              {DIAL_CODES.map((c) => (
+                                <SelectItem key={c.code} value={c.code} className="text-xs">
+                                  {c.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Input
+                            id="manual-phone"
+                            value={manualPhone}
+                            onChange={(e) => setManualPhone(e.target.value)}
+                            placeholder={t('campaigns.newDrawer.manualPhonePlaceholder')}
+                            className={FIELD_CLASS}
+                          />
+                        </div>
                       </div>
                       {manualError && <p className="text-xs text-red-600">{manualError}</p>}
                       <Button type="button" size="sm" className="w-full" onClick={handleAddManual}>

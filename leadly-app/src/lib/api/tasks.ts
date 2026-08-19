@@ -19,7 +19,7 @@ export interface TaskInput {
   description?: string | null
   priority?: TaskPriority
   status?: TaskStatus
-  due_date?: string | null
+  due_date: string
 }
 
 export type TaskWithRelations = Task & {
@@ -35,6 +35,23 @@ export async function listTasks(tenantId: string): Promise<TaskWithRelations[]> 
     .eq('tenant_id', tenantId)
     .is('deleted_at', null)
     .order('due_date', { ascending: true, nullsFirst: false })
+  if (error) throw error
+  return data as unknown as TaskWithRelations[]
+}
+
+/** Tenant-wide tasks in a date range -- Calendar's month/week/day grids
+ * (tasks are rendered inline alongside appointments there, see
+ * pages/tenant/Calendar.tsx). `rangeEnd` is exclusive, same convention as
+ * listAppointmentsForTenantRange. */
+export async function listTasksForTenantRange(tenantId: string, rangeStart: string, rangeEnd: string): Promise<TaskWithRelations[]> {
+  const { data, error } = await supabase
+    .from('tasks')
+    .select('*, contact:clients(full_name), opportunity:opportunities(title), assignee:profiles!assigned_to(full_name)')
+    .eq('tenant_id', tenantId)
+    .is('deleted_at', null)
+    .gte('due_date', rangeStart)
+    .lt('due_date', rangeEnd)
+    .order('due_date', { ascending: true })
   if (error) throw error
   return data as unknown as TaskWithRelations[]
 }
