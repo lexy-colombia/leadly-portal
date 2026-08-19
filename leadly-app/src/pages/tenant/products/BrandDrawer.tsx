@@ -8,9 +8,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 import { isNotBlank } from '../../../lib/validation'
 
 const FIELD_CLASS = '!h-7 !rounded-lg !text-xs'
+const TEXTAREA_CLASS = '!rounded-lg !py-1.5 !text-xs'
 
 /** Storage-only picker -- doesn't persist `logo_url` itself, just uploads/
  * removes the file and reports the resulting URL up via onUploaded/onRemoved.
@@ -117,6 +119,7 @@ export function BrandDrawer({
 }) {
   const { t } = useLanguage()
   const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
   const [isActive, setIsActive] = useState(true)
   const [logoUrl, setLogoUrl] = useState<string | null>(null)
   // Stable id for the logo's storage path even before the brand row exists --
@@ -132,6 +135,7 @@ export function BrandDrawer({
   useEffect(() => {
     if (!open) return
     setName(brand?.name ?? '')
+    setDescription(brand?.description ?? '')
     setIsActive(brand?.is_active ?? true)
     setLogoUrl(brand?.logo_url ?? null)
     setPendingId(brand?.id ?? crypto.randomUUID())
@@ -149,7 +153,7 @@ export function BrandDrawer({
 
     setSubmitting(true)
     try {
-      const input = { tenant_id: tenantId, name: name.trim(), is_active: isActive, logo_url: logoUrl }
+      const input = { tenant_id: tenantId, name: name.trim(), description: description.trim() || null, is_active: isActive, logo_url: logoUrl }
       if (brand) await updateBrand(brand.id, input)
       else await createBrand({ ...input, id: pendingId })
       onSaved()
@@ -180,6 +184,18 @@ export function BrandDrawer({
             className={`mt-1 ${FIELD_CLASS}`}
           />
           <FieldError message={nameError} />
+        </div>
+
+        <div>
+          <Label htmlFor="brand-description">{t('products.brands.fields.description')}</Label>
+          <Textarea
+            id="brand-description"
+            rows={2}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder={t('products.brands.fields.descriptionPlaceholder')}
+            className={`mt-1 ${TEXTAREA_CLASS}`}
+          />
         </div>
 
         <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">

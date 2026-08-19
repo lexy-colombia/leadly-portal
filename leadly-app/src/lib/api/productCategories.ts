@@ -5,8 +5,8 @@ export interface ProductCategoryInput {
   tenant_id: string
   name: string
   description?: string | null
-  color?: string | null
   parent_category_id?: string | null
+  is_active?: boolean
 }
 
 export async function listProductCategories(tenantId: string): Promise<ProductCategory[]> {

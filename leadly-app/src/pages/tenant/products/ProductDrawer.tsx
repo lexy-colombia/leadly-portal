@@ -141,7 +141,13 @@ function ProductImages({ tenantId, product, onChanged }: { tenantId: string; pro
 function CategoryMultiSelect({ categories, selectedIds, onChange }: { categories: ProductCategory[]; selectedIds: string[]; onChange: (ids: string[]) => void }) {
   const { t } = useLanguage()
   const [open, setOpen] = useState(false)
-  const nodes = flattenCategoryTree(categories)
+  // Una categoría desactivada no se puede sumar a un producto nuevo, pero si
+  // este producto ya la tenía enlazada de antes sigue apareciendo (acá, y
+  // como chip abajo) -- desactivar nunca le quita nada a lo ya creado, solo
+  // deja de ofrecerse como opción nueva. `categories` sí trae la lista
+  // completa (activas e inactivas) para que ese chip ya enlazado pueda
+  // seguir resolviendo su nombre.
+  const nodes = flattenCategoryTree(categories).filter(({ category }) => category.is_active || selectedIds.includes(category.id))
   const selected = categories.filter((c) => selectedIds.includes(c.id))
 
   function toggle(id: string) {
@@ -157,7 +163,6 @@ function CategoryMultiSelect({ categories, selectedIds, onChange }: { categories
         <div className="mt-1 flex min-h-7 flex-wrap items-center gap-1.5 rounded-lg border border-input px-1.5 py-1">
           {selected.map((c) => (
             <Badge key={c.id} variant="secondary" className="gap-1 pr-1 text-xs font-normal">
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: c.color ?? '#94A3B8' }} />
               {c.name}
               <button type="button" onClick={() => toggle(c.id)} aria-label={c.name} className="rounded-full p-0.5 hover:bg-black/10">
                 <XIcon className="size-3" />
@@ -195,7 +200,6 @@ function CategoryMultiSelect({ categories, selectedIds, onChange }: { categories
                           >
                             {checked && <CheckIcon className="size-2.5" />}
                           </span>
-                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: category.color ?? '#94A3B8' }} />
                           <span className="flex-1 truncate">{category.name}</span>
                         </CommandItem>
                       )

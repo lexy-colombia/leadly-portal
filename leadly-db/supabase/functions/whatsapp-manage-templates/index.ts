@@ -15,6 +15,13 @@ import { corsHeaders, json } from "../_shared/cors.ts";
 const GRAPH_API_VERSION = "v21.0";
 const TEMPLATE_CATEGORIES = ["MARKETING", "UTILITY", "AUTHENTICATION"];
 
+interface TemplateButton {
+  type: "QUICK_REPLY" | "URL" | "PHONE_NUMBER";
+  text: string;
+  url?: string;
+  phone_number?: string;
+}
+
 interface RequestBody {
   action?: "create" | "edit" | "sync_status" | "delete";
   tenant_id?: string;
@@ -24,6 +31,10 @@ interface RequestBody {
   body_text?: string;
   body_variable_samples?: string[];
   template_id?: string;
+  /** Ruta en el bucket whatsapp-template-media, ya subida por el frontend
+   * antes de llamar acá -- null/undefined significa "sin encabezado". */
+  header_image_path?: string | null;
+  buttons?: TemplateButton[];
 }
 
 /** Meta only accepts lowercase letters, digits and underscores. Normalizing
@@ -71,6 +82,144 @@ function buildBodyComponent(bodyText: string, samples: string[] | undefined): { 
     component.example = { body_text: [provided.map((s) => s.trim())] };
   }
   return { component, count: variables.count };
+}
+
+/** Valida el array de botones que llega del frontend contra los límites que
+ * Meta exige (25 caracteres por texto, máx. 1 botón de llamada, máx. 2 de
+ * URL, máx. 3 en total -- ya resguardado a nivel de constraint en la DB,
+ * esto valida el detalle por tipo). Alcance deliberado: solo URL estática,
+ * sin el sufijo dinámico {{1}} que Meta permite -- no hay caso de uso real
+ * todavía que lo pida. */
+function validateButtons(buttons: unknown): { buttons: TemplateButton[] } | { error: string } {
+  if (!Array.isArray(buttons) || buttons.length === 0) return { buttons: [] };
+  if (buttons.length > 3) return { error: "Máximo 3 botones por plantilla." };
+
+  const cleaned: TemplateButton[] = [];
+  let urlCount = 0;
+  let phoneCount = 0;
+  for (const raw of buttons) {
+    const b = raw as Partial<TemplateButton>;
+    const text = b?.text?.trim();
+    if (!text) return { error: "Todos los botones necesitan un texto." };
+    if (text.length > 25) return { error: `El texto del botón "${text}" supera los 25 caracteres permitidos por Meta.` };
+
+    if (b.type === "URL") {
+      const url = b.url?.trim();
+      if (!url) return { error: "Los botones de tipo enlace necesitan una dirección." };
+      try {
+        new URL(url);
+      } catch {
+        return { error: `"${url}" no es una URL válida.` };
+      }
+      urlCount++;
+      cleaned.push({ type: "URL", text, url });
+    } else if (b.type === "PHONE_NUMBER") {
+      const phoneNumber = b.phone_number?.trim();
+      if (!phoneNumber) return { error: "Los botones de tipo llamada necesitan un número de teléfono." };
+      phoneCount++;
+      cleaned.push({ type: "PHONE_NUMBER", text, phone_number: phoneNumber });
+    } else if (b.type === "QUICK_REPLY") {
+      cleaned.push({ type: "QUICK_REPLY", text });
+    } else {
+      return { error: "Tipo de botón inválido." };
+    }
+  }
+  if (urlCount > 2) return { error: "Máximo 2 botones de tipo enlace." };
+  if (phoneCount > 1) return { error: "Máximo 1 botón de llamada." };
+  return { buttons: cleaned };
+}
+
+function buildButtonsComponent(buttons: TemplateButton[]): Record<string, unknown> | null {
+  if (buttons.length === 0) return null;
+  return {
+    type: "BUTTONS",
+    buttons: buttons.map((b) =>
+      b.type === "URL"
+        ? { type: "URL", text: b.text, url: b.url }
+        : b.type === "PHONE_NUMBER"
+          ? { type: "PHONE_NUMBER", text: b.text, phone_number: b.phone_number }
+          : { type: "QUICK_REPLY", text: b.text },
+    ),
+  };
+}
+
+/** Sube la imagen ya guardada en whatsapp-template-media a Meta vía su
+ * Resumable Upload API y devuelve el "handle" que exige
+ * example.header_handle para aprobar un encabezado de imagen -- a
+ * diferencia del cuerpo, Meta no acepta un link propio como muestra de
+ * revisión acá, solo un handle que ellos alojan. Dos llamadas encadenadas
+ * (abrir sesión, subir bytes), mismo tipo de "baile de dos pasos" que
+ * downloadWhatsappMedia en _shared/whatsapp.ts pero en la dirección
+ * contraria (subimos nosotros, no descargamos). */
+async function uploadHeaderImageHandle(
+  headerImagePath: string,
+  supabaseUrl: string,
+  accessToken: string,
+): Promise<{ handle: string } | { error: string }> {
+  const appId = Deno.env.get("META_APP_ID");
+  if (!appId) return { error: "META_APP_ID no está configurado en el servidor." };
+
+  const publicUrl = `${supabaseUrl}/storage/v1/object/public/whatsapp-template-media/${headerImagePath}`;
+  const fileResp = await fetch(publicUrl);
+  if (!fileResp.ok) return { error: "No se pudo leer la imagen del encabezado desde el storage." };
+  const bytes = new Uint8Array(await fileResp.arrayBuffer());
+  const mimeType = fileResp.headers.get("content-type") ?? "image/jpeg";
+
+  const sessionResp = await fetch(
+    `https://graph.facebook.com/${GRAPH_API_VERSION}/${appId}/uploads?file_length=${bytes.length}&file_type=${encodeURIComponent(mimeType)}&access_token=${accessToken}`,
+    { method: "POST" },
+  );
+  const sessionData = await sessionResp.json().catch(() => null);
+  if (!sessionResp.ok || !sessionData?.id) {
+    console.error("Failed to start Meta upload session", sessionData);
+    return { error: "No se pudo iniciar la subida de la imagen a Meta." };
+  }
+
+  const uploadResp = await fetch(`https://graph.facebook.com/${GRAPH_API_VERSION}/${sessionData.id}`, {
+    method: "POST",
+    headers: { Authorization: `OAuth ${accessToken}`, file_offset: "0" },
+    body: bytes,
+  });
+  const uploadData = await uploadResp.json().catch(() => null);
+  if (!uploadResp.ok || !uploadData?.h) {
+    console.error("Failed to upload header image to Meta", uploadData);
+    return { error: "No se pudo subir la imagen del encabezado a Meta." };
+  }
+  return { handle: uploadData.h };
+}
+
+interface MetaTemplateComponent {
+  type: string;
+  format?: string;
+  text?: string;
+  buttons?: { type: string; text: string; url?: string; phone_number?: string }[];
+}
+
+/** Reconstruye cuerpo/variables/botones a partir de lo que Meta devuelve en
+ * `components` para una plantilla que existe en el WABA pero no fue creada
+ * desde Leadly (ej. alguien la armó directo en Meta Business Manager antes
+ * de conectar el tenant, o en paralelo). El encabezado de imagen es la
+ * única pieza que no se puede reconstruir: Meta solo expone un
+ * `header_handle` opaco en la revisión, no un archivo descargable -- esas
+ * plantillas se importan igual (sirven para verlas/usarlas sin imagen o
+ * para editarlas después), pero necesitan que el tenant suba la imagen de
+ * nuevo desde "Editar" antes de poder reenviarse con encabezado. */
+function extractFromMetaComponents(components: MetaTemplateComponent[] | undefined): {
+  bodyText: string;
+  variableCount: number;
+  buttons: TemplateButton[];
+} {
+  const bodyText = components?.find((c) => c.type === "BODY")?.text ?? "";
+  const variableNumbers = [...bodyText.matchAll(/\{\{(\d+)\}\}/g)].map((m) => Number(m[1]));
+  const variableCount = variableNumbers.length === 0 ? 0 : Math.max(...variableNumbers);
+
+  const remoteButtons = components?.find((c) => c.type === "BUTTONS")?.buttons ?? [];
+  const buttons: TemplateButton[] = remoteButtons
+    .filter((b) => b.type === "QUICK_REPLY" || b.type === "URL" || b.type === "PHONE_NUMBER")
+    .slice(0, 3)
+    .map((b) => ({ type: b.type as TemplateButton["type"], text: b.text, url: b.url, phone_number: b.phone_number }));
+
+  return { bodyText, variableCount, buttons };
 }
 
 Deno.serve(async (req: Request) => {
@@ -142,7 +291,7 @@ Deno.serve(async (req: Request) => {
   }
 
   if (action === "create") {
-    const { name, category, language, body_text, body_variable_samples } = body;
+    const { name, category, language, body_text, body_variable_samples, header_image_path: headerImagePath, buttons } = body;
     if (!name?.trim() || !category || !language?.trim() || !body_text?.trim()) {
       return json({ error: "name, category, language y body_text son obligatorios" }, 400);
     }
@@ -156,6 +305,19 @@ Deno.serve(async (req: Request) => {
     const built = buildBodyComponent(body_text, body_variable_samples);
     if ("error" in built) return json({ error: built.error }, 400);
 
+    const buttonsResult = validateButtons(buttons);
+    if ("error" in buttonsResult) return json({ error: buttonsResult.error }, 400);
+
+    const components: Record<string, unknown>[] = [];
+    if (headerImagePath) {
+      const handleResult = await uploadHeaderImageHandle(headerImagePath, supabaseUrl, accessToken);
+      if ("error" in handleResult) return json({ error: handleResult.error }, 400);
+      components.push({ type: "HEADER", format: "IMAGE", example: { header_handle: [handleResult.handle] } });
+    }
+    components.push(built.component);
+    const buttonsComponent = buildButtonsComponent(buttonsResult.buttons);
+    if (buttonsComponent) components.push(buttonsComponent);
+
     const metaResp = await fetch(`https://graph.facebook.com/${GRAPH_API_VERSION}/${line.business_account_id}/message_templates`, {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
@@ -163,7 +325,7 @@ Deno.serve(async (req: Request) => {
         name: normalizedName,
         category,
         language,
-        components: [built.component],
+        components,
       }),
     });
     const metaData = await metaResp.json().catch(() => null);
@@ -184,6 +346,8 @@ Deno.serve(async (req: Request) => {
         status: metaData?.status ?? "PENDING",
         body_text: body_text.trim(),
         variable_count: built.count,
+        header_image_path: headerImagePath ?? null,
+        buttons: buttonsResult.buttons,
         created_by: caller.id,
       })
       .select()
@@ -198,7 +362,7 @@ Deno.serve(async (req: Request) => {
     // un objeto nuevo -- el nombre y el idioma no se pueden cambiar (son la
     // identidad de la plantilla en el WABA), solo el cuerpo. Al editar,
     // Meta vuelve a poner la plantilla en revisión (PENDING).
-    const { template_id: templateId, body_text, body_variable_samples } = body;
+    const { template_id: templateId, body_text, body_variable_samples, header_image_path: headerImagePath, buttons } = body;
     if (!templateId || !body_text?.trim()) {
       return json({ error: "template_id y body_text son obligatorios" }, 400);
     }
@@ -215,6 +379,9 @@ Deno.serve(async (req: Request) => {
     const built = buildBodyComponent(body_text, body_variable_samples);
     if ("error" in built) return json({ error: built.error }, 400);
 
+    const buttonsResult = validateButtons(buttons);
+    if ("error" in buttonsResult) return json({ error: buttonsResult.error }, 400);
+
     // Meta puede reclasificar la categoría al aprobar (ej. UTILITY -> lo
     // manda a MARKETING según su propio análisis del contenido) sin que
     // nuestra tabla se entere -- si mandamos la categoría vieja que
@@ -229,10 +396,20 @@ Deno.serve(async (req: Request) => {
     const currentData = await currentResp.json().catch(() => null);
     const liveCategory: string = currentResp.ok && currentData?.category ? currentData.category : existing.category;
 
+    const components: Record<string, unknown>[] = [];
+    if (headerImagePath) {
+      const handleResult = await uploadHeaderImageHandle(headerImagePath, supabaseUrl, accessToken);
+      if ("error" in handleResult) return json({ error: handleResult.error }, 400);
+      components.push({ type: "HEADER", format: "IMAGE", example: { header_handle: [handleResult.handle] } });
+    }
+    components.push(built.component);
+    const buttonsComponent = buildButtonsComponent(buttonsResult.buttons);
+    if (buttonsComponent) components.push(buttonsComponent);
+
     const metaResp = await fetch(`https://graph.facebook.com/${GRAPH_API_VERSION}/${existing.meta_template_id}`, {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ category: liveCategory, components: [built.component] }),
+      body: JSON.stringify({ category: liveCategory, components }),
     });
     const metaData = await metaResp.json().catch(() => null);
     if (!metaResp.ok) {
@@ -242,7 +419,15 @@ Deno.serve(async (req: Request) => {
 
     const { data: template, error: updateError } = await callerClient
       .from("whatsapp_message_templates")
-      .update({ body_text: body_text.trim(), variable_count: built.count, category: liveCategory, status: "PENDING", rejected_reason: null })
+      .update({
+        body_text: body_text.trim(),
+        variable_count: built.count,
+        category: liveCategory,
+        status: "PENDING",
+        rejected_reason: null,
+        header_image_path: headerImagePath ?? null,
+        buttons: buttonsResult.buttons,
+      })
       .eq("id", templateId)
       .select()
       .single();
@@ -251,15 +436,19 @@ Deno.serve(async (req: Request) => {
   }
 
   if (action === "sync_status") {
-    const { data: templates } = await callerClient
+    // A diferencia de antes, ya no cortamos temprano si el tenant no tiene
+    // ninguna plantilla local todavía -- un tenant que ya tenía su WABA con
+    // plantillas creadas directo en Meta (antes de conectar Leadly, o en
+    // paralelo) necesita poder descubrirlas acá, no solo sincronizar el
+    // estado de las que él mismo creó desde la app.
+    const { data: localTemplates } = await callerClient
       .from("whatsapp_message_templates")
       .select("id, name")
       .eq("tenant_id", tenantId)
       .is("deleted_at", null);
-    if (!templates || templates.length === 0) return json({ synced: 0 }, 200);
 
     const metaResp = await fetch(
-      `https://graph.facebook.com/${GRAPH_API_VERSION}/${line.business_account_id}/message_templates?fields=id,name,status,category,rejected_reason&limit=250`,
+      `https://graph.facebook.com/${GRAPH_API_VERSION}/${line.business_account_id}/message_templates?fields=id,name,language,status,category,rejected_reason,components&limit=250`,
       { headers: { Authorization: `Bearer ${accessToken}` } },
     );
     const metaData = await metaResp.json().catch(() => null);
@@ -268,30 +457,61 @@ Deno.serve(async (req: Request) => {
       return json({ error: metaData?.error?.message ?? "No se pudo sincronizar el estado de las plantillas." }, 400);
     }
 
-    // Meta puede reclasificar la categoría al revisar (ej. UTILITY ->
-    // MARKETING) sin avisar -- se sincroniza acá también, no solo el
-    // estado, para que nuestra tabla nunca quede desalineada con lo que
-    // Meta realmente tiene (ver acción "edit", que depende de esto).
-    const remoteByName = new Map<string, { id: string; status: string; category?: string; rejected_reason?: string }>(
-      (metaData?.data ?? []).map((t: { id: string; name: string; status: string; category?: string; rejected_reason?: string }) => [t.name, t]),
-    );
+    const localByName = new Map((localTemplates ?? []).map((t) => [t.name, t]));
 
     let synced = 0;
-    for (const template of templates) {
-      const remote = remoteByName.get(template.name);
-      if (!remote) continue;
-      const { error: updateError } = await callerClient
-        .from("whatsapp_message_templates")
-        .update({
-          status: remote.status,
-          category: remote.category ?? undefined,
-          rejected_reason: remote.rejected_reason ?? null,
-          meta_template_id: remote.id,
-        })
-        .eq("id", template.id);
-      if (!updateError) synced++;
+    const rowsToImport: Record<string, unknown>[] = [];
+    for (const remote of metaData?.data ?? []) {
+      const local = localByName.get(remote.name);
+      if (local) {
+        // Plantilla que ya conocíamos -- mismo comportamiento de antes:
+        // sincroniza estado/categoría/motivo de rechazo (Meta puede
+        // reclasificar la categoría al revisar, ej. UTILITY -> MARKETING,
+        // sin avisar). No se toca body/botones/header acá: si se creó desde
+        // Leadly, Leadly ya es la fuente de verdad de esos campos.
+        const { error: updateError } = await callerClient
+          .from("whatsapp_message_templates")
+          .update({
+            status: remote.status,
+            category: remote.category ?? undefined,
+            rejected_reason: remote.rejected_reason ?? null,
+            meta_template_id: remote.id,
+          })
+          .eq("id", local.id);
+        if (!updateError) synced++;
+        continue;
+      }
+
+      // No la conocíamos -- existe en el WABA pero nunca se creó/importó
+      // desde Leadly. Se reconstruye lo que se puede a partir de
+      // `components` (ver extractFromMetaComponents) y se guarda como una
+      // plantilla más, lista para usarse en campañas/envíos manuales igual
+      // que cualquier otra.
+      const { bodyText, variableCount, buttons } = extractFromMetaComponents(remote.components);
+      if (!bodyText.trim()) continue; // sin cuerpo no es una plantilla usable -- no debería pasar, pero por las dudas
+      rowsToImport.push({
+        tenant_id: tenantId,
+        business_account_id: line.business_account_id,
+        meta_template_id: remote.id,
+        name: remote.name,
+        category: TEMPLATE_CATEGORIES.includes(remote.category) ? remote.category : "UTILITY",
+        language: remote.language ?? "es",
+        status: remote.status ?? "PENDING",
+        body_text: bodyText,
+        variable_count: variableCount,
+        buttons,
+        rejected_reason: remote.rejected_reason ?? null,
+      });
     }
-    return json({ synced }, 200);
+
+    let imported = 0;
+    if (rowsToImport.length > 0) {
+      const { data: insertedRows, error: insertError } = await callerClient.from("whatsapp_message_templates").insert(rowsToImport).select("id");
+      if (insertError) console.error("Failed to import WhatsApp templates", insertError);
+      imported = insertedRows?.length ?? 0;
+    }
+
+    return json({ synced, imported }, 200);
   }
 
   return json({ error: "Unknown action" }, 400);

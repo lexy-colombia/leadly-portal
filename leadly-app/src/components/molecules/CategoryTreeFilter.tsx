@@ -117,7 +117,6 @@ export function CategoryTreeFilter({
                   const hasChildren = categories.some((c) => c.parent_category_id === category.id)
                   return (
                     <CommandItem key={category.id} value={category.name} onSelect={() => selectCategory(category)} className="text-xs">
-                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: category.color ?? '#94A3B8' }} />
                       <span className="flex-1 truncate">{category.name}</span>
                       {hasChildren && <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground" />}
                     </CommandItem>

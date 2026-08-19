@@ -44,6 +44,7 @@
   "tasks.field.title": "Título",
   "tasks.field.titlePlaceholder": "Ej. Llamar para confirmar propuesta",
   "tasks.field.titleRequired": "El título es obligatorio.",
+  "tasks.field.dueDateRequired": "La fecha es obligatoria.",
   "tasks.field.description": "Descripción (opcional)",
   "tasks.field.priority": "Prioridad",
   "tasks.field.dueDate": "Fecha límite (opcional)",

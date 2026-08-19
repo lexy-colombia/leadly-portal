@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { deleteProductCategory, flattenCategoryTree, listProductCategories } from '../../../lib/api/productCategories'
+import { deleteProductCategory, flattenCategoryTree, listProductCategories, updateProductCategory } from '../../../lib/api/productCategories'
 import type { ProductCategory } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import { PageSpinner } from '@/components/atoms'
 import { Card, EmptyState } from '@/components/molecules'
 import { PencilIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
 import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { CategoryDrawer } from './CategoryDrawer'
 
@@ -13,8 +14,13 @@ import { CategoryDrawer } from './CategoryDrawer'
 // "all lists paginated" rule) -- a flattened tree loses its parent/child
 // grouping if a page boundary lands mid-subtree, and a tenant's category
 // tree realistically never gets deep enough to need it.
+function formatDate(iso: string, locale: string): string {
+  return new Date(iso).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
 export function CategoriesTab({ tenantId }: { tenantId: string }) {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const locale = language === 'en' ? 'en-US' : 'es-CO'
   const [categories, setCategories] = useState<ProductCategory[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [drawer, setDrawer] = useState<{ open: boolean; category: ProductCategory | null; parentId: string | null }>({
@@ -24,6 +30,7 @@ export function CategoriesTab({ tenantId }: { tenantId: string }) {
   })
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [togglingId, setTogglingId] = useState<string | null>(null)
 
   function reload() {
     listProductCategories(tenantId)
@@ -34,6 +41,19 @@ export function CategoriesTab({ tenantId }: { tenantId: string }) {
   useEffect(reload, [tenantId])
 
   const tree = categories ? flattenCategoryTree(categories) : null
+
+  async function handleToggleActive(category: ProductCategory, checked: boolean) {
+    setTogglingId(category.id)
+    setCategories((list) => (list ? list.map((c) => (c.id === category.id ? { ...c, is_active: checked } : c)) : list))
+    try {
+      await updateProductCategory(category.id, { is_active: checked })
+    } catch (err) {
+      setCategories((list) => (list ? list.map((c) => (c.id === category.id ? { ...c, is_active: !checked } : c)) : list))
+      setError(err instanceof Error ? err.message : t('products.categories.errors.save'))
+    } finally {
+      setTogglingId(null)
+    }
+  }
 
   async function handleDelete(id: string) {
     setDeleting(true)
@@ -76,16 +96,30 @@ export function CategoriesTab({ tenantId }: { tenantId: string }) {
               <TableRow>
                 <TableHead>{t('products.categories.table.category')}</TableHead>
                 <TableHead>{t('products.categories.table.description')}</TableHead>
+                <TableHead>{t('products.categories.table.status')}</TableHead>
+                <TableHead>{t('products.categories.table.createdAt')}</TableHead>
                 <TableHead className="text-right">{t('products.categories.table.actions')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {tree.map(({ category, depth }) => (
-                <TableRow key={category.id}>
+                <TableRow key={category.id} className={!category.is_active ? 'opacity-60' : undefined}>
                   <TableCell className="text-xs font-medium text-brand-800">
-                    <span style={{ paddingLeft: `${depth * 18}px` }}>{category.name}</span>
+                    <span className="flex items-center gap-2" style={{ paddingLeft: `${depth * 20}px` }}>
+                      {depth > 0 && <span className="text-brand-300">└</span>}
+                      <span className={depth > 0 ? 'font-normal text-brand-600' : 'font-semibold'}>{category.name}</span>
+                    </span>
                   </TableCell>
-                  <TableCell className="text-xs text-brand-500">{category.description ?? '-'}</TableCell>
+                  <TableCell className="text-xs text-brand-500">{category.description || '—'}</TableCell>
+                  <TableCell>
+                    <Switch
+                      checked={category.is_active}
+                      disabled={togglingId === category.id}
+                      onCheckedChange={(checked) => handleToggleActive(category, checked)}
+                      aria-label={t(category.is_active ? 'common.status.active' : 'common.status.inactive')}
+                    />
+                  </TableCell>
+                  <TableCell className="text-xs text-brand-500">{formatDate(category.created_at, locale)}</TableCell>
                   <TableCell className="text-right">
                     {deletingId === category.id ? (
                       <span className="inline-flex items-center gap-1.5">

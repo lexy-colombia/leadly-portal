@@ -1,8 +1,18 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { TranslationKey } from '../../i18n/translations'
-import { countTemplateVariables, createMessageTemplate, deleteMessageTemplate, editMessageTemplate, listMessageTemplates, syncTemplateStatuses } from '../../lib/api/templates'
-import type { WhatsappMessageTemplate, WhatsappTemplateCategory, WhatsappTemplateStatus } from '../../types/domain'
+import {
+  countTemplateVariables,
+  createMessageTemplate,
+  deleteMessageTemplate,
+  editMessageTemplate,
+  getTemplateHeaderImageUrl,
+  listMessageTemplates,
+  removeTemplateHeaderImage,
+  syncTemplateStatuses,
+  uploadTemplateHeaderImage,
+} from '../../lib/api/templates'
+import type { WhatsappMessageTemplate, WhatsappTemplateButton, WhatsappTemplateButtonType, WhatsappTemplateCategory, WhatsappTemplateStatus } from '../../types/domain'
 import { PageSpinner, FieldError } from '@/components/atoms'
 import { EmptyState } from '@/components/molecules'
 import { ConfirmDialog, Drawer } from '@/components/organisms'
@@ -13,7 +23,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { PencilIcon, PlusIcon, RefreshIcon, TrashIcon } from '@/components/atoms/icons'
+import { ImageIcon, PencilIcon, PlusIcon, RefreshIcon, TrashIcon } from '@/components/atoms/icons'
 
 const FIELD_CLASS = '!h-7 !rounded-lg !text-xs'
 const TEXTAREA_CLASS = '!rounded-lg !py-1.5 !text-xs'
@@ -50,6 +60,7 @@ export function TemplatesSection({ tenantId, canManage }: { tenantId: string; ca
   const [templates, setTemplates] = useState<WhatsappMessageTemplate[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
+  const [syncMessage, setSyncMessage] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [editingTemplate, setEditingTemplate] = useState<WhatsappMessageTemplate | null>(null)
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
@@ -68,8 +79,10 @@ export function TemplatesSection({ tenantId, canManage }: { tenantId: string; ca
   async function handleSync() {
     setSyncing(true)
     setError(null)
+    setSyncMessage(null)
     try {
-      await syncTemplateStatuses(tenantId)
+      const result = await syncTemplateStatuses(tenantId)
+      setSyncMessage(result.imported > 0 ? t('settings.templates.syncImported', { count: String(result.imported) }) : t('settings.templates.syncUpToDate'))
       reload()
     } catch (err) {
       setError(err instanceof Error ? err.message : t('settings.templates.errors.sync'))
@@ -95,6 +108,7 @@ export function TemplatesSection({ tenantId, canManage }: { tenantId: string; ca
   return (
     <div className="space-y-3.5">
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {syncMessage && <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{syncMessage}</p>}
 
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Button variant="outline" size="sm" onClick={handleSync} disabled={syncing}>
@@ -187,6 +201,172 @@ export function TemplatesSection({ tenantId, canManage }: { tenantId: string; ca
   )
 }
 
+const TEMPLATE_BUTTON_TYPE_KEY: Record<WhatsappTemplateButtonType, TranslationKey> = {
+  QUICK_REPLY: 'settings.templates.drawer.buttons.type.quickReply',
+  URL: 'settings.templates.drawer.buttons.type.url',
+  PHONE_NUMBER: 'settings.templates.drawer.buttons.type.phoneNumber',
+}
+
+/** Sube inmediatamente al elegir el archivo (mismo patrón que
+ * BrandLogoPicker/uploadProductImage) -- el drawer recién persiste la ruta
+ * junto con el resto de la plantilla al enviar el formulario. Un archivo
+ * subido y luego descartado sin guardar queda huérfano en el bucket, mismo
+ * criterio de "best-effort, es inofensivo" que deleteProductImage. */
+function TemplateHeaderImagePicker({
+  tenantId,
+  imagePath,
+  onUploaded,
+  onRemoved,
+}: {
+  tenantId: string
+  imagePath: string | null
+  onUploaded: (path: string) => void
+  onRemoved: () => void
+}) {
+  const { t } = useLanguage()
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleSelect(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null
+    e.target.value = ''
+    if (!file) return
+    setError(null)
+    setBusy(true)
+    try {
+      const path = await uploadTemplateHeaderImage(tenantId, file)
+      onUploaded(path)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('settings.templates.drawer.headerImage.errors.upload'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleRemove() {
+    if (!imagePath) return
+    setBusy(true)
+    try {
+      await removeTemplateHeaderImage(imagePath)
+    } catch {
+      /* best-effort, un objeto huérfano en el bucket es inofensivo */
+    } finally {
+      setBusy(false)
+    }
+    onRemoved()
+  }
+
+  return (
+    <div>
+      <Label>{t('settings.templates.drawer.headerImage.label')}</Label>
+      <div className="mt-1 flex items-center gap-3">
+        <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-brand-100 bg-brand-50">
+          {imagePath ? (
+            <img src={getTemplateHeaderImageUrl(imagePath)} alt="" className="max-h-full max-w-full object-contain" />
+          ) : (
+            <ImageIcon width={20} height={20} />
+          )}
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Button type="button" variant="outline" size="sm" onClick={() => inputRef.current?.click()} disabled={busy}>
+            {busy ? t('settings.templates.drawer.headerImage.uploading') : t(imagePath ? 'settings.templates.drawer.headerImage.change' : 'settings.templates.drawer.headerImage.upload')}
+          </Button>
+          {imagePath && (
+            <Button type="button" variant="ghost" size="sm" className="text-red-600 hover:bg-red-50" onClick={handleRemove} disabled={busy}>
+              {t('settings.templates.drawer.headerImage.remove')}
+            </Button>
+          )}
+        </div>
+      </div>
+      <input ref={inputRef} type="file" accept="image/png,image/jpeg" className="hidden" onChange={handleSelect} />
+      <p className="mt-1 text-xs text-brand-400">{t('settings.templates.drawer.headerImage.hint')}</p>
+      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+    </div>
+  )
+}
+
+/** Hasta 3 botones estáticos -- el límite de 3 y los sub-límites por tipo
+ * (2 URL, 1 llamada) también se validan server-side en
+ * whatsapp-manage-templates, esto solo evita un roundtrip inútil. */
+function TemplateButtonsEditor({ buttons, onChange }: { buttons: WhatsappTemplateButton[]; onChange: (buttons: WhatsappTemplateButton[]) => void }) {
+  const { t } = useLanguage()
+
+  function updateButton(index: number, patch: Partial<WhatsappTemplateButton>) {
+    onChange(buttons.map((b, i) => (i === index ? { ...b, ...patch } : b)))
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between">
+        <Label>{t('settings.templates.drawer.buttons.label')}</Label>
+        {buttons.length < 3 && (
+          <Button type="button" variant="ghost" size="sm" onClick={() => onChange([...buttons, { type: 'QUICK_REPLY', text: '' }])}>
+            {t('settings.templates.drawer.buttons.add')}
+          </Button>
+        )}
+      </div>
+      <p className="mt-0.5 text-xs text-brand-400">{t('settings.templates.drawer.buttons.hint')}</p>
+      {buttons.length > 0 && (
+        <div className="mt-1.5 space-y-2">
+          {buttons.map((button, index) => (
+            <div key={index} className="flex items-start gap-1.5 rounded-lg border border-brand-100 p-2">
+              <div className="flex-1 space-y-1.5">
+                <div className="flex gap-1.5">
+                  <Select value={button.type} onValueChange={(v) => updateButton(index, { type: v as WhatsappTemplateButtonType })}>
+                    <SelectTrigger className={`w-32 shrink-0 ${FIELD_CLASS}`}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(['QUICK_REPLY', 'URL', 'PHONE_NUMBER'] as const).map((type) => (
+                        <SelectItem key={type} value={type} className="text-xs">
+                          {t(TEMPLATE_BUTTON_TYPE_KEY[type])}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    value={button.text}
+                    onChange={(e) => updateButton(index, { text: e.target.value })}
+                    placeholder={t('settings.templates.drawer.buttons.textPlaceholder')}
+                    maxLength={25}
+                    className={FIELD_CLASS}
+                  />
+                </div>
+                {button.type === 'URL' && (
+                  <Input
+                    value={button.url ?? ''}
+                    onChange={(e) => updateButton(index, { url: e.target.value })}
+                    placeholder={t('settings.templates.drawer.buttons.urlPlaceholder')}
+                    className={FIELD_CLASS}
+                  />
+                )}
+                {button.type === 'PHONE_NUMBER' && (
+                  <Input
+                    value={button.phone_number ?? ''}
+                    onChange={(e) => updateButton(index, { phone_number: e.target.value })}
+                    placeholder={t('settings.templates.drawer.buttons.phonePlaceholder')}
+                    className={FIELD_CLASS}
+                  />
+                )}
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="text-red-600 hover:bg-red-50"
+                onClick={() => onChange(buttons.filter((_, i) => i !== index))}
+              >
+                <TrashIcon width={13} height={13} />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function CreateTemplateDrawer({
   open,
   editing,
@@ -209,6 +389,8 @@ function CreateTemplateDrawer({
   const [language, setLanguage] = useState('es')
   const [bodyText, setBodyText] = useState('')
   const [variableSamples, setVariableSamples] = useState<string[]>([])
+  const [headerImagePath, setHeaderImagePath] = useState<string | null>(null)
+  const [buttons, setButtons] = useState<WhatsappTemplateButton[]>([])
   const [touched, setTouched] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -220,6 +402,8 @@ function CreateTemplateDrawer({
     setLanguage(editing?.language ?? 'es')
     setBodyText(editing?.body_text ?? '')
     setVariableSamples([])
+    setHeaderImagePath(editing?.header_image_path ?? null)
+    setButtons(editing?.buttons ?? [])
     setTouched(false)
     setFormError(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -234,21 +418,33 @@ function CreateTemplateDrawer({
   const languageError = touched && !language.trim() ? t('settings.templates.drawer.errors.languageRequired') : undefined
   const bodyError = touched && !bodyText.trim() ? t('settings.templates.drawer.errors.bodyRequired') : undefined
   const samplesError = touched && variableSamples.some((s) => !s.trim()) ? t('settings.templates.drawer.errors.samplesRequired') : undefined
+  const buttonsError = touched
+    ? buttons.some((b) => !b.text.trim())
+      ? t('settings.templates.drawer.buttons.errors.textRequired')
+      : buttons.some((b) => b.type === 'URL' && !b.url?.trim())
+        ? t('settings.templates.drawer.buttons.errors.urlRequired')
+        : buttons.some((b) => b.type === 'PHONE_NUMBER' && !b.phone_number?.trim())
+          ? t('settings.templates.drawer.buttons.errors.phoneRequired')
+          : undefined
+    : undefined
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setTouched(true)
     setFormError(null)
-    if (!name.trim() || !language.trim() || !bodyText.trim() || variableSamples.some((s) => !s.trim())) return
+    if (!name.trim() || !language.trim() || !bodyText.trim() || variableSamples.some((s) => !s.trim()) || buttonsError) return
 
     setSubmitting(true)
     try {
+      const cleanedButtons = buttons.map((b) => ({ ...b, text: b.text.trim() }))
       if (editing) {
         await editMessageTemplate({
           tenant_id: tenantId,
           template_id: editing.id,
           body_text: bodyText.trim(),
           body_variable_samples: variableSamples.map((s) => s.trim()),
+          header_image_path: headerImagePath,
+          buttons: cleanedButtons,
         })
       } else {
         await createMessageTemplate({
@@ -258,6 +454,8 @@ function CreateTemplateDrawer({
           language: language.trim(),
           body_text: bodyText.trim(),
           body_variable_samples: variableSamples.map((s) => s.trim()),
+          header_image_path: headerImagePath,
+          buttons: cleanedButtons,
         })
       }
       onCreated()
@@ -371,6 +569,11 @@ function CreateTemplateDrawer({
             <FieldError message={samplesError} />
           </div>
         )}
+
+        <TemplateHeaderImagePicker tenantId={tenantId} imagePath={headerImagePath} onUploaded={setHeaderImagePath} onRemoved={() => setHeaderImagePath(null)} />
+
+        <TemplateButtonsEditor buttons={buttons} onChange={setButtons} />
+        <FieldError message={buttonsError} />
 
         {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
       </form>

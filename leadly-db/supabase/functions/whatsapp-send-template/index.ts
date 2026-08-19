@@ -67,7 +67,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: template } = await callerClient
     .from("whatsapp_message_templates")
-    .select("id, name, language, status, body_text, variable_count")
+    .select("id, name, language, status, body_text, variable_count, header_image_path")
     .eq("id", templateId)
     .maybeSingle();
   if (!template) {
@@ -129,10 +129,18 @@ Deno.serve(async (req: Request) => {
     conversation = created;
   }
 
-  const components =
-    template.variable_count > 0
-      ? [{ type: "body", parameters: vars.map((v) => ({ type: "text", text: v })) }]
-      : [];
+  // El encabezado de imagen no queda "horneado" en la plantilla aprobada --
+  // a diferencia de los botones estáticos, Meta exige mandar el media de
+  // nuevo en cada envío (mismo motivo por el que send_attachment de la IA
+  // manda un image.link en vez de confiar en algo ya subido antes).
+  const components: Record<string, unknown>[] = [];
+  if (template.header_image_path) {
+    const headerImageUrl = callerClient.storage.from("whatsapp-template-media").getPublicUrl(template.header_image_path).data.publicUrl;
+    components.push({ type: "header", parameters: [{ type: "image", image: { link: headerImageUrl } }] });
+  }
+  if (template.variable_count > 0) {
+    components.push({ type: "body", parameters: vars.map((v) => ({ type: "text", text: v })) });
+  }
 
   const sendResult = await sendWhatsappTemplate(line.phone_number_id, accessToken, contactPhone, template.name, template.language, components);
   if (!sendResult.ok) {

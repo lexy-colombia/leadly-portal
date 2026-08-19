@@ -48,7 +48,7 @@
   "campaigns.newDrawer.searchContacts": "Buscar cliente...",
   "campaigns.newDrawer.manualNameLabel": "Nombre (opcional)",
   "campaigns.newDrawer.manualPhoneLabel": "Teléfono",
-  "campaigns.newDrawer.manualPhonePlaceholder": "+57 300 1234567",
+  "campaigns.newDrawer.manualPhonePlaceholder": "300 1234567",
   "campaigns.newDrawer.manualAdd": "Agregar número",
   "campaigns.newDrawer.tableContact": "Contacto",
   "campaigns.newDrawer.tableVariable": "Variable {n}",

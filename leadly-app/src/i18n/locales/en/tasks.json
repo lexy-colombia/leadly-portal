@@ -44,6 +44,7 @@
   "tasks.field.title": "Title",
   "tasks.field.titlePlaceholder": "E.g. Call to confirm proposal",
   "tasks.field.titleRequired": "Title is required.",
+  "tasks.field.dueDateRequired": "Due date is required.",
   "tasks.field.description": "Description (optional)",
   "tasks.field.priority": "Priority",
   "tasks.field.dueDate": "Due date (optional)",

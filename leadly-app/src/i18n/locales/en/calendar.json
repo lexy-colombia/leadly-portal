@@ -8,10 +8,15 @@
   "calendar.weekday.sun": "Sun",
 
   "calendar.today": "Today",
-  "calendar.aria.prevMonth": "Previous month",
-  "calendar.aria.nextMonth": "Next month",
+  "calendar.aria.prev": "Previous",
+  "calendar.aria.next": "Next",
   "calendar.actions.new": "New appointment",
   "calendar.moreCount": "+{count} more",
+
+  "calendar.view.month": "Month",
+  "calendar.view.week": "Week",
+  "calendar.view.day": "Day",
+  "calendar.day.empty": "No appointments this day.",
 
   "calendar.errors.loadFailed": "Couldn't load appointments.",
   "calendar.errors.updateFailed": "Couldn't update the appointment.",
@@ -25,9 +30,12 @@
   "calendar.detail.contactFallback": "Contact",
   "calendar.detail.markCompleted": "Mark completed",
   "calendar.detail.cancelAppointment": "Cancel appointment",
+  "calendar.detail.reschedule": "Reschedule",
 
   "calendar.form.title": "New appointment",
   "calendar.form.description": "We'll send a WhatsApp reminder an hour before.",
+  "calendar.form.editTitle": "Reschedule appointment",
+  "calendar.form.editDescription": "Update the date, contact, or notes.",
   "calendar.form.contact": "Contact",
   "calendar.form.change": "Change",
   "calendar.form.searchPlaceholder": "Search by name or phone…",

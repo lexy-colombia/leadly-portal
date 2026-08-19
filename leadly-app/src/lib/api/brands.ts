@@ -11,6 +11,7 @@ export interface BrandInput {
   id?: string
   tenant_id: string
   name: string
+  description?: string | null
   logo_url?: string | null
   is_active?: boolean
 }

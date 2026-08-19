@@ -21,6 +21,13 @@ const FIELD_CLASS = '!h-7 !rounded-lg !text-xs'
 const TEXTAREA_CLASS = '!rounded-lg !py-1.5 !text-xs'
 const COMBOBOX_TRIGGER_CLASS = 'flex-1 !rounded-lg'
 
+function defaultDueDate(): string {
+  const d = new Date(Date.now() + 60 * 60 * 1000)
+  d.setMinutes(Math.ceil(d.getMinutes() / 15) * 15, 0, 0)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 function formatFileSize(bytes: number): string {
   if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`
   return `${Math.round(bytes / 1000)} KB`
@@ -113,6 +120,7 @@ export function TaskDrawer({
   tenantId,
   task,
   defaultOpportunityId,
+  prefillDueDate,
   onSaved,
 }: {
   open: boolean
@@ -123,6 +131,9 @@ export function TaskDrawer({
   /** Pre-links the task to an opportunity when created from OpportunityPanel's
    * "Tasks" tab -- ignored when editing (the task's own opportunity_id wins). */
   defaultOpportunityId?: string | null
+  /** Pre-fills the due date when created from an empty Calendar cell (same
+   * <input type="datetime-local"> value format). Ignored when editing. */
+  prefillDueDate?: string
   onSaved: () => void
 }) {
   const { t } = useLanguage()
@@ -143,12 +154,13 @@ export function TaskDrawer({
     setTitle(task?.title ?? '')
     setDescription(task?.description ?? '')
     setPriority(task?.priority ?? 'media')
-    setDueDate(task?.due_date ? task.due_date.slice(0, 16) : '')
+    setDueDate(task?.due_date ? task.due_date.slice(0, 16) : prefillDueDate ?? defaultDueDate())
     setContactId(task?.contact_id ?? null)
     setAssignedTo(task?.assigned_to ?? null)
     setTouched(false)
     setFormError(null)
-  }, [open, task])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, task, prefillDueDate])
 
   useEffect(() => {
     if (!open) return
@@ -157,12 +169,13 @@ export function TaskDrawer({
   }, [open, tenantId])
 
   const titleError = touched && !isNotBlank(title) ? t('tasks.field.titleRequired') : undefined
+  const dueDateError = touched && !dueDate ? t('tasks.field.dueDateRequired') : undefined
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setTouched(true)
     setFormError(null)
-    if (!isNotBlank(title)) return
+    if (!isNotBlank(title) || !dueDate) return
 
     setSubmitting(true)
     try {
@@ -171,7 +184,7 @@ export function TaskDrawer({
         title: title.trim(),
         description: description.trim() || null,
         priority,
-        due_date: dueDate ? new Date(dueDate).toISOString() : null,
+        due_date: new Date(dueDate).toISOString(),
         contact_id: contactId,
         assigned_to: assignedTo,
         ...(task ? {} : { opportunity_id: defaultOpportunityId ?? null }),
@@ -219,7 +232,8 @@ export function TaskDrawer({
           </div>
           <div>
             <Label htmlFor="task-due">{t('tasks.field.dueDate')}</Label>
-            <Input id="task-due" type="datetime-local" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
+            <Input id="task-due" type="datetime-local" value={dueDate} aria-invalid={!!dueDateError} onChange={(e) => setDueDate(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
+            <FieldError message={dueDateError} />
           </div>
         </div>
 
