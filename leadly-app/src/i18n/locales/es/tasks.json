@@ -9,6 +9,8 @@
   "tasks.status.cancelada": "Cancelada",
 
   "tasks.filter.all": "Todas",
+  "tasks.filter.search": "Buscar estado...",
+  "tasks.filter.noResults": "Sin resultados.",
   "tasks.count.singular": "{count} tarea",
   "tasks.count.plural": "{count} tareas",
   "tasks.actions.new": "Nueva tarea",

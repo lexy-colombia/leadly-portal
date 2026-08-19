@@ -3,8 +3,7 @@ import { listEnabledModuleKeys, setModuleEnabled } from '../../lib/api/tenantMod
 import { TENANT_MODULES } from '../../lib/modules'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
-import { PageSpinner, Switch } from '../../components/ui'
-
+import { PageSpinner, Switch } from '@/components/atoms'
 /** Toggles apply immediately (same pattern as ai_assistant_skills' SkillsSection)
  * -- independent of any "Guardar cambios" button. A tenant with no modules
  * enabled loses access to that section of the panel entirely (nav item hidden,

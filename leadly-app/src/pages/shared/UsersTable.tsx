@@ -3,8 +3,8 @@ import type { Profile } from '../../types/domain'
 import { setProfileActive } from '../../lib/api/users'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { TranslationKey } from '../../i18n/translations'
-import { Badge, Button, EmptyState, InitialsAvatar, Table, TBody, TD, TH, THead, TRow } from '../../components/ui'
-
+import { Badge, Button, InitialsAvatar, Table, TBody, TD, TH, THead, TRow } from '@/components/atoms'
+import { EmptyState } from '@/components/molecules'
 const ROLE_LABEL_KEY: Record<string, TranslationKey> = {
   superadmin: 'account.role.superadmin',
   tenant_admin: 'account.role.tenantAdmin',

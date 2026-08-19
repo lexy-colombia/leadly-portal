@@ -5,12 +5,17 @@ import {
   setIntegrationCredentialConfig,
   setIntegrationCredentialSecret,
 } from '../../../lib/api/integrations'
-import { Badge, Button, Drawer, FieldError, Input } from '../../../components/ui'
+import { FieldError } from '@/components/atoms'
+import { Drawer } from '@/components/organisms'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
 import { IntegrationStatusBanner } from './IntegrationStatusBanner'
 import { IntegrationFieldLabel, IntegrationSection } from './IntegrationFieldLabel'
 import { useLanguage } from '../../../contexts/LanguageContext'
 
 const PROVIDER_KEY = 'shopify'
+const FIELD_CLASS = '!h-7 !rounded-lg !text-xs'
 
 /** Shopify's own fields (store domain + Admin API access token) -- mapped,
  * not wired: no Edge Function syncs products/orders yet, this only saves
@@ -19,7 +24,7 @@ const PROVIDER_KEY = 'shopify'
  * ShopifyConnection) needs a registered public app with redirect URIs --
  * out of scope until there's an actual product/order sync to build. Shared
  * between the backoffice (platform account, tenantId null) and each
- * tenant's own Integraciones page (their own account, tenantId set). */
+ * tenant's own Integrations page (their own account, tenantId set). */
 export function ShopifyCredentialDrawer({
   open,
   onClose,
@@ -79,27 +84,18 @@ export function ShopifyCredentialDrawer({
   const connected = !!storeName.trim() && tokenConfigured
 
   return (
-    <Drawer
-      open={open}
-      onClose={onClose}
-      title="Shopify"
-      description={description}
-    >
+    <Drawer open={open} onClose={onClose} title="Shopify" description={description}>
       {!loaded && !error && <p className="text-sm text-brand-400">{t('common.status.loading')}</p>}
 
       {loaded && (
         <div className="space-y-4">
-          <IntegrationStatusBanner
-            connected={connected}
-            connectedText={t('integrations.shopify.connected')}
-            notConnectedText={t('integrations.shopify.notConnected')}
-          />
+          <IntegrationStatusBanner connected={connected} connectedText={t('integrations.shopify.connected')} notConnectedText={t('integrations.shopify.notConnected')} />
 
           <IntegrationSection title={t('integrations.section.credentials')}>
             <div>
               <IntegrationFieldLabel htmlFor="shopify-store" label={t('integrations.shopify.store')} />
               <div className="flex items-center gap-2">
-                <Input id="shopify-store" value={storeName} onChange={(e) => setStoreName(e.target.value)} placeholder="mi-tienda" className="flex-1" />
+                <Input id="shopify-store" value={storeName} onChange={(e) => setStoreName(e.target.value)} placeholder="mi-tienda" className={`flex-1 ${FIELD_CLASS}`} />
                 <span className="shrink-0 text-xs text-brand-400">.myshopify.com</span>
               </div>
             </div>
@@ -108,7 +104,13 @@ export function ShopifyCredentialDrawer({
               <IntegrationFieldLabel
                 htmlFor="shopify-token"
                 label={t('integrations.shopify.accessToken')}
-                badge={tokenConfigured && <Badge tone="success">{t('integrations.configured')}</Badge>}
+                badge={
+                  tokenConfigured && (
+                    <Badge variant="outline" className="border-transparent bg-emerald-100 text-emerald-700">
+                      {t('integrations.configured')}
+                    </Badge>
+                  )
+                }
               />
               <Input
                 id="shopify-token"
@@ -117,6 +119,7 @@ export function ShopifyCredentialDrawer({
                 onChange={(e) => setAccessToken(e.target.value)}
                 placeholder={tokenConfigured ? t('integrations.replaceValue') : 'shpat_...'}
                 autoComplete="off"
+                className={FIELD_CLASS}
               />
               <p className="mt-1 text-xs text-brand-400">{t('integrations.shopify.accessToken.hint')}</p>
             </div>
@@ -125,7 +128,7 @@ export function ShopifyCredentialDrawer({
           {error && <FieldError message={error} />}
 
           <div className="flex items-center gap-2 border-t border-brand-100 pt-4">
-            <Button type="button" variant="secondary" onClick={handleSubmit} disabled={submitting}>
+            <Button type="button" onClick={handleSubmit} disabled={submitting}>
               {submitting ? t('common.actions.saving') : t('common.actions.save')}
             </Button>
             {saved && <span className="text-xs text-emerald-600">{t('integrations.configSaved')}</span>}

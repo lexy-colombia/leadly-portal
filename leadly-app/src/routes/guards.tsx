@@ -2,8 +2,8 @@ import type { ReactNode } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import type { UserRole } from '../types/domain'
-import { AccessDenied, PageSpinner, TenantDeactivated } from '../components/ui'
-
+import { PageSpinner } from '@/components/atoms'
+import { AccessDenied, TenantDeactivated } from '@/components/organisms'
 export function roleHome(role: UserRole | undefined): string {
   return role === 'superadmin' ? '/backoffice' : '/app'
 }

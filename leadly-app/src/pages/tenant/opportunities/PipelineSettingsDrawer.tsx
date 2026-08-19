@@ -8,11 +8,17 @@ import {
   updateStage,
   type StageInput,
 } from '../../../lib/api/pipelines'
-import type { CrmPipeline, CrmPipelineStage } from '../../../types/domain'
-import { Button, ConfirmDialog, Drawer, Input, Label, Select } from '../../../components/ui'
-import { ChevronLeftIcon, PlusIcon, TrashIcon } from '../../../components/icons'
+import type { Pipeline, PipelineStage } from '../../../types/domain'
+import { ConfirmDialog, Drawer } from '@/components/organisms'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { ChevronLeftIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import type { TranslationKey } from '../../../i18n/translations'
+
+const FIELD_CLASS = '!h-7 !rounded-lg !text-xs'
 
 // `deletePipeline`/`deleteStage` throw an `Error` whose `message` is itself a
 // translation key (they live in lib/api, with no access to the language
@@ -24,7 +30,7 @@ function resolveDeleteError(err: unknown, t: (key: TranslationKey) => string, fa
 
 type StageOutcome = 'abierta' | 'ganada' | 'perdida'
 
-function outcomeOf(stage: Pick<CrmPipelineStage, 'is_won' | 'is_lost'>): StageOutcome {
+function outcomeOf(stage: Pick<PipelineStage, 'is_won' | 'is_lost'>): StageOutcome {
   if (stage.is_won) return 'ganada'
   if (stage.is_lost) return 'perdida'
   return 'abierta'
@@ -59,9 +65,9 @@ export function PipelineSettingsDrawer({
   open: boolean
   onClose: () => void
   tenantId: string
-  pipeline: CrmPipeline
+  pipeline: Pipeline
   pipelineCount: number
-  stages: CrmPipelineStage[]
+  stages: PipelineStage[]
   onPipelineChange: () => void
   onPipelineDeleted: () => void
   onStagesChange: () => void
@@ -72,9 +78,9 @@ export function PipelineSettingsDrawer({
   const [color, setColor] = useState(pipeline.color)
   const [savingPipeline, setSavingPipeline] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [localStages, setLocalStages] = useState<CrmPipelineStage[]>(stages)
+  const [localStages, setLocalStages] = useState<PipelineStage[]>(stages)
   const [addingStage, setAddingStage] = useState(false)
-  const [stageToDelete, setStageToDelete] = useState<CrmPipelineStage | null>(null)
+  const [stageToDelete, setStageToDelete] = useState<PipelineStage | null>(null)
   const [deletingStage, setDeletingStage] = useState(false)
   const [deletePipelineOpen, setDeletePipelineOpen] = useState(false)
   const [deletingPipeline, setDeletingPipeline] = useState(false)
@@ -106,7 +112,7 @@ export function PipelineSettingsDrawer({
     }
   }
 
-  async function handleStageFieldSave(stage: CrmPipelineStage, input: Partial<StageInput>) {
+  async function handleStageFieldSave(stage: PipelineStage, input: Partial<StageInput>) {
     setError(null)
     try {
       await updateStage(stage.id, input)
@@ -184,23 +190,19 @@ export function PipelineSettingsDrawer({
           <form onSubmit={handleSavePipeline} className="space-y-3">
             <div>
               <Label htmlFor="pipeline-name">{t('opportunities.settings.fields.name')}</Label>
-              <Input id="pipeline-name" value={name} onChange={(e) => setName(e.target.value)} />
+              <Input id="pipeline-name" value={name} onChange={(e) => setName(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
             </div>
             <div>
               <Label htmlFor="pipeline-description">{t('opportunities.settings.fields.description')}</Label>
-              <Input id="pipeline-description" value={description} onChange={(e) => setDescription(e.target.value)} />
+              <Input id="pipeline-description" value={description} onChange={(e) => setDescription(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
             </div>
-            <div className="flex items-center gap-2">
+            <div>
               <Label htmlFor="pipeline-color">{t('opportunities.settings.fields.color')}</Label>
-              <input
-                id="pipeline-color"
-                type="color"
-                value={color}
-                onChange={(e) => setColor(e.target.value)}
-                className="h-8 w-12 cursor-pointer rounded border border-brand-200"
-              />
+              <div className="mt-1 flex h-7 w-9 items-center justify-center overflow-hidden rounded-lg border border-input p-0.5">
+                <input id="pipeline-color" type="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-full w-full cursor-pointer border-0 bg-transparent p-0" />
+              </div>
             </div>
-            <Button type="submit" variant="secondary" disabled={savingPipeline || !name.trim()} className="!py-1.5 text-xs">
+            <Button type="submit" size="sm" disabled={savingPipeline || !name.trim()}>
               {savingPipeline ? t('common.actions.saving') : t('opportunities.settings.actions.savePipeline')}
             </Button>
           </form>
@@ -231,17 +233,19 @@ export function PipelineSettingsDrawer({
                     </button>
                   </div>
 
-                  <input
-                    type="color"
-                    defaultValue={stage.color}
-                    onBlur={(e) => e.target.value !== stage.color && handleStageFieldSave(stage, { color: e.target.value })}
-                    className="h-8 w-8 shrink-0 cursor-pointer rounded border border-brand-200"
-                  />
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-input p-0.5">
+                    <input
+                      type="color"
+                      defaultValue={stage.color}
+                      onBlur={(e) => e.target.value !== stage.color && handleStageFieldSave(stage, { color: e.target.value })}
+                      className="h-full w-full cursor-pointer border-0 bg-transparent p-0"
+                    />
+                  </span>
 
                   <Input
                     defaultValue={stage.name}
                     onBlur={(e) => e.target.value.trim() && e.target.value !== stage.name && handleStageFieldSave(stage, { name: e.target.value.trim() })}
-                    className="!py-1.5 text-sm"
+                    className={FIELD_CLASS}
                   />
 
                   <Input
@@ -253,34 +257,37 @@ export function PipelineSettingsDrawer({
                       const value = Number(e.target.value)
                       if (!Number.isNaN(value) && value !== stage.probability) handleStageFieldSave(stage, { probability: Math.min(100, Math.max(0, value)) })
                     }}
-                    className="!w-16 !py-1.5 text-sm"
+                    className={`!w-16 ${FIELD_CLASS}`}
                   />
 
-                  <Select
-                    defaultValue={outcomeOf(stage)}
-                    onChange={(e) => handleStageFieldSave(stage, outcomeToFlags(e.target.value as StageOutcome))}
-                    className="!w-auto !py-1.5 text-xs"
-                  >
-                    {(Object.keys(OUTCOME_LABEL) as StageOutcome[]).map((outcome) => (
-                      <option key={outcome} value={outcome}>
-                        {t(OUTCOME_LABEL[outcome])}
-                      </option>
-                    ))}
+                  <Select defaultValue={outcomeOf(stage)} onValueChange={(v) => handleStageFieldSave(stage, outcomeToFlags(v as StageOutcome))}>
+                    <SelectTrigger className={`w-auto ${FIELD_CLASS}`}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(Object.keys(OUTCOME_LABEL) as StageOutcome[]).map((outcome) => (
+                        <SelectItem key={outcome} value={outcome} className="text-xs">
+                          {t(OUTCOME_LABEL[outcome])}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
                   </Select>
 
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="icon-sm"
                     onClick={() => setStageToDelete(stage)}
                     aria-label={t('opportunities.settings.stages.deleteAria', { name: stage.name })}
-                    className="shrink-0 rounded-lg p-1.5 text-brand-400 hover:bg-red-50 hover:text-red-600"
+                    className="shrink-0 text-brand-400 hover:bg-red-50 hover:text-red-600"
                   >
                     <TrashIcon width={14} height={14} />
-                  </button>
+                  </Button>
                 </div>
               ))}
             </div>
 
-            <Button type="button" variant="ghost" onClick={handleAddStage} disabled={addingStage} className="!mt-3 !py-1.5 text-xs">
+            <Button type="button" variant="ghost" size="sm" onClick={handleAddStage} disabled={addingStage} className="mt-3">
               <PlusIcon width={13} height={13} /> {addingStage ? t('opportunities.settings.stages.adding') : t('opportunities.settings.stages.add')}
             </Button>
           </div>
@@ -289,7 +296,7 @@ export function PipelineSettingsDrawer({
             {pipelineCount <= 1 ? (
               <p className="text-xs text-brand-400">{t('opportunities.settings.pipeline.onlyOne')}</p>
             ) : (
-              <Button type="button" variant="danger" onClick={() => setDeletePipelineOpen(true)} className="!py-1.5 text-xs">
+              <Button type="button" variant="destructive" size="sm" onClick={() => setDeletePipelineOpen(true)}>
                 <TrashIcon width={13} height={13} /> {t('opportunities.settings.pipeline.delete')}
               </Button>
             )}

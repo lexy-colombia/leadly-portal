@@ -9,6 +9,8 @@
   "tasks.status.cancelada": "Cancelled",
 
   "tasks.filter.all": "All",
+  "tasks.filter.search": "Search status...",
+  "tasks.filter.noResults": "No results.",
   "tasks.count.singular": "{count} task",
   "tasks.count.plural": "{count} tasks",
   "tasks.actions.new": "New task",

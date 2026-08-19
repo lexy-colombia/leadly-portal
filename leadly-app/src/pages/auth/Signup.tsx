@@ -2,9 +2,10 @@ import { useState, type FormEvent } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
-import { AuthSplitLayout } from '../../components/layout/AuthSplitLayout'
-import { Button, FieldError, IconInput, Input, Label, PasswordInput } from '../../components/ui'
-import { GoogleIcon, LockIcon, MailIcon } from '../../components/icons'
+import { AuthSplitLayout } from '@/components/organisms'
+import { Button, FieldError, Input, Label } from '@/components/atoms'
+import { IconInput, PasswordInput } from '@/components/molecules'
+import { GoogleIcon, LockIcon, MailIcon } from '@/components/atoms/icons'
 import { isNotBlank, isValidEmail, isValidPassword, normalizeEmail, PASSWORD_MIN_LENGTH } from '../../lib/validation'
 
 export function Signup() {

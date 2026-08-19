@@ -3,8 +3,9 @@ import { Link } from 'react-router-dom'
 import { getBackofficeDashboardStats, type BackofficeDashboardStats } from '../../lib/api/dashboard'
 import { listTenants } from '../../lib/api/tenants'
 import type { Tenant } from '../../types/domain'
-import { Badge, Card, EmptyState, InitialsAvatar, PageSpinner } from '../../components/ui'
-import { BuildingIcon, ChatBubbleIcon, PhoneIcon } from '../../components/icons'
+import { Badge, InitialsAvatar, PageSpinner } from '@/components/atoms'
+import { Card, EmptyState } from '@/components/molecules'
+import { BuildingIcon, ChatBubbleIcon, PhoneIcon } from '@/components/atoms/icons'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { Language } from '../../i18n/translations'
 
@@ -67,7 +68,7 @@ export function Dashboard() {
       <Card>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="font-semibold text-brand-800">{t('backoffice.dashboard.recentTenants')}</h2>
-          <Link to="/backoffice/clientes" className="text-xs font-medium text-accent-600 hover:text-accent-700">
+          <Link to="/backoffice/clients" className="text-xs font-medium text-accent-600 hover:text-accent-700">
             {t('common.actions.viewAll')}
           </Link>
         </div>
@@ -78,7 +79,7 @@ export function Dashboard() {
             {recentTenants.map((tenant) => (
               <li key={tenant.id}>
                 <Link
-                  to={`/backoffice/clientes/${tenant.id}`}
+                  to={`/backoffice/clients/${tenant.id}`}
                   className="flex items-center justify-between gap-3 rounded-xl border border-brand-100 px-3.5 py-2.5 transition-colors hover:bg-brand-50"
                 >
                   <span className="flex min-w-0 items-center gap-3">

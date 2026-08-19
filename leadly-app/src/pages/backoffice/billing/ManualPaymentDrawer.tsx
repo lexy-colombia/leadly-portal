@@ -1,7 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { recordManualPayment } from '../../../lib/api/billing'
 import type { PaymentInvoice } from '../../../types/domain'
-import { Button, CurrencyInput, Drawer, FieldError, Input, Label, Select, Textarea } from '../../../components/ui'
+import { Button, FieldError, Input, Label, Select, Textarea } from '@/components/atoms'
+import { CurrencyInput } from '@/components/molecules'
+import { Drawer } from '@/components/organisms'
 import { useLanguage } from '../../../contexts/LanguageContext'
 
 const PAYMENT_METHODS = ['efectivo', 'transferencia', 'tarjeta', 'otro'] as const

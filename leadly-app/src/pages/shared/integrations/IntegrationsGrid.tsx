@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { getPaymentCredentialStatus } from '../../../lib/api/billing'
 import { getIntegrationCredential, getIntegrationCredentialConfiguredSecrets, listIntegrationProviders } from '../../../lib/api/integrations'
 import type { IntegrationCategory, IntegrationProvider } from '../../../types/domain'
-import { Badge, Card, PageSpinner } from '../../../components/ui'
-import { GlobeIcon } from '../../../components/icons'
+import { PageSpinner } from '@/components/atoms'
+import { GlobeIcon } from '@/components/atoms/icons'
+import { Button } from '@/components/ui/button'
 import { LaFacturaCredentialDrawer } from './LaFacturaCredentialDrawer'
 import { WompiIntegrationDrawer } from './WompiIntegrationDrawer'
 import { ShopifyCredentialDrawer } from './ShopifyCredentialDrawer'
@@ -47,7 +48,7 @@ async function checkConnected(providerKey: string, tenantId: string | null): Pro
 /** Card grid + drawers for the third-party integrations catalog
  * (LaFactura/Wompi/Shopify/HubSpot today). Shared between the backoffice
  * (tenantId null -- Leadly's own accounts with each provider) and each
- * tenant's own Integraciones page (tenantId set -- that tenant's own
+ * tenant's own Integrations page (tenantId set -- that tenant's own
  * accounts) -- same catalog, same drawers, different credential rows
  * underneath (see integration_credentials/tenant_payment_credentials'
  * tenant_id-nullable scoping). */
@@ -97,30 +98,37 @@ export function IntegrationsGrid({ tenantId, drawerDescription }: { tenantId: st
           {providers.map((provider) => {
             const connected = connectedByKey[provider.key] ?? false
             return (
-              <button key={provider.key} type="button" onClick={() => setDrawerProvider(provider)} className="text-left">
-                <Card hover className={connected ? '!border-emerald-200 !bg-emerald-50/40' : undefined}>
-                  <div className="flex items-center gap-3">
-                    <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white ring-1 ring-brand-100">
-                      {PROVIDER_LOGO[provider.key] ? (
-                        <img src={PROVIDER_LOGO[provider.key]} alt="" className="h-7 w-7 object-contain" />
-                      ) : (
-                        <GlobeIcon width={18} height={18} className="text-accent-600" />
-                      )}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-brand-800">{provider.name}</p>
-                      <Badge tone="neutral">{t(CATEGORY_LABEL_KEY[provider.category])}</Badge>
-                    </div>
+              <div
+                key={provider.key}
+                className={`rounded-xl border p-4 ${connected ? 'border-emerald-200 bg-emerald-50/40' : 'border-brand-100'}`}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white ring-1 ring-brand-100">
+                    {PROVIDER_LOGO[provider.key] ? (
+                      <img src={PROVIDER_LOGO[provider.key]} alt="" className="h-7 w-7 object-contain" />
+                    ) : (
+                      <GlobeIcon width={18} height={18} className="text-accent-600" />
+                    )}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-brand-800">{provider.name}</p>
+                    <span className="inline-block rounded-full bg-brand-50 px-2 py-0.5 text-[11px] text-brand-500">{t(CATEGORY_LABEL_KEY[provider.category])}</span>
                   </div>
-                  {provider.description && <p className="mt-3 text-xs text-brand-400">{provider.description}</p>}
-                  <div className="mt-3 flex items-center gap-1.5 border-t border-brand-100 pt-3 text-xs font-medium">
-                    <span className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-emerald-500' : 'bg-brand-300'}`} />
-                    <span className={connected ? 'text-emerald-700' : 'text-brand-400'}>
-                      {connected ? t('integrations.connected') : t('integrations.notConnected')}
-                    </span>
-                  </div>
-                </Card>
-              </button>
+                </div>
+                {provider.description && <p className="mt-3 text-xs text-brand-400">{provider.description}</p>}
+                {/* Botón explícito en vez de que toda la tarjeta sea
+                    clickeable sin ninguna señal visual -- pedido explícito
+                    del usuario, "así no es intuitivo". */}
+                <div className="mt-3 flex items-center justify-between gap-2 border-t border-brand-100 pt-3">
+                  <span className="flex items-center gap-1.5 text-xs font-medium">
+                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${connected ? 'bg-emerald-500' : 'bg-brand-300'}`} />
+                    <span className={connected ? 'text-emerald-700' : 'text-brand-400'}>{connected ? t('integrations.connected') : t('integrations.notConnected')}</span>
+                  </span>
+                  <Button type="button" variant={connected ? 'outline' : 'default'} size="xs" onClick={() => setDrawerProvider(provider)}>
+                    {connected ? t('integrations.actions.manage') : t('integrations.actions.connect')}
+                  </Button>
+                </div>
+              </div>
             )
           })}
         </div>

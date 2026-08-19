@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { assignTenantToPlan, cancelSubscription, getActiveSubscriptionForTenant, listBillingPlans, reactivateSubscription } from '../../../lib/api/billing'
 import type { BillingPlan, BillingSubscription } from '../../../types/domain'
-import { Badge, Button, ConfirmDialog, PageSpinner, Select } from '../../../components/ui'
+import { Badge, Button, PageSpinner, Select } from '@/components/atoms'
+import { ConfirmDialog } from '@/components/organisms'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import type { Language, TranslationKey } from '../../../i18n/translations'
 

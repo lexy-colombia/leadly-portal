@@ -2,10 +2,11 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { createPayment, PAYMENT_METHOD_LABEL_KEY } from '../../../lib/api/orderPayments'
 import type { OrderPaymentMethod } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { Button, CurrencyInput, Drawer, FieldError, Input, Label, Select, Textarea } from '../../../components/ui'
-
+import { Button, FieldError, Input, Label, Select, Textarea } from '@/components/atoms'
+import { CurrencyInput } from '@/components/molecules'
+import { Drawer } from '@/components/organisms'
 /** Creation only -- a payment logged by mistake is deleted and re-created
- * from VentaDetalle.tsx, never edited in place (see the plan's reasoning:
+ * from OrderDetail.tsx, never edited in place (see the plan's reasoning:
  * keeps this consistent with the rest of the CRM's "simple by default"
  * criterion instead of adding an edit path nothing else needs yet). */
 export function PaymentDrawer({

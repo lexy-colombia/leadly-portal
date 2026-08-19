@@ -1,8 +1,8 @@
 import { supabase } from '../supabaseClient'
-import type { CrmOrderPayment, OrderPaymentMethod } from '../../types/domain'
+import type { SalesOrderPayment, OrderPaymentMethod } from '../../types/domain'
 import type { TranslationKey } from '../../i18n/translations'
 
-// Shared between VentaDetalle.tsx (payment list) and PaymentDrawer.tsx (method
+// Shared between OrderDetail.tsx (payment list) and PaymentDrawer.tsx (method
 // select) so the wording never drifts between screens.
 export const PAYMENT_METHOD_LABEL_KEY: Record<OrderPaymentMethod, TranslationKey> = {
   efectivo: 'orders.paymentMethod.cash',
@@ -21,9 +21,9 @@ export interface OrderPaymentInput {
   notes?: string | null
 }
 
-export async function listPaymentsForOrder(orderId: string): Promise<CrmOrderPayment[]> {
+export async function listPaymentsForOrder(orderId: string): Promise<SalesOrderPayment[]> {
   const { data, error } = await supabase
-    .from('crm_order_payments')
+    .from('sales_order_payments')
     .select('*')
     .eq('order_id', orderId)
     .is('deleted_at', null)
@@ -32,12 +32,12 @@ export async function listPaymentsForOrder(orderId: string): Promise<CrmOrderPay
   return data
 }
 
-export async function createPayment(input: OrderPaymentInput): Promise<CrmOrderPayment> {
+export async function createPayment(input: OrderPaymentInput): Promise<SalesOrderPayment> {
   const {
     data: { user },
   } = await supabase.auth.getUser()
   const { data, error } = await supabase
-    .from('crm_order_payments')
+    .from('sales_order_payments')
     .insert({ ...input, created_by: user?.id ?? null })
     .select()
     .single()
@@ -51,6 +51,6 @@ export async function deletePayment(id: string): Promise<void> {
   const {
     data: { user },
   } = await supabase.auth.getUser()
-  const { error } = await supabase.from('crm_order_payments').update({ deleted_at: new Date().toISOString(), deleted_by: user?.id ?? null }).eq('id', id)
+  const { error } = await supabase.from('sales_order_payments').update({ deleted_at: new Date().toISOString(), deleted_by: user?.id ?? null }).eq('id', id)
   if (error) throw error
 }

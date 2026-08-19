@@ -6,9 +6,17 @@ import { getMaxWhatsappLinesForTenant } from '../../lib/api/billing'
 import { assignAiAssistantToLine, deleteAiAssistant, listAiAssistantsByTenant } from '../../lib/api/aiAssistants'
 import { listConversations, type ConversationWithLine } from '../../lib/api/conversations'
 import type { AiAssistant, AiProvider, WhatsappLine, WhatsappLineStatus } from '../../types/domain'
-import { Badge, Button, ConfirmDialog, EmptyState, InitialsAvatar, PageSpinner, Select, TBody, TD, TH, THead, Table, TRow } from '../../components/ui'
-import { AiSparkleIcon, ChatBubbleIcon, PencilIcon, PhoneIcon, PlusIcon, TrashIcon } from '../../components/icons'
+import { InitialsAvatar, PageSpinner } from '@/components/atoms'
+import { EmptyState } from '@/components/molecules'
+import { ConfirmDialog } from '@/components/organisms'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { AiSparkleIcon, ChatBubbleIcon, FileIcon, PencilIcon, PhoneIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
 import { AiAssistantDrawer } from './AiAssistantDrawer'
+import { TemplatesSection } from './TemplatesSection'
 
 const LINE_STATUS_KEY: Record<WhatsappLineStatus, TranslationKey> = {
   pending_verification: 'settings.lines.status.pendingVerification',
@@ -17,17 +25,20 @@ const LINE_STATUS_KEY: Record<WhatsappLineStatus, TranslationKey> = {
   disconnected: 'settings.lines.status.disconnected',
 }
 
-const LINE_STATUS_TONE: Record<WhatsappLineStatus, 'neutral' | 'success' | 'warning' | 'danger'> = {
-  pending_verification: 'warning',
-  active: 'success',
-  suspended: 'danger',
-  disconnected: 'neutral',
+const LINE_STATUS_BADGE_CLASS: Record<WhatsappLineStatus, string> = {
+  pending_verification: 'border-transparent bg-amber-100 text-amber-700',
+  active: 'border-transparent bg-emerald-100 text-emerald-700',
+  suspended: 'border-transparent bg-red-100 text-red-700',
+  disconnected: 'border-transparent bg-slate-100 text-slate-600',
 }
 
 const PROVIDER_KEY: Record<AiProvider, TranslationKey> = {
   openai: 'settings.assistant.provider.openai',
   gemini: 'settings.assistant.provider.gemini',
 }
+
+// shadcn Select can't take an empty string as an item value.
+const NONE = '__none'
 
 function isToday(iso: string): boolean {
   return new Date(iso).toDateString() === new Date().toDateString()
@@ -84,7 +95,7 @@ export function LinesAndAgentsSection({
   connectLine?: { label: string; loading: boolean; onClick: () => void }
 }) {
   const { t, language } = useLanguage()
-  const [tab, setTab] = useState<'lineas' | 'agentes'>('lineas')
+  const [tab, setTab] = useState<'lineas' | 'agentes' | 'plantillas'>('lineas')
   const [lines, setLines] = useState<WhatsappLine[] | null>(null)
   const [assistants, setAssistants] = useState<AiAssistant[] | null>(null)
   const [conversations, setConversations] = useState<ConversationWithLine[] | null>(null)
@@ -184,44 +195,39 @@ export function LinesAndAgentsSection({
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex gap-1 border-b border-brand-100">
-          {(
-            [
-              ['lineas', t('settings.lines.tabs.lines'), PhoneIcon],
-              ['agentes', t('settings.lines.tabs.agents'), AiSparkleIcon],
-            ] as const
-          ).map(([value, label, Icon]) => (
-            <button
-              key={value}
-              onClick={() => setTab(value)}
-              className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
-                tab === value ? 'border-accent-500 text-accent-700' : 'border-transparent text-brand-400 hover:text-brand-700'
-              }`}
-            >
-              <Icon width={15} height={15} /> {label}
-            </button>
-          ))}
-        </div>
+        <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
+          <TabsList>
+            <TabsTrigger value="lineas" className="text-xs">
+              <PhoneIcon width={13} height={13} /> {t('settings.lines.tabs.lines')}
+            </TabsTrigger>
+            <TabsTrigger value="agentes" className="text-xs">
+              <AiSparkleIcon width={13} height={13} /> {t('settings.lines.tabs.agents')}
+            </TabsTrigger>
+            <TabsTrigger value="plantillas" className="text-xs">
+              <FileIcon width={13} height={13} /> {t('settings.templates.tabs.templates')}
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
 
-        {canManage &&
+        {tab !== 'plantillas' &&
+          canManage &&
           (tab === 'lineas' ? (
             connectLine ? (
               <Button
-                variant="primary"
                 onClick={connectLine.onClick}
                 disabled={connectLine.loading || atLineCapacity}
                 title={atLineCapacity ? t('settings.lines.metrics.atCapacity', { max: maxLines ?? 0 }) : undefined}
-                className="!py-1.5 text-xs"
+                size="sm"
               >
                 <PlusIcon width={14} height={14} /> {connectLine.loading ? t('settings.lines.connecting') : connectLine.label}
               </Button>
             ) : (
-              <Button variant="secondary" onClick={() => setLineDrawerState({ open: true, line: null })} className="!py-1.5 text-xs">
+              <Button variant="outline" size="sm" onClick={() => setLineDrawerState({ open: true, line: null })}>
                 <PlusIcon width={14} height={14} /> {t('settings.lines.newLine')}
               </Button>
             )
           ) : (
-            <Button variant="primary" onClick={() => setAgentDrawer({ open: true, assistantId: null })} className="!py-1.5 text-xs">
+            <Button size="sm" onClick={() => setAgentDrawer({ open: true, assistantId: null })}>
               <PlusIcon width={14} height={14} /> {t('settings.lines.newAgent')}
             </Button>
           ))}
@@ -270,67 +276,77 @@ export function LinesAndAgentsSection({
             <EmptyState>{connectLine ? t('settings.lines.emptyTenant') : t('settings.lines.emptyBackoffice')}</EmptyState>
           )}
           {lines && lines.length > 0 && (
-            <Table>
-              <THead>
-                <tr>
-                  <TH>{t('settings.lines.table.line')}</TH>
-                  <TH>{t('settings.lines.table.status')}</TH>
-                  <TH>{t('settings.lines.table.assignedAgent')}</TH>
-                  <TH>{t('settings.lines.table.lastActivity')}</TH>
-                  <TH className="text-right">{t('settings.lines.table.actions')}</TH>
-                </tr>
-              </THead>
-              <TBody>
-                {lines.map((line) => {
-                  const assignedAgent = assistants?.find((a) => a.id === line.ai_assistant_id)
-                  const clickable = !!renderLineDrawer
-                  return (
-                    <TRow key={line.id}>
-                      <TD className={clickable ? 'cursor-pointer' : undefined} onClick={clickable ? () => setLineDrawerState({ open: true, line }) : undefined}>
-                        <span className="flex items-center gap-3">
-                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
-                            <PhoneIcon width={14} height={14} />
+            <div className="overflow-hidden rounded-2xl border border-brand-100 bg-white">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t('settings.lines.table.line')}</TableHead>
+                    <TableHead>{t('settings.lines.table.status')}</TableHead>
+                    <TableHead>{t('settings.lines.table.assignedAgent')}</TableHead>
+                    <TableHead>{t('settings.lines.table.lastActivity')}</TableHead>
+                    <TableHead className="text-right">{t('settings.lines.table.actions')}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {lines.map((line) => {
+                    const assignedAgent = assistants?.find((a) => a.id === line.ai_assistant_id)
+                    const clickable = !!renderLineDrawer
+                    return (
+                      <TableRow key={line.id}>
+                        <TableCell className={clickable ? 'cursor-pointer' : undefined} onClick={clickable ? () => setLineDrawerState({ open: true, line }) : undefined}>
+                          <span className="flex items-center gap-3">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+                              <PhoneIcon width={14} height={14} />
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block truncate text-xs font-medium text-brand-800">{line.display_name}</span>
+                              {line.display_phone_number && <span className="block truncate text-xs text-brand-400">{line.display_phone_number}</span>}
+                            </span>
                           </span>
-                          <span className="min-w-0">
-                            <span className="block truncate font-medium text-brand-800">{line.display_name}</span>
-                            {line.display_phone_number && <span className="block truncate text-xs text-brand-400">{line.display_phone_number}</span>}
-                          </span>
-                        </span>
-                      </TD>
-                      <TD>
-                        <Badge tone={LINE_STATUS_TONE[line.status]}>{t(LINE_STATUS_KEY[line.status])}</Badge>
-                      </TD>
-                      <TD>
-                        <div className="flex items-center gap-2">
-                          {assignedAgent && <InitialsAvatar name={assignedAgent.name} size="xs" />}
-                          <Select
-                            value={line.ai_assistant_id ?? ''}
-                            disabled={!assistants || assigningLineId === line.id || line.status === 'disconnected'}
-                            onChange={(e) => handleAssign(line.id, e.target.value)}
-                            className="!w-auto !py-1 text-xs"
-                          >
-                            <option value="">{t('settings.lines.table.noAgentOption')}</option>
-                            {(assistants ?? []).map((agent) => (
-                              <option key={agent.id} value={agent.id}>
-                                {agent.name}
-                              </option>
-                            ))}
-                          </Select>
-                        </div>
-                      </TD>
-                      <TD className="text-xs text-brand-400">{formatActivity(lastActivityByLine.get(line.id), language, t('settings.lines.noActivity'))}</TD>
-                      <TD className="text-right">
-                        {canManage && line.status !== 'disconnected' && (
-                          <Button variant="ghost" onClick={() => setConfirmingDeleteLineId(line.id)} className="!px-2 !py-1.5 text-xs !text-red-600">
-                            <TrashIcon width={13} height={13} />
-                          </Button>
-                        )}
-                      </TD>
-                    </TRow>
-                  )
-                })}
-              </TBody>
-            </Table>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={LINE_STATUS_BADGE_CLASS[line.status]}>
+                            {t(LINE_STATUS_KEY[line.status])}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            {assignedAgent && <InitialsAvatar name={assignedAgent.name} size="xs" />}
+                            <Select
+                              value={line.ai_assistant_id ?? NONE}
+                              disabled={!assistants || assigningLineId === line.id || line.status === 'disconnected'}
+                              onValueChange={(v) => handleAssign(line.id, v === NONE ? '' : v)}
+                            >
+                              <SelectTrigger className="!h-7 w-auto !rounded-lg !text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value={NONE} className="text-xs">
+                                  {t('settings.lines.table.noAgentOption')}
+                                </SelectItem>
+                                {(assistants ?? []).map((agent) => (
+                                  <SelectItem key={agent.id} value={agent.id} className="text-xs">
+                                    {agent.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-xs text-brand-400">{formatActivity(lastActivityByLine.get(line.id), language, t('settings.lines.noActivity'))}</TableCell>
+                        <TableCell className="text-right">
+                          {canManage && line.status !== 'disconnected' && (
+                            <Button variant="ghost" size="icon-xs" className="text-red-600 hover:bg-red-50" onClick={() => setConfirmingDeleteLineId(line.id)}>
+                              <TrashIcon width={13} height={13} />
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
           )}
           {lines && lines.length > 0 && (
             <p className="flex flex-wrap items-center justify-between gap-2 text-xs text-brand-400">
@@ -346,58 +362,62 @@ export function LinesAndAgentsSection({
           {!assistants && !error && <PageSpinner />}
           {assistants && assistants.length === 0 && <EmptyState>{t('settings.lines.agentsEmpty')}</EmptyState>}
           {assistants && assistants.length > 0 && (
-            <Table>
-              <THead>
-                <tr>
-                  <TH>{t('settings.lines.agentTable.agent')}</TH>
-                  <TH>{t('settings.lines.agentTable.model')}</TH>
-                  <TH>{t('settings.lines.agentTable.status')}</TH>
-                  <TH>{t('settings.lines.agentTable.assignedLines')}</TH>
-                  <TH className="text-right">{t('settings.lines.agentTable.actions')}</TH>
-                </tr>
-              </THead>
-              <TBody>
-                {assistants.map((agent) => {
-                  const usage = agentUsageCount(agent.id)
-                  return (
-                    <TRow key={agent.id}>
-                      <TD>
-                        <span className="flex items-center gap-3">
-                          <InitialsAvatar name={agent.name} size="sm" />
-                          <span className="font-medium text-brand-800">{agent.name}</span>
-                        </span>
-                      </TD>
-                      <TD className="text-xs text-brand-500">
-                        {t(PROVIDER_KEY[agent.provider])} · {agent.model}
-                      </TD>
-                      <TD>
-                        <Badge tone={agent.is_active ? 'success' : 'warning'}>{t(agent.is_active ? 'common.status.active' : 'common.status.inactive')}</Badge>
-                      </TD>
-                      <TD className="text-xs text-brand-500">
-                        {usage === 0
-                          ? t('settings.lines.agentTable.noLines')
-                          : t(usage === 1 ? 'settings.lines.agentTable.linesOne' : 'settings.lines.agentTable.linesOther', { count: usage })}
-                      </TD>
-                      <TD className="text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <Button variant="ghost" onClick={() => setAgentDrawer({ open: true, assistantId: agent.id })} className="!px-2 !py-1.5 text-xs">
-                            <PencilIcon width={13} height={13} />
-                          </Button>
-                          {canManage && (
-                            <Button variant="ghost" onClick={() => setConfirmingDeleteAgentId(agent.id)} className="!px-2 !py-1.5 text-xs !text-red-600">
-                              <TrashIcon width={13} height={13} />
+            <div className="overflow-hidden rounded-2xl border border-brand-100 bg-white">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t('settings.lines.agentTable.agent')}</TableHead>
+                    <TableHead>{t('settings.lines.agentTable.model')}</TableHead>
+                    <TableHead>{t('settings.lines.agentTable.status')}</TableHead>
+                    <TableHead>{t('settings.lines.agentTable.assignedLines')}</TableHead>
+                    <TableHead className="text-right">{t('settings.lines.agentTable.actions')}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {assistants.map((agent) => {
+                    const usage = agentUsageCount(agent.id)
+                    return (
+                      <TableRow key={agent.id}>
+                        <TableCell>
+                          <span className="flex items-center gap-3">
+                            <InitialsAvatar name={agent.name} size="sm" />
+                            <span className="text-xs font-medium text-brand-800">{agent.name}</span>
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-xs text-brand-500">
+                          {t(PROVIDER_KEY[agent.provider])} · {agent.model}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={agent.is_active ? 'border-transparent bg-emerald-100 text-emerald-700' : 'border-transparent bg-slate-100 text-slate-600'}>
+                            {t(agent.is_active ? 'common.status.active' : 'common.status.inactive')}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-xs text-brand-500">
+                          {usage === 0 ? t('settings.lines.agentTable.noLines') : t(usage === 1 ? 'settings.lines.agentTable.linesOne' : 'settings.lines.agentTable.linesOther', { count: usage })}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <Button variant="ghost" size="icon-xs" onClick={() => setAgentDrawer({ open: true, assistantId: agent.id })}>
+                              <PencilIcon width={13} height={13} />
                             </Button>
-                          )}
-                        </div>
-                      </TD>
-                    </TRow>
-                  )
-                })}
-              </TBody>
-            </Table>
+                            {canManage && (
+                              <Button variant="ghost" size="icon-xs" className="text-red-600 hover:bg-red-50" onClick={() => setConfirmingDeleteAgentId(agent.id)}>
+                                <TrashIcon width={13} height={13} />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
           )}
         </>
       )}
+
+      {tab === 'plantillas' && <TemplatesSection tenantId={tenantId} canManage={canManage} />}
 
       <AiAssistantDrawer
         open={agentDrawer.open}

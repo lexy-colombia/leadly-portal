@@ -1,6 +1,5 @@
 import changelogRaw from '../../CHANGELOG.md?raw'
-import { Card } from '../components/ui'
-
+import { Card } from '@/components/molecules'
 /** v1: reads the static CHANGELOG.md bundled at build time. If we later need to
  * publish a release note without a redeploy, swap this for a `release_notes`
  * table -- tracked as an open decision in CLAUDE.md section 7. */

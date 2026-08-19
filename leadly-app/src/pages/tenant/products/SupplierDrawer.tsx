@@ -1,9 +1,18 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { createSupplier, updateSupplier } from '../../../lib/api/suppliers'
-import type { CrmSupplier } from '../../../types/domain'
+import type { Supplier } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { Button, Drawer, FieldError, Input, Label, Switch, Textarea } from '../../../components/ui'
+import { FieldError } from '@/components/atoms'
+import { Drawer } from '@/components/organisms'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Switch } from '@/components/ui/switch'
 import { isNotBlank } from '../../../lib/validation'
+
+const FIELD_CLASS = '!h-7 !rounded-lg !text-xs'
+const TEXTAREA_CLASS = '!rounded-lg !py-1.5 !text-xs'
 
 export function SupplierDrawer({
   open,
@@ -15,7 +24,7 @@ export function SupplierDrawer({
   open: boolean
   onClose: () => void
   tenantId: string
-  supplier?: CrmSupplier | null
+  supplier?: Supplier | null
   onSaved: () => void
 }) {
   const { t } = useLanguage()
@@ -81,40 +90,49 @@ export function SupplierDrawer({
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <div>
           <Label htmlFor="supplier-name">{t('products.suppliers.fields.name')}</Label>
-          <Input id="supplier-name" value={name} invalid={!!nameError} onChange={(e) => setName(e.target.value)} placeholder={t('products.suppliers.fields.namePlaceholder')} />
+          <Input
+            id="supplier-name"
+            value={name}
+            aria-invalid={!!nameError}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={t('products.suppliers.fields.namePlaceholder')}
+            className={`mt-1 ${FIELD_CLASS}`}
+          />
           <FieldError message={nameError} />
         </div>
 
         <div>
           <Label htmlFor="supplier-contact">{t('products.suppliers.fields.contactPerson')}</Label>
-          <Input id="supplier-contact" value={contactName} onChange={(e) => setContactName(e.target.value)} />
+          <Input id="supplier-contact" value={contactName} onChange={(e) => setContactName(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-3">
           <div>
             <Label htmlFor="supplier-phone">{t('products.suppliers.fields.phone')}</Label>
-            <Input id="supplier-phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
+            <Input id="supplier-phone" value={phone} onChange={(e) => setPhone(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
           </div>
           <div>
             <Label htmlFor="supplier-email">{t('products.suppliers.fields.email')}</Label>
-            <Input id="supplier-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <Input id="supplier-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
           </div>
         </div>
 
         <div>
           <Label htmlFor="supplier-notes">{t('products.suppliers.fields.notes')}</Label>
-          <Textarea id="supplier-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+          <Textarea id="supplier-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} className={`mt-1 ${TEXTAREA_CLASS}`} />
         </div>
 
         <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
-          <span className="text-sm text-brand-700">{t('products.suppliers.fields.active')}</span>
-          <Switch checked={isActive} onChange={setIsActive} />
+          <Label htmlFor="supplier-active" className="font-normal text-brand-700">
+            {t('products.suppliers.fields.active')}
+          </Label>
+          <Switch id="supplier-active" checked={isActive} onCheckedChange={setIsActive} />
         </div>
 
         {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
 
-        <div className="flex gap-2 border-t border-brand-100 pt-5">
-          <Button type="submit" variant="secondary" disabled={submitting}>
+        <div className="flex gap-2 border-t border-brand-100 pt-4">
+          <Button type="submit" disabled={submitting}>
             {submitting ? t('common.actions.saving') : t('common.actions.save')}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>

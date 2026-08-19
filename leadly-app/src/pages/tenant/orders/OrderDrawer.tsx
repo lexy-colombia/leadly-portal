@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { createOrder, listOrderItems, updateOrder, computeOrderTotals, ORDER_STATUS_LABEL_KEY } from '../../../lib/api/orders'
 import type { OrderInput, OrderItemInput, OrderWithRelations } from '../../../lib/api/orders'
-import { listContacts } from '../../../lib/api/contacts'
+import { listClients } from '../../../lib/api/clients'
 import { listOpportunities } from '../../../lib/api/opportunities'
 import type { OpportunityWithRelations } from '../../../lib/api/opportunities'
 import { listProducts } from '../../../lib/api/products'
@@ -9,13 +9,15 @@ import type { ProductWithImages } from '../../../lib/api/products'
 import { listAddressesForContact } from '../../../lib/api/addresses'
 import { listTasksForOpportunity } from '../../../lib/api/tasks'
 import type { TaskWithRelations } from '../../../lib/api/tasks'
-import type { CrmContact, CrmContactAddress, OrderStatus } from '../../../types/domain'
+import type { Client, ContactAddress, OrderStatus } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { Button, CurrencyInput, Drawer, FieldError, Input, Label, Select, Textarea } from '../../../components/ui'
+import { Button, FieldError, Input, Label, Select, Textarea } from '@/components/atoms'
+import { CurrencyInput } from '@/components/molecules'
+import { Drawer } from '@/components/organisms'
 import { OrderItemsEditor } from './OrderItemsEditor'
 import { isNotBlank } from '../../../lib/validation'
 
-function addressLabel(a: CrmContactAddress): string {
+function addressLabel(a: ContactAddress): string {
   return `${a.label ? `${a.label} — ` : ''}${a.line1}${a.city ? `, ${a.city}` : ''}`
 }
 
@@ -47,7 +49,7 @@ export function OrderDrawer({
   tenantId: string
   /** Present when editing an existing order; omitted when creating a new one. */
   order?: OrderWithRelations | null
-  /** Pre-selects and locks the contact when creating from ContactoDetalle.tsx -- ignored once `order` is set (its own contact wins). */
+  /** Pre-selects and locks the contact when creating from ClientDetail.tsx -- ignored once `order` is set (its own contact wins). */
   defaultContactId?: string | null
   onSaved: () => void
 }) {
@@ -62,10 +64,10 @@ export function OrderDrawer({
   const [shippingAddressId, setShippingAddressId] = useState('')
   const [billingAddressId, setBillingAddressId] = useState('')
   const [items, setItems] = useState<OrderItemInput[]>([])
-  const [contacts, setContacts] = useState<CrmContact[]>([])
+  const [contacts, setContacts] = useState<Client[]>([])
   const [opportunities, setOpportunities] = useState<OpportunityWithRelations[]>([])
   const [products, setProducts] = useState<ProductWithImages[]>([])
-  const [addresses, setAddresses] = useState<CrmContactAddress[]>([])
+  const [addresses, setAddresses] = useState<ContactAddress[]>([])
   const [relatedTasks, setRelatedTasks] = useState<TaskWithRelations[] | null>(null)
   const [touched, setTouched] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -93,9 +95,11 @@ export function OrderDrawer({
 
   useEffect(() => {
     if (!open) return
-    listContacts(tenantId).then(setContacts).catch(() => {})
+    listClients(tenantId).then(setContacts).catch(() => {})
     listOpportunities(tenantId).then(setOpportunities).catch(() => {})
-    listProducts(tenantId).then(setProducts).catch(() => {})
+    listProducts(tenantId, { page: 1, pageSize: 1000 })
+      .then(({ data }) => setProducts(data))
+      .catch(() => {})
   }, [open, tenantId])
 
   const contactOpportunities = useMemo(() => opportunities.filter((o) => o.contact_id === contactId), [opportunities, contactId])

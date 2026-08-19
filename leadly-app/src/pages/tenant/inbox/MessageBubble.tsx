@@ -1,5 +1,5 @@
-import { AiSparkleIcon, UserIcon } from '../../../components/icons'
-import { SignedImage } from '../../../components/AttachmentImage'
+import { AiSparkleIcon, UserIcon } from '@/components/atoms/icons'
+import { SignedImage } from '@/components/molecules'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import type { TranslationKey, Language } from '../../../i18n/translations'
 import type { WhatsappMessage } from '../../../types/domain'

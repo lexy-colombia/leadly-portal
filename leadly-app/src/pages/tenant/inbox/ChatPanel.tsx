@@ -1,10 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
-import { Button, IconSelect, InitialsAvatar, PageSpinner } from '../../../components/ui'
-import { ArchiveIcon, ChevronLeftIcon, ImageIcon, LockClosedIcon, RefreshIcon, SendIcon, TagIcon, UserIcon, XCircleIcon } from '../../../components/icons'
+import { Link } from 'react-router-dom'
+import { CheckIcon, XIcon } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { InitialsAvatar, PageSpinner } from '@/components/atoms'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { ArchiveIcon, ChevronLeftIcon, ImageIcon, LockClosedIcon, PlusIcon, RefreshIcon, SendIcon, TagIcon, UserIcon, XCircleIcon } from '@/components/atoms/icons'
 import {
   CONVERSATION_CATEGORY_KEY,
+  WHATSAPP_WINDOW_MS,
   conversationDisplayName,
   listMessages,
+  markConversationRead,
   retryAiResponse,
   sendHumanMessage,
   setConversationArchived,
@@ -14,12 +25,24 @@ import {
   setConversationStatus,
   subscribeToMessages,
 } from '../../../lib/api/conversations'
-import { listConversationTags, listTagIdsForConversation, setConversationTags } from '../../../lib/api/conversationTags'
+import { listApprovedTemplates, sendTemplateMessage } from '../../../lib/api/templates'
+import {
+  createConversationTag,
+  deleteConversationTag,
+  listConversationTags,
+  listTagIdsForConversation,
+  setConversationTags,
+} from '../../../lib/api/conversationTags'
 import { uploadChatImage, validatePqrAttachmentFile } from '../../../lib/api/attachments'
 import type { ConversationWithLine } from '../../../lib/api/conversations'
-import type { ConversationCategory, ConversationTag, Profile, WhatsappMessage } from '../../../types/domain'
+import type { ConversationCategory, ConversationMode, ConversationTag, Profile, WhatsappMessage, WhatsappMessageTemplate } from '../../../types/domain'
 import { MessageBubble } from './MessageBubble'
+import { LinkClientDrawer } from './LinkClientDrawer'
+import { useAuth } from '../../../contexts/AuthContext'
 import { useLanguage } from '../../../contexts/LanguageContext'
+
+// shadcn Select can't take an empty string as an item value.
+const NONE = '__none'
 
 export function ChatPanel({
   conversation,
@@ -31,6 +54,8 @@ export function ChatPanel({
   onBack: () => void
 }) {
   const { t } = useLanguage()
+  const { profile } = useAuth()
+  const isAdmin = profile?.role === 'tenant_admin'
   const [messages, setMessages] = useState<WhatsappMessage[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [modeUpdating, setModeUpdating] = useState(false)
@@ -49,8 +74,20 @@ export function ChatPanel({
   const [assignedTagIds, setAssignedTagIds] = useState<string[]>([])
   const [tagsUpdating, setTagsUpdating] = useState(false)
   const [tagsPopoverOpen, setTagsPopoverOpen] = useState(false)
+  const [newTagName, setNewTagName] = useState('')
+  const [creatingTag, setCreatingTag] = useState(false)
+  const [deletingTagId, setDeletingTagId] = useState<string | null>(null)
+  const [tagCatalogError, setTagCatalogError] = useState<string | null>(null)
+  const [linkDrawerOpen, setLinkDrawerOpen] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
-  const tagsPopoverRef = useRef<HTMLDivElement>(null)
+
+  const windowOpen =
+    !!conversation.last_inbound_message_at && Date.now() - new Date(conversation.last_inbound_message_at).getTime() < WHATSAPP_WINDOW_MS
+  const [reactivationTemplates, setReactivationTemplates] = useState<WhatsappMessageTemplate[] | null>(null)
+  const [reactivationTemplateId, setReactivationTemplateId] = useState<string | null>(null)
+  const [reactivationVariables, setReactivationVariables] = useState<string[]>([])
+  const [sendingTemplate, setSendingTemplate] = useState(false)
+  const reactivationTemplate = reactivationTemplates?.find((tpl) => tpl.id === reactivationTemplateId) ?? null
 
   useEffect(() => {
     setAttachment(null)
@@ -73,6 +110,7 @@ export function ChatPanel({
     listMessages(conversation.id)
       .then(setMessages)
       .catch((err) => setError(err.message ?? t('inbox.errors.loadMessages')))
+    markConversationRead(conversation.id).catch(() => {})
 
     const unsubscribe = subscribeToMessages(conversation.id, (message) => {
       setMessages((prev) => {
@@ -80,6 +118,9 @@ export function ChatPanel({
         if (prev.some((m) => m.id === message.id)) return prev
         return [...prev, message]
       })
+      // Sigue leyendo esta conversación en tiempo real -- que no le quede el
+      // contador prendido por un mensaje que ya está viendo llegar.
+      if (message.direction === 'inbound') markConversationRead(conversation.id).catch(() => {})
     })
     return unsubscribe
   }, [conversation.id])
@@ -94,20 +135,46 @@ export function ChatPanel({
   }, [conversation.id, conversation.tenant_id])
 
   useEffect(() => {
-    if (!tagsPopoverOpen) return
-    function handleClick(e: MouseEvent) {
-      if (tagsPopoverRef.current && !tagsPopoverRef.current.contains(e.target as Node)) setTagsPopoverOpen(false)
+    setReactivationTemplateId(null)
+    setReactivationVariables([])
+    if (windowOpen) {
+      setReactivationTemplates(null)
+      return
     }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [tagsPopoverOpen])
+    listApprovedTemplates(conversation.tenant_id)
+      .then((all) => setReactivationTemplates(all.filter((tpl) => tpl.business_account_id === conversation.whatsapp_line?.business_account_id)))
+      .catch(() => setReactivationTemplates([]))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversation.id, windowOpen])
 
-  async function handleModeToggle(checked: boolean) {
-    const newMode = checked ? 'ia' : 'humano'
+  async function handleSendReactivationTemplate() {
+    if (!reactivationTemplate) return
+    setSendingTemplate(true)
+    setError(null)
+    try {
+      await sendTemplateMessage({
+        tenant_id: conversation.tenant_id,
+        whatsapp_line_id: conversation.whatsapp_line_id,
+        contact_id: conversation.contact_id,
+        contact_phone: conversation.contact_phone,
+        contact_name: conversation.contact_name,
+        template_id: reactivationTemplate.id,
+        variables: reactivationVariables,
+      })
+      setReactivationTemplateId(null)
+      setReactivationVariables([])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('inbox.chat.errors.sendTemplate'))
+    } finally {
+      setSendingTemplate(false)
+    }
+  }
+
+  async function handleModeToggle(mode: ConversationMode) {
     setModeUpdating(true)
     setError(null)
     try {
-      await setConversationMode(conversation.id, newMode)
+      await setConversationMode(conversation.id, mode)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('inbox.errors.changeMode'))
     } finally {
@@ -196,6 +263,42 @@ export function ChatPanel({
     }
   }
 
+  // Tag catalog management (create/delete) lives here, admin-only, instead
+  // of a separate Configuración screen -- this is the only place tags
+  // actually get used (assigned to a conversation), so managing the
+  // catalog where you use it beats a settings page with no visual
+  // connection to it (2026-08-16, explicit user request).
+  async function handleCreateTag(e: React.FormEvent) {
+    e.preventDefault()
+    const name = newTagName.trim()
+    if (!name) return
+    setCreatingTag(true)
+    setTagCatalogError(null)
+    try {
+      const tag = await createConversationTag(conversation.tenant_id, name)
+      setTagCatalog((prev) => [...prev, tag].sort((a, b) => a.name.localeCompare(b.name)))
+      setNewTagName('')
+    } catch (err) {
+      setTagCatalogError(err instanceof Error ? err.message : t('inbox.tags.errors.create'))
+    } finally {
+      setCreatingTag(false)
+    }
+  }
+
+  async function handleDeleteTag(tagId: string) {
+    setDeletingTagId(tagId)
+    setTagCatalogError(null)
+    try {
+      await deleteConversationTag(tagId)
+      setTagCatalog((prev) => prev.filter((tag) => tag.id !== tagId))
+      setAssignedTagIds((prev) => prev.filter((id) => id !== tagId))
+    } catch (err) {
+      setTagCatalogError(err instanceof Error ? err.message : t('inbox.tags.errors.delete'))
+    } finally {
+      setDeletingTagId(null)
+    }
+  }
+
   function handleAttachmentSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] ?? null
     e.target.value = ''
@@ -248,114 +351,140 @@ export function ChatPanel({
               {conversation.contact_phone}
               {conversation.whatsapp_line && <> · {conversation.whatsapp_line.display_name}</>}
             </p>
+            {/* No todo el que escribe es un cliente (whatsapp-webhook dejó
+                de auto-crear uno por número, ver lib/api/conversations.ts)
+                -- esto hace visible ese estado y da la acción para
+                resolverlo, en vez de asumir en silencio que hay un cliente
+                detrás de cada conversación. */}
+            {conversation.contact_id ? (
+              <Link to={`/app/clients/${conversation.contact_id}`} className="mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-accent-600 hover:underline">
+                <UserIcon width={11} height={11} /> {t('inbox.chat.viewClient')}
+              </Link>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setLinkDrawerOpen(true)}
+                className="mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-amber-600 hover:underline"
+              >
+                <UserIcon width={11} height={11} /> {t('inbox.chat.noClientLinked')}
+              </button>
+            )}
           </div>
-          <div className="flex shrink-0 items-center gap-1 rounded-full bg-brand-50 p-0.5 text-xs font-medium">
-            <button
-              type="button"
-              onClick={() => !modeUpdating && conversation.mode !== 'ia' && handleModeToggle(true)}
-              disabled={modeUpdating}
-              className={`rounded-full px-3 py-1.5 transition-colors ${
-                conversation.mode === 'ia' ? 'bg-accent-500 text-white shadow-sm' : 'text-brand-400 hover:text-brand-700'
-              }`}
-            >
-              {t('inbox.mode.ia')}
-            </button>
-            <button
-              type="button"
-              onClick={() => !modeUpdating && conversation.mode !== 'humano' && handleModeToggle(false)}
-              disabled={modeUpdating}
-              className={`rounded-full px-3 py-1.5 transition-colors ${
-                conversation.mode === 'humano' ? 'bg-amber-500 text-white shadow-sm' : 'text-brand-400 hover:text-brand-700'
-              }`}
-            >
-              {t('inbox.mode.humano')}
-            </button>
-          </div>
+          <Tabs value={conversation.mode} onValueChange={(v) => !modeUpdating && v !== conversation.mode && handleModeToggle(v as ConversationMode)}>
+            <TabsList>
+              <TabsTrigger value="ia" disabled={modeUpdating} className="text-xs">
+                {t('inbox.mode.ia')}
+              </TabsTrigger>
+              <TabsTrigger value="humano" disabled={modeUpdating} className="text-xs">
+                {t('inbox.mode.humano')}
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
         <div className="flex flex-wrap gap-2">
-          <IconSelect
-            icon={<TagIcon width={13} height={13} />}
-            aria-label={t('inbox.category.ariaLabel')}
-            value={conversation.category ?? ''}
-            onChange={(e) => handleCategoryChange(e.target.value)}
-            disabled={categoryUpdating}
-            className="!w-auto !rounded-full !border-brand-200 !py-1.5 !pr-7 !text-xs hover:!border-brand-300"
-          >
-            <option value="">{t('inbox.category.unclassified')}</option>
-            {(Object.keys(CONVERSATION_CATEGORY_KEY) as ConversationCategory[]).map((c) => (
-              <option key={c} value={c}>
-                {t(CONVERSATION_CATEGORY_KEY[c])}
-              </option>
-            ))}
-          </IconSelect>
-          <IconSelect
-            icon={<UserIcon width={13} height={13} />}
-            aria-label={t('inbox.assignee.ariaLabel')}
-            value={conversation.assigned_agent_id ?? ''}
-            onChange={(e) => handleAssigneeChange(e.target.value)}
-            disabled={assigneeUpdating}
-            className="!w-auto !rounded-full !border-brand-200 !py-1.5 !pr-7 !text-xs hover:!border-brand-300"
-          >
-            <option value="">{t('inbox.assignee.unassigned')}</option>
-            {agents.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.full_name}
-              </option>
-            ))}
-          </IconSelect>
+          <Select value={conversation.category ?? NONE} onValueChange={(v) => handleCategoryChange(v === NONE ? '' : v)} disabled={categoryUpdating}>
+            <SelectTrigger size="sm" className="!h-7 w-auto !rounded-full gap-1.5 !text-xs">
+              <TagIcon width={13} height={13} className="text-brand-400" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NONE} className="text-xs">
+                {t('inbox.category.unclassified')}
+              </SelectItem>
+              {(Object.keys(CONVERSATION_CATEGORY_KEY) as ConversationCategory[]).map((c) => (
+                <SelectItem key={c} value={c} className="text-xs">
+                  {t(CONVERSATION_CATEGORY_KEY[c])}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-          <div ref={tagsPopoverRef} className="relative">
-            <button
-              type="button"
-              onClick={() => setTagsPopoverOpen((o) => !o)}
-              className={`flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
-                assignedTagIds.length > 0 ? 'border-accent-300 bg-accent-50 text-accent-700' : 'border-brand-200 text-brand-600 hover:bg-brand-50'
-              }`}
-            >
-              <TagIcon width={13} height={13} />
-              {t('inbox.tags.label')}
-              {assignedTagIds.length > 0 && <span className="text-[10px]">({assignedTagIds.length})</span>}
-            </button>
+          <Select value={conversation.assigned_agent_id ?? NONE} onValueChange={(v) => handleAssigneeChange(v === NONE ? '' : v)} disabled={assigneeUpdating}>
+            <SelectTrigger size="sm" className="!h-7 w-auto !rounded-full gap-1.5 !text-xs">
+              <UserIcon width={13} height={13} className="text-brand-400" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NONE} className="text-xs">
+                {t('inbox.assignee.unassigned')}
+              </SelectItem>
+              {agents.map((a) => (
+                <SelectItem key={a.id} value={a.id} className="text-xs">
+                  {a.full_name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-            {tagsPopoverOpen && (
-              <div className="absolute left-0 top-full z-40 mt-2 w-56 max-w-[calc(100vw-2rem)] space-y-1 rounded-2xl border border-brand-100 bg-white p-3 shadow-lg">
+          <Popover open={tagsPopoverOpen} onOpenChange={setTagsPopoverOpen}>
+            <PopoverTrigger asChild>
+              <Button type="button" variant={assignedTagIds.length > 0 ? 'secondary' : 'outline'} size="sm" className="rounded-full">
+                <TagIcon width={13} height={13} />
+                {t('inbox.tags.label')}
+                {assignedTagIds.length > 0 && <span className="text-[10px]">({assignedTagIds.length})</span>}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-64 p-3" align="start">
+              <div className="space-y-0.5">
                 {tagCatalog.length === 0 ? (
                   <p className="px-1 py-1 text-xs text-brand-400">{t('inbox.tags.empty')}</p>
                 ) : (
-                  tagCatalog.map((tag) => (
-                    <label key={tag.id} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-brand-700 hover:bg-brand-50">
-                      <input
-                        type="checkbox"
-                        checked={assignedTagIds.includes(tag.id)}
-                        onChange={() => handleToggleTag(tag.id)}
-                        disabled={tagsUpdating}
-                        className="h-3.5 w-3.5 rounded border-brand-300 text-accent-500 focus:ring-accent-400"
-                      />
-                      {tag.name}
-                    </label>
-                  ))
+                  tagCatalog.map((tag) => {
+                    const checked = assignedTagIds.includes(tag.id)
+                    return (
+                      <div key={tag.id} className="flex items-center gap-1 rounded-lg pr-1 hover:bg-brand-50">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleTag(tag.id)}
+                          disabled={tagsUpdating}
+                          className="flex flex-1 items-center gap-2 px-2 py-1.5 text-left text-sm text-brand-700 disabled:opacity-50"
+                        >
+                          <span className={cn('flex size-3.5 shrink-0 items-center justify-center rounded-sm border', checked ? 'border-primary bg-primary text-primary-foreground' : 'border-input')}>
+                            {checked && <CheckIcon className="size-2.5" />}
+                          </span>
+                          {tag.name}
+                        </button>
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteTag(tag.id)}
+                            disabled={deletingTagId === tag.id}
+                            aria-label={t('inbox.tags.deleteAria', { name: tag.name })}
+                            className="shrink-0 rounded-full p-1 text-brand-300 transition-colors hover:bg-brand-100 hover:text-red-600 disabled:opacity-50"
+                          >
+                            <XIcon className="size-3" />
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })
                 )}
               </div>
-            )}
-          </div>
+
+              {isAdmin && (
+                <form onSubmit={handleCreateTag} className="mt-2 flex gap-1.5 border-t border-brand-100 pt-2">
+                  <Input value={newTagName} onChange={(e) => setNewTagName(e.target.value)} placeholder={t('inbox.tags.placeholder')} className="!h-7 !rounded-lg !text-xs" />
+                  <Button type="submit" variant="secondary" size="icon-sm" disabled={creatingTag || !newTagName.trim()} className="shrink-0">
+                    <PlusIcon width={12} height={12} />
+                  </Button>
+                </form>
+              )}
+              {tagCatalogError && <p className="mt-1.5 px-1 text-xs text-red-600">{tagCatalogError}</p>}
+            </PopoverContent>
+          </Popover>
 
           <div className="ml-auto flex flex-wrap items-center gap-2">
             {conversation.status === 'open' && conversation.mode === 'ia' && (
-              <Button variant="ghost" onClick={handleRetryAi} disabled={retrying} className="!px-3 !py-1.5 !text-xs">
+              <Button variant="outline" size="sm" onClick={handleRetryAi} disabled={retrying}>
                 <RefreshIcon width={13} height={13} />
                 {retrying ? t('inbox.retryAi.retrying') : t('inbox.retryAi.action')}
               </Button>
             )}
-            <Button variant="ghost" onClick={handleArchiveToggle} disabled={archivedUpdating} className="!px-3 !py-1.5 !text-xs">
+            <Button variant="outline" size="sm" onClick={handleArchiveToggle} disabled={archivedUpdating}>
               <ArchiveIcon width={13} height={13} />
               {conversation.archived_at ? t('inbox.archive.unarchiveAction') : t('inbox.archive.archiveAction')}
             </Button>
-            <Button
-              variant={conversation.status === 'open' ? 'ghost' : 'secondary'}
-              onClick={handleStatusToggle}
-              disabled={statusUpdating}
-              className="!px-3 !py-1.5 !text-xs"
-            >
+            <Button variant={conversation.status === 'open' ? 'outline' : 'secondary'} size="sm" onClick={handleStatusToggle} disabled={statusUpdating}>
               <LockClosedIcon width={13} height={13} />
               {conversation.status === 'open' ? t('inbox.status.closeAction') : t('inbox.status.reopenAction')}
             </Button>
@@ -364,9 +493,7 @@ export function ChatPanel({
       </div>
 
       {error && <p className="border-b border-red-100 bg-red-50 px-4 py-2 text-xs text-red-700">{error}</p>}
-      {retrySuccess && (
-        <p className="border-b border-emerald-100 bg-emerald-50 px-4 py-2 text-xs text-emerald-700">{t('inbox.retryAi.success')}</p>
-      )}
+      {retrySuccess && <p className="border-b border-emerald-100 bg-emerald-50 px-4 py-2 text-xs text-emerald-700">{t('inbox.retryAi.success')}</p>}
 
       <div className="flex-1 space-y-3 overflow-y-auto bg-[var(--color-surface)] px-4 py-4">
         {!messages && <PageSpinner />}
@@ -379,6 +506,65 @@ export function ChatPanel({
       <div className="border-t border-brand-100 bg-white p-3">
         {conversation.status === 'closed' ? (
           <p className="rounded-xl bg-brand-50 px-3.5 py-2.5 text-center text-xs text-brand-400">{t('inbox.chat.closedHint')}</p>
+        ) : isHumano && !windowOpen ? (
+          <div className="space-y-2">
+            <p className="text-xs text-amber-600">{t('inbox.chat.windowClosed')}</p>
+            {reactivationTemplates && reactivationTemplates.length === 0 && (
+              <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">{t('inbox.newConv.noApprovedTemplates')}</p>
+            )}
+            {reactivationTemplates && reactivationTemplates.length > 0 && (
+              <>
+                <Select
+                  value={reactivationTemplateId ?? ''}
+                  onValueChange={(v) => {
+                    setReactivationTemplateId(v)
+                    const tpl = reactivationTemplates.find((t2) => t2.id === v)
+                    setReactivationVariables(tpl ? Array(tpl.variable_count).fill('') : [])
+                  }}
+                >
+                  <SelectTrigger className="w-full !h-7 !rounded-lg !text-xs">
+                    <SelectValue placeholder={t('inbox.newConv.templateLabel')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {reactivationTemplates.map((tpl) => (
+                      <SelectItem key={tpl.id} value={tpl.id} className="text-xs">
+                        {tpl.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {reactivationTemplate && (
+                  <div className="space-y-2">
+                    <p className="rounded-lg border border-brand-100 bg-brand-50 px-3 py-2 text-xs text-brand-600">{reactivationTemplate.body_text}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {Array.from({ length: reactivationTemplate.variable_count }).map((_, i) => (
+                        <Input
+                          key={i}
+                          value={reactivationVariables[i] ?? ''}
+                          onChange={(e) =>
+                            setReactivationVariables((prev) => {
+                              const next = [...prev]
+                              next[i] = e.target.value
+                              return next
+                            })
+                          }
+                          placeholder={t('inbox.newConv.templateVariable', { n: i + 1 })}
+                          className="!h-7 flex-1 !rounded-lg !text-xs"
+                        />
+                      ))}
+                      <Button
+                        size="sm"
+                        onClick={handleSendReactivationTemplate}
+                        disabled={sendingTemplate || reactivationVariables.some((v) => !v.trim())}
+                      >
+                        <SendIcon width={14} height={14} /> {sendingTemplate ? t('common.actions.creating') : t('inbox.newConv.sendTemplate')}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         ) : isHumano ? (
           <div className="space-y-2">
             {attachmentError && <p className="text-xs text-red-600">{attachmentError}</p>}
@@ -391,17 +577,12 @@ export function ChatPanel({
                 </button>
               </div>
             )}
-            <div className="flex items-end gap-2">
+            <div className="flex items-center gap-2">
               <input ref={attachmentInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={handleAttachmentSelect} />
-              <button
-                type="button"
-                onClick={() => attachmentInputRef.current?.click()}
-                className="flex shrink-0 items-center justify-center rounded-xl border border-brand-200 p-2.5 text-brand-500 transition-colors hover:border-brand-300 hover:bg-brand-50"
-                aria-label={t('common.attachment.attach')}
-              >
+              <Button type="button" variant="outline" size="icon" onClick={() => attachmentInputRef.current?.click()} aria-label={t('common.attachment.attach')} className="shrink-0 rounded-xl">
                 <ImageIcon width={18} height={18} />
-              </button>
-              <textarea
+              </Button>
+              <Textarea
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => {
@@ -412,19 +593,32 @@ export function ChatPanel({
                 }}
                 rows={1}
                 placeholder={t('inbox.chat.messagePlaceholder')}
-                className="max-h-32 flex-1 resize-none rounded-xl border border-brand-200 px-3 py-2.5 text-sm focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500"
+                // shadcn Textarea's own default is `min-h-16` (64px) -- more
+                // than double the height of the size-8 (32px) icon buttons
+                // it sits next to, which is what actually made this row look
+                // misaligned. Pinned close to button height instead, growing
+                // up to max-h-32 as the draft wraps to multiple lines.
+                className="!min-h-9 max-h-32 flex-1 resize-none !rounded-xl !border-brand-200 !py-2 !text-sm"
               />
-              <Button onClick={handleSend} disabled={sending || (!draft.trim() && !attachment)} className="!px-3.5 !py-2.5">
+              <Button size="icon" onClick={handleSend} disabled={sending || (!draft.trim() && !attachment)}>
                 <SendIcon width={16} height={16} />
               </Button>
             </div>
           </div>
         ) : (
-          <p className="rounded-xl bg-brand-50 px-3.5 py-2.5 text-center text-xs text-brand-400">
-            {t('inbox.chat.aiRespondingHint')}
-          </p>
+          <p className="rounded-xl bg-brand-50 px-3.5 py-2.5 text-center text-xs text-brand-400">{t('inbox.chat.aiRespondingHint')}</p>
         )}
       </div>
+
+      <LinkClientDrawer
+        open={linkDrawerOpen}
+        onClose={() => setLinkDrawerOpen(false)}
+        tenantId={conversation.tenant_id}
+        conversationId={conversation.id}
+        contactPhone={conversation.contact_phone}
+        contactName={conversation.contact_name}
+        onLinked={() => setLinkDrawerOpen(false)}
+      />
     </div>
   )
 }

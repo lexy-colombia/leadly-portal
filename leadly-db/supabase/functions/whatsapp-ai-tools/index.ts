@@ -1,14 +1,18 @@
 // The "executor service" for AI tool-calling -- deliberately separate from
 // whatsapp-ai-respond (which only talks to the LLM), same split as
-// tania-functions in the seeri project: one place that knows how to
-// generate a response, another that knows how to actually act on the
-// database, so the LLM-facing loop never has direct DB access itself.
+// tania-functions: one place that knows how to generate a response, another
+// that knows how to actually act on the database, so the LLM-facing loop
+// never has direct DB access itself.
 // Internal-only: invoked by whatsapp-ai-respond using the service role key.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { json } from "../_shared/cors.ts";
 import { AI_TOOLS, isToolAllowed } from "../_shared/aiTools.ts";
 import { sendWhatsappImage } from "../_shared/whatsapp.ts";
+import { getAdapter, makeSecretGetter, resolveCredential } from "../_shared/payments/registry.ts";
+import { makeIntegrationSecretGetter, resolveTenantIntegrationCredential } from "../_shared/integrations/credentials.ts";
+import { createDeal, createOrUpdateContact, getDealPipelines } from "../_shared/integrations/hubspot.ts";
+import { resolveShopifyDomain, searchCustomerByPhone, searchOrders, searchProducts } from "../_shared/integrations/shopify.ts";
 
 const ATTACHMENT_SIGNED_URL_TTL_SECONDS = 300;
 const CATALOG_SEARCH_LIMIT = 15;
@@ -139,6 +143,19 @@ async function executeTool(
   parameters: Record<string, unknown>,
 ): Promise<unknown> {
   switch (functionName) {
+    // create_pqr/create_note/add_pqr_update/update_pqr_status/get_pqr_status/
+    // send_attachment (below) all belong to the "pqr" skill, and PQR was
+    // removed from the ai_skills catalog entirely on 2026-08-17 (the
+    // feature itself was dropped, frontend + crm_pqrs/crm_pqr_updates/
+    // crm_attachments included) -- isToolAllowed can never match "pqr"
+    // against any assistant's enabled skills anymore, so none of these
+    // cases can actually be reached from a live conversation. Left
+    // pointing at the now-dropped crm_pqrs/crm_pqr_updates/crm_attachments
+    // tables deliberately, not repointed to anything -- there's no PQR
+    // schema to repoint them to, and resurrecting one isn't part of fixing
+    // what's reachable. Dead code, not a live bug; revisit only if PQR (or
+    // AI note-taking specifically, since create_note rode along on this
+    // same skill) comes back as a product decision.
     case "create_pqr": {
       if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
       const type = String(parameters.type ?? "");
@@ -319,25 +336,65 @@ async function executeTool(
         .eq("id", conversationId)
         .maybeSingle();
 
-      const { data, error } = await adminClient
-        .from("crm_appointments")
-        .insert({
-          tenant_id: tenantId,
-          contact_id: contactId,
-          whatsapp_line_id: conversation?.whatsapp_line_id ?? null,
-          scheduled_at: scheduledAt.toISOString(),
-          notes,
-        })
-        .select("id, scheduled_at, status")
-        .single();
+      // Idempotent by (contact, activa) instead of trusting the model to
+      // call list_contact_appointments and check first -- a stateless
+      // per-turn model that offers to schedule again later in the same
+      // conversation (e.g. the closing-rule flow re-offering an advisor)
+      // will happily call this a second time. Found for real 2026-08-14: the
+      // same contact ended up with two active appointments for the exact
+      // same slot because the model re-ran the whole "qué día y hora"
+      // exchange after already booking one. Treating a second call as a
+      // reschedule of the existing active appointment -- not a second row --
+      // is what the customer actually means by confirming a time again.
+      const { data: existing } = await adminClient
+        .from("appointments")
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .eq("contact_id", contactId)
+        .eq("status", "activa")
+        .gte("scheduled_at", new Date().toISOString())
+        .order("scheduled_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      let data: { id: string; scheduled_at: string; status: string } | null;
+      let error: { message: string } | null;
+      if (existing) {
+        ({ data, error } = await adminClient
+          .from("appointments")
+          .update({ scheduled_at: scheduledAt.toISOString(), notes, whatsapp_line_id: conversation?.whatsapp_line_id ?? null })
+          .eq("id", existing.id)
+          .select("id, scheduled_at, status")
+          .single());
+      } else {
+        ({ data, error } = await adminClient
+          .from("appointments")
+          .insert({
+            tenant_id: tenantId,
+            contact_id: contactId,
+            whatsapp_line_id: conversation?.whatsapp_line_id ?? null,
+            scheduled_at: scheduledAt.toISOString(),
+            notes,
+          })
+          .select("id, scheduled_at, status")
+          .single());
+      }
       if (error) throw new Error(error.message);
-      return data;
+
+      // A real appointment is unambiguous evidence of negotiation -- enforce
+      // this server-side instead of trusting the model to also remember
+      // set_lead_stage in the same turn (it doesn't, reliably). Only bumps
+      // off the untouched 'lead' default; never downgrades or overrides a
+      // stage an agent or a later signal already set (contactado/cliente/etc).
+      await adminClient.from("clients").update({ stage: "negociacion" }).eq("id", contactId).eq("stage", "lead");
+
+      return { ...data, rescheduled: !!existing };
     }
 
     case "list_contact_appointments": {
       if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
       const { data, error } = await adminClient
-        .from("crm_appointments")
+        .from("appointments")
         .select("id, scheduled_at, notes, status")
         .eq("tenant_id", tenantId)
         .eq("contact_id", contactId)
@@ -351,7 +408,7 @@ async function executeTool(
     case "cancel_appointment": {
       if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
       const { data: appt, error } = await adminClient
-        .from("crm_appointments")
+        .from("appointments")
         .select("id")
         .eq("tenant_id", tenantId)
         .eq("contact_id", contactId)
@@ -362,14 +419,14 @@ async function executeTool(
       if (error) throw new Error(error.message);
       if (!appt) throw new Error("Este cliente no tiene ninguna cita activa.");
 
-      const { error: updateError } = await adminClient.from("crm_appointments").update({ status: "cancelada" }).eq("id", appt.id);
+      const { error: updateError } = await adminClient.from("appointments").update({ status: "cancelada" }).eq("id", appt.id);
       if (updateError) throw new Error(updateError.message);
       return { id: appt.id, status: "cancelada" };
     }
 
     case "list_pipelines": {
       const { data, error } = await adminClient
-        .from("crm_pipelines")
+        .from("pipelines")
         .select("name, description")
         .eq("tenant_id", tenantId)
         .eq("is_active", true)
@@ -403,7 +460,7 @@ async function executeTool(
       // earlier, then later asked about botas, kept showing "Interesado en
       // camisetas" in the pipeline forever.
       const { data: existing } = await adminClient
-        .from("crm_opportunities")
+        .from("opportunities")
         .select("id")
         .eq("tenant_id", tenantId)
         .eq("contact_id", contactId)
@@ -415,7 +472,7 @@ async function executeTool(
         .maybeSingle();
       if (existing) {
         const { data: updated, error: updateError } = await adminClient
-          .from("crm_opportunities")
+          .from("opportunities")
           .update({
             title,
             value: typeof parameters.value === "number" ? parameters.value : 0,
@@ -431,7 +488,7 @@ async function executeTool(
       }
 
       const { data, error } = await adminClient
-        .from("crm_opportunities")
+        .from("opportunities")
         .insert({
           tenant_id: tenantId,
           pipeline_id: pipelineId,
@@ -456,7 +513,7 @@ async function executeTool(
       if (!stageName) throw new Error("stage_name es requerido");
 
       const { data: stages, error: stagesError } = await adminClient
-        .from("crm_pipeline_stages")
+        .from("pipeline_stages")
         .select("id, name, is_won, is_lost")
         .eq("pipeline_id", opportunity.pipeline_id);
       if (stagesError) throw new Error(stagesError.message);
@@ -468,7 +525,7 @@ async function executeTool(
       }
 
       const status = stage.is_won ? "won" : stage.is_lost ? "lost" : "open";
-      const { error: updateError } = await adminClient.from("crm_opportunities").update({ stage_id: stage.id, status }).eq("id", opportunity.id);
+      const { error: updateError } = await adminClient.from("opportunities").update({ stage_id: stage.id, status }).eq("id", opportunity.id);
       if (updateError) throw new Error(updateError.message);
       return { id: opportunity.id, stage: stage.name, status };
     }
@@ -476,7 +533,7 @@ async function executeTool(
     case "get_opportunity_status": {
       if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
       const { data: opportunity, error } = await adminClient
-        .from("crm_opportunities")
+        .from("opportunities")
         .select("id, title, value, currency, status, stage_id")
         .eq("tenant_id", tenantId)
         .eq("contact_id", contactId)
@@ -487,7 +544,7 @@ async function executeTool(
       if (error) throw new Error(error.message);
       if (!opportunity) return { found: false };
 
-      const { data: stage } = await adminClient.from("crm_pipeline_stages").select("name").eq("id", opportunity.stage_id).maybeSingle();
+      const { data: stage } = await adminClient.from("pipeline_stages").select("name").eq("id", opportunity.stage_id).maybeSingle();
       return {
         found: true,
         title: opportunity.title,
@@ -505,7 +562,7 @@ async function executeTool(
       const note = parameters.note ? String(parameters.note).trim() : null;
 
       const { data: opportunity } = await adminClient
-        .from("crm_opportunities")
+        .from("opportunities")
         .select("id")
         .eq("tenant_id", tenantId)
         .eq("contact_id", contactId)
@@ -515,9 +572,9 @@ async function executeTool(
         .limit(1)
         .maybeSingle();
 
-      const { data: contact } = await adminClient.from("crm_contacts").select("assigned_to").eq("id", contactId).maybeSingle();
+      const { data: contact } = await adminClient.from("clients").select("assigned_to").eq("id", contactId).maybeSingle();
 
-      const { error } = await adminClient.from("crm_tasks").insert({
+      const { error } = await adminClient.from("tasks").insert({
         tenant_id: tenantId,
         contact_id: contactId,
         opportunity_id: opportunity?.id ?? null,
@@ -537,7 +594,7 @@ async function executeTool(
       const stage = String(parameters.stage ?? "");
       if (!LEAD_STAGES.includes(stage)) throw new Error(`stage inválido: ${stage}`);
 
-      const { error } = await adminClient.from("crm_contacts").update({ stage }).eq("id", contactId);
+      const { error } = await adminClient.from("clients").update({ stage }).eq("id", contactId);
       if (error) throw new Error(error.message);
       return { contact_id: contactId, stage };
     }
@@ -548,7 +605,7 @@ async function executeTool(
       // greeting to lead with categories needs this to be reliable, not a
       // prompt suggestion the model might ignore on a long category list.
       const { data, error } = await adminClient
-        .from("crm_product_categories")
+        .from("product_categories")
         .select("name, description")
         .eq("tenant_id", tenantId)
         .is("deleted_at", null)
@@ -570,34 +627,73 @@ async function executeTool(
       const search = parameters.search ? String(parameters.search).trim() : "";
       const category = parameters.category ? String(parameters.category).trim() : "";
 
+      // A product can be in several categories now (product_category_links,
+      // 2026-08-17) -- there's no direct products.category_id FK anymore for
+      // PostgREST to embed-and-filter on in one query, so a category filter
+      // resolves to a set of product ids first (via the link table), then
+      // scopes the actual products query with .in(). categorySelect always
+      // embeds every one of a product's categories (categories:string[] in
+      // the response), not just whichever one matched the filter.
+      const categorySelect =
+        "id, name, sku, retail_price, description, track_inventory, categories:product_category_links(category:product_categories(name))";
+
+      async function productIdsForCategory(categoryName: string): Promise<string[] | null> {
+        const { data: categoryRow, error: categoryError } = await adminClient
+          .from("product_categories")
+          .select("id")
+          .eq("tenant_id", tenantId)
+          .eq("name", categoryName)
+          .maybeSingle();
+        if (categoryError) throw new Error(categoryError.message);
+        if (!categoryRow) return null; // no such category -- caller returns an empty result, not every product
+
+        const { data: links, error: linksError } = await adminClient
+          .from("product_category_links")
+          .select("product_id")
+          .eq("tenant_id", tenantId)
+          .eq("category_id", categoryRow.id);
+        if (linksError) throw new Error(linksError.message);
+        return (links ?? []).map((l: { product_id: string }) => l.product_id);
+      }
+
+      function mapProduct(p: any) {
+        return {
+          name: p.name,
+          sku: p.sku,
+          price: formatCurrencyCOP(p.retail_price),
+          categories: (p.categories ?? []).map((c: any) => c.category?.name).filter(Boolean),
+          description: p.description ?? null,
+        };
+      }
+
       // Category browsing (no search term) is a distinct case: pulls stock
       // internally to rank by it (most-stocked first -- a reasonable proxy
       // for "what to lead with" when a tenant wants a proactive salesperson
       // tone), then strips it back out of what actually gets returned. The
       // model never sees the numbers, only the resulting order.
       if (category && !search) {
-        // !inner is required here -- without it, .eq() on the embedded
-        // resource doesn't restrict the base crm_products rows at all (it's
-        // a left join), so non-matching products still come back with
-        // category: null instead of being excluded. Found 2026-08-10: a
-        // "Posgrado" query returned every Pregrado product too.
+        const productIds = await productIdsForCategory(category);
+        if (!productIds || productIds.length === 0) return { products: [] };
+
         const { data, error } = await adminClient
-          .from("crm_products")
-          .select("name, sku, retail_price, description, track_inventory, stock_quantity, reserved_stock, category:crm_product_categories!inner(name)")
+          .from("products")
+          .select(categorySelect)
           .eq("tenant_id", tenantId)
           .eq("is_active", true)
           .is("deleted_at", null)
-          .eq("crm_product_categories.name", category);
+          .in("id", productIds);
         if (error) throw new Error(error.message);
+
+        // products carries no stock counter of its own (see
+        // types/domain.ts) -- available-per-product lives in product_stock,
+        // summed across warehouses, same aggregation listStockTotalsByTenant
+        // does client-side in leadly-app.
+        const stockTotals = await getStockTotals(adminClient, tenantId, (data ?? []).map((p: any) => p.id));
 
         const ranked = (data ?? [])
           .map((p: any) => ({
-            name: p.name,
-            sku: p.sku,
-            price: formatCurrencyCOP(p.retail_price),
-            category: p.category?.name ?? null,
-            description: p.description ?? null,
-            _rank: p.track_inventory ? p.stock_quantity - p.reserved_stock : Number.POSITIVE_INFINITY,
+            ...mapProduct(p),
+            _rank: p.track_inventory ? (stockTotals.get(p.id)?.available ?? 0) - (stockTotals.get(p.id)?.reserved ?? 0) : Number.POSITIVE_INFINITY,
           }))
           .sort((a: any, b: any) => b._rank - a._rank)
           .slice(0, CATEGORY_TOP_PRODUCTS_LIMIT)
@@ -606,21 +702,18 @@ async function executeTool(
         return { products: ranked };
       }
 
-      // !inner on the embed is required whenever a category filter is
-      // present -- see the comment above for why a plain embed doesn't
-      // actually restrict rows.
-      const categorySelect = category
-        ? "name, sku, retail_price, description, category:crm_product_categories!inner(name)"
-        : "name, sku, retail_price, description, category:crm_product_categories(name)";
+      const categoryProductIds = category ? await productIdsForCategory(category) : null;
+      if (category && (!categoryProductIds || categoryProductIds.length === 0)) return { products: [] };
 
       let query = adminClient
-        .from("crm_products")
+        .from("products")
         .select(categorySelect)
         .eq("tenant_id", tenantId)
         .eq("is_active", true)
         .is("deleted_at", null)
         .order("name", { ascending: true })
         .limit(CATALOG_SEARCH_LIMIT);
+      if (categoryProductIds) query = query.in("id", categoryProductIds);
 
       // Full-text search (Spanish config), not a rigid ILIKE substring --
       // an ILIKE '%camiseta de algodón%' never matches "Camiseta Algodón
@@ -628,7 +721,6 @@ async function executeTool(
       // singular "Camiseta" either. to_tsvector/plainto_tsquery handles
       // plurals, word order and accents correctly instead.
       if (search) query = query.textSearch("name", search, { type: "plain", config: "spanish" });
-      if (category) query = query.eq("crm_product_categories.name", category);
 
       let { data, error } = await query;
       if (error) throw new Error(error.message);
@@ -637,7 +729,7 @@ async function executeTool(
       // nothing, so it never changes behavior for a query that already works.
       if (search && (!data || data.length === 0)) {
         let fallbackQuery = adminClient
-          .from("crm_products")
+          .from("products")
           .select(categorySelect)
           .eq("tenant_id", tenantId)
           .eq("is_active", true)
@@ -645,19 +737,13 @@ async function executeTool(
           .ilike("name", `%${search}%`)
           .order("name", { ascending: true })
           .limit(CATALOG_SEARCH_LIMIT);
-        if (category) fallbackQuery = fallbackQuery.eq("crm_product_categories.name", category);
+        if (categoryProductIds) fallbackQuery = fallbackQuery.in("id", categoryProductIds);
         const fallback = await fallbackQuery;
         if (fallback.error) throw new Error(fallback.error.message);
         data = fallback.data;
       }
 
-      const products = (data ?? []).map((p: any) => ({
-        name: p.name,
-        sku: p.sku,
-        price: formatCurrencyCOP(p.retail_price),
-        category: p.category?.name ?? null,
-        description: p.description ?? null,
-      }));
+      const products = (data ?? []).map(mapProduct);
       return { products };
     }
 
@@ -669,7 +755,7 @@ async function executeTool(
       if (!product) throw new Error(`No se encontró el producto "${productName}" en el catálogo.`);
 
       const { data: image, error: imageError } = await adminClient
-        .from("crm_product_images")
+        .from("product_images")
         .select("storage_path")
         .eq("product_id", product.id)
         .order("display_order", { ascending: true })
@@ -720,9 +806,9 @@ async function executeTool(
         // asking for more than what's in stock silently never got an
         // opportunity created either. Availability is still a real business
         // question, just not one the AI should gate quote creation on --
-        // fulfillment/backorder is a human call. reserved_stock still
-        // accumulates normally via the crm_order_items trigger even past
-        // physical stock_quantity; nothing here blocks that.
+        // fulfillment/backorder is a human call. reserved_quantity (product_stock)
+        // still accumulates normally via the stock-effect trigger even past
+        // physical quantity; nothing here blocks that.
         resolvedItems.push({
           product_id: product.id,
           product_name: product.name,
@@ -741,7 +827,7 @@ async function executeTool(
       const opportunityId = await resolveOrCreateOpportunityForQuote(adminClient, tenantId, contactId, subtotal);
 
       const { data: order, error: orderError } = await adminClient
-        .from("crm_orders")
+        .from("sales_orders")
         .insert({ tenant_id: tenantId, contact_id: contactId, opportunity_id: opportunityId, notes, subtotal, total: subtotal })
         .select("id, number")
         .single();
@@ -758,7 +844,7 @@ async function executeTool(
         subtotal: item.quantity * item.unit_price,
         display_order: index,
       }));
-      const { error: itemsError } = await adminClient.from("crm_order_items").insert(itemRows);
+      const { error: itemsError } = await adminClient.from("sales_order_items").insert(itemRows);
       if (itemsError) throw new Error(itemsError.message);
 
       return {
@@ -779,12 +865,12 @@ async function executeTool(
       if (!order) return { found: false };
 
       const { data: items } = await adminClient
-        .from("crm_order_items")
+        .from("sales_order_items")
         .select("product_name, quantity, unit_price, subtotal")
         .eq("order_id", order.id)
         .order("display_order", { ascending: true });
 
-      const { data: payments } = await adminClient.from("crm_order_payments").select("amount").eq("order_id", order.id).is("deleted_at", null);
+      const { data: payments } = await adminClient.from("sales_order_payments").select("amount").eq("order_id", order.id).is("deleted_at", null);
       const totalPaid = (payments ?? []).reduce((sum: number, p: { amount: number }) => sum + p.amount, 0);
       const balanceDue = Math.max(0, order.total - totalPaid);
 
@@ -813,7 +899,7 @@ async function executeTool(
       if (!comment) throw new Error("comment es requerido");
 
       const { error } = await adminClient
-        .from("crm_order_comments")
+        .from("sales_order_comments")
         .insert({ tenant_id: tenantId, order_id: order.id, content: comment, created_by_ai: true });
       if (error) throw new Error(error.message);
 
@@ -831,28 +917,35 @@ async function executeTool(
       // 20260809000001_order_stock_effects.sql), so it's the one place that
       // has to know fulfillment is possible before it happens.
       const { data: items } = await adminClient
-        .from("crm_order_items")
+        .from("sales_order_items")
         .select("product_name, quantity, product_id")
         .eq("order_id", order.id)
         .not("product_id", "is", null);
       for (const item of items ?? []) {
         const { data: product } = await adminClient
-          .from("crm_products")
-          .select("track_inventory, stock_quantity, reserved_stock")
+          .from("products")
+          .select("track_inventory")
           .eq("id", item.product_id)
           .maybeSingle();
         if (!product?.track_inventory) continue;
-        const available = product.stock_quantity - product.reserved_stock + item.quantity; // this item's own reservation still counts as "held for it"
+        // products carries no stock counter of its own -- sum product_stock
+        // across warehouses for this one product (same shape as
+        // getStockTotals, just scoped to a single id here).
+        const stockTotals = await getStockTotals(adminClient, tenantId, [item.product_id]);
+        const totals = stockTotals.get(item.product_id) ?? { available: 0, reserved: 0 };
+        const available = totals.available - totals.reserved + item.quantity; // this item's own reservation still counts as "held for it"
         if (available < item.quantity) {
           throw new Error(`Stock insuficiente para confirmar "${item.product_name}": disponible ${Math.max(0, available)}, pedido ${item.quantity}.`);
         }
       }
 
       // Moving the linked opportunity (if any) to its pipeline's "Ganado"
-      // stage now happens in a DB trigger (trg_crm_orders_confirmed_opportunity,
-      // 20260809170000) so it also covers a human agent confirming the sale
-      // by hand from Ventas.tsx, not just this AI path -- nothing to do here.
-      const { error } = await adminClient.from("crm_orders").update({ status: "confirmada" }).eq("id", order.id);
+      // stage used to happen in a DB trigger (trg_crm_orders_confirmed_opportunity,
+      // 20260809170000) -- that trigger was dropped 2026-08-17 along with the
+      // rest of crm_* (see 20260817020001) and not replaced yet, so this no
+      // longer moves the pipeline automatically. The sale itself still
+      // confirms fine.
+      const { error } = await adminClient.from("sales_orders").update({ status: "confirmada" }).eq("id", order.id);
       if (error) throw new Error(error.message);
 
       return { order_number: order.number, order_code: formatOrderCode(order.number), status: "confirmada" };
@@ -862,7 +955,7 @@ async function executeTool(
       const order = await resolveLatestOrder(adminClient, tenantId, contactId, "cotizacion");
       if (!order) throw new Error("Este cliente no tiene ninguna cotización pendiente de cancelar.");
 
-      const { error } = await adminClient.from("crm_orders").update({ status: "cancelada" }).eq("id", order.id);
+      const { error } = await adminClient.from("sales_orders").update({ status: "cancelada" }).eq("id", order.id);
       if (error) throw new Error(error.message);
       return { order_number: order.number, order_code: formatOrderCode(order.number), status: "cancelada" };
     }
@@ -873,7 +966,7 @@ async function executeTool(
       // statuses (confirmada or en_proceso), which that helper's single-value
       // filter can't express, so it queries directly instead.
       const { data: order, error: orderError } = await adminClient
-        .from("crm_orders")
+        .from("sales_orders")
         .select("id, number")
         .eq("tenant_id", tenantId)
         .eq("contact_id", contactId)
@@ -885,7 +978,7 @@ async function executeTool(
       if (orderError) throw new Error(orderError.message);
       if (!order) throw new Error("Este cliente no tiene ninguna venta confirmada pendiente de completar.");
 
-      const { error } = await adminClient.from("crm_orders").update({ status: "entregada" }).eq("id", order.id);
+      const { error } = await adminClient.from("sales_orders").update({ status: "entregada" }).eq("id", order.id);
       if (error) throw new Error(error.message);
       return { order_number: order.number, order_code: formatOrderCode(order.number), status: "entregada" };
     }
@@ -893,7 +986,7 @@ async function executeTool(
     case "list_contact_addresses": {
       if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
       const { data, error } = await adminClient
-        .from("crm_contact_addresses")
+        .from("contact_addresses")
         .select("id, label, is_shipping, is_billing, is_default, line1, line2, city, state_province, postal_code, country")
         .eq("tenant_id", tenantId)
         .eq("contact_id", contactId)
@@ -924,7 +1017,7 @@ async function executeTool(
 
       if (addressId) {
         const { error } = await adminClient
-          .from("crm_contact_addresses")
+          .from("contact_addresses")
           .update(fields)
           .eq("id", addressId)
           .eq("tenant_id", tenantId)
@@ -933,7 +1026,7 @@ async function executeTool(
       } else {
         if (!fields.line1) throw new Error("line1 es requerido para guardar una dirección nueva.");
         const { data: inserted, error } = await adminClient
-          .from("crm_contact_addresses")
+          .from("contact_addresses")
           .insert({ tenant_id: tenantId, contact_id: contactId, is_shipping: true, ...fields, is_default: true })
           .select("id")
           .single();
@@ -949,16 +1042,159 @@ async function executeTool(
           const orderUpdate: Record<string, string> = {};
           if (applyAsShipping) orderUpdate.shipping_address_id = savedAddressId;
           if (applyAsBilling) orderUpdate.billing_address_id = savedAddressId;
-          await adminClient.from("crm_orders").update(orderUpdate).eq("id", order.id);
+          await adminClient.from("sales_orders").update(orderUpdate).eq("id", order.id);
         }
       }
 
       return { address_id: savedAddressId, saved: true };
     }
 
+    case "generate_payment_link": {
+      const description = String(parameters.description ?? "").trim();
+      if (!description) throw new Error("description es requerido");
+      const amount = Number(parameters.amount);
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("amount debe ser mayor a cero");
+      const reference = parameters.reference ? String(parameters.reference).trim() : `wa-${conversationId}-${Date.now()}`;
+
+      // Tenant's own Wompi account (tenant_payment_credentials with
+      // tenant_id = this tenant), not Leadly's platform credential -- same
+      // adapter/registry that already powers real invoice checkout.
+      const credential = await resolveCredential(adminClient, tenantId, "wompi");
+      const getSecret = makeSecretGetter(adminClient, credential.id);
+      const adapter = getAdapter("wompi");
+      const result = await adapter.createCheckout(credential, getSecret, {
+        invoiceId: reference,
+        amountCents: Math.round(amount * 100),
+        currency: "COP",
+        description,
+      });
+      return { checkout_url: result.checkoutUrl, reference };
+    }
+
+    case "hubspot_sync_contact": {
+      if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
+      const email = String(parameters.email ?? "").trim();
+      if (!email) throw new Error("email es requerido");
+
+      const { data: contact } = await adminClient.from("clients").select("phone, full_name").eq("id", contactId).maybeSingle();
+
+      const properties: Record<string, string> = { email };
+      if (contact?.phone) properties.phone = contact.phone;
+      if (parameters.firstname) properties.firstname = String(parameters.firstname).trim();
+      else if (contact?.full_name) properties.firstname = contact.full_name;
+      if (parameters.lastname) properties.lastname = String(parameters.lastname).trim();
+      if (parameters.company) properties.company = String(parameters.company).trim();
+      if (parameters.jobtitle) properties.jobtitle = String(parameters.jobtitle).trim();
+
+      const credential = await resolveTenantIntegrationCredential(adminClient, tenantId, "hubspot");
+      const token = await makeIntegrationSecretGetter(adminClient, credential.id)("token");
+      if (!token) throw new Error("HubSpot no tiene un token configurado para este tenant.");
+
+      const { id, created } = await createOrUpdateContact(token, properties);
+      await adminClient.from("clients").update({ hubspot_contact_id: id }).eq("id", contactId);
+      return { hubspot_contact_id: id, created };
+    }
+
+    case "hubspot_list_deal_pipelines": {
+      const credential = await resolveTenantIntegrationCredential(adminClient, tenantId, "hubspot");
+      const token = await makeIntegrationSecretGetter(adminClient, credential.id)("token");
+      if (!token) throw new Error("HubSpot no tiene un token configurado para este tenant.");
+      const pipelines = await getDealPipelines(token);
+      return {
+        pipelines: pipelines.map((p) => ({
+          name: p.label,
+          stages: ((p.stages as Array<Record<string, unknown>>) ?? []).map((s) => s.label),
+        })),
+      };
+    }
+
+    case "hubspot_create_deal": {
+      if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
+      const { data: contact } = await adminClient.from("clients").select("hubspot_contact_id").eq("id", contactId).maybeSingle();
+      if (!contact?.hubspot_contact_id) {
+        throw new Error("El contacto todavía no está sincronizado con HubSpot -- llamá a hubspot_sync_contact primero.");
+      }
+
+      const dealname = String(parameters.dealname ?? "").trim();
+      if (!dealname) throw new Error("dealname es requerido");
+      const pipelineName = String(parameters.pipeline_name ?? "").trim();
+      const dealstageName = String(parameters.dealstage_name ?? "").trim();
+      if (!pipelineName || !dealstageName) throw new Error("pipeline_name y dealstage_name son requeridos");
+
+      const credential = await resolveTenantIntegrationCredential(adminClient, tenantId, "hubspot");
+      const token = await makeIntegrationSecretGetter(adminClient, credential.id)("token");
+      if (!token) throw new Error("HubSpot no tiene un token configurado para este tenant.");
+
+      const pipelines = await getDealPipelines(token);
+      const pipeline = pipelines.find((p) => p.label === pipelineName);
+      if (!pipeline) throw new Error(`No existe el pipeline "${pipelineName}" en HubSpot.`);
+      const stage = ((pipeline.stages as Array<Record<string, unknown>>) ?? []).find((s) => s.label === dealstageName);
+      if (!stage) throw new Error(`No existe la etapa "${dealstageName}" en el pipeline "${pipelineName}".`);
+
+      const properties: Record<string, string> = { dealname, pipeline: String(pipeline.id), dealstage: String((stage as Record<string, unknown>).id) };
+      if (parameters.amount !== undefined) properties.amount = String(parameters.amount);
+      if (parameters.description) properties.description = String(parameters.description).trim();
+
+      const deal = await createDeal(token, properties, contact.hubspot_contact_id as string);
+      return { hubspot_deal_id: deal.id, dealname };
+    }
+
+    case "shopify_search_products": {
+      const query = String(parameters.query ?? "").trim();
+      if (!query) throw new Error("query es requerido");
+      const { shop, accessToken } = await resolveShopifyConfig(adminClient, tenantId);
+      const products = await searchProducts(shop, accessToken, query);
+      return { products };
+    }
+
+    case "shopify_search_customer_by_phone": {
+      if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
+      const { data: contact } = await adminClient.from("clients").select("phone").eq("id", contactId).maybeSingle();
+      if (!contact?.phone) throw new Error("Este contacto no tiene teléfono registrado.");
+      const { shop, accessToken } = await resolveShopifyConfig(adminClient, tenantId);
+      const customer = await searchCustomerByPhone(shop, accessToken, contact.phone);
+      return { found: !!customer, customer };
+    }
+
+    case "shopify_search_orders": {
+      if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
+      const { data: contact } = await adminClient.from("clients").select("phone").eq("id", contactId).maybeSingle();
+      if (!contact?.phone) throw new Error("Este contacto no tiene teléfono registrado.");
+      const { shop, accessToken } = await resolveShopifyConfig(adminClient, tenantId);
+
+      // Always resolve the Shopify customer for *this* contact's own phone
+      // first, and scope the order search to that customer server-side --
+      // the AI's free-text query is only ever a refinement on top of that
+      // scope, never the sole filter, so this contact can't retrieve another
+      // customer's orders no matter what it searches for.
+      const customer = await searchCustomerByPhone(shop, accessToken, contact.phone);
+      if (!customer) return { orders: [], note: "Este contacto no tiene un perfil de cliente en Shopify." };
+
+      const refinement = String(parameters.query ?? "").trim();
+      const orders = await searchOrders(shop, accessToken, (customer as { id: string }).id, refinement);
+      return { orders };
+    }
+
     default:
       throw new Error(`Unknown function_name: ${functionName}`);
   }
+}
+
+/** Resolves this tenant's Shopify credential into the `{shop}.myshopify.com`
+ * domain + access token the Admin GraphQL client needs. The credential
+ * drawer only stores the bare store name (e.g. "mi-tienda") in config.shop --
+ * resolveShopifyDomain both appends ".myshopify.com" and rejects anything
+ * that isn't a valid Shopify store name, so a tenant can never point this
+ * fetch() at an arbitrary host (SSRF) via a crafted config.shop value. */
+// deno-lint-ignore no-explicit-any
+async function resolveShopifyConfig(adminClient: any, tenantId: string): Promise<{ shop: string; accessToken: string }> {
+  const credential = await resolveTenantIntegrationCredential(adminClient, tenantId, "shopify");
+  const shopName = String(credential.config.shop ?? "").trim();
+  if (!shopName) throw new Error("Shopify no tiene una tienda configurada para este tenant.");
+  const accessToken = await makeIntegrationSecretGetter(adminClient, credential.id)("access_token");
+  if (!accessToken) throw new Error("Shopify no tiene un token configurado para este tenant.");
+  const shop = resolveShopifyDomain(shopName);
+  return { shop, accessToken };
 }
 
 /** If whatsapp-ai-respond injected a pending_attachment (a photo the customer
@@ -1026,7 +1262,7 @@ async function resolvePipelineAndFirstStage(
   pipelineName: string,
 ): Promise<{ pipelineId: string; stageId: string; stageName: string }> {
   const { data: pipelines, error } = await adminClient
-    .from("crm_pipelines")
+    .from("pipelines")
     .select("id, name")
     .eq("tenant_id", tenantId)
     .eq("is_active", true);
@@ -1048,7 +1284,7 @@ async function resolvePipelineAndFirstStage(
   }
 
   const { data: stage, error: stageError } = await adminClient
-    .from("crm_pipeline_stages")
+    .from("pipeline_stages")
     .select("id, name")
     .eq("pipeline_id", pipeline.id)
     .order("display_order", { ascending: true })
@@ -1061,7 +1297,7 @@ async function resolvePipelineAndFirstStage(
 }
 
 /** Same "most recent X of the contact" pattern as resolveLatestPqr, over
- * crm_opportunities -- lets update_opportunity_stage/get_opportunity_status
+ * opportunities -- lets update_opportunity_stage/get_opportunity_status
  * act without the model having to remember an id across turns. */
 // deno-lint-ignore no-explicit-any
 async function resolveLatestOpenOpportunity(
@@ -1073,7 +1309,7 @@ async function resolveLatestOpenOpportunity(
   if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
 
   const { data, error } = await adminClient
-    .from("crm_opportunities")
+    .from("opportunities")
     .select("id, pipeline_id, stage_id, title")
     .eq("tenant_id", tenantId)
     .eq("contact_id", contactId)
@@ -1131,7 +1367,7 @@ async function resolveLatestOrder(
   if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
 
   let query = adminClient
-    .from("crm_orders")
+    .from("sales_orders")
     .select("id, number, status, total, currency, notes")
     .eq("tenant_id", tenantId)
     .eq("contact_id", contactId)
@@ -1185,7 +1421,7 @@ async function resolveOrCreateOpportunityForQuote(
 ): Promise<string | null> {
   try {
     const { data: existing } = await adminClient
-      .from("crm_opportunities")
+      .from("opportunities")
       .select("id")
       .eq("tenant_id", tenantId)
       .eq("contact_id", contactId)
@@ -1197,7 +1433,7 @@ async function resolveOrCreateOpportunityForQuote(
     if (existing) return existing.id;
 
     const { data: pipelines } = await adminClient
-      .from("crm_pipelines")
+      .from("pipelines")
       .select("id, name")
       .eq("tenant_id", tenantId)
       .eq("is_active", true);
@@ -1208,7 +1444,7 @@ async function resolveOrCreateOpportunityForQuote(
     // on the "Propuesta" stage if the pipeline has one (the default seeded
     // pipeline always does), falling back to the first stage otherwise.
     const { data: stages } = await adminClient
-      .from("crm_pipeline_stages")
+      .from("pipeline_stages")
       .select("id, name, display_order")
       .eq("pipeline_id", pipeline.id)
       .order("display_order", { ascending: true });
@@ -1216,7 +1452,7 @@ async function resolveOrCreateOpportunityForQuote(
     const stage = stages.find((s: { name: string }) => s.name.toLowerCase() === "propuesta") ?? stages[0];
 
     const { data: opportunity, error } = await adminClient
-      .from("crm_opportunities")
+      .from("opportunities")
       .insert({
         tenant_id: tenantId,
         pipeline_id: pipeline.id,
@@ -1242,13 +1478,16 @@ async function resolveOrCreateOpportunityForQuote(
  * back the precise name list_catalog_products returned; a full-text-search
  * fallback second, for when it paraphrases slightly (plural, reordered
  * words, missing an accent). Never throws -- returns null so the caller can
- * give its own "no encontrado" message with the right product_name in it. */
+ * give its own "no encontrado" message with the right product_name in it.
+ * No stock columns here -- products carries no stock counter of its own
+ * (see types/domain.ts); callers that actually need availability (confirm_quote)
+ * fetch it separately via getStockTotals, keyed off the id this returns. */
 // deno-lint-ignore no-explicit-any
 async function findProductByName(adminClient: any, tenantId: string, name: string): Promise<Record<string, unknown> | null> {
-  const columns = "id, name, sku, retail_price, track_inventory, stock_quantity, reserved_stock";
+  const columns = "id, name, sku, retail_price, track_inventory";
 
   const { data: exact } = await adminClient
-    .from("crm_products")
+    .from("products")
     .select(columns)
     .eq("tenant_id", tenantId)
     .eq("is_active", true)
@@ -1258,7 +1497,7 @@ async function findProductByName(adminClient: any, tenantId: string, name: strin
   if (exact) return exact;
 
   const { data: fuzzy } = await adminClient
-    .from("crm_products")
+    .from("products")
     .select(columns)
     .eq("tenant_id", tenantId)
     .eq("is_active", true)
@@ -1266,4 +1505,29 @@ async function findProductByName(adminClient: any, tenantId: string, name: strin
     .textSearch("name", name, { type: "plain", config: "spanish" })
     .limit(1);
   return fuzzy && fuzzy.length > 0 ? fuzzy[0] : null;
+}
+
+/** Sums product_stock (per-warehouse quantity/reserved_quantity) per product
+ * id, tenant-scoped -- same client-side aggregation leadly-app's own
+ * listStockTotalsByTenant does (see lib/api/stockMovements.ts), since
+ * products carries no stock counter of its own post-cutover. Empty id list
+ * short-circuits to an empty map instead of an unnecessary round trip. */
+// deno-lint-ignore no-explicit-any
+async function getStockTotals(adminClient: any, tenantId: string, productIds: string[]): Promise<Map<string, { available: number; reserved: number }>> {
+  const totals = new Map<string, { available: number; reserved: number }>();
+  if (productIds.length === 0) return totals;
+
+  const { data } = await adminClient
+    .from("product_stock")
+    .select("product_id, quantity, reserved_quantity")
+    .eq("tenant_id", tenantId)
+    .in("product_id", productIds);
+
+  for (const row of (data ?? []) as { product_id: string; quantity: number; reserved_quantity: number }[]) {
+    const existing = totals.get(row.product_id) ?? { available: 0, reserved: 0 };
+    existing.available += row.quantity;
+    existing.reserved += row.reserved_quantity;
+    totals.set(row.product_id, existing);
+  }
+  return totals;
 }

@@ -110,6 +110,82 @@ export interface WhatsappConversation {
   context_reset_at: string | null
   archived_at: string | null
   last_message_at: string | null
+  /** Solo se actualiza con mensajes entrantes -- a diferencia de
+   * last_message_at, sirve para saber si la ventana de 24h de WhatsApp sigue
+   * abierta (un agente puede mandar varios salientes sin que el contacto
+   * responda, y last_message_at seguiría viéndose "reciente"). */
+  last_inbound_message_at: string | null
+  /** Mensajes entrantes sin leer mientras la conversación está en modo
+   * humano -- mantenido por trigger (bump_conversation_unread_count), ver
+   * migración 20260819010001. Solo tiene sentido mostrarlo en modo humano
+   * (en modo ia la IA ya está respondiendo); se resetea a 0 al abrir la
+   * conversación (markConversationRead) o al devolverla a la IA. */
+  unread_count: number
+  /** Si esta conversación arrancó de una campaña masiva (o le mandaron una
+   * campaña más reciente), apunta a esa Campaign -- whatsapp-ai-respond lo
+   * usa para que la IA siga el "tema" de la campaña una vez que el contacto
+   * responde. */
+  campaign_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type CampaignStatus = 'draft' | 'scheduled' | 'sending' | 'completed' | 'canceled' | 'failed'
+
+/** Envío masivo programado de una plantilla a una lista de contactos subida
+ * por CSV -- Fase 2 de "iniciar conversaciones" (ver CLAUDE.md). */
+export interface Campaign {
+  id: string
+  tenant_id: string
+  name: string
+  whatsapp_line_id: string
+  template_id: string
+  topic: string | null
+  scheduled_at: string
+  status: CampaignStatus
+  total_recipients: number
+  sent_count: number
+  failed_count: number
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type CampaignRecipientStatus = 'pending' | 'sent' | 'failed'
+
+export interface CampaignRecipient {
+  id: string
+  tenant_id: string
+  campaign_id: string
+  contact_phone: string
+  contact_name: string | null
+  variables: string[]
+  status: CampaignRecipientStatus
+  error_message: string | null
+  whatsapp_message_id: string | null
+  sent_at: string | null
+  created_at: string
+}
+
+export type WhatsappTemplateCategory = 'MARKETING' | 'UTILITY' | 'AUTHENTICATION'
+export type WhatsappTemplateStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'PAUSED' | 'DISABLED'
+
+/** Plantilla de WhatsApp (HSM) propia del tenant -- ver CLAUDE.md, Fase 1 de
+ * "iniciar conversaciones". Fase 1: solo variables posicionales {{n}} en el
+ * cuerpo, sin encabezado/imagen/botones. */
+export interface WhatsappMessageTemplate {
+  id: string
+  tenant_id: string
+  business_account_id: string
+  meta_template_id: string | null
+  name: string
+  category: WhatsappTemplateCategory
+  language: string
+  status: WhatsappTemplateStatus
+  body_text: string
+  variable_count: number
+  rejected_reason: string | null
+  created_by: string | null
   created_at: string
   updated_at: string
 }
@@ -123,9 +199,9 @@ export interface ConversationTag {
   created_at: string
 }
 
-export type ContactStage = 'lead' | 'contactado' | 'negociacion' | 'cliente' | 'perdido'
+export type ClientStage = 'lead' | 'contactado' | 'negociacion' | 'cliente' | 'perdido'
 
-export interface CrmContact {
+export interface Client {
   id: string
   tenant_id: string
   full_name: string
@@ -139,16 +215,17 @@ export interface CrmContact {
   city: string | null
   notes: string | null
   is_active: boolean
-  stage: ContactStage
+  stage: ClientStage
   tags: string[]
   assigned_to: string | null
+  hubspot_contact_id: string | null
   deleted_at: string | null
   deleted_by: string | null
   created_at: string
   updated_at: string
 }
 
-export interface CrmPipeline {
+export interface Pipeline {
   id: string
   tenant_id: string
   name: string
@@ -159,7 +236,7 @@ export interface CrmPipeline {
   updated_at: string
 }
 
-export interface CrmPipelineStage {
+export interface PipelineStage {
   id: string
   pipeline_id: string
   name: string
@@ -174,7 +251,7 @@ export interface CrmPipelineStage {
 export type OpportunityPriority = 'baja' | 'media' | 'alta'
 export type OpportunityStatus = 'open' | 'won' | 'lost'
 
-export interface CrmOpportunity {
+export interface Opportunity {
   id: string
   tenant_id: string
   pipeline_id: string
@@ -198,7 +275,7 @@ export interface CrmOpportunity {
 export type TaskPriority = 'baja' | 'media' | 'alta'
 export type TaskStatus = 'pendiente' | 'en_proceso' | 'completada' | 'cancelada'
 
-export interface CrmTask {
+export interface Task {
   id: string
   tenant_id: string
   contact_id: string | null
@@ -215,22 +292,30 @@ export interface CrmTask {
   updated_at: string
 }
 
-export interface CrmProduct {
+// Catálogo -- esquema ERP sin prefijo (products/product_images/
+// product_categories/suppliers/brands). Cutover empezado el 2026-08-16
+// (pedido explícito del usuario): el frontend ya lee/escribe estas tablas
+// en vez de crm_products/crm_product_images/crm_product_categories/
+// crm_suppliers. Esas tablas viejas siguen existiendo intactas (no se
+// borran), pero el catálogo humano y el picker de productos de una orden
+// ya no las usan. Sin stock_quantity/reserved_stock -- ese contador plano
+// no existe en `products`, a propósito (ver core_catalog.sql): el stock
+// vive solo en product_stock/stock_movements (Inventario Fase 1), que ya
+// se repuntaron a esta tabla en la misma migración de este cutover.
+export interface Product {
   id: string
   tenant_id: string
   name: string
   description: string | null
   sku: string | null
   slug: string | null
-  category_id: string | null
   supplier_id: string | null
+  brand_id: string | null
   purchase_price: number | null
   wholesale_price: number | null
   retail_price: number | null
   currency: string
   track_inventory: boolean
-  stock_quantity: number
-  reserved_stock: number
   low_stock_threshold: number
   is_active: boolean
   deleted_at: string | null
@@ -239,7 +324,7 @@ export interface CrmProduct {
   updated_at: string
 }
 
-export interface CrmProductImage {
+export interface ProductImage {
   id: string
   tenant_id: string
   product_id: string
@@ -248,19 +333,32 @@ export interface CrmProductImage {
   created_at: string
 }
 
-export interface CrmProductCategory {
+export interface ProductCategory {
   id: string
   tenant_id: string
   name: string
   description: string | null
   color: string | null
+  parent_category_id: string | null
   deleted_at: string | null
   deleted_by: string | null
   created_at: string
   updated_at: string
 }
 
-export interface CrmSupplier {
+export interface Brand {
+  id: string
+  tenant_id: string
+  name: string
+  logo_url: string | null
+  is_active: boolean
+  deleted_at: string | null
+  deleted_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Supplier {
   id: string
   tenant_id: string
   name: string
@@ -277,7 +375,7 @@ export interface CrmSupplier {
 
 export type OrderStatus = 'cotizacion' | 'confirmada' | 'en_proceso' | 'entregada' | 'cancelada'
 
-export interface CrmOrder {
+export interface SalesOrder {
   id: string
   tenant_id: string
   number: number
@@ -301,7 +399,7 @@ export interface CrmOrder {
   updated_at: string
 }
 
-export interface CrmContactAddress {
+export interface ContactAddress {
   id: string
   tenant_id: string
   contact_id: string
@@ -325,11 +423,12 @@ export interface CrmContactAddress {
   updated_at: string
 }
 
-export interface CrmOrderItem {
+export interface SalesOrderItem {
   id: string
   tenant_id: string
   order_id: string
   product_id: string | null
+  warehouse_id: string | null
   product_name: string
   sku: string | null
   quantity: number
@@ -342,7 +441,7 @@ export interface CrmOrderItem {
 
 export type OrderPaymentMethod = 'efectivo' | 'transferencia' | 'tarjeta' | 'otro'
 
-export interface CrmOrderPayment {
+export interface SalesOrderPayment {
   id: string
   tenant_id: string
   order_id: string
@@ -358,7 +457,7 @@ export interface CrmOrderPayment {
   updated_at: string
 }
 
-export interface CrmOrderComment {
+export interface SalesOrderComment {
   id: string
   tenant_id: string
   order_id: string
@@ -368,7 +467,7 @@ export interface CrmOrderComment {
   created_at: string
 }
 
-export interface CrmNote {
+export interface Note {
   id: string
   tenant_id: string
   contact_id: string
@@ -380,7 +479,7 @@ export interface CrmNote {
 
 export type AppointmentStatus = 'activa' | 'completada' | 'cancelada'
 
-export interface CrmAppointment {
+export interface Appointment {
   id: string
   tenant_id: string
   contact_id: string
@@ -394,39 +493,10 @@ export interface CrmAppointment {
   updated_at: string
 }
 
-/** CrmAppointment + the contact's display name, for tenant-wide views (the
+/** Appointment + the contact's display name, for tenant-wide views (the
  * calendar) that aren't already scoped to one contact. */
-export interface AppointmentWithContact extends CrmAppointment {
+export interface AppointmentWithContact extends Appointment {
   contact_full_name: string | null
-}
-
-export type PqrType = 'peticion' | 'queja' | 'reclamo'
-export type PqrStatus = 'abierto' | 'en_proceso' | 'resuelto' | 'cerrado'
-
-export interface CrmPqr {
-  id: string
-  tenant_id: string
-  contact_id: string
-  code: number
-  type: PqrType
-  subject: string
-  description: string | null
-  status: PqrStatus
-  created_by: string | null
-  created_by_ai: boolean
-  created_at: string
-  updated_at: string
-}
-
-export interface CrmPqrUpdate {
-  id: string
-  tenant_id: string
-  pqr_id: string
-  seq: number
-  content: string
-  created_by: string | null
-  created_by_ai: boolean
-  created_at: string
 }
 
 export interface WhatsappMessage {
@@ -444,13 +514,13 @@ export interface WhatsappMessage {
   created_at: string
 }
 
-export interface CrmAttachment {
+/** `attachments` -- shared by task attachments (task_id) and sales order
+ * comment attachments (sales_order_comment_id), mutually exclusive per row. */
+export interface Attachment {
   id: string
   tenant_id: string
-  pqr_id: string | null
-  pqr_update_id: string | null
   task_id: string | null
-  order_comment_id: string | null
+  sales_order_comment_id: string | null
   storage_path: string
   mime_type: string
   size_bytes: number
@@ -627,4 +697,71 @@ export interface IntegrationCredential {
   updated_at: string
   deleted_at: string | null
   deleted_by: string | null
+}
+
+// --- ERP: Fase 1 (Inventario) -- ver CLAUDE.md "Estado actual (2026-08-15)
+// -- Pivote a ERP". product_stock/stock_movements referenciaban
+// crm_products originalmente; se repuntaron a `products` el 2026-08-16
+// como parte del cutover del catálogo (ver Product más arriba).
+
+export type WarehouseType = 'bodega' | 'punto_venta' | 'transito'
+
+export interface Warehouse {
+  id: string
+  tenant_id: string
+  name: string
+  address: string | null
+  city: string | null
+  type: WarehouseType
+  manager_name: string | null
+  phone: string | null
+  is_default: boolean
+  is_active: boolean
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+  deleted_by: string | null
+}
+
+export interface ProductStock {
+  id: string
+  tenant_id: string
+  product_id: string
+  warehouse_id: string
+  quantity: number
+  reserved_quantity: number
+  departure_quantity: number
+  damaged_quantity: number
+  created_at: string
+  updated_at: string
+}
+
+export type StockMovementType =
+  | 'entrada'
+  | 'salida'
+  | 'ajuste_positivo'
+  | 'ajuste_negativo'
+  | 'transferencia_salida'
+  | 'transferencia_entrada'
+  | 'reserva'
+  | 'liberacion_reserva'
+  | 'salida_despacho'
+  | 'entrega_despacho'
+  | 'ajuste_dano'
+  | 'reversion_dano'
+export type StockReferenceType = 'carga_inicial' | 'compra' | 'despacho' | 'ajuste_manual' | 'transferencia'
+
+export interface StockMovement {
+  id: string
+  tenant_id: string
+  product_id: string
+  warehouse_id: string
+  movement_type: StockMovementType
+  quantity: number
+  unit_cost: number | null
+  reference_type: StockReferenceType | null
+  reference_id: string | null
+  notes: string | null
+  created_by: string | null
+  created_at: string
 }

@@ -1,5 +1,4 @@
-import { CheckIcon } from '../../../components/icons'
-
+import { CheckIcon } from '@/components/atoms/icons'
 /** Shared connected/not-connected status banner shown at the top of every
  * provider's credential drawer -- same visual language across Wompi/
  * LaFactura/Shopify/HubSpot instead of each one inventing its own, mirrors

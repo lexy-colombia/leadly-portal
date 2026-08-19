@@ -36,8 +36,5 @@
   "account.invite.submitting": "Inviting…",
   "account.invite.submit": "Send invitation",
   "account.invite.errors.failed": "Couldn't invite the user.",
-  "account.comingSoon.message": "This module ships in the next stage of the roadmap. See CLAUDE.md / backlog.",
-  "account.locked.reports": "Conversion, activity, and performance reports are coming soon. We're working on this feature.",
-  "account.locked.automations": "Follow-up automations and workflows are coming soon. We're working on this feature.",
-  "account.locked.campaigns": "Ad boosts and bulk WhatsApp campaigns are coming soon. We're working on this feature."
+  "account.comingSoon.message": "This module ships in the next stage of the roadmap. See CLAUDE.md / backlog."
 }

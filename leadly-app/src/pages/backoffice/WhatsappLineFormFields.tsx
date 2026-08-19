@@ -1,4 +1,4 @@
-import { FieldError, Input, Label, Select } from '../../components/ui'
+import { FieldError, Input, Label, Select } from '@/components/atoms'
 import type { Tenant } from '../../types/domain'
 import type { WhatsappLineFormState } from './useWhatsappLineForm'
 import { useLanguage } from '../../contexts/LanguageContext'

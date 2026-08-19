@@ -39,6 +39,12 @@ export const LANGUAGES: { value: TenantLanguage; labelKey: TranslationKey }[] = 
 export const TENANT_LOGO_MAX_BYTES = 5 * 1024 * 1024
 export const TENANT_LOGO_ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml']
 
+// No SVG here (unlike tenant logos) -- this lives in the product-images
+// bucket alongside product photos, whose allowed_mime_types is png/jpeg/webp
+// only (Storage itself would reject an SVG upload, not just this check).
+export const BRAND_LOGO_MAX_BYTES = 5 * 1024 * 1024
+export const BRAND_LOGO_ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp']
+
 export const PQR_ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024
 export const PQR_ATTACHMENT_ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp']
 

@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
-import { Button, Card, EmptyState, IconInput, PageSpinner, Select } from '../../components/ui'
-import { FilterIcon, PlusIcon, SearchIcon, XCircleIcon } from '../../components/icons'
+import { useHeaderSearchSlot } from '@/contexts/HeaderSearchSlotContext'
+import { PageSpinner } from '@/components/atoms'
+import { Card, EmptyState, IconInput } from '@/components/molecules'
+import { FilterIcon, PlusIcon, SearchIcon } from '@/components/atoms/icons'
+import { Button } from '@/components/ui/button'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { conversationDisplayName, listConversations, subscribeToConversations, type ConversationWithLine } from '../../lib/api/conversations'
 import { listConversationTags, listTagAssignmentsForConversations } from '../../lib/api/conversationTags'
 import { listProfilesByTenant } from '../../lib/api/users'
@@ -15,9 +21,15 @@ import { NewConversationDrawer } from './inbox/NewConversationDrawer'
 
 type QuickView = 'aiActive' | 'unassigned' | 'human' | 'myOpen' | null
 
+// shadcn Select can't take an empty string as an item value -- every "all"
+// option below uses this sentinel instead, converted back to '' at the
+// filter boundary.
+const ALL = '__all'
+
 export function Inbox() {
   const { profile } = useAuth()
   const { t } = useLanguage()
+  const { slot: headerSearchSlot } = useHeaderSearchSlot()
   const [searchParams, setSearchParams] = useSearchParams()
   const [conversations, setConversations] = useState<ConversationWithLine[] | null>(null)
   const [agents, setAgents] = useState<Profile[]>([])
@@ -135,57 +147,46 @@ export function Inbox() {
   const selected = conversations?.find((c) => c.id === selectedId) ?? null
 
   return (
-    <div className="flex h-full min-h-[500px] flex-col">
-      <div className="mb-2 flex shrink-0 flex-wrap items-center gap-1.5">
-        <div className="flex gap-1 rounded-full bg-brand-50 p-0.5">
-          {(['all', 'mine', 'archived'] as const).map((value) => (
-            <button
-              key={value}
-              onClick={() => {
-                setTab(value)
-                setQuickView(null)
-              }}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                tab === value ? 'bg-white text-brand-800 shadow-sm' : 'text-brand-400 hover:text-brand-700'
-              }`}
-            >
-              {t(value === 'all' ? 'inbox.tabs.all' : value === 'mine' ? 'inbox.tabs.mine' : 'inbox.tabs.archived')}
-            </button>
-          ))}
-        </div>
-
-        <div className="relative w-full max-w-[220px] sm:w-auto">
+    // AppShell gives this route (the tenant index, "/app") a bare
+    // `overflow-hidden` content wrapper with no padding -- every other
+    // route gets p-5/lg:p-8 for free, Inbox replicates it here itself so
+    // it still has the same breathing room, but capped by `h-full` instead
+    // of letting the ancestor's own scroll take over (see AppShell's
+    // `isFullBleed`).
+    <div className="flex h-full min-h-[500px] flex-col p-5 lg:p-8">
+      {headerSearchSlot &&
+        createPortal(
           <IconInput
-            icon={<SearchIcon width={13} height={13} />}
-            placeholder={t('inbox.search')}
+            icon={<SearchIcon width={14} height={14} />}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className={`!py-1.5 !pl-7 text-xs ${search ? '!pr-7' : ''}`}
-          />
-          {search && (
-            <button
-              type="button"
-              onClick={() => setSearch('')}
-              aria-label={t('inbox.search.clear')}
-              className="absolute inset-y-0 right-0 flex items-center pr-2.5 text-brand-300 hover:text-brand-500"
-            >
-              <XCircleIcon width={13} height={13} />
-            </button>
-          )}
-        </div>
+            placeholder={t('inbox.search')}
+            className="!w-64 !rounded-lg !py-1.5 text-xs"
+          />,
+          headerSearchSlot,
+        )}
+
+      <div className="mb-2 flex shrink-0 flex-wrap items-center gap-2">
+        <Tabs value={tab} onValueChange={(v) => { setTab(v as typeof tab); setQuickView(null) }}>
+          <TabsList>
+            <TabsTrigger value="all" className="text-xs">
+              {t('inbox.tabs.all')}
+            </TabsTrigger>
+            <TabsTrigger value="mine" className="text-xs">
+              {t('inbox.tabs.mine')}
+            </TabsTrigger>
+            <TabsTrigger value="archived" className="text-xs">
+              {t('inbox.tabs.archived')}
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         <div ref={filtersRef} className="relative">
-          <button
-            type="button"
-            onClick={() => setFiltersOpen((o) => !o)}
-            className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-              hasActiveFilters ? 'border-accent-300 bg-accent-50 text-accent-700' : 'border-brand-200 text-brand-600 hover:bg-brand-50'
-            }`}
-          >
+          <Button type="button" variant={hasActiveFilters ? 'secondary' : 'outline'} size="sm" onClick={() => setFiltersOpen((o) => !o)}>
             <FilterIcon width={13} height={13} />
             {t('inbox.filters')}
             {hasActiveFilters && <span className="h-1.5 w-1.5 rounded-full bg-accent-500" />}
-          </button>
+          </Button>
 
           {filtersOpen && (
             <div className="absolute right-0 top-full z-40 mt-2 w-64 max-w-[calc(100vw-2rem)] space-y-3 rounded-2xl border border-brand-100 bg-white p-4 shadow-lg">
@@ -208,55 +209,100 @@ export function Inbox() {
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium text-brand-400">{t('inbox.filters.agent')}</label>
-                <Select value={filterAgent} onChange={(e) => setFilterAgent(e.target.value)} className="!py-1.5 text-sm">
-                  <option value="">{t('inbox.filters.agent.all')}</option>
-                  <option value="unassigned">{t('inbox.filters.agent.unassigned')}</option>
-                  {agents.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.full_name}
-                    </option>
-                  ))}
+                <Select value={filterAgent || ALL} onValueChange={(v) => setFilterAgent(v === ALL ? '' : v)}>
+                  <SelectTrigger className="w-full !h-7 !rounded-lg !text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL} className="text-xs">
+                      {t('inbox.filters.agent.all')}
+                    </SelectItem>
+                    <SelectItem value="unassigned" className="text-xs">
+                      {t('inbox.filters.agent.unassigned')}
+                    </SelectItem>
+                    {agents.map((a) => (
+                      <SelectItem key={a.id} value={a.id} className="text-xs">
+                        {a.full_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
                 </Select>
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium text-brand-400">{t('inbox.filters.status')}</label>
-                <Select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as typeof filterStatus)} className="!py-1.5 text-sm">
-                  <option value="">{t('inbox.filters.status.all')}</option>
-                  <option value="open">{t('inbox.filters.status.open')}</option>
-                  <option value="closed">{t('inbox.filters.status.closed')}</option>
+                <Select value={filterStatus || ALL} onValueChange={(v) => setFilterStatus(v === ALL ? '' : (v as 'open' | 'closed'))}>
+                  <SelectTrigger className="w-full !h-7 !rounded-lg !text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL} className="text-xs">
+                      {t('inbox.filters.status.all')}
+                    </SelectItem>
+                    <SelectItem value="open" className="text-xs">
+                      {t('inbox.filters.status.open')}
+                    </SelectItem>
+                    <SelectItem value="closed" className="text-xs">
+                      {t('inbox.filters.status.closed')}
+                    </SelectItem>
+                  </SelectContent>
                 </Select>
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium text-brand-400">{t('inbox.filters.mode')}</label>
-                <Select value={filterMode} onChange={(e) => setFilterMode(e.target.value as typeof filterMode)} className="!py-1.5 text-sm">
-                  <option value="">{t('inbox.filters.mode.all')}</option>
-                  <option value="ia">{t('inbox.filters.mode.ia')}</option>
-                  <option value="humano">{t('inbox.filters.mode.humano')}</option>
+                <Select value={filterMode || ALL} onValueChange={(v) => setFilterMode(v === ALL ? '' : (v as 'ia' | 'humano'))}>
+                  <SelectTrigger className="w-full !h-7 !rounded-lg !text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL} className="text-xs">
+                      {t('inbox.filters.mode.all')}
+                    </SelectItem>
+                    <SelectItem value="ia" className="text-xs">
+                      {t('inbox.filters.mode.ia')}
+                    </SelectItem>
+                    <SelectItem value="humano" className="text-xs">
+                      {t('inbox.filters.mode.humano')}
+                    </SelectItem>
+                  </SelectContent>
                 </Select>
               </div>
               {tags.length > 0 && (
                 <div>
                   <label className="mb-1 block text-xs font-medium text-brand-400">{t('inbox.filters.tag')}</label>
-                  <Select value={filterTag} onChange={(e) => setFilterTag(e.target.value)} className="!py-1.5 text-sm">
-                    <option value="">{t('inbox.filters.tag.all')}</option>
-                    {tags.map((tag) => (
-                      <option key={tag.id} value={tag.id}>
-                        {tag.name}
-                      </option>
-                    ))}
+                  <Select value={filterTag || ALL} onValueChange={(v) => setFilterTag(v === ALL ? '' : v)}>
+                    <SelectTrigger className="w-full !h-7 !rounded-lg !text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={ALL} className="text-xs">
+                        {t('inbox.filters.tag.all')}
+                      </SelectItem>
+                      {tags.map((tagItem) => (
+                        <SelectItem key={tagItem.id} value={tagItem.id} className="text-xs">
+                          {tagItem.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
                   </Select>
                 </div>
               )}
               {lines.length > 1 && (
                 <div>
                   <label className="mb-1 block text-xs font-medium text-brand-400">{t('inbox.filters.line')}</label>
-                  <Select value={filterLine} onChange={(e) => setFilterLine(e.target.value)} className="!py-1.5 text-sm">
-                    <option value="">{t('inbox.filters.line.all')}</option>
-                    {lines.map((line) => (
-                      <option key={line.id} value={line.id}>
-                        {line.display_name}
-                      </option>
-                    ))}
+                  <Select value={filterLine || ALL} onValueChange={(v) => setFilterLine(v === ALL ? '' : v)}>
+                    <SelectTrigger className="w-full !h-7 !rounded-lg !text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={ALL} className="text-xs">
+                        {t('inbox.filters.line.all')}
+                      </SelectItem>
+                      {lines.map((line) => (
+                        <SelectItem key={line.id} value={line.id} className="text-xs">
+                          {line.display_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
                   </Select>
                 </div>
               )}
@@ -284,7 +330,7 @@ export function Inbox() {
           {filtered?.length ?? 0} {(filtered?.length ?? 0) === 1 ? t('inbox.count.singular') : t('inbox.count.plural')}
         </span>
 
-        <Button variant="secondary" onClick={() => setNewConvOpen(true)} className="!ml-auto !py-1.5 !text-xs">
+        <Button onClick={() => setNewConvOpen(true)} size="sm" className="ml-auto">
           <PlusIcon width={14} height={14} /> {t('inbox.newConversation')}
         </Button>
       </div>

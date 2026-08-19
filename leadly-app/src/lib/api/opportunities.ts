@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient'
-import type { CrmOpportunity, CrmPipeline, CrmPipelineStage, OpportunityPriority } from '../../types/domain'
+import type { Opportunity, Pipeline, PipelineStage, OpportunityPriority } from '../../types/domain'
 
 export interface OpportunityInput {
   tenant_id: string
@@ -19,19 +19,19 @@ export interface OpportunityInput {
 /** A tenant gets exactly one pipeline today (seeded automatically when the
  * tenant is created, see the seed_default_pipeline trigger) -- this just
  * reads it back, nothing creates one from the frontend yet. */
-export async function getDefaultPipeline(tenantId: string): Promise<CrmPipeline | null> {
-  const { data, error } = await supabase.from('crm_pipelines').select('*').eq('tenant_id', tenantId).eq('is_active', true).order('created_at').limit(1).maybeSingle()
+export async function getDefaultPipeline(tenantId: string): Promise<Pipeline | null> {
+  const { data, error } = await supabase.from('pipelines').select('*').eq('tenant_id', tenantId).eq('is_active', true).order('created_at').limit(1).maybeSingle()
   if (error) throw error
   return data
 }
 
-export async function listStages(pipelineId: string): Promise<CrmPipelineStage[]> {
-  const { data, error } = await supabase.from('crm_pipeline_stages').select('*').eq('pipeline_id', pipelineId).order('display_order')
+export async function listStages(pipelineId: string): Promise<PipelineStage[]> {
+  const { data, error } = await supabase.from('pipeline_stages').select('*').eq('pipeline_id', pipelineId).order('display_order')
   if (error) throw error
   return data
 }
 
-export type OpportunityWithRelations = CrmOpportunity & {
+export type OpportunityWithRelations = Opportunity & {
   contact: { full_name: string; phone: string | null; email: string | null } | null
   stage: { name: string; color: string; probability: number; is_won: boolean; is_lost: boolean } | null
   owner: { full_name: string } | null
@@ -42,8 +42,8 @@ export type OpportunityWithRelations = CrmOpportunity & {
  * opportunities from every pipeline would mix into the same board/metrics. */
 export async function listOpportunities(tenantId: string, pipelineId?: string): Promise<OpportunityWithRelations[]> {
   let query = supabase
-    .from('crm_opportunities')
-    .select('*, contact:crm_contacts(full_name, phone, email), stage:crm_pipeline_stages(name, color, probability, is_won, is_lost), owner:profiles!owner_id(full_name)')
+    .from('opportunities')
+    .select('*, contact:clients(full_name, phone, email), stage:pipeline_stages(name, color, probability, is_won, is_lost), owner:profiles!owner_id(full_name)')
     .eq('tenant_id', tenantId)
     .is('deleted_at', null)
     .order('updated_at', { ascending: false })
@@ -53,11 +53,11 @@ export async function listOpportunities(tenantId: string, pipelineId?: string): 
   return data as unknown as OpportunityWithRelations[]
 }
 
-/** "Oportunidades" tab on ContactoDetalle.tsx. */
+/** "Opportunities" tab on ClientDetail.tsx. */
 export async function listOpportunitiesForContact(contactId: string): Promise<OpportunityWithRelations[]> {
   const { data, error } = await supabase
-    .from('crm_opportunities')
-    .select('*, contact:crm_contacts(full_name, phone, email), stage:crm_pipeline_stages(name, color, probability, is_won, is_lost), owner:profiles!owner_id(full_name)')
+    .from('opportunities')
+    .select('*, contact:clients(full_name, phone, email), stage:pipeline_stages(name, color, probability, is_won, is_lost), owner:profiles!owner_id(full_name)')
     .eq('contact_id', contactId)
     .is('deleted_at', null)
     .order('updated_at', { ascending: false })
@@ -65,8 +65,8 @@ export async function listOpportunitiesForContact(contactId: string): Promise<Op
   return data as unknown as OpportunityWithRelations[]
 }
 
-export async function createOpportunity(input: OpportunityInput): Promise<CrmOpportunity> {
-  const { data, error } = await supabase.from('crm_opportunities').insert(input).select().single()
+export async function createOpportunity(input: OpportunityInput): Promise<Opportunity> {
+  const { data, error } = await supabase.from('opportunities').insert(input).select().single()
   if (error) throw error
   return data
 }
@@ -75,8 +75,8 @@ export interface OpportunityUpdateInput extends Partial<OpportunityInput> {
   status?: 'open' | 'won' | 'lost'
 }
 
-export async function updateOpportunity(id: string, input: OpportunityUpdateInput): Promise<CrmOpportunity> {
-  const { data, error } = await supabase.from('crm_opportunities').update(input).eq('id', id).select().single()
+export async function updateOpportunity(id: string, input: OpportunityUpdateInput): Promise<Opportunity> {
+  const { data, error } = await supabase.from('opportunities').update(input).eq('id', id).select().single()
   if (error) throw error
   return data
 }
@@ -85,7 +85,7 @@ export async function updateOpportunity(id: string, input: OpportunityUpdateInpu
  * own status -- keeps "status" a cheap filter without joining stages every
  * time, while the stage itself stays the single source of truth for which
  * stages count as won/lost. */
-export async function moveOpportunityToStage(id: string, stage: CrmPipelineStage): Promise<CrmOpportunity> {
+export async function moveOpportunityToStage(id: string, stage: PipelineStage): Promise<Opportunity> {
   const status = stage.is_won ? 'won' : stage.is_lost ? 'lost' : 'open'
   return updateOpportunity(id, { stage_id: stage.id, status })
 }
@@ -97,14 +97,14 @@ export interface StageHistoryRow {
 }
 
 /** Feeds the Kanban header's "Conversión"/"Tiempo promedio" metrics -- see
- * crm_opportunity_stage_history (CLAUDE.md 3.7). Without this, those numbers
+ * opportunity_stage_history (CLAUDE.md 3.7). Without this, those numbers
  * would have to be guessed instead of computed from when opportunities
  * actually entered their closing stage. */
 export async function listStageHistoryForOpportunities(opportunityIds: string[]): Promise<StageHistoryRow[]> {
   if (opportunityIds.length === 0) return []
   const { data, error } = await supabase
-    .from('crm_opportunity_stage_history')
-    .select('opportunity_id, created_at, to_stage:crm_pipeline_stages!to_stage_id(is_won, is_lost)')
+    .from('opportunity_stage_history')
+    .select('opportunity_id, created_at, to_stage:pipeline_stages!to_stage_id(is_won, is_lost)')
     .in('opportunity_id', opportunityIds)
     .order('created_at', { ascending: true })
   if (error) throw error
@@ -156,6 +156,6 @@ export async function deleteOpportunity(id: string): Promise<void> {
   const {
     data: { user },
   } = await supabase.auth.getUser()
-  const { error } = await supabase.from('crm_opportunities').update({ deleted_at: new Date().toISOString(), deleted_by: user?.id ?? null }).eq('id', id)
+  const { error } = await supabase.from('opportunities').update({ deleted_at: new Date().toISOString(), deleted_by: user?.id ?? null }).eq('id', id)
   if (error) throw error
 }

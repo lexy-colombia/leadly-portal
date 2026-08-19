@@ -1,4 +1,4 @@
-// Scans crm_appointments for anything scheduled ~1h out that hasn't been
+// Scans appointments for anything scheduled ~1h out that hasn't been
 // reminded yet, and sends the contact a WhatsApp message through the
 // conversation's own line. Triggered every 5 minutes by pg_cron (see
 // migration 20260804000004_appointment_reminder_cron.sql) -- never called by
@@ -35,8 +35,8 @@ Deno.serve(async (req: Request) => {
   const windowEnd = new Date(Date.now() + 65 * 60 * 1000).toISOString();
 
   const { data: appointments, error } = await adminClient
-    .from("crm_appointments")
-    .select("id, contact_id, whatsapp_line_id, scheduled_at, tenant_id, crm_contacts(full_name, phone)")
+    .from("appointments")
+    .select("id, contact_id, whatsapp_line_id, scheduled_at, tenant_id, clients(full_name, phone)")
     .eq("status", "activa")
     .is("reminder_sent_at", null)
     .gte("scheduled_at", windowStart)
@@ -50,7 +50,7 @@ Deno.serve(async (req: Request) => {
   let sent = 0;
   for (const appt of appointments ?? []) {
     // deno-lint-ignore no-explicit-any
-    const contact = appt.crm_contacts as any;
+    const contact = appt.clients as any;
     if (!contact) continue;
 
     let lineId = appt.whatsapp_line_id as string | null;
@@ -108,7 +108,7 @@ Deno.serve(async (req: Request) => {
       console.error(`Failed to send appointment reminder for ${appt.id}`, result.errorMessage);
     }
 
-    await adminClient.from("crm_appointments").update({ reminder_sent_at: new Date().toISOString() }).eq("id", appt.id);
+    await adminClient.from("appointments").update({ reminder_sent_at: new Date().toISOString() }).eq("id", appt.id);
     if (result.ok) sent++;
   }
 

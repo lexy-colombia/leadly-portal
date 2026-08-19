@@ -1,13 +1,14 @@
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { Button, CurrencyInput, Input, Select } from '../../../components/ui'
-import { PlusIcon, TrashIcon } from '../../../components/icons'
+import { Button, Input, Select } from '@/components/atoms'
+import { CurrencyInput } from '@/components/molecules'
+import { PlusIcon, TrashIcon } from '@/components/atoms/icons'
 import type { OrderItemInput } from '../../../lib/api/orders'
 import type { ProductWithImages } from '../../../lib/api/products'
 
 const CUSTOM_LINE_VALUE = '__custom__'
 
 /** Editable line-item list shared by OrderDrawer.tsx (inside its form) and
- * VentaDetalle.tsx (inline on the page, no drawer) -- same product
+ * OrderDetail.tsx (inline on the page, no drawer) -- same product
  * picker/quantity/price/discount editing either way, just a different
  * container and save trigger around it. */
 export function OrderItemsEditor({

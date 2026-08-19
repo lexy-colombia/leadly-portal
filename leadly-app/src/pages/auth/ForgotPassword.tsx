@@ -2,9 +2,10 @@ import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../../lib/supabaseClient'
 import { useLanguage } from '../../contexts/LanguageContext'
-import { AuthSplitLayout } from '../../components/layout/AuthSplitLayout'
-import { Button, FieldError, IconInput, Label } from '../../components/ui'
-import { MailIcon } from '../../components/icons'
+import { AuthSplitLayout } from '@/components/organisms'
+import { Button, FieldError, Label } from '@/components/atoms'
+import { IconInput } from '@/components/molecules'
+import { MailIcon } from '@/components/atoms/icons'
 import { isValidEmail, normalizeEmail } from '../../lib/validation'
 
 export function ForgotPassword() {

@@ -1,4 +1,4 @@
-import { InitialsAvatar } from '../../../components/ui'
+import { InitialsAvatar } from '@/components/atoms'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import type { Language } from '../../../i18n/translations'
 import { CONVERSATION_CATEGORY_KEY, conversationDisplayName, type ConversationWithLine } from '../../../lib/api/conversations'
@@ -25,6 +25,7 @@ export function ConversationListItem({
 }) {
   const { t, language } = useLanguage()
   const name = conversationDisplayName(conversation)
+  const showUnreadBadge = conversation.mode === 'humano' && conversation.unread_count > 0
   return (
     <button
       type="button"
@@ -47,8 +48,20 @@ export function ConversationListItem({
           </span>
         </span>
         <span className="flex shrink-0 flex-col items-end gap-1">
-          <span className="text-[11px] text-brand-400">{formatTime(conversation.last_message_at, language)}</span>
+          <span className="flex items-center gap-1.5">
+            <span className="text-[11px] text-brand-400">{formatTime(conversation.last_message_at, language)}</span>
+            {showUnreadBadge && (
+              <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-none text-white">
+                {conversation.unread_count > 99 ? '99+' : conversation.unread_count}
+              </span>
+            )}
+          </span>
           <span className="flex items-center gap-1">
+            {!conversation.contact_id && (
+              <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-amber-600" title={t('inbox.chat.noClientLinked')}>
+                {t('inbox.list.noClient')}
+              </span>
+            )}
             {conversation.category && (
               <span className="rounded-full bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-brand-500">
                 {t(CONVERSATION_CATEGORY_KEY[conversation.category])}

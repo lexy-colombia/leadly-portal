@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient'
-import type { CrmSupplier } from '../../types/domain'
+import type { Supplier } from '../../types/domain'
 
 export interface SupplierInput {
   tenant_id: string
@@ -11,9 +11,9 @@ export interface SupplierInput {
   is_active?: boolean
 }
 
-export async function listSuppliers(tenantId: string): Promise<CrmSupplier[]> {
+export async function listSuppliers(tenantId: string): Promise<Supplier[]> {
   const { data, error } = await supabase
-    .from('crm_suppliers')
+    .from('suppliers')
     .select('*')
     .eq('tenant_id', tenantId)
     .is('deleted_at', null)
@@ -22,14 +22,14 @@ export async function listSuppliers(tenantId: string): Promise<CrmSupplier[]> {
   return data
 }
 
-export async function createSupplier(input: SupplierInput): Promise<CrmSupplier> {
-  const { data, error } = await supabase.from('crm_suppliers').insert(input).select().single()
+export async function createSupplier(input: SupplierInput): Promise<Supplier> {
+  const { data, error } = await supabase.from('suppliers').insert(input).select().single()
   if (error) throw error
   return data
 }
 
-export async function updateSupplier(id: string, input: Partial<SupplierInput>): Promise<CrmSupplier> {
-  const { data, error } = await supabase.from('crm_suppliers').update(input).eq('id', id).select().single()
+export async function updateSupplier(id: string, input: Partial<SupplierInput>): Promise<Supplier> {
+  const { data, error } = await supabase.from('suppliers').update(input).eq('id', id).select().single()
   if (error) throw error
   return data
 }
@@ -38,6 +38,6 @@ export async function deleteSupplier(id: string): Promise<void> {
   const {
     data: { user },
   } = await supabase.auth.getUser()
-  const { error } = await supabase.from('crm_suppliers').update({ deleted_at: new Date().toISOString(), deleted_by: user?.id ?? null }).eq('id', id)
+  const { error } = await supabase.from('suppliers').update({ deleted_at: new Date().toISOString(), deleted_by: user?.id ?? null }).eq('id', id)
   if (error) throw error
 }

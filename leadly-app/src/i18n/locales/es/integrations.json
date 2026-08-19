@@ -1,5 +1,4 @@
 {
-  "integrations.title": "Integraciones",
   "integrations.category.invoicing": "Facturación electrónica",
   "integrations.category.accounting": "Contabilidad",
   "integrations.category.messaging": "Mensajería",
@@ -23,6 +22,8 @@
   "integrations.replaceValue": "Reemplazar…",
   "integrations.connected": "Conectado",
   "integrations.notConnected": "No conectado",
+  "integrations.actions.connect": "Conectar",
+  "integrations.actions.manage": "Gestionar",
   "integrations.adminOnly": "Solo el administrador de la cuenta puede configurar integraciones.",
 
   "integrations.wompi.connected": "Wompi está configurado y listo para usarse.",

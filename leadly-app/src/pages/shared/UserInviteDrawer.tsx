@@ -3,7 +3,8 @@ import { inviteTenantUser } from '../../lib/api/users'
 import type { Profile } from '../../types/domain'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { TranslationKey } from '../../i18n/translations'
-import { Button, Drawer, FieldError, Input, Label, Select } from '../../components/ui'
+import { Button, FieldError, Input, Label, Select } from '@/components/atoms'
+import { Drawer } from '@/components/organisms'
 import { isNotBlank, isValidE164Phone, isValidEmail } from '../../lib/validation'
 
 const ROLE_LABEL_KEY: Record<'tenant_admin' | 'tenant_agent', TranslationKey> = {
