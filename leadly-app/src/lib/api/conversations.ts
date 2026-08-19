@@ -19,7 +19,7 @@ export const CONVERSATION_CATEGORY_KEY: Record<ConversationCategory, Translation
 // so every UI that displays a conversation's contact name must prefer
 // `contact.full_name` over `contact_name`, never the other way around.
 export type ConversationWithLine = WhatsappConversation & {
-  whatsapp_line: { display_name: string } | null
+  whatsapp_line: { display_name: string; business_account_id: string } | null
   contact: { full_name: string } | null
   agent: { full_name: string } | null
 }
@@ -31,7 +31,7 @@ export function conversationDisplayName(conversation: ConversationWithLine): str
 export async function listConversations(tenantId: string): Promise<ConversationWithLine[]> {
   const { data, error } = await supabase
     .from('whatsapp_conversations')
-    .select('*, whatsapp_line:whatsapp_lines(display_name), contact:clients(full_name), agent:profiles!assigned_agent_id(full_name)')
+    .select('*, whatsapp_line:whatsapp_lines(display_name, business_account_id), contact:clients(full_name), agent:profiles!assigned_agent_id(full_name)')
     .eq('tenant_id', tenantId)
     .order('last_message_at', { ascending: false, nullsFirst: false })
   if (error) throw error
@@ -125,7 +125,21 @@ export async function listMessageTimingsForConversations(conversationIds: string
 }
 
 export async function setConversationMode(conversationId: string, mode: ConversationMode): Promise<void> {
-  const { error } = await supabase.from('whatsapp_conversations').update({ mode }).eq('id', conversationId)
+  // Devolver a modo ia resetea el contador de no leídos -- la IA se hace
+  // cargo de lo que siga llegando, no queda nada "pendiente de leer" para un
+  // agente (ver bump_conversation_unread_count, que ya no acumula en modo ia).
+  const update = mode === 'ia' ? { mode, unread_count: 0 } : { mode }
+  const { error } = await supabase.from('whatsapp_conversations').update(update).eq('id', conversationId)
+  if (error) throw error
+}
+
+/** Marca una conversación como leída (badge de no leídos, ver
+ * bump_conversation_unread_count) -- se llama al abrirla en el Inbox y de
+ * nuevo por cada mensaje entrante que llegue mientras sigue abierta, para
+ * que el contador no vuelva a subir bajo la vista del agente que la está
+ * mirando en ese momento. */
+export async function markConversationRead(conversationId: string): Promise<void> {
+  const { error } = await supabase.from('whatsapp_conversations').update({ unread_count: 0 }).eq('id', conversationId)
   if (error) throw error
 }
 
@@ -148,7 +162,7 @@ export async function setConversationArchived(conversationId: string, archived: 
 export async function listConversationsForContact(contactId: string): Promise<ConversationWithLine[]> {
   const { data, error } = await supabase
     .from('whatsapp_conversations')
-    .select('*, whatsapp_line:whatsapp_lines(display_name), contact:clients(full_name), agent:profiles!assigned_agent_id(full_name)')
+    .select('*, whatsapp_line:whatsapp_lines(display_name, business_account_id), contact:clients(full_name), agent:profiles!assigned_agent_id(full_name)')
     .eq('contact_id', contactId)
     .order('last_message_at', { ascending: false, nullsFirst: false })
   if (error) throw error
@@ -164,7 +178,7 @@ export async function listConversationsForContacts(contactIds: string[]): Promis
   if (contactIds.length === 0) return []
   const { data, error } = await supabase
     .from('whatsapp_conversations')
-    .select('*, whatsapp_line:whatsapp_lines(display_name), contact:clients(full_name), agent:profiles!assigned_agent_id(full_name)')
+    .select('*, whatsapp_line:whatsapp_lines(display_name, business_account_id), contact:clients(full_name), agent:profiles!assigned_agent_id(full_name)')
     .in('contact_id', contactIds)
     .order('last_message_at', { ascending: false, nullsFirst: false })
   if (error) throw error
@@ -208,6 +222,31 @@ export async function createConversation(
     .single()
   if (error) throw error
   return data
+}
+
+/** WhatsApp's business-initiated-message window: Meta rejects free text
+ * outside 24h since the contact's last inbound message, requiring an
+ * approved template (HSM) instead -- see CLAUDE.md, Fase 1 de "iniciar
+ * conversaciones". */
+export const WHATSAPP_WINDOW_MS = 24 * 60 * 60 * 1000
+
+/** Whether free text can still be sent to this (line, phone) pair, or a
+ * template is required -- a brand-new contact (no `existing` row) always
+ * needs a template, same as a contact who last wrote more than 24h ago. */
+export async function getConversationWindowStatus(
+  whatsappLineId: string,
+  contactPhone: string,
+): Promise<{ conversationId: string | null; windowOpen: boolean }> {
+  const { data, error } = await supabase
+    .from('whatsapp_conversations')
+    .select('id, last_inbound_message_at')
+    .eq('whatsapp_line_id', whatsappLineId)
+    .eq('contact_phone', contactPhone)
+    .maybeSingle()
+  if (error) throw error
+  if (!data) return { conversationId: null, windowOpen: false }
+  const windowOpen = !!data.last_inbound_message_at && Date.now() - new Date(data.last_inbound_message_at).getTime() < WHATSAPP_WINDOW_MS
+  return { conversationId: data.id, windowOpen }
 }
 
 /** Subscribes to new/updated rows for a single conversation's messages.

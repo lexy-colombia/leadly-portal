@@ -50,7 +50,7 @@ export const TENANT_MODULES: TenantModuleDefinition[] = [
   { key: 'sales', labelKey: 'common.nav.sales', to: '/app/sales', icon: ReceiptIcon },
   { key: 'tasks', labelKey: 'common.nav.tasks', to: '/app/tasks', icon: CheckIcon },
   { key: 'calendar', labelKey: 'common.nav.calendar', to: '/app/calendar', icon: CalendarIcon },
-  { key: 'campaigns', labelKey: 'common.nav.campaigns', to: '/app/campaigns', icon: MegaphoneIcon, badge: 'common.badge.beta' },
+  { key: 'campaigns', labelKey: 'common.nav.campaigns', to: '/app/campaigns', icon: MegaphoneIcon },
   { key: 'aiAgents', labelKey: 'common.nav.aiAgents', to: '/app/ai-agents', icon: AiSparkleIcon },
   { key: 'billing', labelKey: 'common.nav.billing', to: '/app/billing', icon: CreditCardIcon },
   { key: 'integrations', labelKey: 'common.nav.integrations', to: '/app/integrations', icon: GlobeIcon },

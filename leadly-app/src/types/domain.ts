@@ -110,6 +110,82 @@ export interface WhatsappConversation {
   context_reset_at: string | null
   archived_at: string | null
   last_message_at: string | null
+  /** Solo se actualiza con mensajes entrantes -- a diferencia de
+   * last_message_at, sirve para saber si la ventana de 24h de WhatsApp sigue
+   * abierta (un agente puede mandar varios salientes sin que el contacto
+   * responda, y last_message_at seguiría viéndose "reciente"). */
+  last_inbound_message_at: string | null
+  /** Mensajes entrantes sin leer mientras la conversación está en modo
+   * humano -- mantenido por trigger (bump_conversation_unread_count), ver
+   * migración 20260819010001. Solo tiene sentido mostrarlo en modo humano
+   * (en modo ia la IA ya está respondiendo); se resetea a 0 al abrir la
+   * conversación (markConversationRead) o al devolverla a la IA. */
+  unread_count: number
+  /** Si esta conversación arrancó de una campaña masiva (o le mandaron una
+   * campaña más reciente), apunta a esa Campaign -- whatsapp-ai-respond lo
+   * usa para que la IA siga el "tema" de la campaña una vez que el contacto
+   * responde. */
+  campaign_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type CampaignStatus = 'draft' | 'scheduled' | 'sending' | 'completed' | 'canceled' | 'failed'
+
+/** Envío masivo programado de una plantilla a una lista de contactos subida
+ * por CSV -- Fase 2 de "iniciar conversaciones" (ver CLAUDE.md). */
+export interface Campaign {
+  id: string
+  tenant_id: string
+  name: string
+  whatsapp_line_id: string
+  template_id: string
+  topic: string | null
+  scheduled_at: string
+  status: CampaignStatus
+  total_recipients: number
+  sent_count: number
+  failed_count: number
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type CampaignRecipientStatus = 'pending' | 'sent' | 'failed'
+
+export interface CampaignRecipient {
+  id: string
+  tenant_id: string
+  campaign_id: string
+  contact_phone: string
+  contact_name: string | null
+  variables: string[]
+  status: CampaignRecipientStatus
+  error_message: string | null
+  whatsapp_message_id: string | null
+  sent_at: string | null
+  created_at: string
+}
+
+export type WhatsappTemplateCategory = 'MARKETING' | 'UTILITY' | 'AUTHENTICATION'
+export type WhatsappTemplateStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'PAUSED' | 'DISABLED'
+
+/** Plantilla de WhatsApp (HSM) propia del tenant -- ver CLAUDE.md, Fase 1 de
+ * "iniciar conversaciones". Fase 1: solo variables posicionales {{n}} en el
+ * cuerpo, sin encabezado/imagen/botones. */
+export interface WhatsappMessageTemplate {
+  id: string
+  tenant_id: string
+  business_account_id: string
+  meta_template_id: string | null
+  name: string
+  category: WhatsappTemplateCategory
+  language: string
+  status: WhatsappTemplateStatus
+  body_text: string
+  variable_count: number
+  rejected_reason: string | null
+  created_by: string | null
   created_at: string
   updated_at: string
 }

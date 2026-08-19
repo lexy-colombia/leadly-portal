@@ -12,8 +12,10 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { ArchiveIcon, ChevronLeftIcon, ImageIcon, LockClosedIcon, PlusIcon, RefreshIcon, SendIcon, TagIcon, UserIcon, XCircleIcon } from '@/components/atoms/icons'
 import {
   CONVERSATION_CATEGORY_KEY,
+  WHATSAPP_WINDOW_MS,
   conversationDisplayName,
   listMessages,
+  markConversationRead,
   retryAiResponse,
   sendHumanMessage,
   setConversationArchived,
@@ -23,6 +25,7 @@ import {
   setConversationStatus,
   subscribeToMessages,
 } from '../../../lib/api/conversations'
+import { listApprovedTemplates, sendTemplateMessage } from '../../../lib/api/templates'
 import {
   createConversationTag,
   deleteConversationTag,
@@ -32,7 +35,7 @@ import {
 } from '../../../lib/api/conversationTags'
 import { uploadChatImage, validatePqrAttachmentFile } from '../../../lib/api/attachments'
 import type { ConversationWithLine } from '../../../lib/api/conversations'
-import type { ConversationCategory, ConversationMode, ConversationTag, Profile, WhatsappMessage } from '../../../types/domain'
+import type { ConversationCategory, ConversationMode, ConversationTag, Profile, WhatsappMessage, WhatsappMessageTemplate } from '../../../types/domain'
 import { MessageBubble } from './MessageBubble'
 import { LinkClientDrawer } from './LinkClientDrawer'
 import { useAuth } from '../../../contexts/AuthContext'
@@ -78,6 +81,14 @@ export function ChatPanel({
   const [linkDrawerOpen, setLinkDrawerOpen] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
+  const windowOpen =
+    !!conversation.last_inbound_message_at && Date.now() - new Date(conversation.last_inbound_message_at).getTime() < WHATSAPP_WINDOW_MS
+  const [reactivationTemplates, setReactivationTemplates] = useState<WhatsappMessageTemplate[] | null>(null)
+  const [reactivationTemplateId, setReactivationTemplateId] = useState<string | null>(null)
+  const [reactivationVariables, setReactivationVariables] = useState<string[]>([])
+  const [sendingTemplate, setSendingTemplate] = useState(false)
+  const reactivationTemplate = reactivationTemplates?.find((tpl) => tpl.id === reactivationTemplateId) ?? null
+
   useEffect(() => {
     setAttachment(null)
     setAttachmentError(null)
@@ -99,6 +110,7 @@ export function ChatPanel({
     listMessages(conversation.id)
       .then(setMessages)
       .catch((err) => setError(err.message ?? t('inbox.errors.loadMessages')))
+    markConversationRead(conversation.id).catch(() => {})
 
     const unsubscribe = subscribeToMessages(conversation.id, (message) => {
       setMessages((prev) => {
@@ -106,6 +118,9 @@ export function ChatPanel({
         if (prev.some((m) => m.id === message.id)) return prev
         return [...prev, message]
       })
+      // Sigue leyendo esta conversación en tiempo real -- que no le quede el
+      // contador prendido por un mensaje que ya está viendo llegar.
+      if (message.direction === 'inbound') markConversationRead(conversation.id).catch(() => {})
     })
     return unsubscribe
   }, [conversation.id])
@@ -118,6 +133,42 @@ export function ChatPanel({
     listConversationTags(conversation.tenant_id).then(setTagCatalog).catch(() => {})
     listTagIdsForConversation(conversation.id).then(setAssignedTagIds).catch(() => {})
   }, [conversation.id, conversation.tenant_id])
+
+  useEffect(() => {
+    setReactivationTemplateId(null)
+    setReactivationVariables([])
+    if (windowOpen) {
+      setReactivationTemplates(null)
+      return
+    }
+    listApprovedTemplates(conversation.tenant_id)
+      .then((all) => setReactivationTemplates(all.filter((tpl) => tpl.business_account_id === conversation.whatsapp_line?.business_account_id)))
+      .catch(() => setReactivationTemplates([]))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversation.id, windowOpen])
+
+  async function handleSendReactivationTemplate() {
+    if (!reactivationTemplate) return
+    setSendingTemplate(true)
+    setError(null)
+    try {
+      await sendTemplateMessage({
+        tenant_id: conversation.tenant_id,
+        whatsapp_line_id: conversation.whatsapp_line_id,
+        contact_id: conversation.contact_id,
+        contact_phone: conversation.contact_phone,
+        contact_name: conversation.contact_name,
+        template_id: reactivationTemplate.id,
+        variables: reactivationVariables,
+      })
+      setReactivationTemplateId(null)
+      setReactivationVariables([])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('inbox.chat.errors.sendTemplate'))
+    } finally {
+      setSendingTemplate(false)
+    }
+  }
 
   async function handleModeToggle(mode: ConversationMode) {
     setModeUpdating(true)
@@ -455,6 +506,65 @@ export function ChatPanel({
       <div className="border-t border-brand-100 bg-white p-3">
         {conversation.status === 'closed' ? (
           <p className="rounded-xl bg-brand-50 px-3.5 py-2.5 text-center text-xs text-brand-400">{t('inbox.chat.closedHint')}</p>
+        ) : isHumano && !windowOpen ? (
+          <div className="space-y-2">
+            <p className="text-xs text-amber-600">{t('inbox.chat.windowClosed')}</p>
+            {reactivationTemplates && reactivationTemplates.length === 0 && (
+              <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">{t('inbox.newConv.noApprovedTemplates')}</p>
+            )}
+            {reactivationTemplates && reactivationTemplates.length > 0 && (
+              <>
+                <Select
+                  value={reactivationTemplateId ?? ''}
+                  onValueChange={(v) => {
+                    setReactivationTemplateId(v)
+                    const tpl = reactivationTemplates.find((t2) => t2.id === v)
+                    setReactivationVariables(tpl ? Array(tpl.variable_count).fill('') : [])
+                  }}
+                >
+                  <SelectTrigger className="w-full !h-7 !rounded-lg !text-xs">
+                    <SelectValue placeholder={t('inbox.newConv.templateLabel')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {reactivationTemplates.map((tpl) => (
+                      <SelectItem key={tpl.id} value={tpl.id} className="text-xs">
+                        {tpl.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {reactivationTemplate && (
+                  <div className="space-y-2">
+                    <p className="rounded-lg border border-brand-100 bg-brand-50 px-3 py-2 text-xs text-brand-600">{reactivationTemplate.body_text}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {Array.from({ length: reactivationTemplate.variable_count }).map((_, i) => (
+                        <Input
+                          key={i}
+                          value={reactivationVariables[i] ?? ''}
+                          onChange={(e) =>
+                            setReactivationVariables((prev) => {
+                              const next = [...prev]
+                              next[i] = e.target.value
+                              return next
+                            })
+                          }
+                          placeholder={t('inbox.newConv.templateVariable', { n: i + 1 })}
+                          className="!h-7 flex-1 !rounded-lg !text-xs"
+                        />
+                      ))}
+                      <Button
+                        size="sm"
+                        onClick={handleSendReactivationTemplate}
+                        disabled={sendingTemplate || reactivationVariables.some((v) => !v.trim())}
+                      >
+                        <SendIcon width={14} height={14} /> {sendingTemplate ? t('common.actions.creating') : t('inbox.newConv.sendTemplate')}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         ) : isHumano ? (
           <div className="space-y-2">
             {attachmentError && <p className="text-xs text-red-600">{attachmentError}</p>}

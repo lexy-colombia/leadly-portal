@@ -14,8 +14,9 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { AiSparkleIcon, ChatBubbleIcon, PencilIcon, PhoneIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
+import { AiSparkleIcon, ChatBubbleIcon, FileIcon, PencilIcon, PhoneIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
 import { AiAssistantDrawer } from './AiAssistantDrawer'
+import { TemplatesSection } from './TemplatesSection'
 
 const LINE_STATUS_KEY: Record<WhatsappLineStatus, TranslationKey> = {
   pending_verification: 'settings.lines.status.pendingVerification',
@@ -94,7 +95,7 @@ export function LinesAndAgentsSection({
   connectLine?: { label: string; loading: boolean; onClick: () => void }
 }) {
   const { t, language } = useLanguage()
-  const [tab, setTab] = useState<'lineas' | 'agentes'>('lineas')
+  const [tab, setTab] = useState<'lineas' | 'agentes' | 'plantillas'>('lineas')
   const [lines, setLines] = useState<WhatsappLine[] | null>(null)
   const [assistants, setAssistants] = useState<AiAssistant[] | null>(null)
   const [conversations, setConversations] = useState<ConversationWithLine[] | null>(null)
@@ -202,10 +203,14 @@ export function LinesAndAgentsSection({
             <TabsTrigger value="agentes" className="text-xs">
               <AiSparkleIcon width={13} height={13} /> {t('settings.lines.tabs.agents')}
             </TabsTrigger>
+            <TabsTrigger value="plantillas" className="text-xs">
+              <FileIcon width={13} height={13} /> {t('settings.templates.tabs.templates')}
+            </TabsTrigger>
           </TabsList>
         </Tabs>
 
-        {canManage &&
+        {tab !== 'plantillas' &&
+          canManage &&
           (tab === 'lineas' ? (
             connectLine ? (
               <Button
@@ -411,6 +416,8 @@ export function LinesAndAgentsSection({
           )}
         </>
       )}
+
+      {tab === 'plantillas' && <TemplatesSection tenantId={tenantId} canManage={canManage} />}
 
       <AiAssistantDrawer
         open={agentDrawer.open}

@@ -34,9 +34,8 @@ import { Calendar } from './pages/tenant/Calendar'
 import { Billing as TenantBilling } from './pages/tenant/Billing'
 import { Integrations as TenantIntegrations } from './pages/tenant/Integrations'
 import { AiAgents } from './pages/tenant/AiAgents'
-import { LockedFeature } from './pages/tenant/LockedFeature'
+import { Campaigns } from './pages/tenant/Campaigns'
 import { MyAccount } from './pages/shared/MyAccount'
-import { MegaphoneIcon } from '@/components/atoms/icons'
 
 export default function App() {
   return (
@@ -109,14 +108,7 @@ export default function App() {
             <Route path="ai-agents" element={<RequireModule moduleKey="aiAgents"><AiAgents /></RequireModule>} />
             <Route path="billing" element={<RequireModule moduleKey="billing"><TenantBilling /></RequireModule>} />
             <Route path="integrations" element={<RequireModule moduleKey="integrations"><TenantIntegrations /></RequireModule>} />
-            <Route
-              path="campaigns"
-              element={
-                <RequireModule moduleKey="campaigns">
-                  <LockedFeature icon={MegaphoneIcon} descriptionKey="account.locked.campaigns" />
-                </RequireModule>
-              }
-            />
+            <Route path="campaigns" element={<RequireModule moduleKey="campaigns"><Campaigns /></RequireModule>} />
             {/* Catálogo se fusionó dentro de Products (mismo catálogo, no dos
                 pantallas separadas) -- este redirect solo cubre links/bookmarks viejos. */}
             <Route path="catalogo" element={<Navigate to="/app/products" replace />} />
