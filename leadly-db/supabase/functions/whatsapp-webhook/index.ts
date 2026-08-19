@@ -108,13 +108,19 @@ Deno.serve(async (req: Request) => {
           }
         }
 
-        // Every inbound message belongs to a client -- auto-create one
-        // (by tenant+phone) the first time we hear from a number, same as any
-        // real CRM's WhatsApp integration would. Never overwrites a name the
-        // tenant already edited manually on later messages. Excludes
-        // soft-deleted clients (see CLAUDE.md section 3) -- a number that
-        // messages again after its client was deleted gets a fresh record,
-        // it doesn't silently resurrect the old one.
+        // NOT every inbound WhatsApp message is from a client -- a supplier,
+        // a wrong number, or plain spam can text the line just as easily as
+        // a real customer, so auto-creating a `clients` row per number (the
+        // old behavior) polluted the client list with entries nobody ever
+        // meant to track. Instead: only *look up* an existing client by
+        // tenant+phone (excludes soft-deleted ones, see CLAUDE.md section 3
+        // -- a number that messages again after its client was deleted
+        // doesn't silently resurrect the old record). If none matches, the
+        // conversation is simply left unlinked (`contact_id` stays null --
+        // `contact_phone`/`contact_name` below already carry enough to show
+        // and reply to the conversation on their own) until an agent decides
+        // from the Inbox that this sender is worth linking to a real client,
+        // existing or new.
         const { data: existingContact } = await adminClient
           .from("clients")
           .select("id")
@@ -123,15 +129,7 @@ Deno.serve(async (req: Request) => {
           .is("deleted_at", null)
           .maybeSingle();
 
-        let contactId = existingContact?.id ?? null;
-        if (!contactId) {
-          const { data: newContact } = await adminClient
-            .from("clients")
-            .insert({ tenant_id: line.tenant_id, phone: contactPhone, full_name: contactName ?? contactPhone })
-            .select("id")
-            .single();
-          contactId = newContact?.id ?? null;
-        }
+        const contactId = existingContact?.id ?? null;
 
         const { data: conversation, error: convError } = await adminClient
           .from("whatsapp_conversations")

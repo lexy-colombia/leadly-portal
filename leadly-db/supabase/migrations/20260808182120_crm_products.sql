@@ -15,7 +15,7 @@ create table public.crm_products (
   sku text,
   slug text,
   category text,
-  -- Three price points, same distinction seeri's product catalog uses:
+  -- Three price points, a common distinction in product catalogs:
   -- what the tenant pays to acquire the product, what it charges a
   -- wholesale/reseller buyer, and what it charges a retail/end customer.
   -- All nullable -- a tenant might only track the one it actually sells at.

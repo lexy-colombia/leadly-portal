@@ -79,6 +79,25 @@ export async function sendWhatsappImage(
   return postGraphMessage(phoneNumberId, accessToken, { to, type: "image", image: caption ? { link, caption } : { link } });
 }
 
+/** Sends an approved HSM template -- the only business-initiated message
+ * type Meta allows outside the 24h customer-service window. `components` is
+ * the raw Graph API components array (Fase 1: at most a single BODY
+ * component with positional {{n}} parameters, no header/media/buttons). */
+export async function sendWhatsappTemplate(
+  phoneNumberId: string,
+  accessToken: string,
+  to: string,
+  templateName: string,
+  languageCode: string,
+  components: Record<string, unknown>[],
+): Promise<SendTextMessageResult> {
+  return postGraphMessage(phoneNumberId, accessToken, {
+    to,
+    type: "template",
+    template: { name: templateName, language: { code: languageCode }, components },
+  });
+}
+
 export interface DownloadedMedia {
   bytes: Uint8Array;
   mimeType: string;

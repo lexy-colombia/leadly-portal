@@ -1,14 +1,14 @@
 -- Cotizaciones y ventas: una sola entidad (crm_orders), no dos tablas
 -- separadas -- una cotización que el cliente acepta se convierte en venta
--- cambiando `status`, sin duplicar ni migrar filas. Validado contra el
--- modelo de "purchases"/orders de seeri (commercials-app/lib/data/models/
--- order/order_model.dart): ahí también es una única entidad ("purchase"),
--- con QUOTED como un valor más del mismo campo de estado que las etapas de
--- entrega (PENDING/IN_PROCESS/DELIVERED/CANCELLED), no una tabla aparte --
--- el tab "Cotizado" de su UI (purchases_store.dart) filtra por ese status,
--- igual que acá. Deliberadamente mucho más simple que seeri (que además
--- maneja curvas de talla, seriales, splits de pago, retenciones, multi-
--- bodega): sin nada de eso, un tenant de Leadly no lo necesita hoy.
+-- cambiando `status`, sin duplicar ni migrar filas. Validado contra un
+-- modelo de referencia de "purchases"/orders: ahí también es una única
+-- entidad ("purchase"), con QUOTED como un valor más del mismo campo de
+-- estado que las etapas de entrega (PENDING/IN_PROCESS/DELIVERED/CANCELLED),
+-- no una tabla aparte -- el tab "Cotizado" de su UI filtra por ese status,
+-- igual que acá. Deliberadamente mucho más simple que ese modelo de
+-- referencia (que además maneja curvas de talla, seriales, splits de pago,
+-- retenciones, multi-bodega): sin nada de eso, un tenant de Leadly no lo
+-- necesita hoy.
 create table public.crm_orders (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete cascade,
@@ -74,8 +74,8 @@ revoke all on public.crm_orders from anon;
 -- which is always required) so a one-off line not in the catalog can still
 -- be quoted; name/sku are snapshotted at add-time either way so a later
 -- rename/price change on the product doesn't rewrite history on an existing
--- quote/sale, same reasoning as seeri's OrderProductModel keeping its own
--- name/sku instead of always joining live to the product.
+-- quote/sale -- the line item keeps its own name/sku instead of always
+-- joining live to the product.
 create table public.crm_order_items (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete cascade,

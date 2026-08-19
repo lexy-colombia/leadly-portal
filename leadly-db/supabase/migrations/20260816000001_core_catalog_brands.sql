@@ -1,7 +1,6 @@
--- Esquema ERP sin prefijo, catálogo: agrega "marca" como entidad propia,
--- adaptando el modelo de Desktop/Seeri/products (BrandDTO/embedded Brand en
--- ProductEntity: brand_id/brand_name/brand_priority). Se deja fuera
--- deliberadamente todo lo específico de marketplace que trae Seeri
+-- Esquema ERP sin prefijo, catálogo: agrega "marca" como entidad propia
+-- (brand_id/brand_name/brand_priority, embebida en el producto). Se deja
+-- fuera deliberadamente todo lo específico de marketplace multi-proveedor
 -- (banners, logo, límites de compra por marca, descuentos escalonados,
 -- "featured") -- Leadly no es un marketplace multi-proveedor, cada tenant
 -- gestiona su propio catálogo. Mismo patrón que product_categories.

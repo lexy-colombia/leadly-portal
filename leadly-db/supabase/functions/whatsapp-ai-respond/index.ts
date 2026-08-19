@@ -57,7 +57,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: conversation } = await adminClient
     .from("whatsapp_conversations")
-    .select("id, tenant_id, whatsapp_line_id, contact_phone, contact_id, mode, context_reset_at")
+    .select("id, tenant_id, whatsapp_line_id, contact_phone, contact_id, mode, context_reset_at, campaign_id")
     .eq("id", body.conversation_id)
     .maybeSingle();
 
@@ -145,11 +145,31 @@ Deno.serve(async (req: Request) => {
   const CURRENT_DATE_CONTEXT =
     `Fecha y hora actual real (zona horaria de Colombia, America/Bogota): ${bogotaHuman}. En formato ISO, hoy es ${bogotaIsoDate}.\n\n` +
     'Usá esto como referencia real para resolver cualquier fecha relativa que mencione el cliente ("hoy", "mañana", "pasado mañana", "el viernes que viene", "en dos semanas", etc.) -- nunca asumas ni inventes qué día es hoy ni en qué año estás. Cuando llames a una herramienta que reciba una fecha (ej. scheduled_at, expected_close_date), calculá la fecha real a partir de esta referencia, en el formato exacto que pida esa herramienta.';
+  // Si esta conversación arrancó de una campaña masiva (ver run-campaigns /
+  // CLAUDE.md "iniciar conversaciones", Fase 2), la IA debe seguir esa línea
+  // de conversación una vez que el contacto responde -- no solo su prompt
+  // genérico. Persiste durante toda la vida de la conversación (decisión
+  // explícita del usuario), no solo las primeras respuestas.
+  let CAMPAIGN_TOPIC_CONTEXT: string | null = null;
+  if (conversation.campaign_id) {
+    const { data: campaign } = await adminClient
+      .from("campaigns")
+      .select("name, topic")
+      .eq("id", conversation.campaign_id)
+      .maybeSingle();
+    if (campaign?.topic?.trim()) {
+      CAMPAIGN_TOPIC_CONTEXT =
+        `Este contacto te escribió a partir de la campaña de WhatsApp "${campaign.name}": ${campaign.topic.trim()}. ` +
+        "Continuá la conversación teniendo esto en cuenta -- es el motivo por el que se está hablando, no lo ignores ni cambies de tema por tu cuenta.";
+    }
+  }
+
   const fullSystemPrompt = [
     CURRENT_DATE_CONTEXT,
     TOOL_INTEGRITY_RULE,
     assistant.system_prompt,
     ...enabledSkills.map((s) => s.prompt_fragment),
+    CAMPAIGN_TOPIC_CONTEXT,
     TOOL_INTEGRITY_RULE,
   ]
     .filter(Boolean)

@@ -1,0 +1,50 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git push *)",
+      "Bash(find /Users/sebastianavendano/Desktop -maxdepth 3 -iname \"*lexy*\" 2>/dev/null)",
+      "Read(//Users/sebastianavendano/Desktop/**)",
+      "WebFetch(domain:lafactura.co)",
+      "Bash(curl -sI \"https://lafactura.co/img/la-factura-claro-notas.png\")",
+      "Bash(curl -s \"https://lafactura.co/img/la-factura-claro-notas.png\" -o /private/tmp/claude-501/-Users-sebastianavendano-Desktop-Proyectos-Leadly/4facf70d-ea59-4bb1-a3f2-4faf412fd54e/scratchpad/lafactura-logo.png)",
+      "Bash(curl -s \"https://lafactura.co/favicon.ico\" -o /private/tmp/claude-501/-Users-sebastianavendano-Desktop-Proyectos-Leadly/4facf70d-ea59-4bb1-a3f2-4faf412fd54e/scratchpad/lafactura-favicon.ico)",
+      "WebFetch(domain:www.shopify.com)",
+      "Bash(curl -sI \"https://cdn.shopify.com/b/shopify-brochure2-assets/d9340911ca8c679b148dd4a205ad2ffa.svg\")",
+      "Bash(echo \"cairosvg check done: $?\")",
+      "Bash(curl -s \"https://www.shopify.com\")",
+      "Bash(curl -s \"https://cdn.shopify.com/b/shopify-brochure2-assets/c97c60ca19c64a8b5378d9f9e971f7bd.png\" -o /private/tmp/claude-501/-Users-sebastianavendano-Desktop-Proyectos-Leadly/4facf70d-ea59-4bb1-a3f2-4faf412fd54e/scratchpad/shopify-icon.png)",
+      "Bash(curl -s \"https://www.hubspot.com\")",
+      "Bash(curl -s \"https://www.hubspot.com/hubfs/HubSpot_Logos/HubSpot-Inversed-Favicon.png\" -o /private/tmp/claude-501/-Users-sebastianavendano-Desktop-Proyectos-Leadly/4facf70d-ea59-4bb1-a3f2-4faf412fd54e/scratchpad/hubspot-favicon.png)",
+      "Bash(curl -s \"https://wompi.co\")",
+      "Bash(curl -sI \"https://wompi.co\")",
+      "Bash(curl -sI \"https://wompi.co/apple-touch-icon.png\")",
+      "Bash(curl -sI \"https://wompi.co/favicon.ico\")",
+      "Bash(curl -sI \"https://wompi.co/favicon.png\")",
+      "WebFetch(domain:wompi.co)",
+      "Bash(curl -sI \"https://public-assets.wompi.com/brand_wompi/logos/logo-primary.svg\")",
+      "Bash(curl -s \"https://public-assets.wompi.com/brand_wompi/logos/logo-primary.svg\" -o /Users/sebastianavendano/Desktop/Proyectos/Leadly/leadly-app/public/integrations/wompi.svg)",
+      "Bash(curl -sI \"https://public-assets.wompi.com/brand_wompi/logos/isotipo.svg\")",
+      "Bash(curl -sI \"https://public-assets.wompi.com/brand_wompi/logos/logo-icon.svg\")",
+      "Bash(curl -sI \"https://public-assets.wompi.com/brand_wompi/logos/symbol.svg\")",
+      "Bash(curl -sI \"https://public-assets.wompi.com/brand_wompi/logos/logo-symbol.svg\")",
+      "Bash(git mv *)",
+      "Bash(mkdir -p \"/Users/sebastianavendano/Desktop/Proyectos/Lexy/lexy-web/public/images/portfolio\")",
+      "Bash(cp \"/Users/sebastianavendano/Desktop/Proyectos/Leadly/leadly-app/public/favicon.svg\" \"/Users/sebastianavendano/Desktop/Proyectos/Lexy/lexy-web/public/images/portfolio/leadly-isotipo.svg\")",
+      "Bash(curl -s -o /dev/null -w \"leadly.lexycolombia.com -> %{http_code}\\\\n\" --max-time 8 https://leadly.lexycolombia.com)",
+      "Bash(curl -s -o /dev/null -w \"leadly-crm.web.app -> %{http_code}\\\\n\" --max-time 8 https://leadly-crm.web.app)",
+      "Bash(git rm *)",
+      "Bash(mv tenant/Categorias.tsx tenant/Categories.tsx)",
+      "Bash(mv tenant/Marcas.tsx tenant/Brands.tsx)",
+      "Bash(mv tenant/contacts tenant/clients)",
+      "Bash(sed -i '' '/\"common.nav.reports\":/d; /\"common.nav.automations\":/d' locales/en/common.json locales/es/common.json)",
+      "Bash(sed -i '' '/\"account.locked.reports\":/d; /\"account.locked.automations\":/d' locales/en/account.json locales/es/account.json)",
+      "Bash(git commit -m ' *)",
+      "Bash(npx shadcn@latest init -t vite --yes -b neutral)",
+      "Bash(npx shadcn *)"
+    ],
+    "additionalDirectories": [
+      "/Users/sebastianavendano/Desktop/Proyectos/Lexy/lexy-web/src/pages",
+      "/Users/sebastianavendano/Desktop/Proyectos/Lexy/lexy-web/src/components"
+    ]
+  }
+}

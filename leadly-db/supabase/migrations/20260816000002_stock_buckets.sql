@@ -1,11 +1,10 @@
 -- Inventario Fase 1: evoluciona product_stock/stock_movements de 2 estados
--- (quantity/reserved_quantity) a 4, adaptando el modelo de Seeri
--- (Desktop/Seeri/products -- ProductEntity/ProductWarehouse tienen
--- stock_available/stock_reserved/stock_departure/stock_damaged, y
--- ProductMovementEntity registra cada movimiento como una transición entre
--- esos 4 estados). Seguro de aplicar ahora porque 20260815000001 todavía
--- está sin usar por ningún frontend/Edge Function -- estas tablas están
--- vacías en producción.
+-- (quantity/reserved_quantity) a 4, adaptando un modelo de referencia externo
+-- (ProductEntity/ProductWarehouse con stock_available/stock_reserved/
+-- stock_departure/stock_damaged, y un ProductMovementEntity que registra
+-- cada movimiento como una transición entre esos 4 estados). Seguro de
+-- aplicar ahora porque 20260815000001 todavía está sin usar por ningún
+-- frontend/Edge Function -- estas tablas están vacías en producción.
 --
 -- Por qué los 2 estados nuevos:
 -- - departure_quantity: mercancía ya separada/alistada para un despacho,
@@ -15,16 +14,16 @@
 -- - damaged_quantity: mercancía dañada/no vendible, separada del stock
 --   disponible sin haber salido del inventario físico del tenant.
 --
--- No se adapta el patrón source/destiny de Seeri (dos columnas en cada
--- movimiento) -- se prefiere seguir con un solo movement_type con nombre
--- explícito por transición, consistente con el resto del kardex ya
--- construido (más fácil de leer en español que dos columnas de bucket).
+-- No se adapta un patrón source/destiny (dos columnas en cada movimiento)
+-- -- se prefiere seguir con un solo movement_type con nombre explícito por
+-- transición, consistente con el resto del kardex ya construido (más fácil
+-- de leer en español que dos columnas de bucket).
 
 alter table public.product_stock
   add column departure_quantity numeric not null default 0,
   add column damaged_quantity numeric not null default 0;
 
-comment on column public.product_stock.quantity is 'Disponible para vender/reservar (equivalente a stock_available en Seeri).';
+comment on column public.product_stock.quantity is 'Disponible para vender/reservar.';
 comment on column public.product_stock.reserved_quantity is 'Retenido por cotizaciones abiertas -- no disponible, todavía en la bodega.';
 comment on column public.product_stock.departure_quantity is 'Alistado/en camino de un despacho -- ya no está en la bodega para efectos de venta, pero el tenant lo sigue teniendo hasta que se entregue.';
 comment on column public.product_stock.damaged_quantity is 'Dañado/no vendible -- sigue físicamente en la bodega pero fuera de circulación.';

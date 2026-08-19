@@ -1,9 +1,9 @@
 -- Detalle de venta/cotización (/app/ventas/:id) -- pedido explícito del
--- usuario, inspirado en el detalle de "purchase" del portal de seeri
--- (Desktop/seeri/suppliers-web), acotado a lo que tiene sentido con el
--- modelo de datos actual. Dos piezas nuevas: pagos parciales/totales contra
--- una venta, y una bitácora de comentarios (con adjuntos opcionales) -- no
--- existía ninguna de las dos hasta ahora.
+-- usuario, inspirado en el detalle de "purchase" de un portal de referencia,
+-- acotado a lo que tiene sentido con el modelo de datos actual. Dos piezas
+-- nuevas: pagos parciales/totales contra una venta, y una bitácora de
+-- comentarios (con adjuntos opcionales) -- no existía ninguna de las dos
+-- hasta ahora.
 
 -- Mismo patrón soft-delete que crm_tasks (20260806000005) -- un pago mal
 -- cargado se elimina y se vuelve a crear, no se edita.
@@ -45,8 +45,8 @@ create policy crm_order_payments_delete on public.crm_order_payments
 revoke all on public.crm_order_payments from anon;
 
 -- Bitácora append-only, mismo criterio que crm_notes ("Sin políticas de
--- update/delete a propósito") -- no se replica el edit/delete de comentario
--- propio que tiene el detalle de seeri, se sigue la convención ya usada acá.
+-- update/delete a propósito") -- no se replica edit/delete de comentario
+-- propio, se sigue la convención ya usada acá.
 create table public.crm_order_comments (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete cascade,

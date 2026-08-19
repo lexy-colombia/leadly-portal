@@ -1,5 +1,5 @@
 // Minimal HubSpot REST client -- ported from tania-functions'
-// HubSpotRepositoryImpl (~/Desktop/SEERI/tania-functions/internal/repositories/hubspot_repository.go),
+// HubSpotRepositoryImpl (internal/repositories/hubspot_repository.go),
 // trimmed to just what the `hubspot` ai_skill needs: sync a contact, list
 // deal pipelines, create a deal linked to that contact. Same base URL/auth
 // (Bearer Private App token) as the reference implementation.

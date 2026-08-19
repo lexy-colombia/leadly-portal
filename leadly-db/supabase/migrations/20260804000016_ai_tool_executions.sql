@@ -1,5 +1,5 @@
 -- Audit log for every AI tool-calling execution (whatsapp-ai-tools) -- same
--- purpose as tania-functions' function_log_repository in the seeri project:
+-- purpose as tania-functions' function_log_repository:
 -- lets the tenant (later, via a UI) see exactly what the AI did on its own
 -- and with what arguments/result. Only service_role ever writes here
 -- (whatsapp-ai-tools uses the service role key, which bypasses RLS), so

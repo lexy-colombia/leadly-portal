@@ -2,7 +2,7 @@
 -- categories (crm_products.category was free text, no way to create/rename
 -- one from the UI) and a single supplier per product ("todo debe ser por
 -- proveedor" -- kept deliberately simple: one crm_suppliers table + an
--- optional supplier_id on the product, not seeri's full multi-supplier
+-- optional supplier_id on the product, not a full multi-supplier
 -- product_suppliers bridge with per-supplier pricing/stock -- no real case
 -- yet for one product sourced from several suppliers at once).
 create table public.crm_product_categories (

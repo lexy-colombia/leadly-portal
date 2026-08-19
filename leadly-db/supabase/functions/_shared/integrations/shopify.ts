@@ -1,5 +1,5 @@
 // Minimal Shopify Admin GraphQL client -- ported from tania-functions'
-// ShopifyRepositoryImpl (~/Desktop/SEERI/tania-functions/internal/repositories/shopify_repository.go),
+// ShopifyRepositoryImpl (internal/repositories/shopify_repository.go),
 // trimmed to the read-only queries the `shopify` ai_skill needs: search
 // products, find a customer by phone, search orders. No mutations (order/
 // draft-order creation stays out of scope, see CLAUDE.md).

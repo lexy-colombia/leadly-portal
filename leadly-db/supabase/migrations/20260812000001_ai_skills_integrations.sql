@@ -1,9 +1,9 @@
 -- Turns the mapped-but-unwired Wompi/HubSpot/Shopify integrations
 -- (20260811000013/14/15 -- credential storage only, no Edge Function calls
 -- their API yet) into real AI tool-calling habilidades, ported from the
--- sibling tania-functions project's executor patterns (Go microservice under
--- ~/Desktop/SEERI/tania-functions) but scoped down to what a WhatsApp
--- lead-qualification assistant actually needs -- not a 1:1 port of its full
+-- sibling tania-functions project's executor patterns (a Go microservice)
+-- but scoped down to what a WhatsApp lead-qualification assistant actually
+-- needs -- not a 1:1 port of its full
 -- HubSpot/Shopify executor surface (meetings, tickets, B2B catalogs, draft
 -- orders, etc. stay out, see CLAUDE.md).
 --
