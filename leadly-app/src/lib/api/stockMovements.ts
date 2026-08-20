@@ -54,7 +54,10 @@ export interface ProductStockTotal {
  * (Products.tsx) to show "available"/"low stock" at a glance without a
  * per-product round trip. `products` itself carries no stock counter
  * anymore (see types/domain.ts), so this is the only way the list can know
- * how much of a product exists across every warehouse. */
+ * how much of a product exists across every warehouse. Deliberately NOT
+ * variant-aware: it sums every product_stock row for the product regardless
+ * of variant_id, so a variant product's total here still reads correctly
+ * (see listStockTotalsByVariant below for the per-variant breakdown). */
 export async function listStockTotalsByTenant(tenantId: string): Promise<Map<string, ProductStockTotal>> {
   const { data, error } = await supabase.from('product_stock').select('product_id, quantity, reserved_quantity').eq('tenant_id', tenantId)
   if (error) throw error
@@ -65,6 +68,27 @@ export async function listStockTotalsByTenant(tenantId: string): Promise<Map<str
     existing.available += row.quantity
     existing.reserved += row.reserved_quantity
     totals.set(row.product_id, existing)
+  }
+  return totals
+}
+
+/** Same shape as listStockTotalsByTenant but keyed by variant_id and scoped
+ * to one product -- used by ProductVariantsCard's variant cards and by the
+ * variant pickers (OrderItemsEditor/StockMovementDrawer) to show
+ * available stock per combination. Rows with a null variant_id (the
+ * product's own non-variant stock, which shouldn't exist once has_variants
+ * is true, but could linger from before it was toggled on) are skipped --
+ * they don't belong to any variant. */
+export async function listStockTotalsByVariant(productId: string): Promise<Map<string, ProductStockTotal>> {
+  const { data, error } = await supabase.from('product_stock').select('variant_id, quantity, reserved_quantity').eq('product_id', productId).not('variant_id', 'is', null)
+  if (error) throw error
+
+  const totals = new Map<string, ProductStockTotal>()
+  for (const row of data as { variant_id: string; quantity: number; reserved_quantity: number }[]) {
+    const existing = totals.get(row.variant_id) ?? { available: 0, reserved: 0 }
+    existing.available += row.quantity
+    existing.reserved += row.reserved_quantity
+    totals.set(row.variant_id, existing)
   }
   return totals
 }
@@ -99,6 +123,7 @@ export interface StockMovementInput {
   tenant_id: string
   product_id: string
   warehouse_id: string
+  variant_id?: string | null
   movement_type: StockMovementType
   quantity: number
   reference_type?: 'ajuste_manual'
@@ -123,6 +148,7 @@ export interface StockTransferInput {
   product_id: string
   from_warehouse_id: string
   to_warehouse_id: string
+  variant_id?: string | null
   quantity: number
   notes?: string | null
 }
@@ -143,6 +169,7 @@ export async function transferStock(input: StockTransferInput): Promise<string> 
     p_to_warehouse_id: input.to_warehouse_id,
     p_quantity: input.quantity,
     p_notes: input.notes ?? null,
+    p_variant_id: input.variant_id ?? null,
   })
   if (error) throw error
   return data as string

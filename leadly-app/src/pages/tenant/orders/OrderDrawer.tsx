@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { createOrder, listOrderItems, updateOrder, computeOrderTotals, ORDER_STATUS_LABEL_KEY } from '../../../lib/api/orders'
+import { createOrder, listOrderItems, updateOrder, computeOrderTotals, hasIncompleteVariantSelection, ORDER_STATUS_LABEL_KEY } from '../../../lib/api/orders'
 import type { OrderInput, OrderItemInput, OrderWithRelations } from '../../../lib/api/orders'
 import { listClients } from '../../../lib/api/clients'
 import { listOpportunities } from '../../../lib/api/opportunities'
@@ -133,6 +133,12 @@ export function OrderDrawer({
     setFormError(null)
     if (!isNotBlank(contactId)) return
 
+    const validItems = items.filter((item) => isNotBlank(item.product_name))
+    if (hasIncompleteVariantSelection(validItems, products)) {
+      setFormError(t('orders.itemsEditor.variantRequired'))
+      return
+    }
+
     setSubmitting(true)
     try {
       const input: OrderInput = {
@@ -147,7 +153,6 @@ export function OrderDrawer({
         shipping_address_id: shippingAddressId || null,
         billing_address_id: billingAddressId || null,
       }
-      const validItems = items.filter((item) => isNotBlank(item.product_name))
       if (order) await updateOrder(order.id, tenantId, input, validItems)
       else await createOrder(input, validItems)
       onSaved()

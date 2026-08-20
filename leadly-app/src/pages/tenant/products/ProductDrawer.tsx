@@ -1,14 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { CheckIcon, PlusIcon as PlusIconLucide, XIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import {
-  createProduct,
-  deleteProductImage,
-  getProductImageUrl,
-  updateProduct,
-  uploadProductImage,
-  validateProductImageFile,
-} from '../../../lib/api/products'
+import { createProduct, deleteProductImage, getProductImageUrl, updateProduct, uploadProductImage, validateProductImageFile } from '../../../lib/api/products'
 import type { ProductWithImages } from '../../../lib/api/products'
 import { listProductCategories, flattenCategoryTree } from '../../../lib/api/productCategories'
 import { listSuppliers } from '../../../lib/api/suppliers'
@@ -307,6 +300,10 @@ export function ProductDrawer({
         low_stock_threshold: Math.max(0, Math.trunc(Number(lowStockThreshold) || 0)),
         is_active: isActive,
       }
+      // has_variants is deliberately not touched by this form -- it's
+      // managed from ProductDetail's Variantes card instead (more room for
+      // the options/combinations/per-variant photos flow than this drawer
+      // has), same reasoning as images already needing a real product id.
       if (product) await updateProduct(product.id, input, categoryIds)
       else await createProduct(input, categoryIds)
       onSaved()

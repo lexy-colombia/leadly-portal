@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { getOrder, listOrderItems, updateOrderStatus, updateOrderFields, updateOrderItemsAndTotals, ORDER_STATUS_LABEL_KEY } from '../../lib/api/orders'
+import { getOrder, listOrderItems, updateOrderStatus, updateOrderFields, updateOrderItemsAndTotals, hasIncompleteVariantSelection, ORDER_STATUS_LABEL_KEY } from '../../lib/api/orders'
 import type { OrderDetail, OrderItemInput } from '../../lib/api/orders'
 import { listAddressesForContact } from '../../lib/api/addresses'
 import { listProducts } from '../../lib/api/products'
@@ -268,6 +268,10 @@ export function OrderDetail() {
 
   async function handleSaveItems() {
     if (!id || !profile?.tenant_id || !items) return
+    if (hasIncompleteVariantSelection(items, products)) {
+      setError(t('orders.itemsEditor.variantRequired'))
+      return
+    }
     setSavingItems(true)
     try {
       await updateOrderItemsAndTotals(id, profile.tenant_id, items, order?.shipping ?? 0, order?.tax_total ?? 0)

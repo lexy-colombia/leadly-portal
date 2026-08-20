@@ -112,6 +112,8 @@
   "orders.itemsEditor.addLine": "Agregar línea",
   "orders.itemsEditor.empty": "Sin líneas todavía. Agregá al menos un producto.",
   "orders.itemsEditor.customLine": "Línea personalizada…",
+  "orders.itemsEditor.selectVariant": "Seleccioná una variante",
+  "orders.itemsEditor.variantRequired": "Elegí la variante de cada producto que la necesita antes de guardar.",
   "orders.itemsEditor.lineNamePlaceholder": "Nombre de la línea",
   "orders.itemsEditor.quantity": "Cantidad",
   "orders.itemsEditor.unitPrice": "Precio unitario",

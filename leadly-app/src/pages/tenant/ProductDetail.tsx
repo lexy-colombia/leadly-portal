@@ -15,6 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { ConfirmDialog } from '@/components/organisms'
 import { ProductDrawer } from './products/ProductDrawer'
+import { ProductVariantsCard } from './products/ProductVariantsCard'
 import { StockMovementDrawer } from './inventory/StockMovementDrawer'
 import { useAuth } from '../../contexts/AuthContext'
 
@@ -357,9 +358,22 @@ export function ProductDetail() {
         </div>
       </div>
 
+      {profile?.tenant_id && (
+        <StatCard title={t('products.detail.sections.variants')}>
+          <ProductVariantsCard tenantId={profile.tenant_id} product={product} hasExistingStock={!product.has_variants && totalOverall > 0} onChanged={reload} />
+        </StatCard>
+      )}
+
       {product.track_inventory ? (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <div className="space-y-4 lg:col-span-2">
+            {/* Escondida para productos con variantes -- product_stock ya
+                no tiene una fila por producto+bodega ahí, sino una por
+                variante+bodega (ver 20260819061000_product_stock_variant_id.sql),
+                así que esta tabla mostraría varias filas por bodega sin
+                forma de saber a qué variante pertenece cada una. El stock
+                por variante se ve en la card "Variantes" de arriba. */}
+            {!product.has_variants && (
             <StatCard title={t('inventory.product.section.stockByWarehouse')}>
               {stockError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{stockError}</p>}
               {!stockByWarehouse && !stockError && <PageSpinner />}
@@ -403,6 +417,7 @@ export function ProductDetail() {
                 </div>
               )}
             </StatCard>
+            )}
 
             <StatCard title={t('inventory.product.section.movements')}>
               {movementsError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{movementsError}</p>}
@@ -516,7 +531,7 @@ export function ProductDetail() {
             open={movementDrawer.open}
             onClose={() => setMovementDrawer((prev) => ({ ...prev, open: false }))}
             tenantId={profile.tenant_id}
-            productId={product.id}
+            product={product}
             onSaved={reloadStock}
             initialMode={movementDrawer.mode}
           />

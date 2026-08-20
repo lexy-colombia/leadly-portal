@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { ArrowRightIcon } from 'lucide-react'
 import { MOVEMENT_TYPE_KEY, recordStockMovement, transferStock } from '../../../lib/api/stockMovements'
 import { listWarehouses } from '../../../lib/api/warehouses'
+import { formatVariantLabel, type ProductWithImages } from '../../../lib/api/products'
 import type { StockMovementType, Warehouse } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import { FieldError } from '@/components/atoms'
@@ -27,14 +28,14 @@ export function StockMovementDrawer({
   open,
   onClose,
   tenantId,
-  productId,
+  product,
   onSaved,
   initialMode = 'adjustment',
 }: {
   open: boolean
   onClose: () => void
   tenantId: string
-  productId: string
+  product: ProductWithImages
   onSaved: () => void
   /** Lets a caller open straight into the "Traslado" tab (e.g. the
    * dedicated "Traslado de stock" CTA card on ProductDetail) instead of
@@ -48,11 +49,14 @@ export function StockMovementDrawer({
   const [movementType, setMovementType] = useState<StockMovementType>('entrada')
   const [fromWarehouseId, setFromWarehouseId] = useState('')
   const [toWarehouseId, setToWarehouseId] = useState('')
+  const [variantId, setVariantId] = useState('')
   const [quantity, setQuantity] = useState('')
   const [notes, setNotes] = useState('')
   const [touched, setTouched] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+
+  const activeVariants = product.variants.filter((v) => v.is_active)
 
   useEffect(() => {
     if (!open) return
@@ -60,6 +64,7 @@ export function StockMovementDrawer({
     setMovementType('entrada')
     setQuantity('')
     setNotes('')
+    setVariantId(activeVariants[0]?.id ?? '')
     setTouched(false)
     setFormError(null)
     listWarehouses(tenantId)
@@ -80,12 +85,14 @@ export function StockMovementDrawer({
   const quantityError = touched && (!quantity || !(quantityNumber > 0)) ? t('inventory.movementDrawer.field.quantityRequired') : undefined
   const sameWarehouseError =
     mode === 'transfer' && touched && fromWarehouseId && toWarehouseId && fromWarehouseId === toWarehouseId ? t('inventory.movementDrawer.errors.sameWarehouse') : undefined
+  const variantError = touched && product.has_variants && !variantId ? t('inventory.movementDrawer.field.variantRequired') : undefined
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setTouched(true)
     setFormError(null)
     if (!(quantityNumber > 0)) return
+    if (product.has_variants && !variantId) return
 
     if (mode === 'adjustment') {
       if (!warehouseId) return
@@ -93,8 +100,9 @@ export function StockMovementDrawer({
       try {
         await recordStockMovement({
           tenant_id: tenantId,
-          product_id: productId,
+          product_id: product.id,
           warehouse_id: warehouseId,
+          variant_id: product.has_variants ? variantId : null,
           movement_type: movementType,
           quantity: quantityNumber,
           notes: notes.trim() || null,
@@ -114,9 +122,10 @@ export function StockMovementDrawer({
     try {
       await transferStock({
         tenant_id: tenantId,
-        product_id: productId,
+        product_id: product.id,
         from_warehouse_id: fromWarehouseId,
         to_warehouse_id: toWarehouseId,
+        variant_id: product.has_variants ? variantId : null,
         quantity: quantityNumber,
         notes: notes.trim() || null,
       })
@@ -151,6 +160,25 @@ export function StockMovementDrawer({
           )}
 
           <form onSubmit={handleSubmit} noValidate className="space-y-4">
+            {product.has_variants && (
+              <div>
+                <Label htmlFor="movement-variant">{t('inventory.movementDrawer.field.variant')}</Label>
+                <Select value={variantId} onValueChange={setVariantId}>
+                  <SelectTrigger id="movement-variant" aria-invalid={!!variantError} className={`mt-1 w-full ${FIELD_CLASS}`}>
+                    <SelectValue placeholder={t('inventory.movementDrawer.field.variantPlaceholder')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeVariants.map((v) => (
+                      <SelectItem key={v.id} value={v.id} className="text-xs">
+                        {formatVariantLabel(v, product.options)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FieldError message={variantError} />
+              </div>
+            )}
+
             {mode === 'adjustment' ? (
               <div className="grid grid-cols-2 gap-3">
                 <div>

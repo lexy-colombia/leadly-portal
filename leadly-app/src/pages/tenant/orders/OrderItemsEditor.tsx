@@ -3,7 +3,7 @@ import { Button, Input, Select } from '@/components/atoms'
 import { CurrencyInput } from '@/components/molecules'
 import { PlusIcon, TrashIcon } from '@/components/atoms/icons'
 import type { OrderItemInput } from '../../../lib/api/orders'
-import type { ProductWithImages } from '../../../lib/api/products'
+import { formatVariantLabel, type ProductWithImages } from '../../../lib/api/products'
 
 const CUSTOM_LINE_VALUE = '__custom__'
 
@@ -36,12 +36,28 @@ export function OrderItemsEditor({
 
   function handleProductSelect(index: number, productId: string) {
     if (productId === CUSTOM_LINE_VALUE || !productId) {
-      updateItem(index, { product_id: null, product_name: '', sku: null, unit_price: 0 })
+      updateItem(index, { product_id: null, variant_id: null, product_name: '', sku: null, unit_price: 0 })
       return
     }
     const product = products.find((p) => p.id === productId)
     if (!product) return
-    updateItem(index, { product_id: product.id, product_name: product.name, sku: product.sku, unit_price: product.retail_price ?? 0 })
+    // A variant product's unit_price isn't known yet -- there's no variant
+    // chosen until the second select below fires -- so this leaves it at 0
+    // rather than defaulting to the parent's retail_price, which would be
+    // wrong for any variant that overrides its own price.
+    updateItem(index, {
+      product_id: product.id,
+      variant_id: null,
+      product_name: product.name,
+      sku: product.sku,
+      unit_price: product.has_variants ? 0 : (product.retail_price ?? 0),
+    })
+  }
+
+  function handleVariantSelect(index: number, product: ProductWithImages, variantId: string) {
+    const variant = product.variants.find((v) => v.id === variantId)
+    if (!variant) return
+    updateItem(index, { variant_id: variant.id, sku: variant.sku ?? product.sku, unit_price: variant.retail_price ?? product.retail_price ?? 0 })
   }
 
   return (
@@ -57,7 +73,9 @@ export function OrderItemsEditor({
 
       {items.length > 0 && (
         <div className="space-y-2">
-          {items.map((item, index) => (
+          {items.map((item, index) => {
+            const selectedProduct = item.product_id ? products.find((p) => p.id === item.product_id) : undefined
+            return (
             <div key={index} className="rounded-lg border border-brand-100 p-2.5">
               <div className="flex items-start gap-2">
                 <Select value={item.product_id ?? CUSTOM_LINE_VALUE} onChange={(e) => handleProductSelect(index, e.target.value)} className="!flex-1 !py-1.5 text-xs">
@@ -86,6 +104,25 @@ export function OrderItemsEditor({
                   placeholder={t('orders.itemsEditor.lineNamePlaceholder')}
                   className="!mt-2 !py-1.5 text-xs"
                 />
+              )}
+
+              {selectedProduct?.has_variants && (
+                <Select
+                  value={item.variant_id ?? ''}
+                  onChange={(e) => handleVariantSelect(index, selectedProduct, e.target.value)}
+                  className="!mt-2 !w-full !py-1.5 text-xs"
+                >
+                  <option value="" disabled>
+                    {t('orders.itemsEditor.selectVariant')}
+                  </option>
+                  {selectedProduct.variants
+                    .filter((v) => v.is_active)
+                    .map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {formatVariantLabel(v, selectedProduct.options)}
+                      </option>
+                    ))}
+                </Select>
               )}
 
               <div className="mt-2 grid grid-cols-3 gap-2">
@@ -122,7 +159,8 @@ export function OrderItemsEditor({
                 </div>
               </div>
             </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>

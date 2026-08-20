@@ -14,11 +14,25 @@ export const ORDER_STATUS_LABEL_KEY: Record<OrderStatus, TranslationKey> = {
 
 export interface OrderItemInput {
   product_id?: string | null
+  variant_id?: string | null
   product_name: string
   sku?: string | null
   quantity: number
   unit_price: number
   discount_percentage?: number
+}
+
+/** True if any item points at a variant-enabled product but hasn't picked a
+ * specific variant yet -- a line like that would silently save with
+ * unit_price 0 (see OrderItemsEditor.handleProductSelect) and no way to
+ * know which combination was actually sold, so both OrderDrawer and
+ * OrderDetail block submit on this before calling saveOrderItems. */
+export function hasIncompleteVariantSelection(items: OrderItemInput[], products: { id: string; has_variants: boolean }[]): boolean {
+  return items.some((item) => {
+    if (!item.product_id) return false
+    const product = products.find((p) => p.id === item.product_id)
+    return !!product?.has_variants && !item.variant_id
+  })
 }
 
 export interface OrderInput {
@@ -146,6 +160,7 @@ export async function saveOrderItems(tenantId: string, orderId: string, items: O
       tenant_id: tenantId,
       order_id: orderId,
       product_id: item.product_id || null,
+      variant_id: item.variant_id || null,
       product_name: item.product_name,
       sku: item.sku || null,
       quantity: item.quantity,

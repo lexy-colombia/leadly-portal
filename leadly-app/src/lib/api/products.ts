@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient'
-import type { Product, ProductImage } from '../../types/domain'
+import type { Product, ProductImage, ProductOption, ProductVariant } from '../../types/domain'
 import type { TranslationKey } from '../../i18n/translations'
 import { listProductIdsWithWarehouseStock, listStockTotalsByTenant } from './stockMovements'
 
@@ -18,6 +18,7 @@ export interface ProductInput {
   track_inventory?: boolean
   low_stock_threshold?: number
   is_active?: boolean
+  has_variants?: boolean
 }
 
 export interface ProductCategoryRef {
@@ -30,6 +31,57 @@ export type ProductWithImages = Product & {
   categories: ProductCategoryRef[]
   supplier: { id: string; name: string } | null
   brand: { id: string; name: string } | null
+  options: ProductOption[]
+  variants: ProductVariant[]
+}
+
+/** Sorts option values in their declared order (product cartesian below
+ * relies on that order) and drops soft-deleted variants -- product_variants
+ * has deleted_at, unlike product_images, and PostgREST embeds don't filter
+ * soft-deleted rows on their own, so every caller that embeds variants
+ * needs this same client-side pass (same convention as images.sort() below). */
+function normalizeVariants<T extends { options: ProductOption[]; variants: (ProductVariant & { deleted_at: string | null })[] }>(product: T): T {
+  return {
+    ...product,
+    options: [...product.options].sort((a, b) => a.display_order - b.display_order),
+    variants: product.variants.filter((v) => !v.deleted_at),
+  }
+}
+
+/** Builds the label shown wherever a variant needs to be picked/displayed
+ * (OrderItemsEditor, StockMovementDrawer, the variants table itself) --
+ * e.g. "Talla: M, Color: Azul". Skips axes the variant doesn't set (a
+ * product can have fewer variants using an axis than options.length after
+ * an option was added later). */
+export function formatVariantLabel(variant: Pick<ProductVariant, 'option1_value' | 'option2_value' | 'option3_value'>, options: Pick<ProductOption, 'name'>[]): string {
+  const values = [variant.option1_value, variant.option2_value, variant.option3_value]
+  return options
+    .map((option, i) => (values[i] ? `${option.name}: ${values[i]}` : null))
+    .filter((part): part is string => !!part)
+    .join(', ')
+}
+
+/** Product-cartesian of an product's option values, capped at 3 axes (UI
+ * enforces the cap when defining options, this just consumes whatever it's
+ * given). Returns the raw option1/2/3_value combinations -- the caller
+ * (ProductVariantsCard's handleGenerate) is the one that decides which of
+ * these are new vs. already exist as a variant. */
+export function generateVariantCombinations(options: { name: string; values: string[] }[]): { option1_value: string | null; option2_value: string | null; option3_value: string | null }[] {
+  const [a, b, c] = options
+  const av = a?.values.length ? a.values : [null]
+  const bv = b?.values.length ? b.values : [null]
+  const cv = c?.values.length ? c.values : [null]
+
+  const combos: { option1_value: string | null; option2_value: string | null; option3_value: string | null }[] = []
+  for (const v1 of av) {
+    for (const v2 of bv) {
+      for (const v3 of cv) {
+        if (v1 === null && v2 === null && v3 === null) continue
+        combos.push({ option1_value: v1, option2_value: v2, option3_value: v3 })
+      }
+    }
+  }
+  return combos
 }
 
 // Both listProducts and getProduct embed categories through
@@ -123,7 +175,7 @@ export async function listProducts(tenantId: string, params: ListProductsParams)
   let query = supabase
     .from('products')
     .select(
-      '*, images:product_images(*), categories:product_category_links(category:product_categories(id, name)), supplier:suppliers(id, name), brand:brands(id, name)',
+      '*, images:product_images(*), categories:product_category_links(category:product_categories(id, name)), supplier:suppliers(id, name), brand:brands(id, name), options:product_options(*), variants:product_variants(*)',
       { count: 'exact' },
     )
     .eq('tenant_id', tenantId)
@@ -138,16 +190,22 @@ export async function listProducts(tenantId: string, params: ListProductsParams)
 
   const from = (page - 1) * pageSize
   const to = from + pageSize - 1
-  const { data, error, count } = await query.order('created_at', { ascending: false }).range(from, to)
+  // Alphabetical by default -- was created_at desc (newest first), which
+  // meant the list reordered itself every time a product got edited/added
+  // and made a specific product hard to find by scanning (explicit user
+  // complaint: "se desordenan... a veces no encuentro unos productos").
+  const { data, error, count } = await query.order('name', { ascending: true }).range(from, to)
   if (error) throw error
 
   return {
     count: count ?? 0,
-    data: (data as unknown as (ProductWithImages & { categories: { category: ProductCategoryRef }[] })[]).map((p) => ({
-      ...p,
-      images: p.images.sort((a, b) => a.display_order - b.display_order),
-      categories: unwrapCategories(p.categories),
-    })),
+    data: (data as unknown as (ProductWithImages & { categories: { category: ProductCategoryRef }[] })[]).map((p) =>
+      normalizeVariants({
+        ...p,
+        images: p.images.sort((a, b) => a.display_order - b.display_order),
+        categories: unwrapCategories(p.categories),
+      }),
+    ),
   }
 }
 
@@ -156,6 +214,8 @@ export type ProductDetail = Product & {
   categories: ProductCategoryRef[]
   supplier: { id: string; name: string; contact_name: string | null; phone: string | null; email: string | null } | null
   brand: { id: string; name: string; logo_url: string | null } | null
+  options: ProductOption[]
+  variants: ProductVariant[]
 }
 
 /** Fuller join than listProducts (supplier contact details) --
@@ -167,7 +227,7 @@ export async function getProduct(id: string): Promise<ProductDetail | null> {
   const { data, error } = await supabase
     .from('products')
     .select(
-      '*, images:product_images(*), categories:product_category_links(category:product_categories(id, name)), supplier:suppliers(id, name, contact_name, phone, email), brand:brands(id, name, logo_url)',
+      '*, images:product_images(*), categories:product_category_links(category:product_categories(id, name)), supplier:suppliers(id, name, contact_name, phone, email), brand:brands(id, name, logo_url), options:product_options(*), variants:product_variants(*)',
     )
     .eq('id', id)
     .is('deleted_at', null)
@@ -175,7 +235,7 @@ export async function getProduct(id: string): Promise<ProductDetail | null> {
   if (error) throw error
   if (!data) return null
   const product = data as unknown as ProductDetail & { categories: { category: ProductCategoryRef }[] }
-  return { ...product, images: product.images.sort((a, b) => a.display_order - b.display_order), categories: unwrapCategories(product.categories) }
+  return normalizeVariants({ ...product, images: product.images.sort((a, b) => a.display_order - b.display_order), categories: unwrapCategories(product.categories) })
 }
 
 /** Replaces the product's entire category assignment (delete-then-reinsert,
@@ -193,6 +253,69 @@ async function saveProductCategories(tenantId: string, productId: string, catego
   const rows = categoryIds.map((categoryId) => ({ tenant_id: tenantId, product_id: productId, category_id: categoryId }))
   const { error: insertError } = await supabase.from('product_category_links').insert(rows)
   if (insertError) throw insertError
+}
+
+export interface ProductOptionInput {
+  name: string
+  display_order: number
+  values: string[]
+}
+
+/** Replaces the product's option axes wholesale (delete-then-reinsert) --
+ * unlike variants below, product_options has no FKs pointing at it
+ * (product_variants stores value snapshots as text, not option ids), so
+ * there's nothing to lose by recreating every row on each save -- same
+ * trade-off as saveProductCategories. */
+export async function saveProductOptions(tenantId: string, productId: string, options: ProductOptionInput[]): Promise<void> {
+  const { error: deleteError } = await supabase.from('product_options').delete().eq('product_id', productId)
+  if (deleteError) throw deleteError
+  if (options.length === 0) return
+
+  const rows = options.map((o) => ({ tenant_id: tenantId, product_id: productId, name: o.name, display_order: o.display_order, values: o.values }))
+  const { error: insertError } = await supabase.from('product_options').insert(rows)
+  if (insertError) throw insertError
+}
+
+export interface ProductVariantInput {
+  sku: string | null
+  option1_value: string | null
+  option2_value: string | null
+  option3_value: string | null
+  purchase_price: number | null
+  wholesale_price: number | null
+  retail_price: number | null
+  is_active: boolean
+}
+
+/** Variants persist one row at a time (create/update/delete), not as a
+ * batch form submit -- ProductVariantsCard (ProductDetail.tsx) needs each
+ * variant's real id right after creating it so a photo can be attached to
+ * it immediately (product_images.variant_id needs a real row to point at,
+ * same constraint uploadProductImage already has for the product itself),
+ * and every other field on this page (is_active, images) already saves
+ * per-action instead of through one big "Guardar" button. */
+export async function createProductVariant(tenantId: string, productId: string, input: ProductVariantInput): Promise<ProductVariant> {
+  const { data, error } = await supabase
+    .from('product_variants')
+    .insert({ tenant_id: tenantId, product_id: productId, ...input })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function updateProductVariant(id: string, patch: Partial<ProductVariantInput>): Promise<ProductVariant> {
+  const { data, error } = await supabase.from('product_variants').update(patch).eq('id', id).select().single()
+  if (error) throw error
+  return data
+}
+
+export async function deleteProductVariant(id: string): Promise<void> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  const { error } = await supabase.from('product_variants').update({ deleted_at: new Date().toISOString(), deleted_by: user?.id ?? null }).eq('id', id)
+  if (error) throw error
 }
 
 export async function createProduct(input: ProductInput, categoryIds: string[] = []): Promise<Product> {
@@ -274,7 +397,7 @@ async function resizeImageForUpload(file: File): Promise<{ blob: Blob; ext: stri
  * inserts the product_images row that points at it -- the storage upload
  * and the DB row are two separate steps, unlike the tenant logo's single
  * upsert-by-fixed-path, because a product can have several images. */
-export async function uploadProductImage(tenantId: string, productId: string, file: File, displayOrder: number): Promise<ProductImage> {
+export async function uploadProductImage(tenantId: string, productId: string, file: File, displayOrder: number, variantId: string | null = null): Promise<ProductImage> {
   const validationError = validateProductImageFile(file)
   if (validationError) throw new Error(validationError)
 
@@ -286,7 +409,7 @@ export async function uploadProductImage(tenantId: string, productId: string, fi
 
   const { data, error } = await supabase
     .from('product_images')
-    .insert({ tenant_id: tenantId, product_id: productId, storage_path: path, display_order: displayOrder })
+    .insert({ tenant_id: tenantId, product_id: productId, storage_path: path, display_order: displayOrder, variant_id: variantId })
     .select()
     .single()
   if (error) throw error
