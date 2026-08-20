@@ -2,9 +2,15 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { createPayment, PAYMENT_METHOD_LABEL_KEY } from '../../../lib/api/orderPayments'
 import type { OrderPaymentMethod } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { Button, FieldError, Input, Label, Select, Textarea } from '@/components/atoms'
+import { FieldError } from '@/components/atoms'
 import { CurrencyInput } from '@/components/molecules'
 import { Drawer } from '@/components/organisms'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+
 /** Creation only -- a payment logged by mistake is deleted and re-created
  * from OrderDetail.tsx, never edited in place (see the plan's reasoning:
  * keeps this consistent with the rest of the CRM's "simple by default"
@@ -73,36 +79,41 @@ export function PaymentDrawer({
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <div>
           <Label htmlFor="payment-method">{t('orders.paymentDrawer.fields.method')}</Label>
-          <Select id="payment-method" value={method} onChange={(e) => setMethod(e.target.value as OrderPaymentMethod)}>
-            {(Object.keys(PAYMENT_METHOD_LABEL_KEY) as OrderPaymentMethod[]).map((m) => (
-              <option key={m} value={m}>
-                {t(PAYMENT_METHOD_LABEL_KEY[m])}
-              </option>
-            ))}
+          <Select value={method} onValueChange={(v) => setMethod(v as OrderPaymentMethod)}>
+            <SelectTrigger id="payment-method" className="mt-1 w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(Object.keys(PAYMENT_METHOD_LABEL_KEY) as OrderPaymentMethod[]).map((m) => (
+                <SelectItem key={m} value={m}>
+                  {t(PAYMENT_METHOD_LABEL_KEY[m])}
+                </SelectItem>
+              ))}
+            </SelectContent>
           </Select>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
             <Label htmlFor="payment-amount">{t('orders.paymentDrawer.fields.amount')}</Label>
-            <CurrencyInput id="payment-amount" value={amount} invalid={!!amountError} onChange={(e) => setAmount(e.target.value)} />
+            <CurrencyInput id="payment-amount" value={amount} invalid={!!amountError} onChange={(e) => setAmount(e.target.value)} className="mt-1" />
             <FieldError message={amountError} />
           </div>
           <div>
             <Label htmlFor="payment-date">{t('orders.paymentDrawer.fields.date')}</Label>
-            <Input id="payment-date" type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} />
+            <Input id="payment-date" type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} className="mt-1" />
           </div>
         </div>
 
         <div>
           <Label htmlFor="payment-notes">{t('orders.paymentDrawer.fields.notes')}</Label>
-          <Textarea id="payment-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+          <Textarea id="payment-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} className="mt-1" />
         </div>
 
         {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
 
         <div className="flex gap-2 border-t border-brand-100 pt-5">
-          <Button type="submit" variant="secondary" disabled={submitting}>
+          <Button type="submit" disabled={submitting}>
             {submitting ? t('common.actions.saving') : t('common.actions.save')}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>

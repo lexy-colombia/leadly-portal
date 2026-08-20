@@ -37,7 +37,6 @@ import { AppointmentDrawer } from './clients/AppointmentDrawer'
 import { AddressDrawer } from './clients/AddressDrawer'
 import { OpportunityPanel } from './opportunities/OpportunityPanel'
 import { OpportunityDrawer } from './opportunities/OpportunityDrawer'
-import { OrderDrawer } from './orders/OrderDrawer'
 import type { AppointmentStatus, ClientStage } from '../../types/domain'
 
 const ORDER_STATUS_LABEL: Record<OrderStatus, TranslationKey> = {
@@ -204,7 +203,6 @@ function ClientDetailContent({
     open: false,
     opportunity: null,
   })
-  const [orderDrawer, setOrderDrawer] = useState<{ open: boolean; order: OrderWithRelations | null }>({ open: false, order: null })
   const [addressDrawer, setAddressDrawer] = useState<{ open: boolean; address: ContactAddress | null }>({ open: false, address: null })
   const [deleteAddressId, setDeleteAddressId] = useState<string | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -550,7 +548,7 @@ function ClientDetailContent({
           <Panel>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <p className="text-sm text-brand-400">{t('contacts.detail.sales.description')}</p>
-              <Button size="sm" onClick={() => setOrderDrawer({ open: true, order: null })}>
+              <Button size="sm" onClick={() => navigate(`/app/sales/new?contactId=${contact.id}`)}>
                 <PlusIcon width={13} height={13} /> {t('contacts.detail.sales.new')}
               </Button>
             </div>
@@ -701,14 +699,6 @@ function ClientDetailContent({
             onConfirm={handleDeleteAddress}
             title={t('contacts.detail.addresses.deleteConfirm.title')}
             description={t('contacts.detail.addresses.deleteConfirm.description')}
-          />
-          <OrderDrawer
-            open={orderDrawer.open}
-            onClose={() => setOrderDrawer({ open: false, order: null })}
-            tenantId={profile.tenant_id}
-            order={orderDrawer.order}
-            defaultContactId={contact.id}
-            onSaved={reloadOrders}
           />
           <OpportunityPanel
             open={!!selectedOpportunity}

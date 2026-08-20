@@ -267,14 +267,14 @@ export function Products() {
                           <ProductImage src={cover ? getProductImageUrl(cover.storage_path) : null} name={product.name} className="h-full w-full" iconSize={16} />
                         </div>
                       </TableCell>
-                      <TableCell className="text-xs font-medium text-brand-800">
+                      <TableCell className="text-sm font-medium text-brand-800">
                         <Link to={`/app/products/${product.id}`} className="hover:text-accent-600 hover:underline">
                           {product.name}
                         </Link>
-                        {product.sku && <span className="block text-[11px] font-normal text-brand-400">{t('products.table.sku', { sku: product.sku })}</span>}
+                        {product.sku && <span className="block text-xs font-normal text-brand-400">{t('products.table.sku', { sku: product.sku })}</span>}
                       </TableCell>
-                      <TableCell className="text-xs text-brand-500">{product.brand?.name ?? '-'}</TableCell>
-                      <TableCell className="text-xs text-brand-500">
+                      <TableCell className="text-sm text-brand-500">{product.brand?.name ?? '-'}</TableCell>
+                      <TableCell className="text-sm text-brand-500">
                         {product.categories.length > 0 ? (
                           // Sin punto de color por categoría por ahora -- con
                           // la cadena completa de ancestros (raíz→hoja) un
@@ -285,7 +285,7 @@ export function Products() {
                           // una celda angosta.
                           <span className="flex flex-wrap gap-1">
                             {product.categories.map((c) => (
-                              <span key={c.id} className="rounded-full bg-brand-50 px-2 py-0.5 text-[11px] whitespace-nowrap text-brand-500">
+                              <span key={c.id} className="rounded-full bg-brand-50 px-2 py-0.5 text-xs whitespace-nowrap text-brand-500">
                                 {c.name}
                               </span>
                             ))}
@@ -294,16 +294,16 @@ export function Products() {
                           '-'
                         )}
                       </TableCell>
-                      <TableCell className="text-xs text-brand-700">{formatCurrency(product.retail_price, product.currency)}</TableCell>
+                      <TableCell className="text-sm text-brand-700">{formatCurrency(product.retail_price, product.currency)}</TableCell>
                       <TableCell>
                         {product.track_inventory ? (
                           <Badge variant={lowStock ? 'destructive' : 'secondary'}>
                             {t('products.table.available', { count: availableStock(product, stockTotals) })} {lowStock && t('products.table.low')}
                           </Badge>
                         ) : (
-                          <span className="text-xs text-brand-400">{t('products.table.noControl')}</span>
+                          <span className="text-sm text-brand-400">{t('products.table.noControl')}</span>
                         )}
-                        {reserved > 0 && <span className="ml-1.5 text-[11px] text-brand-400">{t('products.table.reserved', { count: reserved })}</span>}
+                        {reserved > 0 && <span className="ml-1.5 text-xs text-brand-400">{t('products.table.reserved', { count: reserved })}</span>}
                       </TableCell>
                       <TableCell>
                         <Switch

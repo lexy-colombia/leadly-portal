@@ -331,6 +331,7 @@ export interface Product {
   track_inventory: boolean
   low_stock_threshold: number
   is_active: boolean
+  has_variants: boolean
   deleted_at: string | null
   deleted_by: string | null
   created_at: string
@@ -343,7 +344,44 @@ export interface ProductImage {
   product_id: string
   storage_path: string
   display_order: number
+  variant_id: string | null
   created_at: string
+}
+
+// Variantes de producto (talla/color/etc.) -- ver CLAUDE.md "Estado actual"
+// para el diseño completo. product_options declara hasta 3 ejes por
+// producto (name + values, en el orden que se cargaron); product_variants
+// son las combinaciones vendibles reales, cada una con su propio SKU y
+// stock (product_stock/stock_movements.variant_id). Precios nullable en la
+// variante heredan del producto padre cuando no se definen -- eso se
+// resuelve en la capa de aplicación (lib/api/products.ts), no acá.
+export interface ProductOption {
+  id: string
+  tenant_id: string
+  product_id: string
+  name: string
+  display_order: number
+  values: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface ProductVariant {
+  id: string
+  tenant_id: string
+  product_id: string
+  sku: string | null
+  option1_value: string | null
+  option2_value: string | null
+  option3_value: string | null
+  purchase_price: number | null
+  wholesale_price: number | null
+  retail_price: number | null
+  is_active: boolean
+  deleted_at: string | null
+  deleted_by: string | null
+  created_at: string
+  updated_at: string
 }
 
 export interface ProductCategory {
@@ -443,11 +481,12 @@ export interface SalesOrderItem {
   order_id: string
   product_id: string | null
   warehouse_id: string | null
+  variant_id: string | null
   product_name: string
   sku: string | null
   quantity: number
   unit_price: number
-  discount_percentage: number
+  discount_amount: number
   subtotal: number
   display_order: number
   created_at: string
@@ -742,6 +781,7 @@ export interface ProductStock {
   tenant_id: string
   product_id: string
   warehouse_id: string
+  variant_id: string | null
   quantity: number
   reserved_quantity: number
   departure_quantity: number
@@ -770,6 +810,7 @@ export interface StockMovement {
   tenant_id: string
   product_id: string
   warehouse_id: string
+  variant_id: string | null
   movement_type: StockMovementType
   quantity: number
   unit_cost: number | null
