@@ -101,6 +101,7 @@ export default function App() {
                 (Configuración) el 2026-08-16 -- ya no tiene ruta propia. */}
             <Route path="inventario" element={<Navigate to="/app/settings" replace />} />
             <Route path="sales" element={<RequireModule moduleKey="sales"><Orders /></RequireModule>} />
+            <Route path="sales/new" element={<RequireModule moduleKey="sales"><OrderDetail /></RequireModule>} />
             <Route path="sales/:id" element={<RequireModule moduleKey="sales"><OrderDetail /></RequireModule>} />
             {/* Tareas se fusionó dentro de Calendario el 2026-08-19 -- ya no
                 tiene ruta propia. */}

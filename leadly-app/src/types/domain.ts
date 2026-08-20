@@ -486,7 +486,7 @@ export interface SalesOrderItem {
   sku: string | null
   quantity: number
   unit_price: number
-  discount_percentage: number
+  discount_amount: number
   subtotal: number
   display_order: number
   created_at: string

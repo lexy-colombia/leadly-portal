@@ -108,6 +108,23 @@ export async function listProductIdsWithWarehouseStock(tenantId: string, warehou
   return Array.from(new Set((data as { product_id: string }[]).map((r) => r.product_id)))
 }
 
+export interface ProductWarehouseStockRow {
+  product_id: string
+  variant_id: string | null
+  warehouse_id: string
+  quantity: number
+}
+
+/** Full per-(product, variant, warehouse) grid for the tenant in one query --
+ * used by OrderItemsEditor to show "X disp." for the specific warehouse
+ * picked on each line. listStockTotalsByTenant/ByVariant only give the sum
+ * across every warehouse, not "how much in warehouse Y specifically". */
+export async function listStockByWarehouse(tenantId: string): Promise<ProductWarehouseStockRow[]> {
+  const { data, error } = await supabase.from('product_stock').select('product_id, variant_id, warehouse_id, quantity').eq('tenant_id', tenantId)
+  if (error) throw error
+  return data
+}
+
 export async function listMovementsForProduct(productId: string, limit = 20): Promise<StockMovementWithWarehouse[]> {
   const { data, error } = await supabase
     .from('stock_movements')

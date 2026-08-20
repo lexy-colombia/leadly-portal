@@ -105,7 +105,7 @@ export function AppointmentFormDrawer({
               searchPlaceholder={t('calendar.form.searchPlaceholder')}
               emptyLabel={t('tasks.filter.noResults')}
               className="w-full"
-              triggerClassName="w-full !rounded-lg"
+              triggerClassName="min-w-0 flex-1 shrink !rounded-lg"
             />
           </div>
           <FieldError message={contactError} />

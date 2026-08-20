@@ -24,6 +24,32 @@ export interface ProductInput {
 export interface ProductCategoryRef {
   id: string
   name: string
+  parent_category_id: string | null
+}
+
+/** A product is linked to its whole category ancestor chain, not just the
+ * leaf it was actually filed under (see core_catalog.sql/
+ * product_category_links) -- but that join has no guaranteed order, so
+ * ProductDetail.tsx would show e.g. "Adaptadores HDMI, Adaptadores y
+ * cables" with no way to tell which one is the parent. This orders the
+ * chain root -> leaf and joins it as "Adaptadores y cables › Adaptadores
+ * HDMI". Depth is computed by walking parent_category_id only through
+ * ancestors that are also in this product's own set -- a category whose
+ * parent isn't among them (chain cut short, e.g. a stale ancestor) is just
+ * treated as its own root instead of breaking the sort. Multiple root
+ * categories (a product filed under two unrelated branches) sort
+ * alphabetically relative to each other, each followed by its own children. */
+export function formatCategoryHierarchy(categories: ProductCategoryRef[]): string {
+  function depth(category: ProductCategoryRef, seen: Set<string>): number {
+    if (seen.has(category.id)) return 0 // guards against a cyclic parent chain, if one ever slips in
+    const parent = category.parent_category_id ? categories.find((c) => c.id === category.parent_category_id) : undefined
+    return parent ? 1 + depth(parent, new Set(seen).add(category.id)) : 0
+  }
+  return [...categories]
+    .map((c) => ({ c, depth: depth(c, new Set()) }))
+    .sort((a, b) => a.depth - b.depth || a.c.name.localeCompare(b.c.name))
+    .map(({ c }) => c.name)
+    .join(' › ')
 }
 
 export type ProductWithImages = Product & {
@@ -175,7 +201,7 @@ export async function listProducts(tenantId: string, params: ListProductsParams)
   let query = supabase
     .from('products')
     .select(
-      '*, images:product_images(*), categories:product_category_links(category:product_categories(id, name)), supplier:suppliers(id, name), brand:brands(id, name), options:product_options(*), variants:product_variants(*)',
+      '*, images:product_images(*), categories:product_category_links(category:product_categories(id, name, parent_category_id)), supplier:suppliers(id, name), brand:brands(id, name), options:product_options(*), variants:product_variants(*)',
       { count: 'exact' },
     )
     .eq('tenant_id', tenantId)
@@ -227,7 +253,7 @@ export async function getProduct(id: string): Promise<ProductDetail | null> {
   const { data, error } = await supabase
     .from('products')
     .select(
-      '*, images:product_images(*), categories:product_category_links(category:product_categories(id, name)), supplier:suppliers(id, name, contact_name, phone, email), brand:brands(id, name, logo_url), options:product_options(*), variants:product_variants(*)',
+      '*, images:product_images(*), categories:product_category_links(category:product_categories(id, name, parent_category_id)), supplier:suppliers(id, name, contact_name, phone, email), brand:brands(id, name, logo_url), options:product_options(*), variants:product_variants(*)',
     )
     .eq('id', id)
     .is('deleted_at', null)

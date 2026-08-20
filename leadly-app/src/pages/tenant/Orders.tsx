@@ -8,8 +8,7 @@ import type { OrderWithRelations } from '../../lib/api/orders'
 import type { OrderStatus } from '../../types/domain'
 import { Badge, Button, PageSpinner, Table, TBody, TD, TH, THead, TRow } from '@/components/atoms'
 import { Card, EmptyState, IconInput, Pagination } from '@/components/molecules'
-import { PencilIcon, PlusIcon, SearchIcon, TrashIcon } from '@/components/atoms/icons'
-import { OrderDrawer } from './orders/OrderDrawer'
+import { PlusIcon, SearchIcon, TrashIcon } from '@/components/atoms/icons'
 
 const PAGE_SIZE = 10
 
@@ -39,7 +38,6 @@ export function Orders() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<OrderStatus | 'all'>('all')
   const [page, setPage] = useState(1)
-  const [drawer, setDrawer] = useState<{ open: boolean; order: OrderWithRelations | null }>({ open: false, order: null })
   // Shared by both destructive actions (cancel a cotización / anular a
   // venta) -- only one of the two is ever offered per row (see the status
   // check in the actions column), so one pending-id is enough.
@@ -136,7 +134,7 @@ export function Orders() {
           {filtered?.length ?? 0} {t((filtered?.length ?? 0) === 1 ? 'orders.count.singular' : 'orders.count.plural')}
         </span>
 
-        <Button variant="secondary" onClick={() => setDrawer({ open: true, order: null })} className="!ml-auto !py-1 !text-xs">
+        <Button variant="secondary" onClick={() => navigate('/app/sales/new')} className="!ml-auto !py-1 !text-xs">
           <PlusIcon width={14} height={14} /> {t('orders.actions.newQuote')}
         </Button>
       </div>
@@ -180,10 +178,10 @@ export function Orders() {
             <TBody>
               {pageItems.map((order) => (
                 <TRow key={order.id}>
-                  <TD className="cursor-pointer text-xs font-medium text-brand-800" onClick={() => navigate(`/app/sales/${order.id}`)}>
+                  <TD className="cursor-pointer text-xs font-medium text-accent-600 hover:underline" onClick={() => navigate(`/app/sales/${order.id}`)}>
                     ORD-{order.number}
                   </TD>
-                  <TD className="cursor-pointer text-xs text-brand-700" onClick={() => navigate(`/app/sales/${order.id}`)}>
+                  <TD className="cursor-pointer text-xs text-accent-600 hover:underline" onClick={() => navigate(`/app/sales/${order.id}`)}>
                     {order.contact?.full_name ?? '-'}
                     {order.opportunity && <span className="block text-[11px] font-normal text-brand-400">{order.opportunity.title}</span>}
                   </TD>
@@ -214,9 +212,6 @@ export function Orders() {
                             {confirmingId === order.id ? t('orders.actions.confirming') : t('orders.actions.convert')}
                           </Button>
                         )}
-                        <Button variant="ghost" onClick={() => setDrawer({ open: true, order })} className="!px-2 !py-1 text-xs">
-                          <PencilIcon width={12} height={12} />
-                        </Button>
                         {order.status === 'cotizacion' && (
                           <Button variant="ghost" onClick={() => setPendingId(order.id)} className="!px-2 !py-1 text-xs !text-red-600 hover:!bg-red-50">
                             <TrashIcon width={12} height={12} />
@@ -236,10 +231,6 @@ export function Orders() {
           </Table>
           <Pagination page={page} totalPages={totalPages} onChange={setPage} />
         </>
-      )}
-
-      {profile?.tenant_id && (
-        <OrderDrawer open={drawer.open} onClose={() => setDrawer({ open: false, order: null })} tenantId={profile.tenant_id} order={drawer.order} onSaved={reload} />
       )}
     </div>
   )

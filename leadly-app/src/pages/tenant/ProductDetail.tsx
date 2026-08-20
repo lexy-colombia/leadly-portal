@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ArrowRightIcon, Maximize2Icon, MoreHorizontalIcon } from 'lucide-react'
-import { deleteProduct, getProduct, getProductImageUrl, updateProduct } from '../../lib/api/products'
+import { deleteProduct, formatCategoryHierarchy, getProduct, getProductImageUrl, updateProduct } from '../../lib/api/products'
 import type { ProductDetail } from '../../lib/api/products'
 import { combineTransferHistory, isStockEntry, listMovementsForProduct, listStockByProduct, MOVEMENT_TYPE_KEY } from '../../lib/api/stockMovements'
 import type { MovementHistoryEntry, ProductStockWithWarehouse, StockMovementWithWarehouse } from '../../lib/api/stockMovements'
@@ -24,18 +24,21 @@ function formatCurrency(value: number | null, currency: string): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 }
 
+// Numérico corto ("15/08/2026") -- pedido explícito, ni el mes en texto
+// largo ("15 de agosto de 2026") ni abreviado ("15 ago 2026") era lo que se
+// buscaba acá.
 function formatDate(iso: string, language: Language): string {
   const locale = language === 'en' ? 'en-US' : 'es-CO'
-  return new Date(iso).toLocaleDateString(locale, { day: '2-digit', month: 'long', year: 'numeric' })
+  return new Date(iso).toLocaleDateString(locale, { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
 /** Label-above-value field -- the one fact-display shape for the whole
  * page (pricing, inventory counts, supplier contact info, metadata alike). */
-function Field({ label, value, tone = 'neutral' }: { label: string; value: ReactNode; tone?: 'neutral' | 'danger' }) {
+function Field({ label, value, tone = 'neutral', className = '' }: { label: string; value: ReactNode; tone?: 'neutral' | 'danger'; className?: string }) {
   return (
-    <div className="min-w-0">
-      <dt className="text-xs text-brand-400">{label}</dt>
-      <dd className={`truncate text-sm font-semibold ${tone === 'danger' ? 'text-red-600' : 'text-brand-800'}`}>{value}</dd>
+    <div className={`min-w-0 ${className}`}>
+      <dt className="text-[11px] text-brand-400">{label}</dt>
+      <dd className={`truncate text-xs font-semibold ${tone === 'danger' ? 'text-red-600' : 'text-brand-800'}`}>{value}</dd>
     </div>
   )
 }
@@ -50,8 +53,8 @@ function Field({ label, value, tone = 'neutral' }: { label: string; value: React
 function StatCard({ title, action, children, className = '' }: { title: string; action?: ReactNode; children: ReactNode; className?: string }) {
   return (
     <div className={`rounded-xl border border-brand-100 p-4 ${className}`}>
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-brand-800">{title}</h3>
+      <div className="mb-2.5 flex items-center justify-between gap-2">
+        <h3 className="text-xs font-semibold text-brand-800">{title}</h3>
         {action}
       </div>
       {children}
@@ -295,17 +298,9 @@ export function ProductDetail() {
                 </div>
               )}
 
-              {(product.categories.length > 0 || product.sku) && (
-                <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-brand-400">
-                  {product.sku && <span>SKU: {product.sku}</span>}
-                  {product.categories.map((c) => (
-                    <span key={c.id} className="inline-flex items-center gap-1.5">
-                      {c.name}
-                    </span>
-                  ))}
-                </div>
-              )}
-
+              {/* SKU y categorías se movieron a la card "Información general"
+                  de abajo (junto al resto de los datos del producto) --
+                  antes se repetían acá arriba Y en la sección de Detalles. */}
               {product.description && <p className="mt-2 text-sm text-brand-600">{product.description}</p>}
             </div>
 
@@ -329,32 +324,49 @@ export function ProductDetail() {
             </div>
           </div>
 
-          {/* Precios | Detalles -- ya no "Inventario general" acá: era una
-              simple repetición de lo que el cuadro de Inventario por bodega
-              ya muestra (con su fila de Total general), sin agregar nada
-              (pedido explícito). Detalles pasa a este lugar en vez de vivir
-              en el sidebar de abajo. */}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <StatCard title={t('products.detail.sections.pricing')}>
-              <div className="grid grid-cols-3 gap-3">
-                <Field label={t('products.detail.fields.purchase')} value={formatCurrency(product.purchase_price, product.currency)} />
-                <Field label={t('products.detail.fields.wholesale')} value={formatCurrency(product.wholesale_price, product.currency)} />
-                <Field label={t('products.detail.fields.retail')} value={formatCurrency(product.retail_price, product.currency)} />
-              </div>
-              <div className="mt-3 border-t border-brand-100 pt-3">
-                <Field label={t('products.detail.fields.margin')} value={margin != null ? `${formatCurrency(margin, product.currency)} (${marginPct?.toFixed(0)}%)` : '-'} />
-              </div>
-            </StatCard>
-
-            <StatCard title={t('products.detail.sections.details')}>
-              <dl className="grid grid-cols-2 gap-3">
-                <Field label={t('products.detail.fields.slug')} value={product.slug ?? '-'} />
-                <Field label={t('products.detail.fields.currency')} value={product.currency} />
-                <Field label={t('products.detail.fields.createdAt')} value={formatDate(product.created_at, language)} />
-                <Field label={t('products.detail.fields.updatedAt')} value={formatDate(product.updated_at, language)} />
-              </dl>
-            </StatCard>
-          </div>
+          {/* Precios + Detalles en UNA sola card con dos secciones internas
+              separadas por una línea vertical, no dos cards con borde propio
+              cada una (pedido explícito, referencia visual del usuario) --
+              ya no "Inventario general" acá: era una simple repetición de lo
+              que el cuadro de Inventario por bodega ya muestra (con su fila
+              de Total general), sin agregar nada. Sin botón "Editar" propio
+              -- ya existe uno en el header de la página (regla del proyecto:
+              no duplicarlo, ver EmpresaDetalle.tsx). */}
+          <StatCard title={t('products.detail.sections.general')}>
+            {/* Grilla real (alineada), no flex-wrap -- el ancho "natural" por
+                campo se veía descuadrado (pedido explícito). 4 columnas con
+                los 8 campos cortos primero (2 filas completas), y los 2
+                campos que de verdad pueden ser largos (Categoría/Slug) al
+                final ocupando 2 columnas cada uno -- así cierran su propia
+                fila completa en vez de romper la alineación de los demás. */}
+            <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
+              <Field label={t('products.detail.fields.purchase')} value={formatCurrency(product.purchase_price, product.currency)} />
+              <Field label={t('products.detail.fields.wholesale')} value={formatCurrency(product.wholesale_price, product.currency)} />
+              <Field label={t('products.detail.fields.retail')} value={<span className="text-accent-600">{formatCurrency(product.retail_price, product.currency)}</span>} />
+              <Field
+                label={t('products.detail.fields.margin')}
+                value={
+                  margin != null ? (
+                    <span className={margin > 0 ? 'text-emerald-600' : margin < 0 ? 'text-red-600' : undefined}>
+                      {formatCurrency(margin, product.currency)} <span className="font-normal text-brand-400">({marginPct?.toFixed(0)}%)</span>
+                    </span>
+                  ) : (
+                    '-'
+                  )
+                }
+              />
+              <Field label={t('products.detail.fields.sku')} value={product.sku ?? '-'} />
+              <Field label={t('products.detail.fields.currency')} value={product.currency} />
+              <Field label={t('products.detail.fields.createdAt')} value={formatDate(product.created_at, language)} />
+              <Field label={t('products.detail.fields.updatedAt')} value={formatDate(product.updated_at, language)} />
+              <Field
+                className="col-span-2"
+                label={t('products.detail.fields.category')}
+                value={product.categories.length > 0 ? formatCategoryHierarchy(product.categories) : '-'}
+              />
+              <Field className="col-span-2" label={t('products.detail.fields.slug')} value={product.slug ?? '-'} />
+            </div>
+          </StatCard>
         </div>
       </div>
 

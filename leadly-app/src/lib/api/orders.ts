@@ -2,8 +2,8 @@ import { supabase } from '../supabaseClient'
 import type { ContactAddress, SalesOrder, SalesOrderItem, OrderStatus } from '../../types/domain'
 import type { TranslationKey } from '../../i18n/translations'
 
-// Shared between Orders.tsx, OrderDetail.tsx, and OrderDrawer.tsx so the
-// status wording never drifts between screens.
+// Shared between Orders.tsx and OrderDetail.tsx so the status wording
+// never drifts between screens.
 export const ORDER_STATUS_LABEL_KEY: Record<OrderStatus, TranslationKey> = {
   cotizacion: 'orders.status.quote',
   confirmada: 'orders.status.confirmed',
@@ -15,18 +15,22 @@ export const ORDER_STATUS_LABEL_KEY: Record<OrderStatus, TranslationKey> = {
 export interface OrderItemInput {
   product_id?: string | null
   variant_id?: string | null
+  warehouse_id?: string | null
   product_name: string
   sku?: string | null
   quantity: number
   unit_price: number
-  discount_percentage?: number
+  /** Flat amount subtracted from this line's gross (quantity * unit_price),
+   * not a percentage -- explicit product decision, ver CLAUDE.md. */
+  discount_amount?: number
 }
 
 /** True if any item points at a variant-enabled product but hasn't picked a
  * specific variant yet -- a line like that would silently save with
  * unit_price 0 (see OrderItemsEditor.handleProductSelect) and no way to
- * know which combination was actually sold, so both OrderDrawer and
- * OrderDetail block submit on this before calling saveOrderItems. */
+ * know which combination was actually sold, so OrderDetail.tsx (both the
+ * create form and the batch item save) blocks on this before calling
+ * saveOrderItems. */
 export function hasIncompleteVariantSelection(items: OrderItemInput[], products: { id: string; has_variants: boolean }[]): boolean {
   return items.some((item) => {
     if (!item.product_id) return false
@@ -68,7 +72,7 @@ export function computeOrderTotals(items: OrderItemInput[], shipping: number, ta
   let discountTotal = 0
   for (const item of items) {
     const gross = item.quantity * item.unit_price
-    const discount = gross * ((item.discount_percentage ?? 0) / 100)
+    const discount = item.discount_amount ?? 0
     subtotal += gross
     discountTotal += discount
   }
@@ -154,18 +158,19 @@ export async function saveOrderItems(tenantId: string, orderId: string, items: O
 
   const rows = items.map((item, index) => {
     const gross = item.quantity * item.unit_price
-    const discountPercentage = item.discount_percentage ?? 0
-    const subtotal = gross * (1 - discountPercentage / 100)
+    const discountAmount = item.discount_amount ?? 0
+    const subtotal = gross - discountAmount
     return {
       tenant_id: tenantId,
       order_id: orderId,
       product_id: item.product_id || null,
       variant_id: item.variant_id || null,
+      warehouse_id: item.warehouse_id || null,
       product_name: item.product_name,
       sku: item.sku || null,
       quantity: item.quantity,
       unit_price: item.unit_price,
-      discount_percentage: discountPercentage,
+      discount_amount: discountAmount,
       subtotal,
       display_order: index,
     }
@@ -199,10 +204,11 @@ export async function updateOrder(id: string, tenantId: string, input: Partial<O
   return data
 }
 
-/** Patches a handful of header fields (notes, shipping/billing address)
- * without touching items or recomputing totals -- used by OrderDetail.tsx's
- * inline editors, where each section saves itself independently instead of
- * going through the full OrderDrawer form. */
+/** Patches a handful of header fields (contact, opportunity, status, notes,
+ * shipping/billing address...) without touching items or recomputing
+ * totals -- used by OrderDetail.tsx's per-field autosave, where each
+ * section saves itself independently the moment it changes instead of
+ * going through one big form submit. */
 export async function updateOrderFields(id: string, patch: Partial<OrderInput>): Promise<SalesOrder> {
   const { data, error } = await supabase.from('sales_orders').update(patch).eq('id', id).select().single()
   if (error) throw error
