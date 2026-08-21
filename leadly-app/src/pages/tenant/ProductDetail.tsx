@@ -6,7 +6,7 @@ import type { ProductDetail } from '../../lib/api/products'
 import { combineTransferHistory, isStockEntry, listMovementsForProduct, listStockByProduct, MOVEMENT_TYPE_KEY } from '../../lib/api/stockMovements'
 import type { MovementHistoryEntry, ProductStockWithWarehouse, StockMovementWithWarehouse } from '../../lib/api/stockMovements'
 import { useLanguage } from '../../contexts/LanguageContext'
-import type { Language } from '../../i18n/translations'
+import { formatDate } from '../../lib/dates'
 import { InitialsAvatar, PageSpinner, ProductImage } from '@/components/atoms'
 import { MailIcon, PencilIcon, PhoneIcon, PlusIcon, UserIcon } from '@/components/atoms/icons'
 import { Button } from '@/components/ui/button'
@@ -22,14 +22,6 @@ import { useAuth } from '../../contexts/AuthContext'
 function formatCurrency(value: number | null, currency: string): string {
   if (value == null) return '-'
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
-}
-
-// Numérico corto ("15/08/2026") -- pedido explícito, ni el mes en texto
-// largo ("15 de agosto de 2026") ni abreviado ("15 ago 2026") era lo que se
-// buscaba acá.
-function formatDate(iso: string, language: Language): string {
-  const locale = language === 'en' ? 'en-US' : 'es-CO'
-  return new Date(iso).toLocaleDateString(locale, { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
 /** Label-above-value field -- the one fact-display shape for the whole
@@ -117,12 +109,12 @@ function ProductImageBlock({ product }: { product: ProductDetail }) {
  * transfer's "Bodega" column shows "origen → destino" and its "Tipo" reads
  * as a single "Traslado" instead of the two raw transferencia_salida/
  * entrada rows it's made of (see combineTransferHistory). */
-function HistoryRow({ entry, language }: { entry: MovementHistoryEntry; language: Language }) {
+function HistoryRow({ entry }: { entry: MovementHistoryEntry }) {
   const { t } = useLanguage()
   if (entry.kind === 'transfer') {
     return (
       <TableRow>
-        <TableCell className="text-xs text-brand-500">{formatDate(entry.created_at, language)}</TableCell>
+        <TableCell className="text-xs text-brand-500">{formatDate(entry.created_at)}</TableCell>
         <TableCell className="text-xs text-brand-700">
           <span className="inline-flex items-center gap-1.5">
             {entry.from.warehouse.name}
@@ -138,7 +130,7 @@ function HistoryRow({ entry, language }: { entry: MovementHistoryEntry; language
   const { movement } = entry
   return (
     <TableRow>
-      <TableCell className="text-xs text-brand-500">{formatDate(movement.created_at, language)}</TableCell>
+      <TableCell className="text-xs text-brand-500">{formatDate(movement.created_at)}</TableCell>
       <TableCell className="text-xs text-brand-500">{movement.warehouse.name}</TableCell>
       <TableCell className="text-xs text-brand-700">{t(MOVEMENT_TYPE_KEY[movement.movement_type])}</TableCell>
       <TableCell className={`text-right text-xs font-medium ${isStockEntry(movement.movement_type) ? 'text-emerald-600' : 'text-red-600'}`}>
@@ -148,7 +140,7 @@ function HistoryRow({ entry, language }: { entry: MovementHistoryEntry; language
   )
 }
 
-function HistoryTable({ entries, language }: { entries: MovementHistoryEntry[]; language: Language }) {
+function HistoryTable({ entries }: { entries: MovementHistoryEntry[] }) {
   const { t } = useLanguage()
   return (
     <div className="overflow-hidden rounded-lg border border-brand-100">
@@ -163,7 +155,7 @@ function HistoryTable({ entries, language }: { entries: MovementHistoryEntry[]; 
         </TableHeader>
         <TableBody>
           {entries.map((entry) => (
-            <HistoryRow key={entry.kind === 'transfer' ? entry.id : entry.movement.id} entry={entry} language={language} />
+            <HistoryRow key={entry.kind === 'transfer' ? entry.id : entry.movement.id} entry={entry} />
           ))}
         </TableBody>
       </Table>
@@ -175,7 +167,7 @@ export function ProductDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { profile } = useAuth()
-  const { t, language } = useLanguage()
+  const { t } = useLanguage()
   const [product, setProduct] = useState<ProductDetail | null | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
   const [editOpen, setEditOpen] = useState(false)
@@ -357,8 +349,8 @@ export function ProductDetail() {
               />
               <Field label={t('products.detail.fields.sku')} value={product.sku ?? '-'} />
               <Field label={t('products.detail.fields.currency')} value={product.currency} />
-              <Field label={t('products.detail.fields.createdAt')} value={formatDate(product.created_at, language)} />
-              <Field label={t('products.detail.fields.updatedAt')} value={formatDate(product.updated_at, language)} />
+              <Field label={t('products.detail.fields.createdAt')} value={formatDate(product.created_at)} />
+              <Field label={t('products.detail.fields.updatedAt')} value={formatDate(product.updated_at)} />
               <Field
                 className="col-span-2"
                 label={t('products.detail.fields.category')}
@@ -435,7 +427,7 @@ export function ProductDetail() {
               {movementsError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{movementsError}</p>}
               {!historyEntries && !movementsError && <PageSpinner />}
               {historyEntries && historyEntries.length === 0 && <p className="text-xs text-brand-400">{t('inventory.product.empty.noMovements')}</p>}
-              {historyEntries && historyEntries.length > 0 && <HistoryTable entries={historyEntries} language={language} />}
+              {historyEntries && historyEntries.length > 0 && <HistoryTable entries={historyEntries} />}
             </StatCard>
           </div>
 

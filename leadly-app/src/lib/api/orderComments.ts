@@ -13,13 +13,13 @@ export async function listCommentsForOrder(orderId: string): Promise<OrderCommen
   return data as unknown as OrderCommentWithAuthor[]
 }
 
-export async function createComment(tenantId: string, orderId: string, content: string): Promise<SalesOrderComment> {
+export async function createComment(tenantId: string, orderId: string, content: string, isInternal = false): Promise<SalesOrderComment> {
   const {
     data: { user },
   } = await supabase.auth.getUser()
   const { data, error } = await supabase
     .from('sales_order_comments')
-    .insert({ tenant_id: tenantId, order_id: orderId, content, author_id: user?.id ?? null })
+    .insert({ tenant_id: tenantId, order_id: orderId, content, author_id: user?.id ?? null, is_internal: isInternal })
     .select()
     .single()
   if (error) throw error

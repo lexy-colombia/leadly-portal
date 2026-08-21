@@ -425,7 +425,17 @@ export interface Supplier {
   updated_at: string
 }
 
-export type OrderStatus = 'cotizacion' | 'confirmada' | 'en_proceso' | 'entregada' | 'cancelada'
+// Estado comercial de la orden (cotización/venta/anulada) -- separado del
+// estado de entrega (ver DeliveryStatus) desde el 2026-08-20, pedido
+// explícito del usuario: "una cosa es el estado de la orden y otra cosa el
+// estado de envío". Antes 'en_proceso'/'entregada' vivían acá y en realidad
+// describían el envío, no el negocio de la venta en sí.
+export type OrderStatus = 'cotizacion' | 'confirmada' | 'cancelada'
+
+// Genérico a propósito (no referencia bodegas/despachos) -- ese módulo
+// (Fase 2, Despachos) todavía no existe, así que esto es solo un
+// seguimiento descriptivo, no reservas reales de stock por envío.
+export type DeliveryStatus = 'pendiente' | 'en_camino' | 'entregado'
 
 export interface SalesOrder {
   id: string
@@ -434,6 +444,7 @@ export interface SalesOrder {
   contact_id: string
   opportunity_id: string | null
   status: OrderStatus
+  delivery_status: DeliveryStatus
   currency: string
   subtotal: number
   discount_total: number
@@ -517,6 +528,9 @@ export interface SalesOrderComment {
   author_id: string | null
   content: string
   created_by_ai: boolean
+  // true -> shows in the order page's "Notas" column (internal, no
+  // attachments); false -> "Comentarios" (customer-facing, ver CLAUDE.md).
+  is_internal: boolean
   created_at: string
 }
 

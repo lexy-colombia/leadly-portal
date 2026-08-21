@@ -21,6 +21,7 @@ import {
   type StageHistoryRow,
 } from '../../lib/api/opportunities'
 import type { PipelineStage, OpportunityPriority } from '../../types/domain'
+import { formatDate } from '../../lib/dates'
 import { Badge, PageSpinner, Select } from '@/components/atoms'
 import { Card, EmptyState } from '@/components/molecules'
 import { PhoneIcon } from '@/components/atoms/icons'
@@ -31,10 +32,6 @@ function formatCompactCurrency(value: number): string {
   if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
   if (value >= 1_000) return `$${Math.round(value / 1_000)}K`
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(value)
-}
-
-function formatShortDate(iso: string, language: Language): string {
-  return new Date(iso).toLocaleDateString(language === 'en' ? 'en-US' : 'es-CO', { day: '2-digit', month: 'short' })
 }
 
 function formatTime(iso: string, language: Language): string {
@@ -367,7 +364,7 @@ export function Dashboard() {
                     <p className="truncate text-xs font-medium text-brand-800">{task.title}</p>
                     <p className="truncate text-[11px] text-brand-400">
                       {task.contact?.full_name ?? task.opportunity?.title ?? t('dashboard.upcomingTasks.generalTask')}
-                      {task.due_date && ` · ${formatShortDate(task.due_date, language)}`}
+                      {task.due_date && ` · ${formatDate(task.due_date)}`}
                     </p>
                   </div>
                   <Badge tone={PRIORITY_TONE[task.priority]}>{t(TASK_PRIORITY_KEY[task.priority])}</Badge>

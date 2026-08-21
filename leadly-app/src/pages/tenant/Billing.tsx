@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
-import type { Language, TranslationKey } from '../../i18n/translations'
+import type { TranslationKey } from '../../i18n/translations'
+import { formatDate } from '../../lib/dates'
 import {
   createCheckoutForInvoice,
   getActiveSubscriptionForTenant,
@@ -42,12 +43,6 @@ function formatMoney(amountCents: number, currency: string): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amountCents / 100)
 }
 
-function formatDate(iso: string | null, language: Language): string {
-  if (!iso) return '—'
-  const locale = language === 'en' ? 'en-US' : 'es-CO'
-  return new Date(iso).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })
-}
-
 function PayButton({ invoice }: { invoice: PaymentInvoice }) {
   const { t } = useLanguage()
   const [loading, setLoading] = useState(false)
@@ -78,7 +73,7 @@ function PayButton({ invoice }: { invoice: PaymentInvoice }) {
 
 export function Billing() {
   const { profile } = useAuth()
-  const { t, language } = useLanguage()
+  const { t } = useLanguage()
   const tenantId = profile?.tenant_id ?? null
 
   const [subscription, setSubscription] = useState<BillingSubscription | null | undefined>(undefined)
@@ -128,7 +123,7 @@ export function Billing() {
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-brand-400">{t('billing.plan.nextDue', { date: formatDate(subscription.current_period_end, language) })}</span>
+                <span className="text-brand-400">{t('billing.plan.nextDue', { date: formatDate(subscription.current_period_end) })}</span>
                 <Badge tone={subscription.status === 'ACTIVE' ? 'success' : subscription.status === 'PENDING_PAYMENT' ? 'warning' : 'danger'}>
                   {t(SUBSCRIPTION_STATUS_KEY[subscription.status])}
                 </Badge>
@@ -160,7 +155,7 @@ export function Billing() {
                       <TD>
                         <Badge tone={STATUS_TONE[invoice.status]}>{t(STATUS_KEY[invoice.status])}</Badge>
                       </TD>
-                      <TD className="text-brand-400">{formatDate(invoice.due_date, language)}</TD>
+                      <TD className="text-brand-400">{formatDate(invoice.due_date)}</TD>
                       <TD>{invoice.status === 'PENDING' || invoice.status === 'OVERDUE' ? <PayButton invoice={invoice} /> : null}</TD>
                     </TRow>
                   ))}

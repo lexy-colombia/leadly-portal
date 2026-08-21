@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import { useHeaderSearchSlot } from '@/contexts/HeaderSearchSlotContext'
@@ -63,6 +63,7 @@ function isLowStock(product: ProductWithImages, stockTotals: Map<string, Product
 export function Products() {
   const { profile } = useAuth()
   const { t } = useLanguage()
+  const navigate = useNavigate()
   const tenantId = profile?.tenant_id
   const { slot: headerSearchSlot } = useHeaderSearchSlot()
 
@@ -261,16 +262,14 @@ export function Products() {
                   const reserved = stockTotals.get(product.id)?.reserved ?? 0
                   const cover = product.images[0]
                   return (
-                    <TableRow key={product.id}>
+                    <TableRow key={product.id} onClick={() => navigate(`/app/products/${product.id}`)} className="cursor-pointer">
                       <TableCell>
                         <div className="h-9 w-9 overflow-hidden rounded-lg border border-brand-100">
                           <ProductImage src={cover ? getProductImageUrl(cover.storage_path) : null} name={product.name} className="h-full w-full" iconSize={16} />
                         </div>
                       </TableCell>
                       <TableCell className="text-sm font-medium text-brand-800">
-                        <Link to={`/app/products/${product.id}`} className="hover:text-accent-600 hover:underline">
-                          {product.name}
-                        </Link>
+                        {product.name}
                         {product.sku && <span className="block text-xs font-normal text-brand-400">{t('products.table.sku', { sku: product.sku })}</span>}
                       </TableCell>
                       <TableCell className="text-sm text-brand-500">{product.brand?.name ?? '-'}</TableCell>
@@ -305,7 +304,7 @@ export function Products() {
                         )}
                         {reserved > 0 && <span className="ml-1.5 text-xs text-brand-400">{t('products.table.reserved', { count: reserved })}</span>}
                       </TableCell>
-                      <TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
                         <Switch
                           checked={product.is_active}
                           disabled={togglingId === product.id}
@@ -313,7 +312,7 @@ export function Products() {
                           aria-label={t(product.is_active ? 'common.status.active' : 'common.status.inactive')}
                         />
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                         {deletingId === product.id ? (
                           <span className="inline-flex items-center gap-1.5">
                             <Button variant="destructive" size="xs" onClick={() => handleDelete(product.id)} disabled={deleting}>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { deleteBrand, listBrands, updateBrand } from '../../../lib/api/brands'
 import type { Brand } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
+import { formatDate } from '../../../lib/dates'
 import { InitialsAvatar, PageSpinner } from '@/components/atoms'
 import { Card, EmptyState, Pagination } from '@/components/molecules'
 import { PencilIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
@@ -12,13 +13,8 @@ import { BrandDrawer } from './BrandDrawer'
 
 const PAGE_SIZE = 10
 
-function formatDate(iso: string, locale: string): string {
-  return new Date(iso).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })
-}
-
 export function BrandsTab({ tenantId }: { tenantId: string }) {
-  const { t, language } = useLanguage()
-  const locale = language === 'en' ? 'en-US' : 'es-CO'
+  const { t } = useLanguage()
   const [brands, setBrands] = useState<Brand[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [page, setPage] = useState(1)
@@ -106,7 +102,7 @@ export function BrandsTab({ tenantId }: { tenantId: string }) {
               </TableHeader>
               <TableBody>
                 {pageItems.map((brand) => (
-                  <TableRow key={brand.id}>
+                  <TableRow key={brand.id} onClick={() => setDrawer({ open: true, brand })} className="cursor-pointer">
                     <TableCell className="text-xs font-medium text-brand-800">
                       <span className="flex items-center gap-2.5">
                         {brand.logo_url ? (
@@ -118,7 +114,7 @@ export function BrandsTab({ tenantId }: { tenantId: string }) {
                       </span>
                     </TableCell>
                     <TableCell className="text-xs text-brand-500">{brand.description || '—'}</TableCell>
-                    <TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
                       <Switch
                         checked={brand.is_active}
                         disabled={togglingId === brand.id}
@@ -126,8 +122,8 @@ export function BrandsTab({ tenantId }: { tenantId: string }) {
                         aria-label={t(brand.is_active ? 'common.status.active' : 'common.status.inactive')}
                       />
                     </TableCell>
-                    <TableCell className="text-xs text-brand-500">{formatDate(brand.created_at, locale)}</TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-xs text-brand-500">{formatDate(brand.created_at)}</TableCell>
+                    <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                       {deletingId === brand.id ? (
                         <span className="inline-flex items-center gap-1.5">
                           <Button variant="destructive" size="xs" onClick={() => handleDelete(brand.id)} disabled={deleting}>

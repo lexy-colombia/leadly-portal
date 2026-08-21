@@ -1,6 +1,7 @@
 import { InitialsAvatar } from '@/components/atoms'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import type { Language } from '../../../i18n/translations'
+import { formatDate } from '../../../lib/dates'
 import { CONVERSATION_CATEGORY_KEY, conversationDisplayName, type ConversationWithLine } from '../../../lib/api/conversations'
 
 function formatTime(iso: string | null, language: Language): string {
@@ -8,10 +9,9 @@ function formatTime(iso: string | null, language: Language): string {
   const date = new Date(iso)
   const now = new Date()
   const sameDay = date.toDateString() === now.toDateString()
+  if (!sameDay) return formatDate(iso)
   const locale = language === 'en' ? 'en-US' : 'es-CO'
-  return sameDay
-    ? date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
-    : date.toLocaleDateString(locale, { day: '2-digit', month: 'short' })
+  return date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
 }
 
 export function ConversationListItem({

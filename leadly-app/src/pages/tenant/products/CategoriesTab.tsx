@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { deleteProductCategory, flattenCategoryTree, listProductCategories, updateProductCategory } from '../../../lib/api/productCategories'
 import type { ProductCategory } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
+import { formatDate } from '../../../lib/dates'
 import { PageSpinner } from '@/components/atoms'
 import { Card, EmptyState } from '@/components/molecules'
 import { PencilIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
@@ -14,13 +15,8 @@ import { CategoryDrawer } from './CategoryDrawer'
 // "all lists paginated" rule) -- a flattened tree loses its parent/child
 // grouping if a page boundary lands mid-subtree, and a tenant's category
 // tree realistically never gets deep enough to need it.
-function formatDate(iso: string, locale: string): string {
-  return new Date(iso).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })
-}
-
 export function CategoriesTab({ tenantId }: { tenantId: string }) {
-  const { t, language } = useLanguage()
-  const locale = language === 'en' ? 'en-US' : 'es-CO'
+  const { t } = useLanguage()
   const [categories, setCategories] = useState<ProductCategory[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [drawer, setDrawer] = useState<{ open: boolean; category: ProductCategory | null; parentId: string | null }>({
@@ -103,7 +99,11 @@ export function CategoriesTab({ tenantId }: { tenantId: string }) {
             </TableHeader>
             <TableBody>
               {tree.map(({ category, depth }) => (
-                <TableRow key={category.id} className={!category.is_active ? 'opacity-60' : undefined}>
+                <TableRow
+                  key={category.id}
+                  onClick={() => setDrawer({ open: true, category, parentId: null })}
+                  className={`cursor-pointer ${!category.is_active ? 'opacity-60' : ''}`}
+                >
                   <TableCell className="text-xs font-medium text-brand-800">
                     <span className="flex items-center gap-2" style={{ paddingLeft: `${depth * 20}px` }}>
                       {depth > 0 && <span className="text-brand-300">└</span>}
@@ -111,7 +111,7 @@ export function CategoriesTab({ tenantId }: { tenantId: string }) {
                     </span>
                   </TableCell>
                   <TableCell className="text-xs text-brand-500">{category.description || '—'}</TableCell>
-                  <TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
                     <Switch
                       checked={category.is_active}
                       disabled={togglingId === category.id}
@@ -119,8 +119,8 @@ export function CategoriesTab({ tenantId }: { tenantId: string }) {
                       aria-label={t(category.is_active ? 'common.status.active' : 'common.status.inactive')}
                     />
                   </TableCell>
-                  <TableCell className="text-xs text-brand-500">{formatDate(category.created_at, locale)}</TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-xs text-brand-500">{formatDate(category.created_at)}</TableCell>
+                  <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                     {deletingId === category.id ? (
                       <span className="inline-flex items-center gap-1.5">
                         <Button variant="destructive" size="xs" onClick={() => handleDelete(category.id)} disabled={deleting}>

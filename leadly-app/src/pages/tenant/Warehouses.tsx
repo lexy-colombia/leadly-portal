@@ -81,7 +81,7 @@ export function Warehouses() {
             </THead>
             <TBody>
               {pageItems.map((warehouse) => (
-                <TRow key={warehouse.id}>
+                <TRow key={warehouse.id} clickable onClick={() => setDrawer({ open: true, warehouse })}>
                   <TD className="text-xs font-medium text-brand-800">
                     <span className="inline-flex items-center gap-2">
                       {warehouse.name}
@@ -94,7 +94,7 @@ export function Warehouses() {
                   <TD>
                     <Badge tone={warehouse.is_active ? 'success' : 'neutral'}>{t(warehouse.is_active ? 'common.status.active' : 'common.status.inactive')}</Badge>
                   </TD>
-                  <TD className="text-right">
+                  <TD className="text-right" onClick={(e) => e.stopPropagation()}>
                     {deletingId === warehouse.id ? (
                       <span className="inline-flex items-center gap-1.5">
                         <Button variant="danger" onClick={() => handleDelete(warehouse.id)} disabled={deleting} className="!px-2 !py-1 text-xs">

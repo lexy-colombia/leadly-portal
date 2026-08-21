@@ -15,6 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { CampaignFormDrawer, defaultScheduledAt, toDatetimeLocalValue } from './campaigns/CampaignFormDrawer'
 import type { CampaignFormInitial } from './campaigns/CampaignFormDrawer'
 import { CampaignDetailDrawer } from './campaigns/CampaignDetailDrawer'
+import { formatDateTime } from '../../lib/dates'
 
 const PAGE_SIZE = 10
 
@@ -123,8 +124,6 @@ export function Campaigns() {
   const totalPages = campaigns ? Math.max(1, Math.ceil(campaigns.length / PAGE_SIZE)) : 1
   const pageItems = campaigns ? campaigns.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE) : null
 
-  const locale = language === 'en' ? 'en-US' : 'es-CO'
-
   return (
     <div className="space-y-3">
       <div className="flex justify-end">
@@ -163,9 +162,7 @@ export function Campaigns() {
                     <TableCell className="text-xs font-medium text-brand-800">{campaign.name}</TableCell>
                     <TableCell className="text-xs text-brand-500">{campaign.template?.name ?? '-'}</TableCell>
                     <TableCell className="text-xs text-brand-500">{campaign.whatsapp_line?.display_name ?? '-'}</TableCell>
-                    <TableCell className="text-xs text-brand-500">
-                      {new Date(campaign.scheduled_at).toLocaleString(locale, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                    </TableCell>
+                    <TableCell className="text-xs text-brand-500">{formatDateTime(campaign.scheduled_at, language)}</TableCell>
                     <TableCell>
                       <Badge variant="outline" className={CAMPAIGN_STATUS_BADGE_CLASS[campaign.status]}>
                         {t(CAMPAIGN_STATUS_KEY[campaign.status])}

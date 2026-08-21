@@ -4,15 +4,10 @@ import type { PaymentAttempt, PaymentInvoice, PaymentInvoiceItem } from '../../.
 import { Badge, PageSpinner, Table, TBody, TD, TH, THead, TRow } from '@/components/atoms'
 import { Drawer } from '@/components/organisms'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import type { Language } from '../../../i18n/translations'
+import { formatDateTime } from '../../../lib/dates'
 
 function formatMoney(amountCents: number, currency: string): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amountCents / 100)
-}
-
-function formatDateTime(iso: string, language: Language): string {
-  const locale = language === 'en' ? 'en-US' : 'es-CO'
-  return new Date(iso).toLocaleString(locale, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 function Row({ label, value }: { label: string; value: ReactNode }) {

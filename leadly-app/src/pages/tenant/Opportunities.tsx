@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { TranslationKey } from '../../i18n/translations'
+import { formatDate } from '../../lib/dates'
 import {
   computePipelineMetrics,
   listOpportunities,
@@ -57,10 +58,6 @@ function formatCurrency(value: number, currency = 'COP'): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 }
 
-function formatShortDate(iso: string, locale: string): string {
-  return new Date(iso).toLocaleDateString(locale, { day: '2-digit', month: 'short' })
-}
-
 function formatCompactCurrency(value: number): string {
   if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
   if (value >= 1_000) return `$${Math.round(value / 1_000)}K`
@@ -79,8 +76,7 @@ function MetricTile({ label, value, tone = 'neutral' }: { label: string; value: 
 
 export function Opportunities() {
   const { profile } = useAuth()
-  const { t, language } = useLanguage()
-  const locale = language === 'en' ? 'en-US' : 'es-CO'
+  const { t } = useLanguage()
   const isAdmin = profile?.role === 'tenant_admin'
   const [pipelines, setPipelines] = useState<Pipeline[] | undefined>(undefined)
   const [selectedPipelineId, setSelectedPipelineId] = useState<string | null>(null)
@@ -566,7 +562,7 @@ export function Opportunities() {
                             <CalendarIcon width={12} height={12} />
                           </span>
                         </div>
-                        <span className="text-[10px] text-brand-300">{formatShortDate(opp.expected_close_date ?? opp.created_at, locale)}</span>
+                        <span className="text-[10px] text-brand-300">{formatDate(opp.expected_close_date ?? opp.created_at)}</span>
                       </div>
                     </div>
                   ))}
