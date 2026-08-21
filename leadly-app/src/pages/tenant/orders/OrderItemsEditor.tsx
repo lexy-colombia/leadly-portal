@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { CategoryTreeFilter, ComboboxFilter, CurrencyInput, IconInput } from '@/components/molecules'
 import { ProductImage } from '@/components/atoms'
 import { TrashIcon } from '@/components/atoms/icons'
-import { computeOrderTotals, type OrderItemInput } from '../../../lib/api/orders'
+import type { OrderItemInput, StockShortfall } from '../../../lib/api/orders'
 import { formatVariantLabel, getProductImageUrl, type ProductWithImages } from '../../../lib/api/products'
 import type { ProductWarehouseStockRow } from '../../../lib/api/stockMovements'
 import type { Brand, ProductCategory, Warehouse } from '../../../types/domain'
@@ -42,6 +42,7 @@ export function OrderItemsEditor({
   brands,
   warehouses,
   stockRows,
+  shortfalls = [],
   currency = 'COP',
   onChange,
 }: {
@@ -51,11 +52,15 @@ export function OrderItemsEditor({
   brands: Brand[]
   warehouses: Warehouse[]
   stockRows: ProductWarehouseStockRow[]
+  /** Lines a stock check just blocked on -- see StockShortfallDialog. Marks
+   * that line's Cantidad input red so the agent doesn't have to cross-
+   * reference the dialog's text against every row by eye. Cleared by the
+   * parent the moment any item changes (stale otherwise). */
+  shortfalls?: StockShortfall[]
   currency?: string
   onChange: (items: OrderItemInput[]) => void
 }) {
   const { t } = useLanguage()
-  const subtotal = computeOrderTotals(items, 0, 0).subtotal
   const defaultWarehouseId = warehouses.find((w) => w.is_default)?.id ?? warehouses[0]?.id ?? null
 
   const [searchOpen, setSearchOpen] = useState(false)
@@ -123,7 +128,7 @@ export function OrderItemsEditor({
   }
 
   const searchPanel = searchOpen && (
-    <div className="mb-3 rounded-lg border border-brand-100 bg-brand-50/40 p-3">
+    <div className="mt-3 rounded-lg border border-brand-100 bg-brand-50/40 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <CategoryTreeFilter
@@ -204,24 +209,19 @@ export function OrderItemsEditor({
 
   return (
     <div>
-      <div className="mb-3 flex justify-end">
-        <Button type="button" size="sm" onClick={() => setSearchOpen((v) => !v)}>
-          <PlusIcon className="size-3.5" /> {t('orders.itemsEditor.addProduct')}
-        </Button>
-      </div>
-
-      {searchPanel}
-
-      <div className="space-y-2">
+      <div>
         {items.map((item, index) => {
           const selectedProduct = item.product_id ? products.find((p) => p.id === item.product_id) : undefined
           const discountAmount = item.discount_amount ?? 0
           const lineTotal = item.quantity * item.unit_price - discountAmount
           const available = availableStock(stockRows, item.product_id, item.variant_id, item.warehouse_id)
+          const isShort = shortfalls.some(
+            (s) => s.productId === item.product_id && s.variantId === (item.variant_id ?? null) && s.warehouseId === item.warehouse_id,
+          )
           return (
-            <div key={index} className="rounded-lg border border-brand-100 p-3">
-              <div className="flex flex-wrap items-start gap-3">
-                <ProductImage src={selectedProduct?.images[0] ? getProductImageUrl(selectedProduct.images[0].storage_path) : null} name={item.product_name || '?'} className="size-11 shrink-0 rounded-lg" iconSize={18} />
+            <div key={index} className="border-b border-brand-100 py-2 last:border-b-0">
+              <div className="flex flex-wrap items-start gap-2.5">
+                <ProductImage src={selectedProduct?.images[0] ? getProductImageUrl(selectedProduct.images[0].storage_path) : null} name={item.product_name || '?'} className="mt-4 size-9 shrink-0 rounded-lg" iconSize={15} />
 
                 <div className="min-w-[160px] flex-1 space-y-1">
                   {item.product_id ? (
@@ -230,15 +230,15 @@ export function OrderItemsEditor({
                       <p className="truncate text-xs text-brand-400">{item.sku ? `SKU: ${item.sku}` : '—'}</p>
                     </>
                   ) : (
-                    <Input value={item.product_name} onChange={(e) => updateItem(index, { product_name: e.target.value })} placeholder={t('orders.itemsEditor.lineNamePlaceholder')} className="h-8 text-xs" />
+                    <Input value={item.product_name} onChange={(e) => updateItem(index, { product_name: e.target.value })} placeholder={t('orders.itemsEditor.lineNamePlaceholder')} />
                   )}
                 </div>
 
                 {selectedProduct?.has_variants && (
                   <div className="w-40 shrink-0">
-                    <span className="mb-1 block text-[11px] font-medium text-brand-400">{t('orders.itemsEditor.variant')}</span>
+                    <span className="mb-0.5 block text-[11px] font-medium text-brand-400">{t('orders.itemsEditor.variant')}</span>
                     <Select value={item.variant_id ?? undefined} onValueChange={(v) => handleVariantSelect(index, selectedProduct, v)}>
-                      <SelectTrigger className="h-8 w-full text-xs">
+                      <SelectTrigger className="w-full">
                         <SelectValue placeholder={t('orders.itemsEditor.selectVariant')} />
                       </SelectTrigger>
                       <SelectContent>
@@ -255,23 +255,34 @@ export function OrderItemsEditor({
                 )}
 
                 <div className="w-36 shrink-0">
-                  <span className="mb-1 block text-[11px] font-medium text-brand-400">{t('orders.itemsEditor.warehouse')}</span>
+                  <span className="mb-0.5 block text-[11px] font-medium text-brand-400">{t('orders.itemsEditor.warehouse')}</span>
                   {item.product_id ? (
                     <>
                       <Select value={item.warehouse_id ?? undefined} onValueChange={(v) => updateItem(index, { warehouse_id: v })}>
-                        <SelectTrigger className="h-8 w-full text-xs">
+                        <SelectTrigger className="w-full">
                           <SelectValue placeholder={t('orders.itemsEditor.selectWarehouse')} />
                         </SelectTrigger>
                         <SelectContent>
-                          {warehouses.map((w) => (
-                            <SelectItem key={w.id} value={w.id}>
-                              {w.name}
-                            </SelectItem>
-                          ))}
+                          {warehouses.map((w) => {
+                            const wAvailable = availableStock(stockRows, item.product_id, item.variant_id, w.id) ?? 0
+                            return (
+                              <SelectItem
+                                key={w.id}
+                                value={w.id}
+                                meta={
+                                  <span className={`ml-auto shrink-0 text-[11px] ${wAvailable > 0 ? 'text-brand-400' : 'text-red-500'}`}>
+                                    {t('products.table.available', { count: wAvailable })}
+                                  </span>
+                                }
+                              >
+                                {w.name}
+                              </SelectItem>
+                            )
+                          })}
                         </SelectContent>
                       </Select>
                       {available !== null && (
-                        <p className={`mt-1 text-[11px] font-medium ${available > 0 ? 'text-brand-400' : 'text-red-500'}`}>{t('products.table.available', { count: available })}</p>
+                        <p className={`mt-1 text-[11px] font-medium ${available <= 0 || isShort ? 'text-red-500' : 'text-brand-400'}`}>{t('products.table.available', { count: available })}</p>
                       )}
                     </>
                   ) : (
@@ -280,26 +291,34 @@ export function OrderItemsEditor({
                 </div>
 
                 <div className="w-20 shrink-0">
-                  <span className="mb-1 block text-[11px] font-medium text-brand-400">{t('orders.itemsEditor.quantity')}</span>
-                  <Input type="number" min="0" step="1" value={item.quantity} onChange={(e) => updateItem(index, { quantity: Number(e.target.value) || 0 })} className="h-8 text-right text-xs" />
+                  <span className={`mb-0.5 block text-[11px] font-medium ${isShort ? 'text-red-500' : 'text-brand-400'}`}>{t('orders.itemsEditor.quantity')}</span>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={item.quantity}
+                    onChange={(e) => updateItem(index, { quantity: Number(e.target.value) || 0 })}
+                    aria-invalid={isShort}
+                    className={`text-right ${isShort ? 'border-red-400 text-red-700 focus-visible:ring-red-300' : ''}`}
+                  />
                 </div>
 
                 <div className="w-28 shrink-0">
-                  <span className="mb-1 block text-[11px] font-medium text-brand-400">{t('orders.itemsEditor.unitPrice')}</span>
-                  <CurrencyInput value={item.unit_price} onChange={(e) => updateItem(index, { unit_price: Number(e.target.value) || 0 })} className="h-8 text-right text-xs" />
+                  <span className="mb-0.5 block text-[11px] font-medium text-brand-400">{t('orders.itemsEditor.unitPrice')}</span>
+                  <CurrencyInput value={item.unit_price} onChange={(e) => updateItem(index, { unit_price: Number(e.target.value) || 0 })} className="text-right" />
                 </div>
 
                 <div className="w-28 shrink-0">
-                  <span className="mb-1 block text-[11px] font-medium text-brand-400">{t('orders.itemsEditor.columns.discount')}</span>
-                  <CurrencyInput value={discountAmount} onChange={(e) => updateItem(index, { discount_amount: Number(e.target.value) || 0 })} className="h-8 text-right text-xs" />
+                  <span className="mb-0.5 block text-[11px] font-medium text-brand-400">{t('orders.itemsEditor.columns.discount')}</span>
+                  <CurrencyInput value={discountAmount} onChange={(e) => updateItem(index, { discount_amount: Number(e.target.value) || 0 })} className="text-right" />
                 </div>
 
                 <div className="w-28 shrink-0 text-right">
-                  <span className="mb-1 block text-[11px] font-medium text-brand-400">{t('orders.itemsEditor.columns.total')}</span>
-                  <p className="mt-1.5 text-sm font-semibold text-brand-800">{formatCurrency(lineTotal, currency)}</p>
+                  <span className="mb-0.5 block text-[11px] font-medium text-brand-400">{t('orders.itemsEditor.columns.total')}</span>
+                  <p className="mt-1 text-sm font-semibold text-brand-800">{formatCurrency(lineTotal, currency)}</p>
                 </div>
 
-                <Button type="button" variant="destructive" size="icon-xs" onClick={() => removeItem(index)} aria-label={t('orders.itemsEditor.removeAria')} className="mt-5 shrink-0 rounded-full">
+                <Button type="button" variant="destructive" size="icon-xs" onClick={() => removeItem(index)} aria-label={t('orders.itemsEditor.removeAria')} className="mt-4 shrink-0 rounded-full">
                   <TrashIcon width={12} height={12} />
                 </Button>
               </div>
@@ -308,13 +327,23 @@ export function OrderItemsEditor({
         })}
       </div>
 
-      <div className="mt-3 flex items-center justify-between border-t border-brand-100 pt-3">
-        <Button type="button" variant="ghost" size="sm" onClick={addCustomLine}>
-          {t('orders.itemsEditor.addLine')}
-        </Button>
-        <span className="text-sm font-semibold text-brand-800">
-          {t('orders.itemsEditor.subtotal')} {formatCurrency(subtotal, currency)}
-        </span>
+      {/* Debajo de la lista, no arriba -- pedido explícito del usuario: con
+          el buscador arriba, agregar un producto lo mandaba al fondo de la
+          lista sin ninguna señal visible de que se agregó, sin hacer
+          scroll. Acá la línea nueva aparece justo encima de donde ya está
+          mirando. "Línea personalizada" vive al lado de "Agregar producto"
+          (antes tenía su propia barra abajo con el subtotal, que ya se ve
+          en la card de Resumen -- quitarlo de acá gana espacio). */}
+      <div className={items.length > 0 ? 'mt-3' : ''}>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" size="sm" onClick={addCustomLine}>
+            {t('orders.itemsEditor.addLine')}
+          </Button>
+          <Button type="button" size="sm" onClick={() => setSearchOpen((v) => !v)}>
+            <PlusIcon className="size-3.5" /> {t('orders.itemsEditor.addProduct')}
+          </Button>
+        </div>
+        {searchPanel}
       </div>
     </div>
   )

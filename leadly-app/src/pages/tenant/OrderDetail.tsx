@@ -1,19 +1,23 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { MoreHorizontalIcon, ScanLineIcon, UploadIcon, XIcon } from 'lucide-react'
+import { ScanLineIcon, UploadIcon, XIcon } from 'lucide-react'
 import {
   createOrder,
   deleteOrder,
+  findStockShortfalls,
   getOrder,
   hasIncompleteVariantSelection,
   listOrderItems,
   updateOrderFields,
   updateOrderItemsAndTotals,
   updateOrderStatus,
+  updateDeliveryStatus,
   computeOrderTotals,
   ORDER_STATUS_LABEL_KEY,
+  ORDER_STATUS_BADGE_CLASS,
+  DELIVERY_STATUS_LABEL_KEY,
 } from '../../lib/api/orders'
-import type { OrderDetail as OrderDetailType, OrderInput, OrderItemInput } from '../../lib/api/orders'
+import type { OrderDetail as OrderDetailType, OrderInput, OrderItemInput, StockShortfall } from '../../lib/api/orders'
 import { listClients } from '../../lib/api/clients'
 import type { Client } from '../../types/domain'
 import { listOpportunities } from '../../lib/api/opportunities'
@@ -32,34 +36,25 @@ import type { OrderCommentWithAuthor } from '../../lib/api/orderComments'
 import { listAttachmentsForOrderComments, uploadOrderCommentAttachment } from '../../lib/api/attachments'
 import { listTasksForOpportunity } from '../../lib/api/tasks'
 import type { TaskWithRelations } from '../../lib/api/tasks'
-import type { ContactAddress, SalesOrderPayment, Attachment, OrderStatus, ProductCategory, Brand, Warehouse } from '../../types/domain'
+import type { ContactAddress, SalesOrderPayment, Attachment, OrderStatus, DeliveryStatus, ProductCategory, Brand, Warehouse } from '../../types/domain'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
-import type { Language } from '../../i18n/translations'
 import { isNotBlank } from '../../lib/validation'
+import { formatDate, formatDateTime } from '../../lib/dates'
 import { FieldError, InitialsAvatar, PageSpinner } from '@/components/atoms'
-import { ComboboxFilter, CurrencyInput, ImageAttachmentPicker, Pagination, SignedImage } from '@/components/molecules'
+import { ComboboxFilter, CurrencyInput, ImageAttachmentPicker, SignedImage } from '@/components/molecules'
 import { ConfirmDialog } from '@/components/organisms'
-import { ClockIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
+import { ClockIcon, PencilIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { OrderItemsEditor } from './orders/OrderItemsEditor'
 import { PaymentDrawer } from './orders/PaymentDrawer'
+import { StockShortfallDialog } from './orders/StockShortfallDialog'
 import { AddressDrawer } from './clients/AddressDrawer'
-
-const ORDER_STATUS_BADGE_CLASS: Record<OrderStatus, string> = {
-  cotizacion: 'border-transparent bg-slate-100 text-slate-600',
-  confirmada: 'border-transparent bg-amber-100 text-amber-700',
-  en_proceso: 'border-transparent bg-amber-100 text-amber-700',
-  entregada: 'border-transparent bg-emerald-100 text-emerald-700',
-  cancelada: 'border-transparent bg-red-100 text-red-700',
-}
 
 function addressLabel(a: ContactAddress): string {
   return `${a.label ? `${a.label} — ` : ''}${a.line1}${a.city ? `, ${a.city}` : ''}`
@@ -69,36 +64,14 @@ function itemsEqual(a: OrderItemInput[], b: OrderItemInput[]): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
 }
 
-/** No reverse transitions -- once a cotización becomes a venta it can't go
- * back, and 'cancelada' is terminal. A brand new order can start directly
- * at any non-cancelada status (an instant/walk-in sale skips the quote
- * phase entirely). */
-function availableStatusOptions(currentStatus: OrderStatus | null): OrderStatus[] {
-  if (!currentStatus || currentStatus === 'cotizacion') return ['cotizacion', 'confirmada', 'en_proceso', 'entregada', 'cancelada']
-  if (currentStatus === 'cancelada') return ['cancelada']
-  return ['confirmada', 'en_proceso', 'entregada', 'cancelada']
-}
-
-const PAGE_SIZE = 6
-
-function paginate<T>(items: T[], page: number): { items: T[]; totalPages: number } {
-  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE))
-  return { items: items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), totalPages }
-}
+/** Only relevant at creation -- 'cancelada' isn't offered (a brand new
+ * order can't start already voided), and once it exists, edit mode moves
+ * status forward through the header buttons instead of a select (see
+ * statusActions below). */
+const CREATE_STATUS_OPTIONS: OrderStatus[] = ['cotizacion', 'confirmada']
 
 function formatCurrency(value: number, currency = 'COP'): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
-}
-
-function formatDate(iso: string | null, language: Language): string {
-  if (!iso) return '—'
-  const locale = language === 'en' ? 'en-US' : 'es-CO'
-  return new Date(iso).toLocaleDateString(locale, { day: '2-digit', month: 'short', year: 'numeric' })
-}
-
-function formatDateTime(iso: string, language: Language): string {
-  const locale = language === 'en' ? 'en-US' : 'es-CO'
-  return new Date(iso).toLocaleString(locale, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 /** Same card shape as ProductDetail.tsx (title + optional header action +
@@ -121,6 +94,62 @@ function StatCard({ title, action, children, className = '' }: { title: string; 
  * OrderDetail.tsx) to mark something the AI created on its own. */
 function AiBadge({ label }: { label: string }) {
   return <span className="shrink-0 rounded-full bg-accent-50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-accent-700">{label}</span>
+}
+
+/** One half of the "4. Notas y comentarios" card -- Notas and Comentarios
+ * are the same shape (content + author + date, newest first, like a
+ * conversation) since both now live in sales_order_comments split by
+ * is_internal (ver types/domain.ts), so this covers both instead of
+ * duplicating the list markup. Only what varies (the add-form: Comentarios
+ * has an image picker, Notas doesn't) is passed in as `form`. */
+function ThreadColumn({
+  label,
+  entries,
+  adding,
+  onToggleAdd,
+  addAria,
+  form,
+  attachmentsByComment,
+}: {
+  label: string
+  entries: OrderCommentWithAuthor[] | null
+  adding: boolean
+  onToggleAdd: () => void
+  addAria: string
+  form: ReactNode
+  attachmentsByComment?: Record<string, Attachment[]>
+}) {
+  const { t, language } = useLanguage()
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <Label>{label}</Label>
+        <Button type="button" variant="default" size="icon-sm" onClick={onToggleAdd} aria-label={addAria}>
+          {adding ? <XIcon className="size-3.5" /> : <PlusIcon width={13} height={13} />}
+        </Button>
+      </div>
+      {adding && <div className="mb-2">{form}</div>}
+      {!entries && <PageSpinner />}
+      {entries && entries.length === 0 && !adding && <p className="text-xs text-brand-400">{t('orders.detail.threadEmpty')}</p>}
+      {entries && entries.length > 0 && (
+        <ul className="max-h-56 space-y-2.5 overflow-y-auto">
+          {entries.map((c) => (
+            <li key={c.id} className="flex items-start gap-2">
+              <InitialsAvatar name={c.created_by_ai ? t('orders.detail.aiBadge') : (c.author?.full_name ?? t('orders.detail.agent'))} size="xs" />
+              <div className="min-w-0 flex-1">
+                <p className="whitespace-pre-wrap text-sm text-brand-700">{c.content}</p>
+                {attachmentsByComment?.[c.id]?.map((a) => <SignedImage key={a.id} storagePath={a.storage_path} className="mt-1 h-12 w-12" />)}
+                <p className="mt-0.5 flex items-center gap-1.5 text-xs text-brand-400">
+                  {c.created_by_ai ? t('orders.detail.aiAssistant') : (c.author?.full_name ?? t('orders.detail.agent'))} · {formatDateTime(c.created_at, language)}
+                  {c.created_by_ai && <AiBadge label={t('orders.detail.aiBadge')} />}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 }
 
 export function OrderDetail() {
@@ -150,11 +179,14 @@ export function OrderDetail() {
   // ----- editable fields, shared shape for both modes -----
   const [contactId, setContactId] = useState(() => searchParams.get('contactId') ?? '')
   const [opportunityId, setOpportunityId] = useState('')
-  const [status, setStatus] = useState<OrderStatus>('cotizacion')
+  // Ventas directas son el caso por defecto (pedido explícito del usuario:
+  // "por defecto deben ser ventas, cotizaciones [son] algo adicional que
+  // requiera") -- Cotización sigue siendo una opción real en el Select de
+  // Estado, solo dejó de ser el estado inicial al crear.
+  const [status, setStatus] = useState<OrderStatus>('confirmada')
   const [validUntil, setValidUntil] = useState('')
   const [shippingAddressId, setShippingAddressId] = useState('')
   const [billingAddressId, setBillingAddressId] = useState('')
-  const [notesDraft, setNotesDraft] = useState('')
   const [contactChangedNotice, setContactChangedNotice] = useState(false)
   // Contacto shows either the search combobox or (once picked) a compact
   // read-only card with its info -- the "x" on the card switches back to
@@ -163,6 +195,13 @@ export function OrderDetail() {
   // order); the combobox itself is rendered with value=null while in this
   // mode so it doesn't show its own redundant "x" on top of the old pick.
   const [editingContact, setEditingContact] = useState(false)
+  // Same toggle idea as editingContact, one per address role -- picking a
+  // different saved address (or clearing to search) shouldn't require the
+  // field to look like a dropdown all the time (explicit user feedback,
+  // reference screenshot: address shows as plain text, edit is a separate
+  // small action).
+  const [editingShippingAddress, setEditingShippingAddress] = useState(false)
+  const [editingBillingAddress, setEditingBillingAddress] = useState(false)
   const [touched, setTouched] = useState(false)
 
   // ----- items + shipping + tax: the one block with an explicit batch save -----
@@ -177,11 +216,20 @@ export function OrderDetail() {
   // ----- creation -----
   const [creating, setCreating] = useState(false)
 
-  // ----- payments / comments (edit mode only) -----
+  // ----- payments / notes+comments (edit mode only) -----
   const [payments, setPayments] = useState<SalesOrderPayment[] | null>(null)
+  // Both threads live in the same table now (sales_order_comments.is_internal
+  // splits them, ver types/domain.ts) -- one fetch, filtered client-side into
+  // the two columns (see notesList/commentsList below).
   const [comments, setComments] = useState<OrderCommentWithAuthor[] | null>(null)
   const [attachmentsByComment, setAttachmentsByComment] = useState<Record<string, Attachment[]>>({})
-  const [commentsPage, setCommentsPage] = useState(1)
+  // Each column's "+" reveals its own form instead of always showing one --
+  // explicit user feedback, matches the reference screenshot's collapsed
+  // "Comentarios [+]" / "Observaciones [+]" boxes.
+  const [addingNote, setAddingNote] = useState(false)
+  const [noteDraft, setNoteDraft] = useState('')
+  const [savingNote, setSavingNote] = useState(false)
+  const [addingComment, setAddingComment] = useState(false)
   const [commentDraft, setCommentDraft] = useState('')
   const [commentAttachment, setCommentAttachment] = useState<File | null>(null)
   const [savingComment, setSavingComment] = useState(false)
@@ -192,6 +240,12 @@ export function OrderDetail() {
   const [voiding, setVoiding] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [advancingStatus, setAdvancingStatus] = useState(false)
+  // stockShortfalls persists after the dialog closes (it drives the red
+  // outline on the offending Cantidad inputs in OrderItemsEditor) --
+  // shortfallDialogOpen is the only thing the dialog itself reads.
+  const [stockShortfalls, setStockShortfalls] = useState<StockShortfall[]>([])
+  const [shortfallDialogOpen, setShortfallDialogOpen] = useState(false)
 
   function reloadOrder() {
     if (!id) return
@@ -267,14 +321,6 @@ export function OrderDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order?.id, order?.contact_id, order?.opportunity_id, order?.status, order?.valid_until, order?.shipping_address_id, order?.billing_address_id])
 
-  // Notes get their own effect (Textarea, real risk of an in-progress typed
-  // draft) -- only resyncs when the *value* actually changed, never on a
-  // reload triggered by something else on the page.
-  useEffect(() => {
-    if (isNew || !order) return
-    setNotesDraft(order.notes ?? '')
-  }, [order?.id, order?.notes])
-
   // Items+shipping+tax baseline: only on order.id changing (a different
   // order loaded), or right after this block's own save (handled inline in
   // handleSaveItemsBlock) -- never in response to a reload triggered by
@@ -344,7 +390,11 @@ export function OrderDetail() {
   }, [contactChangedNotice])
 
   const contactOpportunities = useMemo(() => opportunities.filter((o) => o.contact_id === contactId), [opportunities, contactId])
-  const commentsPageData = useMemo(() => paginate(comments ?? [], commentsPage), [comments, commentsPage])
+  // Same table, split by is_internal (ver types/domain.ts) -- newest first
+  // in both, like a conversation. Stays null (not []) while comments hasn't
+  // loaded yet so each column can still tell "loading" from "empty".
+  const notesList = useMemo(() => (comments ? comments.filter((c) => c.is_internal) : null), [comments])
+  const commentsList = useMemo(() => (comments ? comments.filter((c) => !c.is_internal) : null), [comments])
   const totalPaid = useMemo(() => (payments ?? []).reduce((sum, p) => sum + p.amount, 0), [payments])
   const totalQuantity = useMemo(() => items.reduce((sum, i) => sum + i.quantity, 0), [items])
   const previewTotals = useMemo(() => computeOrderTotals(items, Number(shippingDraft) || 0, Number(taxDraft) || 0), [items, shippingDraft, taxDraft])
@@ -389,14 +439,45 @@ export function OrderDetail() {
       .catch((err) => setActionError(err instanceof Error ? err.message : t('orders.drawer.errors.save')))
   }
 
-  function handleStatusSelect(newStatus: OrderStatus) {
+  async function handleStatusSelect(newStatus: OrderStatus) {
     if (isNew) {
       setStatus(newStatus)
       return
     }
+    if (!order || !profile?.tenant_id) return
+    setActionError(null)
+    // Stock is only checked at the exact moment a cotización turns into a
+    // venta -- quoting is allowed to exceed what's on hand, confirming
+    // isn't (explicit product decision). Void (-> cancelada) never needs
+    // this check.
+    if (order.status === 'cotizacion' && newStatus === 'confirmada') {
+      try {
+        const shortfalls = await findStockShortfalls(profile.tenant_id, items, warehouses)
+        if (shortfalls.length > 0) {
+          setStockShortfalls(shortfalls)
+          setShortfallDialogOpen(true)
+          return
+        }
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : t('orders.drawer.errors.save'))
+        return
+      }
+    }
+    setAdvancingStatus(true)
+    updateOrderStatus(order.id, newStatus)
+      .then(reloadOrder)
+      .catch((err) => setActionError(err instanceof Error ? err.message : t('orders.drawer.errors.save')))
+      .finally(() => setAdvancingStatus(false))
+  }
+
+  /** Fully independent from handleStatusSelect -- delivery_status never
+   * gates or is gated by the order's commercial status, no stock check,
+   * no restriction on which values are reachable from which (ver
+   * types/domain.ts). */
+  function handleDeliveryStatusSelect(newStatus: DeliveryStatus) {
     if (!order) return
     setActionError(null)
-    updateOrderStatus(order.id, newStatus)
+    updateDeliveryStatus(order.id, newStatus)
       .then(reloadOrder)
       .catch((err) => setActionError(err instanceof Error ? err.message : t('orders.drawer.errors.save')))
   }
@@ -411,6 +492,8 @@ export function OrderDetail() {
   }
 
   function handleAddressSelect(kind: 'shipping' | 'billing', addressId: string | null) {
+    if (kind === 'shipping') setEditingShippingAddress(false)
+    else setEditingBillingAddress(false)
     if (isNew) {
       if (kind === 'shipping') setShippingAddressId(addressId ?? '')
       else setBillingAddressId(addressId ?? '')
@@ -447,13 +530,20 @@ export function OrderDetail() {
       })
   }
 
-  function handleNotesBlur() {
-    if (isNew || !order) return
-    if (notesDraft === (order.notes ?? '')) return
-    setActionError(null)
-    updateOrderFields(order.id, { notes: notesDraft.trim() || null })
-      .then(reloadOrder)
-      .catch((err) => setActionError(err instanceof Error ? err.message : t('orders.detail.errors.notes')))
+  async function handleAddNote(e: FormEvent) {
+    e.preventDefault()
+    if (!noteDraft.trim() || !profile?.tenant_id || !id) return
+    setSavingNote(true)
+    try {
+      await createComment(profile.tenant_id, id, noteDraft.trim(), true)
+      setNoteDraft('')
+      setAddingNote(false)
+      reloadComments()
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : t('orders.detail.errors.notes'))
+    } finally {
+      setSavingNote(false)
+    }
   }
 
   async function handleSaveItemsBlock() {
@@ -488,6 +578,22 @@ export function OrderDetail() {
       return
     }
 
+    // Same rule as handleStatusSelect: creating directly as a venta (not a
+    // cotización) skips the separate "convert" step but not this check.
+    if (status !== 'cotizacion') {
+      try {
+        const shortfalls = await findStockShortfalls(profile.tenant_id, validItems, warehouses)
+        if (shortfalls.length > 0) {
+          setStockShortfalls(shortfalls)
+          setShortfallDialogOpen(true)
+          return
+        }
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : t('orders.detail.errors.create'))
+        return
+      }
+    }
+
     setCreating(true)
     try {
       const input: OrderInput = {
@@ -497,7 +603,6 @@ export function OrderDetail() {
         status,
         shipping: Number(shippingDraft) || 0,
         tax_total: Number(taxDraft) || 0,
-        notes: notesDraft.trim() || null,
         valid_until: validUntil || null,
         shipping_address_id: shippingAddressId || null,
         billing_address_id: billingAddressId || null,
@@ -527,6 +632,7 @@ export function OrderDetail() {
       }
       setCommentDraft('')
       setCommentAttachment(null)
+      setAddingComment(false)
       reloadComments()
     } catch {
       /* keep the draft on failure so the agent doesn't lose what they typed */
@@ -594,32 +700,52 @@ export function OrderDetail() {
   const addressField = (kind: 'shipping' | 'billing') => {
     const value = kind === 'shipping' ? shippingAddressId : billingAddressId
     const filtered = addresses.filter((a) => (kind === 'shipping' ? a.is_shipping : a.is_billing))
+    const selected = filtered.find((a) => a.id === value)
+    const editing = kind === 'shipping' ? editingShippingAddress : editingBillingAddress
+    const setEditing = kind === 'shipping' ? setEditingShippingAddress : setEditingBillingAddress
     return (
       <div>
         <Label>{t(kind === 'shipping' ? 'orders.detail.shipping' : 'orders.detail.billing')}</Label>
-        <div className="mt-1 flex gap-2">
-          <ComboboxFilter
-            options={filtered.map((a) => ({ id: a.id, label: addressLabel(a) }))}
-            value={value || null}
-            onChange={(v) => handleAddressSelect(kind, v)}
-            placeholder={t('orders.detail.noAddress')}
-            searchPlaceholder={t('orders.detail.searchAddress')}
-            emptyLabel={t('orders.detail.noAddressResults')}
-            className="min-w-0 flex-1"
-            triggerClassName="min-w-0 flex-1 shrink"
-          />
-          <Button
-            type="button"
-            variant="default"
-            size="icon"
-            onClick={() => setAddressDrawerOpen(true)}
-            disabled={!contactId}
-            aria-label={t('orders.detail.newAddressAria')}
-            className="shrink-0"
-          >
-            <PlusIcon width={14} height={14} />
-          </Button>
-        </div>
+        {selected && !editing ? (
+          <div className="mt-1 flex items-start justify-between gap-2">
+            <div className="min-w-0 text-sm">
+              <p className="truncate font-medium text-brand-800">
+                {selected.line1}
+                {selected.line2 ? `, ${selected.line2}` : ''}
+              </p>
+              {(selected.city || selected.state_province || selected.country) && (
+                <p className="truncate text-xs text-brand-400">{[selected.city, selected.state_province, selected.country].filter(Boolean).join(', ')}</p>
+              )}
+            </div>
+            <Button type="button" variant="default" size="icon-sm" onClick={() => setEditing(true)} aria-label={t('orders.detail.changeAddressAria')} className="shrink-0">
+              <PencilIcon width={12} height={12} />
+            </Button>
+          </div>
+        ) : (
+          <div className="mt-1 flex gap-2">
+            <ComboboxFilter
+              options={filtered.map((a) => ({ id: a.id, label: addressLabel(a) }))}
+              value={value || null}
+              onChange={(v) => handleAddressSelect(kind, v)}
+              placeholder={t('orders.detail.noAddress')}
+              searchPlaceholder={t('orders.detail.searchAddress')}
+              emptyLabel={t('orders.detail.noAddressResults')}
+              className="min-w-0 flex-1"
+              triggerClassName="min-w-0 flex-1 shrink"
+            />
+            <Button
+              type="button"
+              variant="default"
+              size="icon"
+              onClick={() => setAddressDrawerOpen(true)}
+              disabled={!contactId}
+              aria-label={t('orders.detail.newAddressAria')}
+              className="shrink-0"
+            >
+              <PlusIcon width={14} height={14} />
+            </Button>
+          </div>
+        )}
       </div>
     )
   }
@@ -630,80 +756,188 @@ export function OrderDetail() {
     </Button>
   ) : undefined
 
+  const showPayments = (isNew ? status : order?.status) !== 'cotizacion'
+  const showTasks = !isNew && !!relatedTasks && relatedTasks.length > 0
+  const hasSidePanel = showPayments || showTasks
+
+  const paymentsCard =
+    !isNew && order ? (
+      <StatCard
+        title={t('orders.detail.payments')}
+        action={
+          <Button type="button" variant="default" size="icon-sm" onClick={() => setPaymentDrawerOpen(true)} aria-label={t('orders.detail.registerPaymentAria')}>
+            <PlusIcon width={13} height={13} />
+          </Button>
+        }
+      >
+        {balance > 0 ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-700">
+            {t('orders.detail.pendingBalance', { amount: formatCurrency(balance, order.currency) })}
+          </div>
+        ) : (
+          payments &&
+          payments.length > 0 && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-700">{t('orders.detail.fullyPaid')}</div>
+          )
+        )}
+
+        {payments && payments.length > 0 && (
+          <ul className="mt-2 space-y-1">
+            {payments.map((p) => (
+              <li key={p.id} className="flex items-center justify-between gap-2 text-xs text-brand-600">
+                <span className="min-w-0 truncate">
+                  {t(PAYMENT_METHOD_LABEL_KEY[p.method])} · {formatDate(p.paid_at)}
+                </span>
+                <span className="flex shrink-0 items-center gap-1.5">
+                  <span className="font-medium text-brand-800">{formatCurrency(p.amount, p.currency)}</span>
+                  <button type="button" onClick={() => setDeletePaymentId(p.id)} className="text-brand-300 hover:text-red-600" aria-label={t('orders.detail.deletePaymentAria')}>
+                    <TrashIcon width={11} height={11} />
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {payments && payments.length === 0 && balance === 0 && <p className="text-xs text-brand-400">{t('orders.detail.noPayments')}</p>}
+      </StatCard>
+    ) : (
+      <StatCard title={t('orders.detail.payments')}>
+        <p className="text-xs text-brand-400">{t('orders.detail.paymentsAfterCreateHint')}</p>
+      </StatCard>
+    )
+
   const detailsContent = (
     <div className="space-y-4">
-      {/* 1. Cliente y direcciones */}
-      <StatCard title={t('orders.detail.sections.clientAndAddresses')}>
-        <div className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-3">
-          <div>
-            <Label>{t('orders.drawer.fields.contact')}</Label>
-            {contactId && !editingContact && selectedContact ? (
-              <div className="mt-1 flex items-center justify-between gap-2 rounded-lg border border-brand-100 bg-brand-50/40 px-3 py-1.5">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-brand-800">{selectedContact.full_name}</p>
-                  <p className="truncate text-xs text-brand-500">{[selectedContact.nit ? `NIT ${selectedContact.nit}` : null, selectedContact.phone].filter(Boolean).join(' · ')}</p>
-                </div>
-                <Button type="button" variant="ghost" size="icon-sm" onClick={() => setEditingContact(true)} aria-label={t('orders.detail.changeContactAria')} className="shrink-0">
-                  <XIcon className="size-3.5" />
-                </Button>
+      {/* Row 1: 1. Cliente y direcciones + Pagos/Tareas al lado -- pedido
+          explícito del usuario de que los pagos queden junto a la card de
+          cliente en vez de más abajo en la página. */}
+      <div className={`grid grid-cols-1 gap-4 ${hasSidePanel ? 'lg:grid-cols-3' : ''}`}>
+        <StatCard title={t('orders.detail.sections.clientAndAddresses')} className={hasSidePanel ? 'lg:col-span-2' : ''}>
+          <div className="grid grid-cols-1 gap-y-4 sm:grid-cols-3 sm:gap-x-6">
+            {/* Columna 1: Cliente + Facturación */}
+            <div className="space-y-4">
+              <div>
+                <Label>{t('orders.drawer.fields.contact')}</Label>
+                {contactId && !editingContact && selectedContact ? (
+                  <div className="mt-1 flex items-start justify-between gap-2">
+                    <div className="min-w-0 text-sm">
+                      <p className="truncate font-medium text-brand-800">{selectedContact.full_name}</p>
+                      <p className="truncate text-xs text-brand-400">{[selectedContact.nit ? `NIT ${selectedContact.nit}` : null, selectedContact.phone].filter(Boolean).join(' · ')}</p>
+                    </div>
+                    <Button type="button" variant="default" size="icon-sm" onClick={() => setEditingContact(true)} aria-label={t('orders.detail.changeContactAria')} className="shrink-0">
+                      <PencilIcon width={12} height={12} />
+                    </Button>
+                  </div>
+                ) : (
+                  <ComboboxFilter
+                    options={contacts.map((c) => ({ id: c.id, label: c.full_name }))}
+                    value={null}
+                    onChange={handleContactSelect}
+                    placeholder={t('orders.drawer.fields.selectPlaceholder')}
+                    searchPlaceholder={t('orders.detail.searchContact')}
+                    emptyLabel={t('orders.detail.noContactResults')}
+                    className="mt-1 w-full"
+                    triggerClassName="min-w-0 flex-1 shrink"
+                  />
+                )}
+                <FieldError message={contactError} />
               </div>
-            ) : (
-              <ComboboxFilter
-                options={contacts.map((c) => ({ id: c.id, label: c.full_name }))}
-                value={null}
-                onChange={handleContactSelect}
-                placeholder={t('orders.drawer.fields.selectPlaceholder')}
-                searchPlaceholder={t('orders.detail.searchContact')}
-                emptyLabel={t('orders.detail.noContactResults')}
-                className="mt-1 w-full"
-                triggerClassName="min-w-0 flex-1 shrink"
-              />
+              {addressField('billing')}
+            </div>
+
+            {/* Columna 2: Envío + Estado de envío */}
+            <div className="space-y-4 sm:border-l sm:border-brand-100 sm:pl-4">
+              {addressField('shipping')}
+              {/* Estado de envío -- solo edición + venta confirmada (concepto
+                  aparte del estado comercial, ver DeliveryStatus). No aplica
+                  en cotización/cancelada, no hay nada que enviar todavía o
+                  ya no corre. */}
+              {!isNew && order && order.status === 'confirmada' && (
+                <div>
+                  <Label>{t('orders.drawer.fields.deliveryStatus')}</Label>
+                  <Select value={order.delivery_status} onValueChange={(v) => handleDeliveryStatusSelect(v as DeliveryStatus)}>
+                    <SelectTrigger className="mt-1 w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(Object.keys(DELIVERY_STATUS_LABEL_KEY) as DeliveryStatus[]).map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {t(DELIVERY_STATUS_LABEL_KEY[s])}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+
+            {/* Columna 3: Oportunidad + Estado (solo al crear) + Válida
+                hasta (solo cotización -- no aplica a una venta ya
+                confirmada, se oculta entera en vez de mostrarla deshabilitada). */}
+            <div className="space-y-4 sm:border-l sm:border-brand-100 sm:pl-4">
+              <div>
+                <Label>{t('orders.drawer.fields.opportunity')}</Label>
+                <ComboboxFilter
+                  options={contactOpportunities.map((o) => ({ id: o.id, label: o.title }))}
+                  value={opportunityId || null}
+                  onChange={handleOpportunitySelect}
+                  placeholder={t('orders.drawer.fields.noOpportunity')}
+                  searchPlaceholder={t('orders.detail.searchOpportunity')}
+                  emptyLabel={t('orders.detail.noOpportunityResults')}
+                  className="mt-1 w-full"
+                  triggerClassName="min-w-0 flex-1 shrink"
+                />
+              </div>
+              {isNew && (
+                <div>
+                  <Label>{t('orders.drawer.fields.status')}</Label>
+                  <Select value={status} onValueChange={(v) => handleStatusSelect(v as OrderStatus)}>
+                    <SelectTrigger className="mt-1 w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CREATE_STATUS_OPTIONS.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {t(ORDER_STATUS_LABEL_KEY[s])}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              {(isNew ? status : order?.status) === 'cotizacion' && (
+                <div>
+                  <Label>{t('orders.drawer.fields.validUntil')}</Label>
+                  <Input type="date" value={validUntil} onChange={(e) => handleValidUntilChange(e.target.value)} className="mt-1" />
+                </div>
+              )}
+            </div>
+          </div>
+
+          {contactChangedNotice && <p className="mt-3 text-xs text-amber-600">{t('orders.detail.contactChangedNotice')}</p>}
+          {contactId && addresses.length === 0 && <p className="mt-3 text-xs text-brand-400">{t('orders.drawer.noAddressesHint')}</p>}
+        </StatCard>
+
+        {hasSidePanel && (
+          <div className="space-y-4">
+            {showPayments && paymentsCard}
+            {showTasks && (
+              <StatCard title={t('orders.detail.relatedTasks')}>
+                <ul className="space-y-1.5">
+                  {relatedTasks!.map((task) => (
+                    <li key={task.id} className="flex items-center justify-between gap-2 text-sm">
+                      <span className="min-w-0 truncate text-brand-600">{task.title}</span>
+                      <Badge className={task.status === 'completada' ? 'border-transparent bg-emerald-100 text-emerald-700' : 'border-transparent bg-amber-100 text-amber-700'}>
+                        {task.status === 'completada' ? t('orders.detail.taskDone') : t('orders.detail.taskPending')}
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+              </StatCard>
             )}
-            <FieldError message={contactError} />
           </div>
-          {addressField('shipping')}
-          {addressField('billing')}
-        </div>
-
-        {contactChangedNotice && <p className="mt-2 text-xs text-amber-600">{t('orders.detail.contactChangedNotice')}</p>}
-        {contactId && addresses.length === 0 && <p className="mt-2 text-xs text-brand-400">{t('orders.drawer.noAddressesHint')}</p>}
-
-        <div className="mt-3 grid grid-cols-1 gap-x-6 gap-y-4 border-t border-brand-100 pt-3 sm:grid-cols-3">
-          <div>
-            <Label>{t('orders.drawer.fields.opportunity')}</Label>
-            <ComboboxFilter
-              options={contactOpportunities.map((o) => ({ id: o.id, label: o.title }))}
-              value={opportunityId || null}
-              onChange={handleOpportunitySelect}
-              placeholder={t('orders.drawer.fields.noOpportunity')}
-              searchPlaceholder={t('orders.detail.searchOpportunity')}
-              emptyLabel={t('orders.detail.noOpportunityResults')}
-              className="mt-1 w-full"
-              triggerClassName="min-w-0 flex-1 shrink"
-            />
-          </div>
-          <div>
-            <Label>{t('orders.drawer.fields.status')}</Label>
-            <Select value={status} onValueChange={(v) => handleStatusSelect(v as OrderStatus)} disabled={!isNew && order?.status === 'cancelada'}>
-              <SelectTrigger className="mt-1 w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {availableStatusOptions(isNew ? null : (order?.status ?? null)).map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {t(ORDER_STATUS_LABEL_KEY[s])}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {!isNew && order?.status === 'cancelada' && <p className="mt-1 text-xs text-brand-400">{t('orders.drawer.cancelledNotice')}</p>}
-          </div>
-          <div>
-            <Label>{t('orders.drawer.fields.validUntil')}</Label>
-            <Input type="date" value={validUntil} onChange={(e) => handleValidUntilChange(e.target.value)} className="mt-1" disabled={!isNew && order?.status === 'cancelada'} />
-          </div>
-        </div>
-      </StatCard>
+        )}
+      </div>
 
       {/* 2. Ítems de la orden */}
       <StatCard
@@ -727,8 +961,15 @@ export function OrderDetail() {
           brands={brands}
           warehouses={warehouses}
           stockRows={stockRows}
+          shortfalls={stockShortfalls}
           currency={order?.currency ?? 'COP'}
-          onChange={setItems}
+          onChange={(next) => {
+            setItems(next)
+            // Stale otherwise -- a shortfall found for the old quantities/
+            // warehouse doesn't necessarily still apply once the agent
+            // changes something.
+            setStockShortfalls([])
+          }}
         />
         {items.length > 0 && (
           <p className="mt-2 text-xs text-brand-400">
@@ -768,115 +1009,73 @@ export function OrderDetail() {
           </div>
         </StatCard>
 
-        {/* 4. Notas adicionales */}
-        <StatCard title={t('orders.detail.notes')}>
-          <p className="mb-2 text-xs text-brand-400">{t('orders.detail.notesHint')}</p>
-          <Textarea value={notesDraft} onChange={(e) => setNotesDraft(e.target.value)} onBlur={handleNotesBlur} rows={4} placeholder={t('orders.detail.notesPlaceholder')} />
-        </StatCard>
-      </div>
+        {/* 4. Notas y comentarios -- una sola card, dividida en 2 columnas
+            (mismo criterio que Envío/Facturación: línea vertical al centro,
+            no tabs). Cada columna es su propio hilo tipo conversación
+            (contenido + autor + fecha) en vez de Notas siendo un textarea
+            único -- ambas viven en sales_order_comments, diferenciadas por
+            is_internal. Solo en edición: necesitan un order.id real. */}
+        {!isNew && (
+          <StatCard title={t('orders.detail.sections.notesAndComments')}>
+            <div className="grid grid-cols-1 gap-y-5 sm:grid-cols-2 sm:gap-x-6">
+              <ThreadColumn
+                label={t('orders.detail.notesTab')}
+                entries={notesList}
+                adding={addingNote}
+                onToggleAdd={() => setAddingNote((v) => !v)}
+                addAria={t('orders.detail.addNoteAria')}
+                form={
+                  <form onSubmit={handleAddNote} className="rounded-lg border border-brand-100 bg-brand-50/40 p-2 focus-within:border-accent-300">
+                    <Textarea
+                      value={noteDraft}
+                      onChange={(e) => setNoteDraft(e.target.value)}
+                      placeholder={t('orders.detail.notesPlaceholder')}
+                      rows={2}
+                      autoFocus
+                      className="resize-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
+                    />
+                    <div className="mt-1 flex justify-end">
+                      <Button type="submit" size="sm" disabled={savingNote || !noteDraft.trim()}>
+                        {savingNote ? t('common.actions.saving') : t('common.actions.save')}
+                      </Button>
+                    </div>
+                  </form>
+                }
+              />
 
-      {/* Pagos + Tareas relacionadas -- solo modo edición, no tienen
-          equivalente en la referencia (no existe todavía un pedido creado
-          para registrarles pagos). */}
-      {!isNew && order && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <StatCard
-            title={t('orders.detail.payments')}
-            action={
-              <Button type="button" variant="default" size="icon-sm" onClick={() => setPaymentDrawerOpen(true)} aria-label={t('orders.detail.registerPaymentAria')}>
-                <PlusIcon width={13} height={13} />
-              </Button>
-            }
-          >
-            {balance > 0 ? (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-700">
-                {t('orders.detail.pendingBalance', { amount: formatCurrency(balance, order.currency) })}
+              <div className="sm:border-l sm:border-brand-100 sm:pl-6">
+                <ThreadColumn
+                  label={t('orders.detail.commentsTab')}
+                  entries={commentsList}
+                  adding={addingComment}
+                  onToggleAdd={() => setAddingComment((v) => !v)}
+                  addAria={t('orders.detail.addCommentAria')}
+                  attachmentsByComment={attachmentsByComment}
+                  form={
+                    <form onSubmit={handleAddComment} className="rounded-lg border border-brand-100 bg-brand-50/40 p-2 focus-within:border-accent-300">
+                      <Textarea
+                        value={commentDraft}
+                        onChange={(e) => setCommentDraft(e.target.value)}
+                        placeholder={t('orders.detail.commentPlaceholder')}
+                        rows={2}
+                        autoFocus
+                        className="resize-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
+                      />
+                      <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
+                        <ImageAttachmentPicker file={commentAttachment} onChange={setCommentAttachment} />
+                        <Button type="submit" size="sm" disabled={savingComment || !commentDraft.trim()}>
+                          {savingComment ? t('common.actions.saving') : t('common.actions.save')}
+                        </Button>
+                      </div>
+                    </form>
+                  }
+                />
               </div>
-            ) : (
-              payments &&
-              payments.length > 0 && (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-700">{t('orders.detail.fullyPaid')}</div>
-              )
-            )}
-
-            {payments && payments.length > 0 && (
-              <ul className="mt-2 space-y-1">
-                {payments.map((p) => (
-                  <li key={p.id} className="flex items-center justify-between gap-2 text-xs text-brand-600">
-                    <span className="min-w-0 truncate">
-                      {t(PAYMENT_METHOD_LABEL_KEY[p.method])} · {formatDate(p.paid_at, language)}
-                    </span>
-                    <span className="flex shrink-0 items-center gap-1.5">
-                      <span className="font-medium text-brand-800">{formatCurrency(p.amount, p.currency)}</span>
-                      <button type="button" onClick={() => setDeletePaymentId(p.id)} className="text-brand-300 hover:text-red-600" aria-label={t('orders.detail.deletePaymentAria')}>
-                        <TrashIcon width={11} height={11} />
-                      </button>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {payments && payments.length === 0 && balance === 0 && <p className="text-xs text-brand-400">{t('orders.detail.noPayments')}</p>}
+            </div>
           </StatCard>
-
-          {relatedTasks && relatedTasks.length > 0 && (
-            <StatCard title={t('orders.detail.relatedTasks')}>
-              <ul className="space-y-1.5">
-                {relatedTasks.map((task) => (
-                  <li key={task.id} className="flex items-center justify-between gap-2 text-sm">
-                    <span className="min-w-0 truncate text-brand-600">{task.title}</span>
-                    <Badge className={task.status === 'completada' ? 'border-transparent bg-emerald-100 text-emerald-700' : 'border-transparent bg-amber-100 text-amber-700'}>
-                      {task.status === 'completada' ? t('orders.detail.taskDone') : t('orders.detail.taskPending')}
-                    </Badge>
-                  </li>
-                ))}
-              </ul>
-            </StatCard>
-          )}
-        </div>
-      )}
+        )}
+      </div>
     </div>
-  )
-
-  const commentsContent = (
-    <StatCard title={t('orders.detail.comments')}>
-      <form onSubmit={handleAddComment} className="mb-3 rounded-lg border border-brand-100 bg-brand-50/40 p-2 focus-within:border-accent-300">
-        <Textarea
-          value={commentDraft}
-          onChange={(e) => setCommentDraft(e.target.value)}
-          placeholder={t('orders.detail.commentPlaceholder')}
-          rows={2}
-          className="resize-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
-        />
-        <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
-          <ImageAttachmentPicker file={commentAttachment} onChange={setCommentAttachment} />
-          <Button type="submit" size="sm" disabled={savingComment || !commentDraft.trim()}>
-            {savingComment ? t('common.actions.saving') : t('orders.detail.addComment')}
-          </Button>
-        </div>
-      </form>
-
-      {!comments && <PageSpinner />}
-      {comments && comments.length === 0 && <p className="text-xs text-brand-400">{t('orders.detail.noComments')}</p>}
-      {comments && comments.length > 0 && (
-        <ul className="divide-y divide-brand-100">
-          {commentsPageData.items.map((c) => (
-            <li key={c.id} className="flex items-start gap-2 py-2 first:pt-0 last:pb-0">
-              <InitialsAvatar name={c.created_by_ai ? t('orders.detail.aiBadge') : (c.author?.full_name ?? t('orders.detail.agent'))} size="xs" />
-              <div className="min-w-0 flex-1">
-                <p className="whitespace-pre-wrap text-sm text-brand-700">{c.content}</p>
-                {attachmentsByComment[c.id]?.map((a) => <SignedImage key={a.id} storagePath={a.storage_path} className="mt-1 h-12 w-12" />)}
-                <p className="mt-0.5 flex items-center gap-1.5 text-xs text-brand-400">
-                  {c.created_by_ai ? t('orders.detail.aiAssistant') : (c.author?.full_name ?? t('orders.detail.agent'))} · {formatDateTime(c.created_at, language)}
-                  {c.created_by_ai && <AiBadge label={t('orders.detail.aiBadge')} />}
-                </p>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-      <Pagination page={commentsPage} totalPages={commentsPageData.totalPages} onChange={setCommentsPage} />
-    </StatCard>
   )
 
   return (
@@ -884,7 +1083,7 @@ export function OrderDetail() {
       {isNew ? (
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-xl font-bold text-brand-800">{t('orders.drawer.newTitle')}</h1>
+            <h1 className="text-xl font-bold text-brand-800">{t(status === 'cotizacion' ? 'orders.drawer.newTitle' : 'orders.detail.newSaleTitle')}</h1>
             <p className="mt-1 text-sm text-brand-500">{t('orders.detail.newSubtitle')}</p>
           </div>
           <div className="flex gap-2">
@@ -899,53 +1098,44 @@ export function OrderDetail() {
       ) : (
         order && (
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl font-bold text-brand-800">{t('orders.detail.title', { number: order.number })}</h1>
-                <Badge className={ORDER_STATUS_BADGE_CLASS[order.status]}>{t(ORDER_STATUS_LABEL_KEY[order.status])}</Badge>
-              </div>
-              <p className="mt-1 flex items-center gap-1 text-xs text-brand-500">
-                <ClockIcon width={12} height={12} /> {formatDateTime(order.created_at, language)}
-                {order.created_by_profile && <span>· {order.created_by_profile.full_name}</span>}
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-xl font-bold text-brand-800">ORD-{order.number}</h1>
+              <Badge className={ORDER_STATUS_BADGE_CLASS[order.status]}>{t(ORDER_STATUS_LABEL_KEY[order.status])}</Badge>
+              <p className="flex items-center gap-1 text-sm font-medium text-brand-600">
+                <ClockIcon width={13} height={13} /> {t('orders.detail.createdAtLabel')}: {formatDateTime(order.created_at, language)}
               </p>
+              {order.created_by_profile && <span className="text-xs text-brand-400">· {order.created_by_profile.full_name}</span>}
             </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="icon-sm" aria-label={t('orders.detail.moreActionsAria')}>
-                  <MoreHorizontalIcon className="size-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                {order.status !== 'cancelada' && <DropdownMenuItem onSelect={() => setConfirmingVoid(true)}>{t('orders.detail.voidAction')}</DropdownMenuItem>}
-                {order.status === 'cotizacion' && (
-                  <DropdownMenuItem variant="destructive" onSelect={() => setConfirmingDelete(true)}>
+            {/* Botones condicionados al estado actual -- reemplaza el menú
+                "···" y el Select de Estado de más abajo (pedido explícito
+                del usuario: nada de un selector que deje saltar a cualquier
+                estado, solo las transiciones que de verdad aplican desde
+                acá). Solo cubre el estado *comercial* (cotización/venta/
+                anulada) -- el de envío se edita aparte, ver la card 1. */}
+            <div className="flex flex-wrap items-center gap-2">
+              {order.status === 'cotizacion' && (
+                <>
+                  <Button size="sm" onClick={() => handleStatusSelect('confirmada')} disabled={advancingStatus}>
+                    {advancingStatus ? t('common.actions.saving') : t('orders.detail.actions.confirmSale')}
+                  </Button>
+                  <Button variant="outline" size="sm" className="text-red-600 hover:bg-red-50" onClick={() => setConfirmingDelete(true)}>
                     {t('orders.detail.deleteAction')}
-                  </DropdownMenuItem>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  </Button>
+                </>
+              )}
+              {order.status === 'confirmada' && (
+                <Button variant="outline" size="sm" className="text-red-600 hover:bg-red-50" onClick={() => setConfirmingVoid(true)}>
+                  {t('orders.detail.voidAction')}
+                </Button>
+              )}
+            </div>
           </div>
         )
       )}
 
       {actionError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{actionError}</p>}
 
-      {isNew ? (
-        detailsContent
-      ) : (
-        <Tabs defaultValue="detalles">
-          <TabsList>
-            <TabsTrigger value="detalles">{t('orders.detail.tabs.details')}</TabsTrigger>
-            <TabsTrigger value="comentarios">{t('orders.detail.tabs.comments')}</TabsTrigger>
-          </TabsList>
-          <TabsContent value="detalles" className="mt-4">
-            {detailsContent}
-          </TabsContent>
-          <TabsContent value="comentarios" className="mt-4">
-            {commentsContent}
-          </TabsContent>
-        </Tabs>
-      )}
+      {detailsContent}
 
       {profile?.tenant_id && contactId && (
         <AddressDrawer open={addressDrawerOpen} onClose={() => setAddressDrawerOpen(false)} tenantId={profile.tenant_id} contactId={contactId} onSaved={handleAddressCreated} />
@@ -982,6 +1172,8 @@ export function OrderDetail() {
         description={t('orders.detail.deleteBody')}
         confirmLabel={t('orders.detail.deleteAction')}
       />
+
+      <StockShortfallDialog shortfalls={stockShortfalls} open={shortfallDialogOpen} onClose={() => setShortfallDialogOpen(false)} />
     </div>
   )
 }

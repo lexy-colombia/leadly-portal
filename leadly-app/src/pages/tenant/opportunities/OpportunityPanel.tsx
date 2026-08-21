@@ -15,6 +15,7 @@ import { ChatBubbleIcon, CheckIcon, PlusIcon, TrashIcon } from '@/components/ato
 import { TaskDrawer } from '../tasks/TaskDrawer'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import type { TranslationKey } from '../../../i18n/translations'
+import { formatDate, formatDateTime } from '../../../lib/dates'
 
 const PRIORITY_LABEL: Record<OpportunityPriority, TranslationKey> = {
   baja: 'opportunities.priority.low',
@@ -31,30 +32,17 @@ const PRIORITY_BADGE_CLASS: Record<OpportunityPriority, string> = {
 const ORDER_STATUS_LABEL: Record<OrderStatus, TranslationKey> = {
   cotizacion: 'opportunities.order.status.cotizacion',
   confirmada: 'opportunities.order.status.confirmada',
-  en_proceso: 'opportunities.order.status.en_proceso',
-  entregada: 'opportunities.order.status.entregada',
   cancelada: 'opportunities.order.status.cancelada',
 }
 const ORDER_STATUS_BADGE_CLASS: Record<OrderStatus, string> = {
   cotizacion: 'border-transparent bg-slate-100 text-slate-600',
   confirmada: 'border-transparent bg-emerald-100 text-emerald-700',
-  en_proceso: 'border-transparent bg-amber-100 text-amber-700',
-  entregada: 'border-transparent bg-emerald-100 text-emerald-700',
   cancelada: 'border-transparent bg-red-100 text-red-700',
 }
 
 // Currency stays Colombian formatting regardless of UI language.
 function formatCurrency(value: number, currency = 'COP'): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
-}
-
-function formatDate(iso: string | null, locale: string): string {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleDateString(locale, { day: '2-digit', month: 'short', year: 'numeric' })
-}
-
-function formatDateTime(iso: string, locale: string): string {
-  return new Date(iso).toLocaleString(locale, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
 }
 
 /** Label-above-value field, same shape as ClientDetail's own `Field` --
@@ -95,7 +83,6 @@ export function OpportunityPanel({
 }) {
   const navigate = useNavigate()
   const { t, language } = useLanguage()
-  const locale = language === 'en' ? 'en-US' : 'es-CO'
   const [tab, setTab] = useState<'resumen' | 'conversaciones' | 'tareas'>('resumen')
   const [conversations, setConversations] = useState<ConversationWithLine[] | null>(null)
   const [tasks, setTasks] = useState<TaskWithRelations[] | null>(null)
@@ -220,9 +207,9 @@ export function OpportunityPanel({
                   <Field label={t('opportunities.panel.fields.stage')} value={opportunity.stage?.name ?? '—'} />
                   <Field label={t('opportunities.panel.fields.owner')} value={opportunity.owner?.full_name ?? t('opportunities.panel.fields.unassigned')} />
                   <Field label={t('opportunities.panel.fields.probability')} value={opportunity.stage ? `${opportunity.stage.probability}%` : '—'} />
-                  <Field label={t('opportunities.panel.fields.closeDate')} value={formatDate(opportunity.expected_close_date, locale)} />
+                  <Field label={t('opportunities.panel.fields.closeDate')} value={formatDate(opportunity.expected_close_date)} />
                   <Field label={t('opportunities.panel.fields.source')} value={opportunity.source ?? '—'} />
-                  <Field label={t('opportunities.panel.fields.createdAt')} value={formatDate(opportunity.created_at, locale)} />
+                  <Field label={t('opportunities.panel.fields.createdAt')} value={formatDate(opportunity.created_at)} />
                   <div>
                     <dt className="text-xs text-brand-400">{t('opportunities.panel.fields.priority')}</dt>
                     <dd className="mt-0.5">
@@ -297,7 +284,7 @@ export function OpportunityPanel({
                             <span className="block truncate text-xs text-brand-400">{conv.whatsapp_line?.display_name ?? t('opportunities.panel.conversations.line')}</span>
                           </span>
                         </span>
-                        {conv.last_message_at && <span className="text-xs text-brand-300">{formatDateTime(conv.last_message_at, locale)}</span>}
+                        {conv.last_message_at && <span className="text-xs text-brand-300">{formatDateTime(conv.last_message_at, language)}</span>}
                       </button>
                     ))}
                   </div>
@@ -346,7 +333,7 @@ export function OpportunityPanel({
                         </button>
                         <button type="button" onClick={() => setTaskDrawer({ open: true, task })} className="min-w-0 flex-1 text-left">
                           <p className={`text-sm ${task.status === 'completada' ? 'text-brand-400 line-through' : 'text-brand-800'}`}>{task.title}</p>
-                          {task.due_date && <p className="text-xs text-brand-400">{formatDateTime(task.due_date, locale)}</p>}
+                          {task.due_date && <p className="text-xs text-brand-400">{formatDateTime(task.due_date, language)}</p>}
                         </button>
                       </li>
                     ))}

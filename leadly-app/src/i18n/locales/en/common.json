@@ -34,6 +34,7 @@
   "common.actions.saveChanges": "Save changes",
   "common.actions.cancel": "Cancel",
   "common.actions.close": "Close",
+  "common.actions.understood": "Got it",
   "common.actions.edit": "Edit",
   "common.actions.delete": "Delete",
   "common.actions.deleting": "Deleting…",

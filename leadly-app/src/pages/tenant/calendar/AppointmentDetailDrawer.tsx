@@ -6,7 +6,8 @@ import { Drawer } from '@/components/organisms'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import type { Language, TranslationKey } from '../../../i18n/translations'
+import type { TranslationKey } from '../../../i18n/translations'
+import { formatDateTime } from '../../../lib/dates'
 
 const STATUS_KEY: Record<AppointmentStatus, TranslationKey> = {
   activa: 'calendar.status.activa',
@@ -18,11 +19,6 @@ const STATUS_BADGE_CLASS: Record<AppointmentStatus, string> = {
   activa: 'border-transparent bg-amber-100 text-amber-700',
   completada: 'border-transparent bg-emerald-100 text-emerald-700',
   cancelada: 'border-transparent bg-red-100 text-red-700',
-}
-
-function formatDateTime(iso: string, language: Language): string {
-  const locale = language === 'en' ? 'en-US' : 'es-CO'
-  return new Date(iso).toLocaleString(locale, { weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' })
 }
 
 export function AppointmentDetailDrawer({
@@ -71,7 +67,7 @@ export function AppointmentDetailDrawer({
           </Badge>
         </div>
 
-        <p className="text-sm capitalize text-brand-700">{formatDateTime(appointment.scheduled_at, language)}</p>
+        <p className="text-sm text-brand-700">{formatDateTime(appointment.scheduled_at, language)}</p>
 
         {appointment.notes && <p className="rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-600">{appointment.notes}</p>}
 

@@ -95,11 +95,11 @@ export function SuppliersTab({ tenantId }: { tenantId: string }) {
               </TableHeader>
               <TableBody>
                 {pageItems.map((supplier) => (
-                  <TableRow key={supplier.id}>
+                  <TableRow key={supplier.id} onClick={() => setDrawer({ open: true, supplier })} className="cursor-pointer">
                     <TableCell className="text-xs font-medium text-brand-800">{supplier.name}</TableCell>
                     <TableCell className="text-xs text-brand-500">{supplier.contact_name ?? '-'}</TableCell>
                     <TableCell className="text-xs text-brand-500">{supplier.phone ?? '-'}</TableCell>
-                    <TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
                       <Switch
                         checked={supplier.is_active}
                         disabled={togglingId === supplier.id}
@@ -107,7 +107,7 @@ export function SuppliersTab({ tenantId }: { tenantId: string }) {
                         aria-label={t(supplier.is_active ? 'common.status.active' : 'common.status.inactive')}
                       />
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                       {deletingId === supplier.id ? (
                         <span className="inline-flex items-center gap-1.5">
                           <Button variant="destructive" size="xs" onClick={() => handleDelete(supplier.id)} disabled={deleting}>

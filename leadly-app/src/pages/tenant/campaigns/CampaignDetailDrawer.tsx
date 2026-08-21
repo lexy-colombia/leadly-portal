@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useLanguage } from '../../../contexts/LanguageContext'
+import { formatDateTime } from '../../../lib/dates'
 import { CAMPAIGN_STATUS_BADGE_CLASS, CAMPAIGN_STATUS_KEY } from '../Campaigns'
 
 const PAGE_SIZE = 10
@@ -73,7 +74,6 @@ export function CampaignDetailDrawer({
 
   const totalPages = recipients ? Math.max(1, Math.ceil(recipients.length / PAGE_SIZE)) : 1
   const pageItems = recipients ? recipients.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE) : null
-  const locale = language === 'en' ? 'en-US' : 'es-CO'
 
   return (
     <Drawer open={!!campaignId} onClose={onClose} title={campaign?.name ?? t('campaigns.detail.title')} description={campaign?.template?.name}>
@@ -91,9 +91,7 @@ export function CampaignDetailDrawer({
             </div>
             <div>
               <p className="text-brand-400">{t('campaigns.table.scheduledAt')}</p>
-              <p className="mt-1 font-medium text-brand-700">
-                {new Date(campaign.scheduled_at).toLocaleString(locale, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-              </p>
+              <p className="mt-1 font-medium text-brand-700">{formatDateTime(campaign.scheduled_at, language)}</p>
             </div>
             <div>
               <p className="text-brand-400">{t('campaigns.table.line')}</p>

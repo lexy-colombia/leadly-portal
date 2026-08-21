@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import type { TranslationKey } from '../../../i18n/translations'
+import { formatDate } from '../../../lib/dates'
 
 const PRIORITY_BADGE_CLASS: Record<OpportunityPriority, string> = {
   baja: 'border-transparent bg-slate-100 text-slate-600',
@@ -23,11 +24,6 @@ function formatCurrency(value: number, currency = 'COP'): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 }
 
-function formatDate(iso: string | null, locale: string): string {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleDateString(locale, { day: '2-digit', month: 'short', year: 'numeric' })
-}
-
 /** "Lista" alternative to the Kanban -- same filtered/sorted opportunities,
  * flat table instead of columns-by-stage. Moving stage here is a plain
  * select per row (same as the pre-Kanban Opportunities.tsx used to work)
@@ -43,8 +39,7 @@ export function OpportunityListView({
   onOpen: (opportunity: OpportunityWithRelations) => void
   onStageChange: (opportunity: OpportunityWithRelations, stage: PipelineStage) => void
 }) {
-  const { t, language } = useLanguage()
-  const locale = language === 'en' ? 'en-US' : 'es-CO'
+  const { t } = useLanguage()
 
   if (opportunities.length === 0) {
     return <EmptyState>{t('opportunities.list.empty')}</EmptyState>
@@ -96,7 +91,7 @@ export function OpportunityListView({
                 </Badge>
               </TableCell>
               <TableCell className="text-xs text-brand-500">{opp.owner?.full_name ?? t('opportunities.list.unassigned')}</TableCell>
-              <TableCell className="text-xs text-brand-500">{formatDate(opp.expected_close_date, locale)}</TableCell>
+              <TableCell className="text-xs text-brand-500">{formatDate(opp.expected_close_date)}</TableCell>
             </TableRow>
           ))}
         </TableBody>

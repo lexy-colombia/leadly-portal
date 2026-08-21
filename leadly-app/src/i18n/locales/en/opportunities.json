@@ -84,8 +84,6 @@
   "opportunities.panel.orders.empty": "No quotes linked yet.",
   "opportunities.order.status.cotizacion": "Quote",
   "opportunities.order.status.confirmada": "Confirmed",
-  "opportunities.order.status.en_proceso": "In progress",
-  "opportunities.order.status.entregada": "Delivered",
   "opportunities.order.status.cancelada": "Cancelled",
   "opportunities.panel.conversations.empty": "No conversations with this contact yet.",
   "opportunities.panel.conversations.modeIa": "AI mode",

@@ -74,8 +74,6 @@
   "contacts.detail.sales.empty": "No quotes or sales yet.",
   "contacts.order.status.cotizacion": "Quote",
   "contacts.order.status.confirmada": "Confirmed",
-  "contacts.order.status.en_proceso": "In progress",
-  "contacts.order.status.entregada": "Delivered",
   "contacts.order.status.cancelada": "Canceled",
   "contacts.detail.conversations.empty": "No conversations with this contact yet.",
   "contacts.detail.conversations.modeIa": "AI mode",

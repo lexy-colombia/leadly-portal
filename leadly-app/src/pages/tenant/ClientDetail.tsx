@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 're
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { MoreHorizontalIcon } from 'lucide-react'
 import { useLanguage } from '../../contexts/LanguageContext'
-import type { Language, TranslationKey } from '../../i18n/translations'
+import type { TranslationKey } from '../../i18n/translations'
+import { formatDate, formatDateTime } from '../../lib/dates'
 import { deleteClient, getClient, createNote, listNotes } from '../../lib/api/clients'
 import { listAppointmentsForContact, updateAppointmentStatus } from '../../lib/api/appointments'
 import { listConversationsForContact } from '../../lib/api/conversations'
@@ -42,16 +43,12 @@ import type { AppointmentStatus, ClientStage } from '../../types/domain'
 const ORDER_STATUS_LABEL: Record<OrderStatus, TranslationKey> = {
   cotizacion: 'contacts.order.status.cotizacion',
   confirmada: 'contacts.order.status.confirmada',
-  en_proceso: 'contacts.order.status.en_proceso',
-  entregada: 'contacts.order.status.entregada',
   cancelada: 'contacts.order.status.cancelada',
 }
 
 const ORDER_STATUS_BADGE_CLASS: Record<OrderStatus, string> = {
   cotizacion: 'border-transparent bg-slate-100 text-slate-600',
   confirmada: 'border-transparent bg-emerald-100 text-emerald-700',
-  en_proceso: 'border-transparent bg-amber-100 text-amber-700',
-  entregada: 'border-transparent bg-emerald-100 text-emerald-700',
   cancelada: 'border-transparent bg-red-100 text-red-700',
 }
 
@@ -86,16 +83,6 @@ const PAGE_SIZE = 8
 function paginate<T>(items: T[], page: number): { items: T[]; totalPages: number } {
   const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE))
   return { items: items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), totalPages }
-}
-
-function formatDateTime(iso: string, language: Language): string {
-  const locale = language === 'en' ? 'en-US' : 'es-CO'
-  return new Date(iso).toLocaleString(locale, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
-}
-
-function formatDate(iso: string, language: Language): string {
-  const locale = language === 'en' ? 'en-US' : 'es-CO'
-  return new Date(iso).toLocaleDateString(locale, { day: '2-digit', month: 'long', year: 'numeric' })
 }
 
 /** Label-above-value field -- the one fact-display shape used across both
@@ -415,7 +402,7 @@ function ClientDetailContent({
 
         <StatCard title={t('contacts.detail.sections.details')}>
           <div className="grid grid-cols-2 gap-3">
-            <Field label={t('contacts.detail.fields.createdAt')} value={formatDate(contact.created_at, language)} />
+            <Field label={t('contacts.detail.fields.createdAt')} value={formatDate(contact.created_at)} />
             <Field label={t('contacts.detail.fields.lastContact')} value={lastContactAt ? formatDateTime(lastContactAt, language) : t('contacts.detail.fields.lastContact.none')} />
             <Field label={t('contacts.detail.fields.assignedAgent')} value={assignedAgentName ?? t('contacts.detail.fields.unassigned')} />
           </div>

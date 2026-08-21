@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { listTenants } from '../../lib/api/tenants'
 import type { Tenant, TenantEntityType, TenantStatus } from '../../types/domain'
 import { Badge, Button, InitialsAvatar, PageSpinner, Select, Table, TBody, TD, TH, THead, TRow } from '@/components/atoms'
@@ -7,11 +7,13 @@ import { Card, EmptyState, IconInput, Pagination } from '@/components/molecules'
 import { FilterIcon, PlusIcon, SearchIcon } from '@/components/atoms/icons'
 import { TenantDrawer } from './TenantDrawer'
 import { useLanguage } from '../../contexts/LanguageContext'
+import { formatDate } from '../../lib/dates'
 
 const PAGE_SIZE = 10
 
 export function TenantsList() {
-  const { t, language } = useLanguage()
+  const { t } = useLanguage()
+  const navigate = useNavigate()
   const [tenants, setTenants] = useState<Tenant[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -182,16 +184,16 @@ export function TenantsList() {
             </THead>
             <TBody>
               {pageItems.map((tenant) => (
-                <TRow key={tenant.id} clickable>
+                <TRow key={tenant.id} clickable onClick={() => navigate(`/backoffice/clients/${tenant.id}`)}>
                   <TD>
-                    <Link to={`/backoffice/clients/${tenant.id}`} className="flex items-center gap-3 font-medium text-brand-800 hover:text-accent-600">
+                    <span className="flex items-center gap-3 font-medium text-brand-800">
                       {tenant.logo_url ? (
                         <img src={tenant.logo_url} alt="" className="h-8 w-8 rounded-full object-cover" />
                       ) : (
                         <InitialsAvatar name={tenant.name} size="sm" />
                       )}
                       {tenant.name}
-                    </Link>
+                    </span>
                   </TD>
                   <TD>
                     <Badge tone={tenant.status === 'active' ? 'success' : 'neutral'}>
@@ -201,7 +203,7 @@ export function TenantsList() {
                   <TD className="hidden sm:table-cell text-brand-400">{tenant.contact_email ?? '—'}</TD>
                   <TD className="hidden md:table-cell text-brand-400">{tenant.country ?? '—'}</TD>
                   <TD className="hidden md:table-cell text-brand-400">
-                    {new Date(tenant.created_at).toLocaleDateString(language === 'en' ? 'en-US' : 'es-CO')}
+                    {formatDate(tenant.created_at)}
                   </TD>
                 </TRow>
               ))}

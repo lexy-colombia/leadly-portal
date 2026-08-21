@@ -84,8 +84,6 @@
   "opportunities.panel.orders.empty": "Sin cotizaciones vinculadas todavía.",
   "opportunities.order.status.cotizacion": "Cotización",
   "opportunities.order.status.confirmada": "Confirmada",
-  "opportunities.order.status.en_proceso": "En proceso",
-  "opportunities.order.status.entregada": "Entregada",
   "opportunities.order.status.cancelada": "Cancelada",
   "opportunities.panel.conversations.empty": "Todavía no hay conversaciones con este contacto.",
   "opportunities.panel.conversations.modeIa": "Modo IA",

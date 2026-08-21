@@ -1,15 +1,36 @@
 import { supabase } from '../supabaseClient'
-import type { ContactAddress, SalesOrder, SalesOrderItem, OrderStatus } from '../../types/domain'
+import type { ContactAddress, SalesOrder, SalesOrderItem, OrderStatus, DeliveryStatus } from '../../types/domain'
 import type { TranslationKey } from '../../i18n/translations'
 
 // Shared between Orders.tsx and OrderDetail.tsx so the status wording
-// never drifts between screens.
+// never drifts between screens. Estado *comercial* de la orden -- ver
+// DELIVERY_STATUS_LABEL_KEY para el estado de envío, un concepto separado
+// desde el 2026-08-20.
 export const ORDER_STATUS_LABEL_KEY: Record<OrderStatus, TranslationKey> = {
   cotizacion: 'orders.status.quote',
   confirmada: 'orders.status.confirmed',
-  en_proceso: 'orders.status.inProgress',
-  entregada: 'orders.status.delivered',
   cancelada: 'orders.status.cancelled',
+}
+
+// Same bg/text pair convention as Clients.tsx's STAGE_BADGE_CLASS -- shadcn
+// Badge has no built-in "warning"/"success" tone, unlike the legacy atoms
+// Badge these two screens replaced.
+export const ORDER_STATUS_BADGE_CLASS: Record<OrderStatus, string> = {
+  cotizacion: 'border-transparent bg-slate-100 text-slate-600',
+  confirmada: 'border-transparent bg-emerald-100 text-emerald-700',
+  cancelada: 'border-transparent bg-red-100 text-red-700',
+}
+
+export const DELIVERY_STATUS_LABEL_KEY: Record<DeliveryStatus, TranslationKey> = {
+  pendiente: 'orders.deliveryStatus.pendiente',
+  en_camino: 'orders.deliveryStatus.enCamino',
+  entregado: 'orders.deliveryStatus.entregado',
+}
+
+export const DELIVERY_STATUS_BADGE_CLASS: Record<DeliveryStatus, string> = {
+  pendiente: 'border-transparent bg-slate-100 text-slate-600',
+  en_camino: 'border-transparent bg-amber-100 text-amber-700',
+  entregado: 'border-transparent bg-emerald-100 text-emerald-700',
 }
 
 export interface OrderItemInput {
@@ -39,11 +60,61 @@ export function hasIncompleteVariantSelection(items: OrderItemInput[], products:
   })
 }
 
+export interface StockShortfall {
+  productId: string
+  variantId: string | null
+  warehouseId: string
+  productName: string
+  sku: string | null
+  warehouseName: string
+  requested: number
+  available: number
+}
+
+/** Fresh product_stock read (not whatever snapshot the page happened to
+ * load on mount) for every line that points at a real product+warehouse --
+ * called at the exact moment a cotización turns into a venta (see
+ * OrderDetail.tsx's handleStatusSelect/handleCreate and Orders.tsx's
+ * handleConfirm), never while it's still a cotización, which is allowed to
+ * quote more than what's physically on hand. Lines without a product_id
+ * (custom lines) or without a warehouse chosen are skipped -- there's
+ * nothing to check them against. */
+export async function findStockShortfalls(tenantId: string, items: OrderItemInput[], warehouses: { id: string; name: string }[]): Promise<StockShortfall[]> {
+  const relevant = items.filter((i) => i.product_id && i.warehouse_id && i.quantity > 0)
+  if (relevant.length === 0) return []
+
+  const productIds = Array.from(new Set(relevant.map((i) => i.product_id as string)))
+  const { data, error } = await supabase.from('product_stock').select('product_id, variant_id, warehouse_id, quantity').eq('tenant_id', tenantId).in('product_id', productIds)
+  if (error) throw error
+  const rows = data as { product_id: string; variant_id: string | null; warehouse_id: string; quantity: number }[]
+
+  const shortfalls: StockShortfall[] = []
+  for (const item of relevant) {
+    const available = rows
+      .filter((r) => r.product_id === item.product_id && r.warehouse_id === item.warehouse_id && r.variant_id === (item.variant_id ?? null))
+      .reduce((sum, r) => sum + r.quantity, 0)
+    if (available < item.quantity) {
+      shortfalls.push({
+        productId: item.product_id as string,
+        variantId: item.variant_id ?? null,
+        warehouseId: item.warehouse_id as string,
+        productName: item.product_name,
+        sku: item.sku ?? null,
+        warehouseName: warehouses.find((w) => w.id === item.warehouse_id)?.name ?? '—',
+        requested: item.quantity,
+        available,
+      })
+    }
+  }
+  return shortfalls
+}
+
 export interface OrderInput {
   tenant_id: string
   contact_id: string
   opportunity_id?: string | null
   status?: OrderStatus
+  delivery_status?: DeliveryStatus
   currency?: string
   shipping?: number
   tax_total?: number
@@ -233,6 +304,15 @@ export async function updateOrderItemsAndTotals(id: string, tenantId: string, it
 
 export async function updateOrderStatus(id: string, status: OrderStatus): Promise<SalesOrder> {
   const { data, error } = await supabase.from('sales_orders').update({ status }).eq('id', id).select().single()
+  if (error) throw error
+  return data
+}
+
+/** Independent from updateOrderStatus -- delivery_status never gates or is
+ * gated by the order's commercial status (see types/domain.ts), so it's
+ * its own plain update with no stock check or any other side effect. */
+export async function updateDeliveryStatus(id: string, deliveryStatus: DeliveryStatus): Promise<SalesOrder> {
+  const { data, error } = await supabase.from('sales_orders').update({ delivery_status: deliveryStatus }).eq('id', id).select().single()
   if (error) throw error
   return data
 }

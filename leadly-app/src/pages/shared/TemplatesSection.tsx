@@ -137,7 +137,7 @@ export function TemplatesSection({ tenantId, canManage }: { tenantId: string; ca
             </TableHeader>
             <TableBody>
               {templates.map((template) => (
-                <TableRow key={template.id}>
+                <TableRow key={template.id} onClick={canManage ? () => setEditingTemplate(template) : undefined} className={canManage ? 'cursor-pointer' : undefined}>
                   <TableCell className="text-xs font-medium text-brand-800">{template.name}</TableCell>
                   <TableCell className="text-xs text-brand-500">{t(CATEGORY_KEY[template.category])}</TableCell>
                   <TableCell className="text-xs text-brand-500">{template.language}</TableCell>
@@ -149,7 +149,7 @@ export function TemplatesSection({ tenantId, canManage }: { tenantId: string; ca
                       <p className="mt-1 max-w-xs text-[11px] text-red-500">{template.rejected_reason}</p>
                     )}
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                     {canManage && (
                       <div className="flex items-center justify-end gap-1">
                         <Button variant="ghost" size="icon-xs" onClick={() => setEditingTemplate(template)}>

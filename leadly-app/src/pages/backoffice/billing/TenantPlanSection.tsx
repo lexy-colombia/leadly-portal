@@ -4,7 +4,8 @@ import type { BillingPlan, BillingSubscription } from '../../../types/domain'
 import { Badge, Button, PageSpinner, Select } from '@/components/atoms'
 import { ConfirmDialog } from '@/components/organisms'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import type { Language, TranslationKey } from '../../../i18n/translations'
+import type { TranslationKey } from '../../../i18n/translations'
+import { formatDate } from '../../../lib/dates'
 
 const SUBSCRIPTION_STATUS_LABEL_KEY: Record<BillingSubscription['status'], TranslationKey> = {
   ACTIVE: 'backoffice.tenantBilling.subscriptionStatus.active',
@@ -18,12 +19,6 @@ function formatMoney(amountCents: number, currency: string): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amountCents / 100)
 }
 
-function formatDate(iso: string | null, language: Language): string {
-  if (!iso) return '—'
-  const locale = language === 'en' ? 'en-US' : 'es-CO'
-  return new Date(iso).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })
-}
-
 /** The tenant's plan, shown in the client detail sidebar (identity/info
  * card) rather than buried inside the "Facturación" tab -- the plan isn't a
  * billing operation, it's a fact about the tenant (and drives limits like
@@ -31,7 +26,7 @@ function formatDate(iso: string | null, language: Language): string {
  * legal_name/document/etc, not next to the invoice list. Facturación stays
  * scoped to invoices/payments; this owns assign/change/cancel. */
 export function TenantPlanSection({ tenantId, onPlanChange }: { tenantId: string; onPlanChange?: (plan: BillingPlan | null) => void }) {
-  const { t, language } = useLanguage()
+  const { t } = useLanguage()
   const [subscription, setSubscription] = useState<BillingSubscription | null | undefined>(undefined)
   const [plans, setPlans] = useState<BillingPlan[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -154,10 +149,10 @@ export function TenantPlanSection({ tenantId, onPlanChange }: { tenantId: string
           )}
           {subscription.cancel_at_period_end ? (
             <p className="text-xs font-medium text-amber-600">
-              {t('backoffice.tenantPlan.cancelsOn', { date: formatDate(subscription.current_period_end, language) })}
+              {t('backoffice.tenantPlan.cancelsOn', { date: formatDate(subscription.current_period_end) })}
             </p>
           ) : (
-            <p className="text-xs text-brand-400">{t('backoffice.tenantBilling.expires', { date: formatDate(subscription.current_period_end, language) })}</p>
+            <p className="text-xs text-brand-400">{t('backoffice.tenantBilling.expires', { date: formatDate(subscription.current_period_end) })}</p>
           )}
           <div className="flex gap-1.5 pt-0.5">
             <button type="button" onClick={() => setChangingPlan(true)} className="text-xs font-medium text-accent-600 hover:text-accent-700">

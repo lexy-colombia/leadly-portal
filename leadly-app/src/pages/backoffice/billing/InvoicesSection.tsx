@@ -8,7 +8,8 @@ import { FilterIcon, SearchIcon } from '@/components/atoms/icons'
 import { ManualPaymentDrawer } from './ManualPaymentDrawer'
 import { InvoiceDetailDrawer } from './InvoiceDetailDrawer'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import type { Language, TranslationKey } from '../../../i18n/translations'
+import type { TranslationKey } from '../../../i18n/translations'
+import { formatDate } from '../../../lib/dates'
 
 const PAGE_SIZE = 10
 
@@ -32,14 +33,8 @@ function formatMoney(amountCents: number, currency: string): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amountCents / 100)
 }
 
-function formatDate(iso: string | null, language: Language): string {
-  if (!iso) return '—'
-  const locale = language === 'en' ? 'en-US' : 'es-CO'
-  return new Date(iso).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })
-}
-
 export function InvoicesSection() {
-  const { t, language } = useLanguage()
+  const { t } = useLanguage()
   const [invoices, setInvoices] = useState<PaymentInvoiceWithTenant[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
@@ -200,11 +195,9 @@ export function InvoicesSection() {
             </THead>
             <TBody>
               {pageItems.map((invoice) => (
-                <TRow key={invoice.id}>
-                  <TD className="cursor-pointer font-medium text-brand-800" onClick={() => setDetailDrawer(invoice)}>
-                    {invoice.invoice_number ?? invoice.id.slice(0, 8)}
-                  </TD>
-                  <TD>
+                <TRow key={invoice.id} clickable onClick={() => setDetailDrawer(invoice)}>
+                  <TD className="font-medium text-brand-800">{invoice.invoice_number ?? invoice.id.slice(0, 8)}</TD>
+                  <TD onClick={(e) => e.stopPropagation()}>
                     <Link to={`/backoffice/clients/${invoice.payer_tenant_id}`} className="text-brand-600 hover:text-accent-600">
                       {invoice.tenant?.name ?? '—'}
                     </Link>
@@ -213,8 +206,8 @@ export function InvoicesSection() {
                   <TD>
                     <Badge tone={STATUS_TONE[invoice.status]}>{t(STATUS_LABEL_KEY[invoice.status])}</Badge>
                   </TD>
-                  <TD className="hidden sm:table-cell text-brand-400">{formatDate(invoice.due_date, language)}</TD>
-                  <TD className="text-right">
+                  <TD className="hidden sm:table-cell text-brand-400">{formatDate(invoice.due_date)}</TD>
+                  <TD className="text-right" onClick={(e) => e.stopPropagation()}>
                     <span className="inline-flex items-center gap-1">
                       {(invoice.status === 'PENDING' || invoice.status === 'OVERDUE') && (
                         <Button variant="ghost" onClick={() => setPaymentDrawer(invoice)} className="!px-2.5 !py-1.5 text-xs">

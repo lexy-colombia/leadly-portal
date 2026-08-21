@@ -7,12 +7,7 @@ import { Badge, InitialsAvatar, PageSpinner } from '@/components/atoms'
 import { Card, EmptyState } from '@/components/molecules'
 import { BuildingIcon, ChatBubbleIcon, PhoneIcon } from '@/components/atoms/icons'
 import { useLanguage } from '../../contexts/LanguageContext'
-import type { Language } from '../../i18n/translations'
-
-function formatDate(iso: string, language: Language): string {
-  const locale = language === 'en' ? 'en-US' : 'es-CO'
-  return new Date(iso).toLocaleDateString(locale, { day: '2-digit', month: 'short', year: 'numeric' })
-}
+import { formatDate } from '../../lib/dates'
 
 function StatCard({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return (
@@ -29,7 +24,7 @@ function StatCard({ icon, label, value }: { icon: ReactNode; label: string; valu
 }
 
 export function Dashboard() {
-  const { t, language } = useLanguage()
+  const { t } = useLanguage()
   const [stats, setStats] = useState<BackofficeDashboardStats | null>(null)
   const [tenants, setTenants] = useState<Tenant[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -91,7 +86,7 @@ export function Dashboard() {
                     <span className="min-w-0">
                       <span className="block truncate text-sm font-medium text-brand-800">{tenant.name}</span>
                       <span className="block truncate text-xs text-brand-400">
-                        {t('backoffice.dashboard.since', { date: formatDate(tenant.created_at, language) })}
+                        {t('backoffice.dashboard.since', { date: formatDate(tenant.created_at) })}
                       </span>
                     </span>
                   </span>

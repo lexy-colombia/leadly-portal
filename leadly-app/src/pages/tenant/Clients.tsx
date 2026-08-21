@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import { useHeaderSearchSlot } from '@/contexts/HeaderSearchSlotContext'
 import type { Language } from '../../i18n/translations'
+import { formatDate } from '../../lib/dates'
 import { deleteClient, listClients } from '../../lib/api/clients'
 import { listLastContactTimesByTenant } from '../../lib/api/conversations'
 import { listProfilesByTenant } from '../../lib/api/users'
@@ -40,9 +41,7 @@ function formatLastContact(iso: string | undefined, language: Language): string 
   const date = new Date(iso)
   const now = new Date()
   const sameDay = date.toDateString() === now.toDateString()
-  return sameDay
-    ? date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
-    : date.toLocaleDateString(locale, { day: '2-digit', month: 'short' })
+  return sameDay ? date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }) : formatDate(iso)
 }
 
 export function Clients() {

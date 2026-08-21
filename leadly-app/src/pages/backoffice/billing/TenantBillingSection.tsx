@@ -7,7 +7,8 @@ import { PlusIcon, TrashIcon } from '@/components/atoms/icons'
 import { ManualPaymentDrawer } from './ManualPaymentDrawer'
 import { InvoiceDetailDrawer } from './InvoiceDetailDrawer'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import type { Language, TranslationKey } from '../../../i18n/translations'
+import type { TranslationKey } from '../../../i18n/translations'
+import { formatDate } from '../../../lib/dates'
 
 const STATUS_LABEL_KEY: Record<PaymentInvoiceStatus, TranslationKey> = {
   PENDING: 'backoffice.tenantBilling.invoiceStatus.pending',
@@ -27,12 +28,6 @@ const STATUS_TONE: Record<PaymentInvoiceStatus, 'success' | 'warning' | 'danger'
 
 function formatMoney(amountCents: number, currency: string): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amountCents / 100)
-}
-
-function formatDate(iso: string | null, language: Language): string {
-  if (!iso) return '—'
-  const locale = language === 'en' ? 'en-US' : 'es-CO'
-  return new Date(iso).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
 interface ItemDraft {
@@ -185,7 +180,7 @@ function ManualInvoiceForm({
 }
 
 export function TenantBillingSection({ tenantId }: { tenantId: string }) {
-  const { t, language } = useLanguage()
+  const { t } = useLanguage()
   // Only the subscription id is needed here (to link a manual invoice to it)
   // -- the plan itself (assign/change/cancel) now lives in the client detail
   // sidebar (TenantPlanSection), not in this invoices/payments tab.
@@ -246,16 +241,14 @@ export function TenantBillingSection({ tenantId }: { tenantId: string }) {
           </THead>
           <TBody>
             {invoices.map((invoice) => (
-              <TRow key={invoice.id}>
-                <TD className="cursor-pointer font-medium text-brand-800" onClick={() => setDetailDrawerInvoice(invoice)}>
-                  {invoice.invoice_number ?? invoice.id.slice(0, 8)}
-                </TD>
+              <TRow key={invoice.id} clickable onClick={() => setDetailDrawerInvoice(invoice)}>
+                <TD className="font-medium text-brand-800">{invoice.invoice_number ?? invoice.id.slice(0, 8)}</TD>
                 <TD>{formatMoney(invoice.amount_cents, invoice.currency)}</TD>
                 <TD>
                   <Badge tone={STATUS_TONE[invoice.status]}>{t(STATUS_LABEL_KEY[invoice.status])}</Badge>
                 </TD>
-                <TD className="text-brand-400">{formatDate(invoice.due_date, language)}</TD>
-                <TD className="text-right">
+                <TD className="text-brand-400">{formatDate(invoice.due_date)}</TD>
+                <TD className="text-right" onClick={(e) => e.stopPropagation()}>
                   <span className="inline-flex items-center gap-1">
                     {(invoice.status === 'PENDING' || invoice.status === 'OVERDUE') && (
                       <Button variant="ghost" onClick={() => setPaymentDrawerInvoice(invoice)} className="!px-2.5 !py-1.5 text-xs">

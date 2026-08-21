@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { Language, TranslationKey } from '../../i18n/translations'
+import { formatDate } from '../../lib/dates'
 import { deleteWhatsappLine, listWhatsappLinesByTenant } from '../../lib/api/whatsappLines'
 import { getMaxWhatsappLinesForTenant } from '../../lib/api/billing'
 import { assignAiAssistantToLine, deleteAiAssistant, listAiAssistantsByTenant } from '../../lib/api/aiAssistants'
@@ -46,9 +47,11 @@ function isToday(iso: string): boolean {
 
 function formatActivity(iso: string | undefined, language: Language, noActivityLabel: string): string {
   if (!iso) return noActivityLabel
-  const date = new Date(iso)
-  const locale = language === 'en' ? 'en-US' : 'es-CO'
-  return isToday(iso) ? date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }) : date.toLocaleDateString(locale, { day: '2-digit', month: 'short' })
+  if (isToday(iso)) {
+    const locale = language === 'en' ? 'en-US' : 'es-CO'
+    return new Date(iso).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
+  }
+  return formatDate(iso)
 }
 
 function MetricCard({ icon, iconClass, value, label, sublabel }: { icon: ReactNode; iconClass: string; value: string; label: string; sublabel?: string }) {
@@ -292,8 +295,12 @@ export function LinesAndAgentsSection({
                     const assignedAgent = assistants?.find((a) => a.id === line.ai_assistant_id)
                     const clickable = !!renderLineDrawer
                     return (
-                      <TableRow key={line.id}>
-                        <TableCell className={clickable ? 'cursor-pointer' : undefined} onClick={clickable ? () => setLineDrawerState({ open: true, line }) : undefined}>
+                      <TableRow
+                        key={line.id}
+                        className={clickable ? 'cursor-pointer' : undefined}
+                        onClick={clickable ? () => setLineDrawerState({ open: true, line }) : undefined}
+                      >
+                        <TableCell>
                           <span className="flex items-center gap-3">
                             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
                               <PhoneIcon width={14} height={14} />
@@ -309,7 +316,7 @@ export function LinesAndAgentsSection({
                             {t(LINE_STATUS_KEY[line.status])}
                           </Badge>
                         </TableCell>
-                        <TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center gap-2">
                             {assignedAgent && <InitialsAvatar name={assignedAgent.name} size="xs" />}
                             <Select
@@ -334,7 +341,7 @@ export function LinesAndAgentsSection({
                           </div>
                         </TableCell>
                         <TableCell className="text-xs text-brand-400">{formatActivity(lastActivityByLine.get(line.id), language, t('settings.lines.noActivity'))}</TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                           {canManage && line.status !== 'disconnected' && (
                             <Button variant="ghost" size="icon-xs" className="text-red-600 hover:bg-red-50" onClick={() => setConfirmingDeleteLineId(line.id)}>
                               <TrashIcon width={13} height={13} />

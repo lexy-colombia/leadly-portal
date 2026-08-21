@@ -76,10 +76,8 @@ function PlansSection() {
               </THead>
               <TBody>
                 {pageItems.map((plan) => (
-                  <TRow key={plan.id}>
-                    <TD className="cursor-pointer font-medium text-brand-800" onClick={() => setDrawer({ open: true, plan })}>
-                      {plan.name}
-                    </TD>
+                  <TRow key={plan.id} clickable onClick={() => setDrawer({ open: true, plan })}>
+                    <TD className="font-medium text-brand-800">{plan.name}</TD>
                     <TD>{new Intl.NumberFormat('es-CO', { style: 'currency', currency: plan.currency, maximumFractionDigits: 0 }).format(plan.amount_cents / 100)}</TD>
                     <TD>{plan.billing_interval === 'monthly' ? t('backoffice.facturacion.interval.monthly') : t('backoffice.facturacion.interval.yearly')}</TD>
                     <TD className="text-brand-500">{plan.max_users ?? t('backoffice.facturacion.table.maxUsers.unlimited')}</TD>
@@ -87,7 +85,7 @@ function PlansSection() {
                     <TD>
                       <Badge tone={plan.is_active ? 'success' : 'neutral'}>{plan.is_active ? t('common.status.active') : t('common.status.inactive')}</Badge>
                     </TD>
-                    <TD className="text-right">
+                    <TD className="text-right" onClick={(e) => e.stopPropagation()}>
                       <Button variant="ghost" onClick={() => setDrawer({ open: true, plan })} className="!px-3 !py-1.5 text-xs">
                         <PencilIcon width={14} height={14} /> {t('common.actions.edit')}
                       </Button>
