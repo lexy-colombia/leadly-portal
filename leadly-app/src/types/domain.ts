@@ -232,6 +232,7 @@ export interface Client {
   tags: string[]
   assigned_to: string | null
   hubspot_contact_id: string | null
+  credit_enabled: boolean
   deleted_at: string | null
   deleted_by: string | null
   created_at: string
@@ -432,9 +433,15 @@ export interface Supplier {
 // describían el envío, no el negocio de la venta en sí.
 export type OrderStatus = 'cotizacion' | 'confirmada' | 'cancelada'
 
-// Genérico a propósito (no referencia bodegas/despachos) -- ese módulo
-// (Fase 2, Despachos) todavía no existe, así que esto es solo un
-// seguimiento descriptivo, no reservas reales de stock por envío.
+// Genérico a propósito -- se mantiene solo como el estado "resumen" de 3
+// valores que usa el badge/filtro de la lista de Órdenes. Desde 2026-08-23
+// (Fase 2, Despachos) se deriva automáticamente de DispatchStatus.stock_effect
+// (reserve->pendiente, ship->en_camino, deliver->entregado, none->no lo
+// toca) en vez de editarse a mano cuando el módulo 'dispatches' está
+// habilitado -- no hay ningún mapeo manual, a propósito (feedback del
+// usuario: un select aparte para esto era confuso). La orden en sí muestra
+// el nombre real del estado de despacho (ver Dispatch/DispatchStatus más
+// abajo), no este bucket traducido.
 export type DeliveryStatus = 'pendiente' | 'en_camino' | 'entregado'
 
 export interface SalesOrder {
@@ -503,7 +510,14 @@ export interface SalesOrderItem {
   created_at: string
 }
 
-export type OrderPaymentMethod = 'efectivo' | 'transferencia' | 'tarjeta' | 'otro'
+export type OrderPaymentMethod = 'efectivo' | 'transferencia' | 'tarjeta' | 'otro' | 'credito' | 'saldo_favor'
+
+/** Subset of OrderPaymentMethod valid for paying down a credit balance
+ * (credit_payments.method) -- 'credito' is deliberately excluded (paying
+ * credit debt with more credit doesn't make sense), same for
+ * 'saldo_favor' (that's the opposite ledger entirely, ver
+ * store_credit_grants -- "el cliente me debe" vs "yo le debo al cliente"). */
+export type CreditPaymentMethod = Exclude<OrderPaymentMethod, 'credito' | 'saldo_favor'>
 
 export interface SalesOrderPayment {
   id: string
@@ -531,6 +545,185 @@ export interface SalesOrderComment {
   // true -> shows in the order page's "Notas" column (internal, no
   // attachments); false -> "Comentarios" (customer-facing, ver CLAUDE.md).
   is_internal: boolean
+  created_at: string
+}
+
+/** Cargo a la cuenta de crédito de un cliente -- append-only, nace
+ * automáticamente cuando se registra un SalesOrderPayment con
+ * method='credito' (ver trigger apply_credit_payment_charge). */
+export interface CreditCharge {
+  id: string
+  tenant_id: string
+  client_id: string
+  sales_order_id: string
+  sales_order_payment_id: string
+  amount: number
+  notes: string | null
+  created_by: string | null
+  created_at: string
+}
+
+/** Abono contra el saldo de crédito general de un cliente (no contra una
+ * orden puntual) -- distinto de SalesOrderPayment. Cada uno tiene un
+ * recibo (receipt_number) secuencial por tenant. */
+export interface CreditPayment {
+  id: string
+  tenant_id: string
+  client_id: string
+  receipt_number: number
+  method: CreditPaymentMethod
+  amount: number
+  currency: string
+  paid_at: string
+  notes: string | null
+  created_by: string | null
+  deleted_at: string | null
+  deleted_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** In real-life order: 'none' (informational only, e.g. "En camino") ->
+ * 'reserve' (earmarks stock without moving it out) -> 'ship' (physically
+ * leaves the warehouse) -> 'deliver' (confirmed with the customer, gone
+ * for good). Drives which stock_movements the DB trigger fires when a
+ * dispatch enters that status -- see apply_dispatch_stock_and_delivery_effect(). */
+export type DispatchStockEffect = 'none' | 'reserve' | 'ship' | 'deliver'
+
+/** Per-tenant configurable dispatch status catalog (Configuración ->
+ * Despachos) -- same spirit as PipelineStage, one flat ordered list per
+ * tenant instead of several "pipelines". */
+export interface DispatchStatus {
+  id: string
+  tenant_id: string
+  name: string
+  color: string
+  display_order: number
+  stock_effect: DispatchStockEffect
+  is_terminal: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type DispatchCarrierType = 'propio' | 'tercero'
+export type DispatchStockStage = 'none' | 'reserved' | 'shipped' | 'delivered'
+
+/** One dispatch per order (1:1, no partial shipments yet). carrier_key
+ * comes from the fixed frontend catalog (lib/carriers.ts) when
+ * carrier_type='tercero', not a tenant-managed table. */
+export interface Dispatch {
+  id: string
+  tenant_id: string
+  sales_order_id: string
+  status_id: string
+  warehouse_id: string
+  carrier_type: DispatchCarrierType
+  carrier_key: string | null
+  carrier_name: string | null
+  tracking_number: string | null
+  tracking_url: string | null
+  stock_stage: DispatchStockStage
+  notes: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** Append-only -- one row per status change, feeds the courier-style
+ * timeline in DispatchDrawer.tsx. */
+export interface DispatchStatusHistoryEntry {
+  id: string
+  tenant_id: string
+  dispatch_id: string
+  from_status_id: string | null
+  to_status_id: string
+  changed_by: string | null
+  created_at: string
+}
+
+/** Ciclo de vida del ticket de devolución, configurable por tenant (mismo
+ * mecanismo que DispatchStatus). A diferencia de DispatchStatus, no lleva
+ * un efecto de inventario a nivel de estado -- eso se dispara por ítem
+ * (ver ReturnItem.condition), no por el estado general del ticket. */
+export interface ReturnStatus {
+  id: string
+  tenant_id: string
+  name: string
+  color: string
+  display_order: number
+  is_terminal: boolean
+  created_at: string
+  updated_at: string
+}
+
+/** El nombre lo elige el tenant, pero el `effect` es uno de 4 fijos que sí
+ * controla comportamiento real (ver apply_return_resolution_credit()). */
+export type ReturnResolutionEffect = 'saldo_a_favor' | 'reembolso_efectivo' | 'cambio' | 'ninguno'
+
+export interface ReturnResolutionType {
+  id: string
+  tenant_id: string
+  name: string
+  effect: ReturnResolutionEffect
+  display_order: number
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+/** El motivo es una constante fija (RETURN_REASONS en lib/returnReasons.ts),
+ * a propósito no configurable -- pedido explícito del usuario. */
+export type ReturnReason = 'danado' | 'equivocado' | 'no_esperado' | 'no_le_gusto' | 'otro'
+
+export interface Return {
+  id: string
+  tenant_id: string
+  sales_order_id: string
+  status_id: string
+  resolution_type_id: string | null
+  reason: ReturnReason
+  resolution_amount: number | null
+  credit_granted: boolean
+  notes: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type ReturnItemCondition = 'pendiente' | 'bueno' | 'danado'
+
+export interface ReturnItem {
+  id: string
+  tenant_id: string
+  return_id: string
+  sales_order_item_id: string
+  quantity: number
+  condition: ReturnItemCondition
+  stock_applied: boolean
+  created_at: string
+}
+
+export interface ReturnStatusHistoryEntry {
+  id: string
+  tenant_id: string
+  return_id: string
+  from_status_id: string | null
+  to_status_id: string
+  changed_by: string | null
+  created_at: string
+}
+
+/** Saldo a favor del cliente por una devolución resuelta con
+ * effect='saldo_a_favor' -- ledger separado de credit_charges/
+ * credit_payments (Cartera), que modelan la dirección contraria ("el
+ * cliente me debe"). Redimir este saldo en una compra nueva queda
+ * pendiente -- por ahora solo se acumula y se muestra. */
+export interface StoreCreditGrant {
+  id: string
+  tenant_id: string
+  client_id: string
+  return_id: string
+  amount: number
   created_at: string
 }
 

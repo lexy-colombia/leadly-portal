@@ -17,6 +17,7 @@ export interface ClientInput {
   stage: ClientStage
   tags: string[]
   assigned_to?: string | null
+  credit_enabled?: boolean
 }
 
 export async function listClients(tenantId: string): Promise<Client[]> {

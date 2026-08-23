@@ -174,7 +174,13 @@ h1, h2, h3, h4, h5, h6 {
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
+  /* Esquinas más cuadradas en todo el sistema -- pedido explícito del
+     usuario, "no quiero esos bordes tan redondos". rounded-lg/xl/2xl/md/sm
+     (los más usados en toda la app) derivan de este único valor vía
+     calc(), así que bajarlo acá reescala todo sin tocar componente por
+     componente. rounded-full (avatares, dots de estado) no depende de
+     --radius y sigue perfectamente circular a propósito. */
+  --radius: 0.25rem;
 
   /* Sidebar chrome pinned to navy -- independent of the tokens above, no
      .dark toggle needed (see AppShell/SidebarNavItem: "dark" is currently

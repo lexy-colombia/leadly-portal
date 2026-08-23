@@ -9,6 +9,8 @@ export const PAYMENT_METHOD_LABEL_KEY: Record<OrderPaymentMethod, TranslationKey
   transferencia: 'orders.paymentMethod.transfer',
   tarjeta: 'orders.paymentMethod.card',
   otro: 'orders.paymentMethod.other',
+  credito: 'orders.paymentMethod.credit',
+  saldo_favor: 'orders.paymentMethod.storeCredit',
 }
 
 export interface OrderPaymentInput {
@@ -28,6 +30,16 @@ export async function listPaymentsForOrder(orderId: string): Promise<SalesOrderP
     .eq('order_id', orderId)
     .is('deleted_at', null)
     .order('paid_at', { ascending: false })
+  if (error) throw error
+  return data
+}
+
+/** Whole-tenant fetch (not scoped to one order) -- feeds the sales summary
+ * on Orders.tsx (ventas del mes, ingresos por método de pago), which needs
+ * every payment across whatever set of orders the current filters leave
+ * visible, not just one order at a time like listPaymentsForOrder. */
+export async function listPaymentsForTenant(tenantId: string): Promise<SalesOrderPayment[]> {
+  const { data, error } = await supabase.from('sales_order_payments').select('*').eq('tenant_id', tenantId).is('deleted_at', null)
   if (error) throw error
   return data
 }
