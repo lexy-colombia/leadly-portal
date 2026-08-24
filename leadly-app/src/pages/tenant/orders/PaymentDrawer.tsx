@@ -11,6 +11,10 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
+function formatCurrency(value: number, currency = 'COP'): string {
+  return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
+}
+
 /** Creation only -- a payment logged by mistake is deleted and re-created
  * from OrderDetail.tsx, never edited in place (see the plan's reasoning:
  * keeps this consistent with the rest of the CRM's "simple by default"
@@ -20,12 +24,29 @@ export function PaymentDrawer({
   onClose,
   tenantId,
   orderId,
+  creditEnabled,
+  storeCreditBalance,
+  pendingAmount,
   onSaved,
 }: {
   open: boolean
   onClose: () => void
   tenantId: string
   orderId: string
+  /** Only clients with clients.credit_enabled can be charged to their
+   * credit account -- 'credito' is hidden from the method select
+   * otherwise (also enforced server-side, see apply_credit_payment_charge). */
+  creditEnabled: boolean
+  /** sum(store_credit_grants) - sum(store_credit_redemptions) for this
+   * order's client -- 'saldo_favor' only shows up as a method when this is
+   * > 0, and a payment with that method can never exceed it (also
+   * enforced server-side, see apply_store_credit_redemption()). */
+  storeCreditBalance: number
+  /** order.total - sum(existing payments) -- pre-fills the amount field
+   * (explicit user request: the form should always open with the balance
+   * still owed, not blank) and caps how much a single payment can be for
+   * (a sale can't end up "overpaid"). */
+  pendingAmount: number
   onSaved: () => void
 }) {
   const { t } = useLanguage()
@@ -40,20 +61,39 @@ export function PaymentDrawer({
   useEffect(() => {
     if (!open) return
     setMethod('efectivo')
-    setAmount('')
+    setAmount(pendingAmount > 0 ? String(pendingAmount) : '')
     setPaidAt(new Date().toISOString().slice(0, 10))
     setNotes('')
     setTouched(false)
     setFormError(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
-  const amountError = touched && !(Number(amount) > 0) ? t('orders.paymentDrawer.errors.amountInvalid') : undefined
+  const amountValue = Number(amount)
+  // 'saldo_favor' has a second, tighter cap on top of pendingAmount -- can
+  // never redeem more store credit than the client actually has.
+  const maxAmount = method === 'saldo_favor' ? Math.min(pendingAmount, storeCreditBalance) : pendingAmount
+
+  // Re-clamps the prefilled amount when switching into a method with a
+  // lower cap (e.g. pendingAmount is bigger than the client's store
+  // credit) -- otherwise the field silently opens already over the limit.
+  useEffect(() => {
+    if (Number(amount) > maxAmount) setAmount(maxAmount > 0 ? String(maxAmount) : '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [method])
+  const amountError = touched
+    ? !(amountValue > 0)
+      ? t('orders.paymentDrawer.errors.amountInvalid')
+      : amountValue > maxAmount
+        ? t('orders.paymentDrawer.errors.amountExceedsBalance', { amount: formatCurrency(maxAmount) })
+        : undefined
+    : undefined
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setTouched(true)
     setFormError(null)
-    if (!(Number(amount) > 0)) return
+    if (!(amountValue > 0) || amountValue > maxAmount) return
 
     setSubmitting(true)
     try {
@@ -61,7 +101,7 @@ export function PaymentDrawer({
         tenant_id: tenantId,
         order_id: orderId,
         method,
-        amount: Number(amount),
+        amount: amountValue,
         paid_at: paidAt || undefined,
         notes: notes.trim() || null,
       })
@@ -84,11 +124,13 @@ export function PaymentDrawer({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {(Object.keys(PAYMENT_METHOD_LABEL_KEY) as OrderPaymentMethod[]).map((m) => (
-                <SelectItem key={m} value={m}>
-                  {t(PAYMENT_METHOD_LABEL_KEY[m])}
-                </SelectItem>
-              ))}
+              {(Object.keys(PAYMENT_METHOD_LABEL_KEY) as OrderPaymentMethod[])
+                .filter((m) => (m !== 'credito' || creditEnabled) && (m !== 'saldo_favor' || storeCreditBalance > 0))
+                .map((m) => (
+                  <SelectItem key={m} value={m}>
+                    {t(PAYMENT_METHOD_LABEL_KEY[m])}
+                  </SelectItem>
+                ))}
             </SelectContent>
           </Select>
         </div>
@@ -97,6 +139,11 @@ export function PaymentDrawer({
           <div>
             <Label htmlFor="payment-amount">{t('orders.paymentDrawer.fields.amount')}</Label>
             <CurrencyInput id="payment-amount" value={amount} invalid={!!amountError} onChange={(e) => setAmount(e.target.value)} className="mt-1" />
+            {!amountError && (
+              <p className="mt-1 text-[11px] text-brand-400">
+                {t(method === 'saldo_favor' ? 'orders.paymentDrawer.fields.storeCreditHint' : 'orders.paymentDrawer.fields.amountHint', { amount: formatCurrency(maxAmount) })}
+              </p>
+            )}
             <FieldError message={amountError} />
           </div>
           <div>

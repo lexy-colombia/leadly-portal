@@ -75,6 +75,7 @@ export function ContactDrawer({
   const [city, setCity] = useState('')
   const [notes, setNotes] = useState('')
   const [isActive, setIsActive] = useState(true)
+  const [creditEnabled, setCreditEnabled] = useState(false)
   const [touched, setTouched] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -95,6 +96,7 @@ export function ContactDrawer({
     setCity(contact?.city ?? '')
     setNotes(contact?.notes ?? '')
     setIsActive(contact?.is_active ?? true)
+    setCreditEnabled(contact?.credit_enabled ?? false)
     setTouched(false)
     setFormError(null)
   }, [open, contact])
@@ -132,6 +134,7 @@ export function ContactDrawer({
         city: city.trim() || null,
         notes: notes.trim() || null,
         is_active: isActive,
+        credit_enabled: creditEnabled,
       }
       const saved = contact ? await updateClient(contact.id, input) : await createClient(input)
       onSaved(saved)
@@ -292,6 +295,15 @@ export function ContactDrawer({
               {t('contacts.drawer.fields.active')}
             </Label>
             <Switch id="contact-active" checked={isActive} onCheckedChange={setIsActive} />
+          </div>
+          <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
+            <div>
+              <Label htmlFor="contact-credit" className="font-normal text-brand-700">
+                {t('contacts.drawer.fields.creditEnabled')}
+              </Label>
+              <p className="mt-0.5 text-[11px] text-brand-400">{t('contacts.drawer.fields.creditEnabledHint')}</p>
+            </div>
+            <Switch id="contact-credit" checked={creditEnabled} onCheckedChange={setCreditEnabled} />
           </div>
         </Section>
 

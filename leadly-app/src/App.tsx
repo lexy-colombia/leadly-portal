@@ -29,6 +29,8 @@ import { Suppliers } from './pages/tenant/Suppliers'
 import { ProductDetail } from './pages/tenant/ProductDetail'
 import { Orders } from './pages/tenant/Orders'
 import { OrderDetail } from './pages/tenant/OrderDetail'
+import { Credit } from './pages/tenant/Credit'
+import { Returns } from './pages/tenant/Returns'
 import { Calendar } from './pages/tenant/Calendar'
 import { Billing as TenantBilling } from './pages/tenant/Billing'
 import { Integrations as TenantIntegrations } from './pages/tenant/Integrations'
@@ -103,6 +105,8 @@ export default function App() {
             <Route path="sales" element={<RequireModule moduleKey="sales"><Orders /></RequireModule>} />
             <Route path="sales/new" element={<RequireModule moduleKey="sales"><OrderDetail /></RequireModule>} />
             <Route path="sales/:id" element={<RequireModule moduleKey="sales"><OrderDetail /></RequireModule>} />
+            <Route path="credit" element={<RequireModule moduleKey="credit"><Credit /></RequireModule>} />
+            <Route path="returns" element={<RequireModule moduleKey="returns"><Returns /></RequireModule>} />
             {/* Tareas se fusionó dentro de Calendario el 2026-08-19 -- ya no
                 tiene ruta propia. */}
             <Route path="tasks" element={<Navigate to="/app/calendar" replace />} />

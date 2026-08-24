@@ -469,6 +469,16 @@ export function ReceiptIcon(props: IconProps) {
   )
 }
 
+export function WalletIcon(props: IconProps) {
+  return (
+    <svg {...DEFAULTS} {...props}>
+      <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5v-9Z" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M15 12.25a1.25 1.25 0 1 0 2.5 0 1.25 1.25 0 0 0-2.5 0Z" fill="currentColor" />
+      <path d="M4 9.5h13.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 export function DownloadIcon(props: IconProps) {
   return (
     <svg {...DEFAULTS} {...props}>

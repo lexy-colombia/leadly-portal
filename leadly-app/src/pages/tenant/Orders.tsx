@@ -1,89 +1,134 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { MoreHorizontalIcon } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import { useHeaderSearchSlot } from '@/contexts/HeaderSearchSlotContext'
-import type { TranslationKey } from '../../i18n/translations'
-import { formatDate } from '../../lib/dates'
-import { deleteOrder, listOrders, updateOrderStatus, ORDER_STATUS_LABEL_KEY, ORDER_STATUS_BADGE_CLASS, DELIVERY_STATUS_LABEL_KEY, DELIVERY_STATUS_BADGE_CLASS } from '../../lib/api/orders'
+import { formatDate, formatTime } from '../../lib/dates'
+import {
+  deleteOrder,
+  listOrders,
+  updateOrderStatus,
+  ORDER_STATUS_LABEL_KEY,
+  ORDER_STATUS_DOT_CLASS,
+  DELIVERY_STATUS_LABEL_KEY,
+  DELIVERY_STATUS_DOT_CLASS,
+} from '../../lib/api/orders'
 import type { OrderWithRelations } from '../../lib/api/orders'
 import { listClients } from '../../lib/api/clients'
-import type { Client, OrderStatus } from '../../types/domain'
+import { listPaymentsForTenant, PAYMENT_METHOD_LABEL_KEY } from '../../lib/api/orderPayments'
+import type { Client, OrderStatus, OrderPaymentMethod, SalesOrderPayment } from '../../types/domain'
 import { PageSpinner } from '@/components/atoms'
 import { Card, ComboboxFilter, EmptyState, IconInput, Pagination } from '@/components/molecules'
 import { ConfirmDialog } from '@/components/organisms'
-import { PlusIcon, SearchIcon } from '@/components/atoms/icons'
+import { ChevronLeftIcon, PlusIcon, SearchIcon } from '@/components/atoms/icons'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 
 const PAGE_SIZE = 10
 
 // Same trigger sizing convention as Products.tsx/Clients.tsx's filter
-// pills, so this list doesn't feel like a separate design system.
-const FILTER_TRIGGER_CLASS = 'w-40 rounded-lg text-xs'
+// pills, so this list doesn't feel like a separate design system. Border
+// bumped one step past the shared default (brand-200 instead of the
+// component's own pale brand-100/--input) -- pedido explícito del usuario,
+// esta vista se veía "muy en blanco" y necesitaba algo más de azul.
+const FILTER_TRIGGER_CLASS = 'w-40 rounded-lg border-brand-300 text-xs'
 
-type Period = 'all' | 'today' | '7d' | '30d' | 'thisMonth' | 'lastMonth' | 'custom'
-
-const PERIOD_LABEL_KEY: Record<Period, TranslationKey> = {
-  all: 'orders.filters.period.all',
-  today: 'orders.filters.period.today',
-  '7d': 'orders.filters.period.7d',
-  '30d': 'orders.filters.period.30d',
-  thisMonth: 'orders.filters.period.thisMonth',
-  lastMonth: 'orders.filters.period.lastMonth',
-  custom: 'orders.filters.period.custom',
+/** YYYY-MM-DD de hoy, en hora local -- valor por defecto de "Desde"/"Hasta"
+ * (pedido explícito del usuario: nada de un select de períodos, siempre los
+ * dos calendarios, arrancando en el día actual). */
+function todayIso(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-/** [start, end) for a period preset -- end is exclusive so "hasta" (custom)
- * can be expressed as "start of the next day" without a >= vs > mismatch.
- * A null bound means "no limit on that side" (today/7d/30d/thisMonth all
- * run through the present moment). */
-function resolvePeriodRange(period: Period, dateFrom: string, dateTo: string): { start: Date | null; end: Date | null } {
-  const now = new Date()
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  switch (period) {
-    case 'all':
-      return { start: null, end: null }
-    case 'today':
-      return { start: startOfToday, end: null }
-    case '7d': {
-      const start = new Date(startOfToday)
-      start.setDate(start.getDate() - 6)
-      return { start, end: null }
-    }
-    case '30d': {
-      const start = new Date(startOfToday)
-      start.setDate(start.getDate() - 29)
-      return { start, end: null }
-    }
-    case 'thisMonth':
-      return { start: new Date(now.getFullYear(), now.getMonth(), 1), end: null }
-    case 'lastMonth':
-      return { start: new Date(now.getFullYear(), now.getMonth() - 1, 1), end: new Date(now.getFullYear(), now.getMonth(), 1) }
-    case 'custom': {
-      const start = dateFrom ? new Date(`${dateFrom}T00:00:00`) : null
-      const end = dateTo ? new Date(new Date(`${dateTo}T00:00:00`).getTime() + 24 * 60 * 60 * 1000) : null
-      return { start, end }
-    }
-    default:
-      return { start: null, end: null }
-  }
+/** [start, end) del rango Desde/Hasta -- end es exclusivo para poder
+ * expresar "hasta" como "el inicio del día siguiente" sin mezclar >= y >. */
+function resolveDateRange(dateFrom: string, dateTo: string): { start: Date | null; end: Date | null } {
+  const start = dateFrom ? new Date(`${dateFrom}T00:00:00`) : null
+  const end = dateTo ? new Date(new Date(`${dateTo}T00:00:00`).getTime() + 24 * 60 * 60 * 1000) : null
+  return { start, end }
 }
 
 function formatCurrency(value: number, currency: string): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 }
 
+/** Tarjeta de resumen (Órdenes/Total vendido/Pagado/Pendiente/Ticket
+ * promedio) -- compacta, solo etiqueta + valor, sin pie con porcentajes
+ * (pedido explícito del usuario: "lo demás no importa"). */
+function SummaryTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-lg border border-brand-100 bg-white px-2.5 py-1.5">
+      <p className="truncate text-[10px] text-brand-400">{label}</p>
+      <p className="truncate text-sm font-bold text-brand-800">{value}</p>
+    </div>
+  )
+}
+
+/** Etiqueta pequeña sobre cada filtro (Estado/Cliente/Período) -- el usuario
+ * pidió dejar claro qué tipo de filtro es cada uno, como en la referencia
+ * de POS. Mismo tamaño/color que la etiqueta de MetricTile, para no
+ * inventar una escala tipográfica nueva. */
+function FilterField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] font-medium text-brand-400">{label}</span>
+      {children}
+    </div>
+  )
+}
+
+/** Una fila del desglose "Ingresos por método de pago" -- barra proporcional
+ * al total vendido del período filtrado (no al método más alto, como
+ * antes), con el porcentaje explícito junto a la barra, igual que la
+ * referencia de diseño que trajo el usuario. */
+function PaymentMethodRow({ label, amount, total, currency }: { label: string; amount: number; total: number; currency: string }) {
+  const pct = total > 0 ? Math.round((amount / total) * 100) : 0
+  return (
+    <div className="flex items-center gap-3">
+      <span className="w-32 shrink-0 truncate text-xs text-brand-600">{label}</span>
+      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-brand-100">
+        <div className="h-full rounded-full bg-accent-500" style={{ width: `${pct}%` }} />
+      </div>
+      <span className="w-10 shrink-0 text-right text-xs text-brand-500">{pct}%</span>
+      <span className="w-24 shrink-0 text-right text-xs font-medium text-brand-800">{formatCurrency(amount, currency)}</span>
+    </div>
+  )
+}
+
+/** Celda "Método de pago" de la tabla -- texto simple con el método
+ * principal (mayor monto) de la orden, sin barra ni porcentaje (pedido
+ * explícito del usuario, referencia de diseño). `methods` ya viene ordenado
+ * de mayor a menor monto (ver paymentsByOrder), así que el primero es el
+ * principal. */
+function OrderPaymentMethodCell({ methods }: { methods: { method: OrderPaymentMethod; amount: number }[] | undefined }) {
+  const { t } = useLanguage()
+  if (!methods || methods.length === 0) return <span className="text-xs text-brand-300">—</span>
+  return <span className="text-xs text-brand-700">{t(PAYMENT_METHOD_LABEL_KEY[methods[0].method])}</span>
+}
+
+/** Una línea de la columna "Estados" -- etiqueta ("Estado de entrega:") +
+ * bullet de color + valor, en vez de un badge tipo pill (pedido explícito
+ * del usuario, referencia de diseño). `null` en vez de un dot cuando el
+ * estado no aplica (ej. envío de una cotización que nunca se despachó). */
+function StatusDotLine({ label, dotClass, value }: { label: string; dotClass: string | null; value: string }) {
+  return (
+    <div className="flex items-center gap-1.5 text-[11px] whitespace-nowrap">
+      <span className="text-brand-400">{label}</span>
+      {dotClass && <span className={`inline-block size-1.5 shrink-0 rounded-full ${dotClass}`} />}
+      <span className="text-brand-700">{value}</span>
+    </div>
+  )
+}
+
 export function Orders() {
   const { profile } = useAuth()
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const navigate = useNavigate()
   const { slot: headerSearchSlot } = useHeaderSearchSlot()
 
@@ -93,9 +138,8 @@ export function Orders() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<OrderStatus | null>(null)
   const [contactFilter, setContactFilter] = useState<string | null>(null)
-  const [period, setPeriod] = useState<Period>('all')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  const [dateFrom, setDateFrom] = useState(todayIso())
+  const [dateTo, setDateTo] = useState(todayIso())
   const [page, setPage] = useState(1)
   // First column, prep for a future bulk-actions bar -- no toolbar wired up
   // yet, just the ability to check rows. Selection is page-scoped: cleared
@@ -111,6 +155,8 @@ export function Orders() {
   const [confirmOrder, setConfirmOrder] = useState<OrderWithRelations | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [confirmError, setConfirmError] = useState<string | null>(null)
+  const [payments, setPayments] = useState<SalesOrderPayment[] | null>(null)
+  const [summaryOpen, setSummaryOpen] = useState(true)
 
   function reload() {
     if (!profile?.tenant_id) return
@@ -124,9 +170,14 @@ export function Orders() {
   useEffect(() => {
     if (!profile?.tenant_id) return
     listClients(profile.tenant_id).then(setContacts).catch(() => {})
+    // Resumen de ventas (ver salesSummary más abajo) -- todos los pagos del
+    // tenant de una sola vez, igual que `orders` mismo, filtrado del lado
+    // del cliente junto con `filtered` en vez de refetch por cada cambio de
+    // filtro.
+    listPaymentsForTenant(profile.tenant_id).then(setPayments).catch(() => setPayments([]))
   }, [profile?.tenant_id])
 
-  const { start: periodStart, end: periodEnd } = useMemo(() => resolvePeriodRange(period, dateFrom, dateTo), [period, dateFrom, dateTo])
+  const { start: periodStart, end: periodEnd } = useMemo(() => resolveDateRange(dateFrom, dateTo), [dateFrom, dateTo])
 
   const filtered = useMemo(() => {
     if (!orders) return null
@@ -142,10 +193,65 @@ export function Orders() {
     })
   }, [orders, statusFilter, contactFilter, periodStart, periodEnd, search])
 
+  // Ventas del período filtrado -- pedido explícito del usuario (referencia:
+  // un POS de restaurante). Solo cuenta 'confirmada' (ventas reales, no
+  // cotizaciones ni anuladas) sin importar qué status haya en el filtro de
+  // arriba -- el resumen siempre es "de lo que de verdad se vendió". La
+  // moneda se toma de la primera orden confirmada porque hoy todo el
+  // dashboard asume una sola moneda por tenant (igual que el resto de la
+  // pantalla, ver formatCurrency en las filas de la tabla).
+  const salesSummary = useMemo(() => {
+    if (!filtered || !payments) return null
+    const confirmed = filtered.filter((o) => o.status === 'confirmada')
+    const orderIds = new Set(confirmed.map((o) => o.id))
+    const currency = confirmed[0]?.currency ?? 'COP'
+
+    const paidByOrder = new Map<string, number>()
+    const byMethod: Record<OrderPaymentMethod, number> = { efectivo: 0, transferencia: 0, tarjeta: 0, credito: 0, otro: 0, saldo_favor: 0 }
+    for (const p of payments) {
+      if (!orderIds.has(p.order_id)) continue
+      byMethod[p.method] += p.amount
+      paidByOrder.set(p.order_id, (paidByOrder.get(p.order_id) ?? 0) + p.amount)
+    }
+
+    const total = confirmed.reduce((sum, o) => sum + o.total, 0)
+    const pending = confirmed.reduce((sum, o) => sum + Math.max(0, o.total - (paidByOrder.get(o.id) ?? 0)), 0)
+    const paid = total - pending
+
+    return {
+      count: confirmed.length,
+      total,
+      average: confirmed.length > 0 ? total / confirmed.length : 0,
+      paid,
+      pending,
+      byMethod,
+      currency,
+    }
+  }, [filtered, payments])
+
+  // Desglose de métodos de pago por orden (columna "Métodos de pago" de la
+  // tabla) -- se construye una sola vez a partir de `payments` (ya cargado
+  // completo para todo el tenant, ver arriba) en vez de una consulta por
+  // fila. Ordenado de mayor a menor monto para que el método principal de
+  // cada orden aparezca primero.
+  const paymentsByOrder = useMemo(() => {
+    const map = new Map<string, { method: OrderPaymentMethod; amount: number }[]>()
+    if (!payments) return map
+    for (const p of payments) {
+      const list = map.get(p.order_id) ?? []
+      const existing = list.find((m) => m.method === p.method)
+      if (existing) existing.amount += p.amount
+      else list.push({ method: p.method, amount: p.amount })
+      map.set(p.order_id, list)
+    }
+    for (const list of map.values()) list.sort((a, b) => b.amount - a.amount)
+    return map
+  }, [payments])
+
   useEffect(() => {
     setPage(1)
     setSelectedIds(new Set())
-  }, [statusFilter, contactFilter, period, dateFrom, dateTo, search])
+  }, [statusFilter, contactFilter, dateFrom, dateTo, search])
 
   const totalPages = filtered ? Math.max(1, Math.ceil(filtered.length / PAGE_SIZE)) : 1
   const pageItems = filtered ? filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE) : null
@@ -231,55 +337,94 @@ export function Orders() {
           headerSearchSlot,
         )}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <ComboboxFilter
-          options={(Object.keys(ORDER_STATUS_LABEL_KEY) as OrderStatus[]).map((s) => ({ id: s, label: t(ORDER_STATUS_LABEL_KEY[s]) }))}
-          value={statusFilter}
-          onChange={(id) => setStatusFilter(id as OrderStatus | null)}
-          placeholder={t('orders.filters.all')}
-          searchPlaceholder={t('orders.filters.search')}
-          emptyLabel={t('orders.filters.noResults')}
-          triggerClassName={FILTER_TRIGGER_CLASS}
-        />
+      <div className="flex flex-wrap items-end gap-2 rounded-2xl border border-brand-100 bg-brand-50/40 p-3">
+        <FilterField label={t('orders.filters.labels.status')}>
+          <ComboboxFilter
+            options={(Object.keys(ORDER_STATUS_LABEL_KEY) as OrderStatus[]).map((s) => ({ id: s, label: t(ORDER_STATUS_LABEL_KEY[s]) }))}
+            value={statusFilter}
+            onChange={(id) => setStatusFilter(id as OrderStatus | null)}
+            placeholder={t('orders.filters.all')}
+            searchPlaceholder={t('orders.filters.search')}
+            emptyLabel={t('orders.filters.noResults')}
+            triggerClassName={FILTER_TRIGGER_CLASS}
+          />
+        </FilterField>
 
-        <ComboboxFilter
-          options={contacts.map((c) => ({ id: c.id, label: c.full_name }))}
-          value={contactFilter}
-          onChange={setContactFilter}
-          placeholder={t('orders.filters.allContacts')}
-          searchPlaceholder={t('orders.filters.searchContact')}
-          emptyLabel={t('orders.filters.noResults')}
-          triggerClassName={FILTER_TRIGGER_CLASS}
-        />
+        <FilterField label={t('orders.filters.labels.client')}>
+          <ComboboxFilter
+            options={contacts.map((c) => ({ id: c.id, label: c.full_name }))}
+            value={contactFilter}
+            onChange={setContactFilter}
+            placeholder={t('orders.filters.allContacts')}
+            searchPlaceholder={t('orders.filters.searchContact')}
+            emptyLabel={t('orders.filters.noResults')}
+            triggerClassName={FILTER_TRIGGER_CLASS}
+          />
+        </FilterField>
 
-        <Select value={period} onValueChange={(v) => setPeriod(v as Period)}>
-          <SelectTrigger size="sm" className={FILTER_TRIGGER_CLASS}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {(Object.keys(PERIOD_LABEL_KEY) as Period[]).map((p) => (
-              <SelectItem key={p} value={p}>
-                {t(PERIOD_LABEL_KEY[p])}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <FilterField label={t('orders.filters.dateFrom')}>
+          <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label={t('orders.filters.dateFrom')} className="h-7 w-36 rounded-lg border-brand-300 text-xs" />
+        </FilterField>
+        <FilterField label={t('orders.filters.dateTo')}>
+          <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} aria-label={t('orders.filters.dateTo')} className="h-7 w-36 rounded-lg border-brand-300 text-xs" />
+        </FilterField>
 
-        {period === 'custom' && (
-          <>
-            <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label={t('orders.filters.dateFrom')} className="h-7 w-36 rounded-lg text-xs" />
-            <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} aria-label={t('orders.filters.dateTo')} className="h-7 w-36 rounded-lg text-xs" />
-          </>
-        )}
-
-        <span className="shrink-0 text-xs text-brand-400">
+        <span className="shrink-0 pb-1.5 text-xs text-brand-400">
           {filtered?.length ?? 0} {t((filtered?.length ?? 0) === 1 ? 'orders.count.singular' : 'orders.count.plural')}
         </span>
 
-        <Button onClick={() => navigate('/app/sales/new')} size="sm" className="ml-auto">
+        <Button onClick={() => navigate('/app/sales/new')} size="sm" className="ml-auto self-center">
           <PlusIcon width={14} height={14} /> {t('orders.actions.newSale')}
         </Button>
       </div>
+
+      {salesSummary && salesSummary.count > 0 && (
+        <div className="space-y-2">
+          {/* Siempre visibles, nunca detrás del toggle -- pedido explícito
+              del usuario, a diferencia del desglose por método (ver abajo),
+              que sí es "el detalle" que se abre/cierra. */}
+          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-5">
+            <SummaryTile label={t('orders.summary.count')} value={String(salesSummary.count)} />
+            <SummaryTile label={t('orders.summary.total')} value={formatCurrency(salesSummary.total, salesSummary.currency)} />
+            <SummaryTile label={t('orders.summary.paid')} value={formatCurrency(salesSummary.paid, salesSummary.currency)} />
+            <SummaryTile label={t('orders.summary.pending')} value={formatCurrency(salesSummary.pending, salesSummary.currency)} />
+            <SummaryTile label={t('orders.summary.average')} value={formatCurrency(salesSummary.average, salesSummary.currency)} />
+          </div>
+
+          <div className="overflow-hidden rounded-2xl border border-brand-100 bg-white">
+            {/* Mismo fondo sombreado que la card de filtros (bg-brand-50/40)
+                -- pedido explícito del usuario, en vez del azul oscuro que
+                tenía antes. */}
+            <button type="button" onClick={() => setSummaryOpen((v) => !v)} className="flex w-full items-center justify-between bg-brand-50/40 px-4 py-2.5 text-left">
+              <span className="text-xs font-semibold tracking-wide text-brand-700 uppercase">{t('orders.summary.byMethod')}</span>
+              <ChevronLeftIcon width={11} height={11} className={`text-brand-400 transition-transform ${summaryOpen ? 'rotate-90' : '-rotate-90'}`} />
+            </button>
+            {summaryOpen && (
+              <div className="space-y-1.5 border-t border-brand-100 px-4 py-3">
+                {/* Solo métodos que de verdad se usaron en este período --
+                    pedido explícito del usuario, no tiene sentido mostrar
+                    "Otro: $0" si ninguna orden lo usó. */}
+                {(Object.keys(PAYMENT_METHOD_LABEL_KEY) as OrderPaymentMethod[])
+                  .filter((m) => m !== 'saldo_favor' && salesSummary.byMethod[m] > 0)
+                  .map((m) => (
+                    <PaymentMethodRow key={m} label={t(PAYMENT_METHOD_LABEL_KEY[m])} amount={salesSummary.byMethod[m]} total={salesSummary.total} currency={salesSummary.currency} />
+                  ))}
+                {salesSummary.pending > 0 && (
+                  <PaymentMethodRow label={t('orders.summary.pending')} amount={salesSummary.pending} total={salesSummary.total} currency={salesSummary.currency} />
+                )}
+                {salesSummary.byMethod.saldo_favor > 0 && (
+                  <PaymentMethodRow
+                    label={t('orders.summary.storeCreditApplied')}
+                    amount={salesSummary.byMethod.saldo_favor}
+                    total={salesSummary.total}
+                    currency={salesSummary.currency}
+                  />
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       {!orders && !error && <PageSpinner />}
@@ -307,6 +452,7 @@ export function Orders() {
                   <TableHead>{t('orders.table.contact')}</TableHead>
                   <TableHead>{t('orders.table.status')}</TableHead>
                   <TableHead>{t('orders.table.delivery')}</TableHead>
+                  <TableHead>{t('orders.table.paymentMethods')}</TableHead>
                   <TableHead>{t('orders.table.total')}</TableHead>
                   <TableHead>{t('orders.table.date')}</TableHead>
                   <TableHead className="text-right">{t('orders.table.actions')}</TableHead>
@@ -324,25 +470,53 @@ export function Orders() {
                     </TableCell>
                     <TableCell className="text-xs font-medium text-brand-800">ORD-{order.number}</TableCell>
                     <TableCell className="text-xs text-brand-700">
-                      {order.contact?.full_name ?? '-'}
-                      {order.opportunity && <span className="block text-[11px] font-normal text-brand-400">{order.opportunity.title}</span>}
+                      <p className="font-medium text-brand-800">{order.contact?.full_name ?? '-'}</p>
+                      {order.contact?.phone && <p className="text-[11px] font-normal text-brand-400">{order.contact.phone}</p>}
+                      {order.opportunity && <p className="text-[11px] font-normal text-brand-400">{order.opportunity.title}</p>}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline" className={ORDER_STATUS_BADGE_CLASS[order.status]}>
-                        {t(ORDER_STATUS_LABEL_KEY[order.status])}
-                      </Badge>
+                      <div className="space-y-1">
+                        <StatusDotLine
+                          label={t('orders.table.deliveryStateLabel')}
+                          dotClass={ORDER_STATUS_DOT_CLASS[order.status]}
+                          value={t(ORDER_STATUS_LABEL_KEY[order.status])}
+                        />
+                        <StatusDotLine
+                          label={t('orders.table.shippingStateLabel')}
+                          dotClass={order.status === 'confirmada' ? DELIVERY_STATUS_DOT_CLASS[order.delivery_status] : null}
+                          value={order.status === 'confirmada' ? t(DELIVERY_STATUS_LABEL_KEY[order.delivery_status]) : '—'}
+                        />
+                      </div>
                     </TableCell>
-                    <TableCell>
-                      {order.status === 'confirmada' ? (
-                        <Badge variant="outline" className={DELIVERY_STATUS_BADGE_CLASS[order.delivery_status]}>
-                          {t(DELIVERY_STATUS_LABEL_KEY[order.delivery_status])}
-                        </Badge>
+                    <TableCell className="text-xs text-brand-700">
+                      {order.shipping_address ? (
+                        <>
+                          <p>{order.shipping_address.line1}</p>
+                          {(order.shipping_address.city || order.shipping_address.state_province) && (
+                            <p className="text-[11px] text-brand-400">
+                              {[order.shipping_address.city, order.shipping_address.state_province].filter(Boolean).join(', ')}
+                            </p>
+                          )}
+                        </>
                       ) : (
-                        <span className="text-xs text-brand-300">—</span>
+                        <span className="text-brand-300">{t('orders.table.noAddress')}</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-xs text-brand-700">{formatCurrency(order.total, order.currency)}</TableCell>
-                    <TableCell className="text-xs text-brand-500">{formatDate(order.created_at)}</TableCell>
+                    <TableCell>
+                      <OrderPaymentMethodCell methods={paymentsByOrder.get(order.id)} />
+                    </TableCell>
+                    <TableCell className="text-xs text-brand-700">
+                      <p>{formatCurrency(order.total, order.currency)}</p>
+                      {order.items?.[0]?.count > 0 && (
+                        <p className="text-[11px] text-brand-400">
+                          {t(order.items[0].count === 1 ? 'orders.table.itemsCount.singular' : 'orders.table.itemsCount.plural', { count: order.items[0].count })}
+                        </p>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs text-brand-500">
+                      <p>{formatDate(order.created_at)}</p>
+                      <p className="text-[11px] text-brand-400">{formatTime(order.created_at, language)}</p>
+                    </TableCell>
                     <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -370,7 +544,7 @@ export function Orders() {
               </TableBody>
             </Table>
           </div>
-          <Pagination page={page} totalPages={totalPages} onChange={setPage} />
+          <Pagination page={page} totalPages={totalPages} onChange={setPage} alwaysVisible />
         </>
       )}
 

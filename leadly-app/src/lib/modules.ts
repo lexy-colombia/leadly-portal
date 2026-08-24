@@ -1,4 +1,4 @@
-import { AiSparkleIcon, ArchiveIcon, BoxIcon, BuildingIcon, CalendarIcon, ChatBubbleIcon, CheckIcon, CreditCardIcon, DashboardIcon, GlobeIcon, MegaphoneIcon, ReceiptIcon, SettingsIcon, TargetIcon, UsersIcon } from '@/components/atoms/icons'
+import { AiSparkleIcon, ArchiveIcon, BoxIcon, BuildingIcon, CalendarIcon, ChatBubbleIcon, CheckIcon, CreditCardIcon, DashboardIcon, GlobeIcon, MegaphoneIcon, ReceiptIcon, RefreshIcon, SettingsIcon, TargetIcon, UsersIcon, WalletIcon } from '@/components/atoms/icons'
 import type { TranslationKey } from '../i18n/translations'
 import type { ComponentType } from 'react'
 
@@ -48,6 +48,15 @@ export const TENANT_MODULES: TenantModuleDefinition[] = [
   },
   { key: 'inventory', labelKey: 'common.nav.inventory', to: '/app/settings', icon: ArchiveIcon, hideFromNav: true },
   { key: 'sales', labelKey: 'common.nav.sales', to: '/app/sales', icon: ReceiptIcon },
+  { key: 'credit', labelKey: 'common.nav.credit', to: '/app/credit', icon: WalletIcon },
+  // Igual que 'inventory': vive dentro de una orden (DispatchDrawer, "Ver
+  // detalle" junto a Estado de envío) y dentro de Configuración
+  // (DispatchStatusesSection) -- sin ítem de nav propio.
+  { key: 'dispatches', labelKey: 'common.nav.dispatches', to: '/app/settings', icon: BoxIcon, hideFromNav: true },
+  // A diferencia de credit/dispatches, Devoluciones sí tiene nav propio --
+  // es una lista de tickets propia (Returns.tsx), no vive adentro de otra
+  // pantalla.
+  { key: 'returns', labelKey: 'common.nav.returns', to: '/app/returns', icon: RefreshIcon },
   // Tareas se fusionó dentro de Calendario (2026-08-19, pedido explícito del
   // usuario: "el calendario debería ser la matriz de mi CRM") -- mismo
   // patrón que 'inventory': el module_key/gating por tenant se conserva

@@ -2,6 +2,7 @@ import esAccount from './locales/es/account.json'
 import esAuth from './locales/es/auth.json'
 import esBackoffice from './locales/es/backoffice.json'
 import esBilling from './locales/es/billing.json'
+import esCredit from './locales/es/credit.json'
 import esCalendar from './locales/es/calendar.json'
 import esCampaigns from './locales/es/campaigns.json'
 import esChangelog from './locales/es/changelog.json'
@@ -11,6 +12,8 @@ import esDashboard from './locales/es/dashboard.json'
 import esInbox from './locales/es/inbox.json'
 import esIntegrations from './locales/es/integrations.json'
 import esInventory from './locales/es/inventory.json'
+import esDispatches from './locales/es/dispatches.json'
+import esReturns from './locales/es/returns.json'
 import esOpportunities from './locales/es/opportunities.json'
 import esOrders from './locales/es/orders.json'
 import esProducts from './locales/es/products.json'
@@ -22,6 +25,7 @@ import enAccount from './locales/en/account.json'
 import enAuth from './locales/en/auth.json'
 import enBackoffice from './locales/en/backoffice.json'
 import enBilling from './locales/en/billing.json'
+import enCredit from './locales/en/credit.json'
 import enCalendar from './locales/en/calendar.json'
 import enCampaigns from './locales/en/campaigns.json'
 import enChangelog from './locales/en/changelog.json'
@@ -31,6 +35,8 @@ import enDashboard from './locales/en/dashboard.json'
 import enInbox from './locales/en/inbox.json'
 import enIntegrations from './locales/en/integrations.json'
 import enInventory from './locales/en/inventory.json'
+import enDispatches from './locales/en/dispatches.json'
+import enReturns from './locales/en/returns.json'
 import enOpportunities from './locales/en/opportunities.json'
 import enOrders from './locales/en/orders.json'
 import enProducts from './locales/en/products.json'
@@ -63,7 +69,10 @@ export const translations = {
     ...esCampaigns,
     ...esProducts,
     ...esInventory,
+    ...esDispatches,
+    ...esReturns,
     ...esOrders,
+    ...esCredit,
     ...esBilling,
     ...esSettings,
     ...esTemplates,
@@ -84,7 +93,10 @@ export const translations = {
     ...enCampaigns,
     ...enProducts,
     ...enInventory,
+    ...enDispatches,
+    ...enReturns,
     ...enOrders,
+    ...enCredit,
     ...enBilling,
     ...enSettings,
     ...enTemplates,

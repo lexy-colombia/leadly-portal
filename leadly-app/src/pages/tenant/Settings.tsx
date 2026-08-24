@@ -9,6 +9,9 @@ import { Card, CardSection } from '@/components/molecules'
 import { Drawer } from '@/components/organisms'
 import { PencilIcon, XCircleIcon } from '@/components/atoms/icons'
 import { Warehouses } from './Warehouses'
+import { DispatchStatusesSection } from './settings/DispatchStatusesSection'
+import { ReturnStatusesSection } from './settings/ReturnStatusesSection'
+import { ReturnResolutionTypesSection } from './settings/ReturnResolutionTypesSection'
 import { useTenantForm } from '../backoffice/useTenantForm'
 import { TenantFormFields } from '../backoffice/TenantFormFields'
 
@@ -91,6 +94,27 @@ export function Settings() {
             <Warehouses />
           </CardSection>
         </Card>
+      )}
+      {enabledModules?.has('dispatches') && profile?.tenant_id && (
+        <Card padded={false}>
+          <CardSection title={t('dispatches.settings.title')}>
+            <DispatchStatusesSection tenantId={profile.tenant_id} />
+          </CardSection>
+        </Card>
+      )}
+      {enabledModules?.has('returns') && profile?.tenant_id && (
+        <>
+          <Card padded={false}>
+            <CardSection title={t('returns.settings.statuses.title')}>
+              <ReturnStatusesSection tenantId={profile.tenant_id} />
+            </CardSection>
+          </Card>
+          <Card padded={false}>
+            <CardSection title={t('returns.settings.resolutionTypes.title')}>
+              <ReturnResolutionTypesSection tenantId={profile.tenant_id} />
+            </CardSection>
+          </Card>
+        </>
       )}
     </div>
   )

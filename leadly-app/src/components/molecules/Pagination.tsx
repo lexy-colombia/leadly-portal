@@ -22,10 +22,25 @@ function paginationRange(page: number, totalPages: number): (number | 'ellipsis'
  * to cap every list in the app at a fixed page size so a page's content
  * stays short enough to fit the viewport without scrolling. Same
  * `page`/`totalPages`/`onChange` contract this had as a plain prev/next
- * pager, so no caller needed to change for the redesign. */
-export function Pagination({ page, totalPages, onChange }: { page: number; totalPages: number; onChange: (page: number) => void }) {
+ * pager, so no caller needed to change for the redesign.
+ *
+ * `alwaysVisible` opts a single caller out of the default "hide when there's
+ * only one page" behavior (pedido explícito del usuario para Orders.tsx, que
+ * quiere el pager siempre visible como referencia de diseño) -- defaults to
+ * false so every other list keeps hiding it, unchanged. */
+export function Pagination({
+  page,
+  totalPages,
+  onChange,
+  alwaysVisible = false,
+}: {
+  page: number
+  totalPages: number
+  onChange: (page: number) => void
+  alwaysVisible?: boolean
+}) {
   const { t } = useLanguage()
-  if (totalPages <= 1) return null
+  if (totalPages <= 1 && !alwaysVisible) return null
 
   return (
     <nav aria-label="pagination" className="flex items-center justify-end gap-1 border-t border-brand-100 px-4 py-3">

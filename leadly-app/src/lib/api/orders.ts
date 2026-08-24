@@ -33,6 +33,21 @@ export const DELIVERY_STATUS_BADGE_CLASS: Record<DeliveryStatus, string> = {
   entregado: 'border-transparent bg-emerald-100 text-emerald-700',
 }
 
+// Solid-color counterparts of the two badge-class maps above, for the small
+// status dots in Orders.tsx's "Estados" column (label + dot + text, instead
+// of a pill badge -- pedido explícito del usuario, referencia de diseño).
+export const ORDER_STATUS_DOT_CLASS: Record<OrderStatus, string> = {
+  cotizacion: 'bg-slate-400',
+  confirmada: 'bg-emerald-500',
+  cancelada: 'bg-red-500',
+}
+
+export const DELIVERY_STATUS_DOT_CLASS: Record<DeliveryStatus, string> = {
+  pendiente: 'bg-slate-400',
+  en_camino: 'bg-amber-500',
+  entregado: 'bg-emerald-500',
+}
+
 export interface OrderItemInput {
   product_id?: string | null
   variant_id?: string | null
@@ -128,12 +143,17 @@ export interface OrderInput {
 export type OrderWithRelations = SalesOrder & {
   contact: { full_name: string; phone: string } | null
   opportunity: { title: string } | null
-  shipping_address: { label: string | null; line1: string; city: string | null } | null
+  shipping_address: { label: string | null; line1: string; city: string | null; state_province: string | null } | null
   billing_address: { label: string | null; line1: string; city: string | null } | null
+  // Embedded PostgREST count aggregate (`sales_order_items(count)`) --
+  // always a one-element array, never the actual item rows. Used by
+  // Orders.tsx to show "N items" under the total without a second query
+  // per order.
+  items: { count: number }[]
 }
 
 const ORDER_SELECT =
-  '*, contact:clients(full_name, phone), opportunity:opportunities(title), shipping_address:contact_addresses!shipping_address_id(label, line1, city), billing_address:contact_addresses!billing_address_id(label, line1, city)'
+  '*, contact:clients(full_name, phone), opportunity:opportunities(title), shipping_address:contact_addresses!shipping_address_id(label, line1, city, state_province), billing_address:contact_addresses!billing_address_id(label, line1, city), items:sales_order_items(count)'
 
 /** Pure function: derives subtotal/discount_total/total from a set of line
  * items plus header-level shipping/tax -- the same shape both the drawer's

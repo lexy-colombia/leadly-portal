@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { MoreHorizontalIcon } from 'lucide-react'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { TranslationKey } from '../../i18n/translations'
@@ -14,10 +14,13 @@ import { listOrdersForContact, type OrderWithRelations } from '../../lib/api/ord
 import { listAddressesForContact, deleteAddress } from '../../lib/api/addresses'
 import { listTasksForAccount, type TaskWithRelations } from '../../lib/api/tasks'
 import { listPipelinesByTenant } from '../../lib/api/pipelines'
+import { listCreditCharges, listCreditPayments, deleteCreditPayment, CREDIT_PAYMENT_METHOD_LABEL_KEY } from '../../lib/api/credit'
 import type {
   Appointment,
   Client,
   ContactAddress,
+  CreditCharge,
+  CreditPayment,
   Note,
   Pipeline,
   OrderStatus,
@@ -32,13 +35,19 @@ import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { CalendarIcon, CheckIcon, ChatBubbleIcon, PencilIcon, PlusIcon, TrashIcon, XCircleIcon } from '@/components/atoms/icons'
+import { CalendarIcon, CheckIcon, ChatBubbleIcon, PencilIcon, PlusIcon, ReceiptIcon, TrashIcon, XCircleIcon } from '@/components/atoms/icons'
 import { ContactDrawer, STAGE_LABEL } from './clients/ContactDrawer'
 import { AppointmentDrawer } from './clients/AppointmentDrawer'
 import { AddressDrawer } from './clients/AddressDrawer'
+import { CreditPaymentDrawer } from './clients/CreditPaymentDrawer'
+import { CreditReceiptDialog } from './clients/CreditReceiptDialog'
 import { OpportunityPanel } from './opportunities/OpportunityPanel'
 import { OpportunityDrawer } from './opportunities/OpportunityDrawer'
 import type { AppointmentStatus, ClientStage } from '../../types/domain'
+
+type CreditMovement =
+  | { kind: 'charge'; date: string; charge: CreditCharge }
+  | { kind: 'payment'; date: string; payment: CreditPayment }
 
 const ORDER_STATUS_LABEL: Record<OrderStatus, TranslationKey> = {
   cotizacion: 'contacts.order.status.cotizacion',
@@ -170,7 +179,10 @@ function ClientDetailContent({
   // tenant has the Pipeline module on -- otherwise it's a badge nobody can
   // act on (explicit user call, see Clients.tsx).
   const showStage = enabledModules?.has('pipeline') ?? false
-  const [tab, setTab] = useState('actividad')
+  // Deep-link support (e.g. from the Cartera list, `/app/clients/:id?tab=credito`) --
+  // same one-shot-read-on-mount criterion as Inbox's `?c=<id>`.
+  const [searchParams] = useSearchParams()
+  const [tab, setTab] = useState(() => searchParams.get('tab') ?? 'actividad')
   const [page, setPage] = useState(1)
   const [notes, setNotes] = useState<Note[] | null>(null)
   const [appointments, setAppointments] = useState<Appointment[] | null>(null)
@@ -195,6 +207,12 @@ function ClientDetailContent({
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [creditCharges, setCreditCharges] = useState<CreditCharge[] | null>(null)
+  const [creditPayments, setCreditPayments] = useState<CreditPayment[] | null>(null)
+  const [creditPaymentDrawerOpen, setCreditPaymentDrawerOpen] = useState(false)
+  const [receiptPayment, setReceiptPayment] = useState<CreditPayment | null>(null)
+  const [deleteCreditPaymentId, setDeleteCreditPaymentId] = useState<string | null>(null)
+  const [deletingCreditPayment, setDeletingCreditPayment] = useState(false)
 
   function reloadAppointments() {
     listAppointmentsForContact(contact.id).then(setAppointments).catch(() => setAppointments([]))
@@ -212,6 +230,11 @@ function ClientDetailContent({
     listOpportunitiesForContact(contact.id).then(setOpportunities).catch(() => setOpportunities([]))
   }
 
+  function reloadCredit() {
+    listCreditCharges(contact.id).then(setCreditCharges).catch(() => setCreditCharges([]))
+    listCreditPayments(contact.id).then(setCreditPayments).catch(() => setCreditPayments([]))
+  }
+
   useEffect(() => {
     listNotes(contact.id).then(setNotes).catch(() => setNotes([]))
     reloadAppointments()
@@ -219,8 +242,21 @@ function ClientDetailContent({
     reloadOpportunities()
     reloadOrders()
     reloadAddresses()
+    if (contact.credit_enabled) reloadCredit()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contact.id])
+  }, [contact.id, contact.credit_enabled])
+
+  async function handleDeleteCreditPayment() {
+    if (!deleteCreditPaymentId) return
+    setDeletingCreditPayment(true)
+    try {
+      await deleteCreditPayment(deleteCreditPaymentId)
+      setCreditPayments((prev) => (prev ? prev.filter((p) => p.id !== deleteCreditPaymentId) : prev))
+      setDeleteCreditPaymentId(null)
+    } finally {
+      setDeletingCreditPayment(false)
+    }
+  }
 
   useEffect(() => {
     if (!profile?.tenant_id) return
@@ -322,6 +358,16 @@ function ClientDetailContent({
   const opportunitiesPage = useMemo(() => paginate(opportunities ?? [], page), [opportunities, page])
   const ordersPage = useMemo(() => paginate(orders ?? [], page), [orders, page])
   const addressesPage = useMemo(() => paginate(addresses ?? [], page), [addresses, page])
+
+  const totalCharged = useMemo(() => (creditCharges ?? []).reduce((sum, c) => sum + c.amount, 0), [creditCharges])
+  const totalPaid = useMemo(() => (creditPayments ?? []).reduce((sum, p) => sum + p.amount, 0), [creditPayments])
+  const creditBalance = totalCharged - totalPaid
+  const creditMovements = useMemo<CreditMovement[]>(() => {
+    const charges: CreditMovement[] = (creditCharges ?? []).map((charge) => ({ kind: 'charge', date: charge.created_at, charge }))
+    const payments: CreditMovement[] = (creditPayments ?? []).map((payment) => ({ kind: 'payment', date: payment.created_at, payment }))
+    return [...charges, ...payments].sort((a, b) => (a.date < b.date ? 1 : -1))
+  }, [creditCharges, creditPayments])
+  const creditMovementsPage = useMemo(() => paginate(creditMovements, page), [creditMovements, page])
 
   const openOpportunities = useMemo(() => (opportunities ?? []).filter((o) => o.status === 'open'), [opportunities])
   const openOpportunitiesValue = useMemo(() => openOpportunities.reduce((sum, o) => sum + o.value, 0), [openOpportunities])
@@ -445,6 +491,7 @@ function ClientDetailContent({
           <TabsTrigger value="ventas">{`${t('contacts.detail.tabs.sales')}${orders ? ` (${orders.length})` : ''}`}</TabsTrigger>
           <TabsTrigger value="conversaciones">{t('contacts.detail.tabs.conversations')}</TabsTrigger>
           <TabsTrigger value="direcciones">{`${t('contacts.detail.tabs.addresses')}${addresses ? ` (${addresses.length})` : ''}`}</TabsTrigger>
+          {contact.credit_enabled && <TabsTrigger value="credito">{t('contacts.detail.tabs.credit')}</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="actividad">
@@ -667,6 +714,91 @@ function ClientDetailContent({
             <Pagination page={page} totalPages={addressesPage.totalPages} onChange={setPage} />
           </Panel>
         </TabsContent>
+
+        {contact.credit_enabled && (
+          <TabsContent value="credito">
+            <Panel>
+              <div className="mb-4 grid grid-cols-3 gap-3">
+                <StatCard title={t('credit.tab.charged')}>
+                  <p className="text-lg font-semibold text-brand-800">{formatCurrency(totalCharged)}</p>
+                </StatCard>
+                <StatCard title={t('credit.tab.paid')}>
+                  <p className="text-lg font-semibold text-emerald-700">{formatCurrency(totalPaid)}</p>
+                </StatCard>
+                <StatCard title={t('credit.tab.balance')}>
+                  <p className={`text-lg font-semibold ${creditBalance > 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                    {creditBalance > 0 ? formatCurrency(creditBalance) : t('credit.tab.noBalance')}
+                  </p>
+                </StatCard>
+              </div>
+
+              <div className="mb-3 flex items-center justify-between">
+                <h4 className="text-sm font-semibold text-brand-800">{t('credit.tab.movements')}</h4>
+                <Button size="sm" onClick={() => setCreditPaymentDrawerOpen(true)}>
+                  <PlusIcon width={13} height={13} /> {t('credit.tab.registerPayment')}
+                </Button>
+              </div>
+
+              {(!creditCharges || !creditPayments) && <PageSpinner />}
+              {creditCharges && creditPayments && creditMovements.length === 0 && (
+                <p className="py-6 text-center text-sm text-brand-400">{t('credit.tab.noMovements')}</p>
+              )}
+              {creditMovements.length > 0 && (
+                <ul className="space-y-2">
+                  {creditMovementsPage.items.map((m) =>
+                    m.kind === 'charge' ? (
+                      <li key={`charge-${m.charge.id}`} className="flex items-center justify-between gap-3 rounded-xl border border-brand-100 px-4 py-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <Badge variant="outline" className="border-transparent bg-red-100 text-red-700">
+                              {t('credit.movement.charge')}
+                            </Badge>
+                            <p className="text-xs text-brand-400">{formatDate(m.charge.created_at)}</p>
+                          </div>
+                          {m.charge.notes && <p className="mt-1 truncate text-sm text-brand-700">{m.charge.notes}</p>}
+                        </div>
+                        <span className="shrink-0 font-semibold text-red-700">-{formatCurrency(m.charge.amount)}</span>
+                      </li>
+                    ) : (
+                      <li key={`payment-${m.payment.id}`} className="flex items-center justify-between gap-3 rounded-xl border border-brand-100 px-4 py-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <Badge variant="outline" className="border-transparent bg-emerald-100 text-emerald-700">
+                              {t('credit.movement.payment')}
+                            </Badge>
+                            <p className="text-xs text-brand-400">
+                              {formatDate(m.payment.paid_at)} · {t(CREDIT_PAYMENT_METHOD_LABEL_KEY[m.payment.method])}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setReceiptPayment(m.payment)}
+                            className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-accent-600 hover:text-accent-700"
+                          >
+                            <ReceiptIcon width={12} height={12} />
+                            {t('credit.movement.receipt', { number: m.payment.receipt_number })}
+                          </button>
+                        </div>
+                        <span className="flex shrink-0 items-center gap-2">
+                          <span className="font-semibold text-emerald-700">+{formatCurrency(m.payment.amount)}</span>
+                          <button
+                            type="button"
+                            onClick={() => setDeleteCreditPaymentId(m.payment.id)}
+                            className="text-brand-300 hover:text-red-600"
+                            aria-label={t('credit.movement.deleteAria')}
+                          >
+                            <TrashIcon width={12} height={12} />
+                          </button>
+                        </span>
+                      </li>
+                    ),
+                  )}
+                </ul>
+              )}
+              <Pagination page={page} totalPages={creditMovementsPage.totalPages} onChange={setPage} />
+            </Panel>
+          </TabsContent>
+        )}
       </Tabs>
 
       {profile?.tenant_id && (
@@ -714,6 +846,29 @@ function ClientDetailContent({
             contactId={contact.id}
             onCreated={(a) => setAppointments((prev) => (prev ? [...prev, a] : [a]))}
           />
+          {contact.credit_enabled && (
+            <>
+              <CreditPaymentDrawer
+                open={creditPaymentDrawerOpen}
+                onClose={() => setCreditPaymentDrawerOpen(false)}
+                tenantId={profile.tenant_id}
+                clientId={contact.id}
+                onSaved={(payment) => {
+                  setCreditPayments((prev) => (prev ? [payment, ...prev] : [payment]))
+                  setReceiptPayment(payment)
+                }}
+              />
+              <CreditReceiptDialog open={!!receiptPayment} onClose={() => setReceiptPayment(null)} payment={receiptPayment} client={contact} />
+              <ConfirmDialog
+                open={!!deleteCreditPaymentId}
+                onClose={() => setDeleteCreditPaymentId(null)}
+                onConfirm={handleDeleteCreditPayment}
+                title={t('credit.deletePayment.title')}
+                description={t('credit.deletePayment.body')}
+                loading={deletingCreditPayment}
+              />
+            </>
+          )}
         </>
       )}
 

@@ -5,7 +5,8 @@
       "name": "leadly-app",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--prefix", "leadly-app"],
-      "port": 5173
+      "port": 5173,
+      "autoPort": true
     }
   ]
 }

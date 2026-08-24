@@ -24,3 +24,11 @@ export function formatDateTime(iso: string | null | undefined, language: Languag
   const time = new Date(iso).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
   return `${formatDate(iso)}, ${time}`
 }
+
+/** formatDateTime's time part alone -- for table cells that already show
+ * the date on its own line and just need the time as a secondary line. */
+export function formatTime(iso: string | null | undefined, language: Language): string {
+  if (!iso) return '—'
+  const locale = language === 'en' ? 'en-US' : 'es-CO'
+  return new Date(iso).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
+}

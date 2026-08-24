@@ -53,6 +53,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { OrderItemsEditor } from './orders/OrderItemsEditor'
 import { PaymentDrawer } from './orders/PaymentDrawer'
+import { DispatchDrawer } from './orders/DispatchDrawer'
+import { getDispatchStatusForOrder, type DispatchStatusSummary } from '../../lib/api/dispatches'
+import { getStoreCreditBalance } from '../../lib/api/returns'
 import { StockShortfallDialog } from './orders/StockShortfallDialog'
 import { AddressDrawer } from './clients/AddressDrawer'
 
@@ -156,7 +159,7 @@ export function OrderDetail() {
   const { id } = useParams<{ id: string }>()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { profile } = useAuth()
+  const { profile, enabledModules } = useAuth()
   const { t, language } = useLanguage()
   const isNew = !id
 
@@ -234,6 +237,35 @@ export function OrderDetail() {
   const [commentAttachment, setCommentAttachment] = useState<File | null>(null)
   const [savingComment, setSavingComment] = useState(false)
   const [paymentDrawerOpen, setPaymentDrawerOpen] = useState(false)
+  const [dispatchDrawerOpen, setDispatchDrawerOpen] = useState(false)
+  const [dispatchStatus, setDispatchStatus] = useState<DispatchStatusSummary | null>(null)
+
+  function reloadDispatchStatus() {
+    if (!order || !enabledModules?.has('dispatches')) return
+    getDispatchStatusForOrder(order.id)
+      .then(setDispatchStatus)
+      .catch(() => setDispatchStatus(null))
+  }
+
+  useEffect(() => {
+    reloadDispatchStatus()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order?.id, enabledModules])
+
+  // Redimir saldo a favor en PaymentDrawer (ver returns.md) necesita saber
+  // cuánto tiene disponible el cliente de esta orden -- se recarga cada vez
+  // que cambia el contacto, no solo al montar, porque "Cambiar contacto" es
+  // una acción real acá (ver handleContactSelect).
+  const [storeCreditBalance, setStoreCreditBalance] = useState(0)
+
+  useEffect(() => {
+    if (!order?.contact_id) {
+      setStoreCreditBalance(0)
+      return
+    }
+    getStoreCreditBalance(order.contact_id).then(setStoreCreditBalance).catch(() => setStoreCreditBalance(0))
+  }, [order?.contact_id])
+
   const [addressDrawerOpen, setAddressDrawerOpen] = useState(false)
   const [deletePaymentId, setDeletePaymentId] = useState<string | null>(null)
   const [confirmingVoid, setConfirmingVoid] = useState(false)
@@ -275,6 +307,10 @@ export function OrderDetail() {
   function reloadPayments() {
     if (!id) return
     listPaymentsForOrder(id).then(setPayments).catch(() => setPayments([]))
+    // Un pago con method='saldo_favor' descuenta el saldo del lado del
+    // servidor -- refrescarlo acá para que el drawer no siga ofreciendo un
+    // monto máximo desactualizado si se abre de nuevo.
+    if (order?.contact_id) getStoreCreditBalance(order.contact_id).then(setStoreCreditBalance).catch(() => {})
   }
 
   function reloadComments() {
@@ -709,7 +745,7 @@ export function OrderDetail() {
         {selected && !editing ? (
           <div className="mt-1 flex items-start justify-between gap-2">
             <div className="min-w-0 text-sm">
-              <p className="truncate font-medium text-brand-800">
+              <p className="truncate text-brand-800">
                 {selected.line1}
                 {selected.line2 ? `, ${selected.line2}` : ''}
               </p>
@@ -790,9 +826,15 @@ export function OrderDetail() {
                 </span>
                 <span className="flex shrink-0 items-center gap-1.5">
                   <span className="font-medium text-brand-800">{formatCurrency(p.amount, p.currency)}</span>
-                  <button type="button" onClick={() => setDeletePaymentId(p.id)} className="text-brand-300 hover:text-red-600" aria-label={t('orders.detail.deletePaymentAria')}>
-                    <TrashIcon width={11} height={11} />
-                  </button>
+                  {order.status === 'cotizacion' ? (
+                    <button type="button" onClick={() => setDeletePaymentId(p.id)} className="text-brand-300 hover:text-red-600" aria-label={t('orders.detail.deletePaymentAria')}>
+                      <TrashIcon width={11} height={11} />
+                    </button>
+                  ) : (
+                    <span title={t('orders.detail.paymentLocked')} className="text-brand-200">
+                      <TrashIcon width={11} height={11} />
+                    </span>
+                  )}
                 </span>
               </li>
             ))}
@@ -821,7 +863,7 @@ export function OrderDetail() {
                 {contactId && !editingContact && selectedContact ? (
                   <div className="mt-1 flex items-start justify-between gap-2">
                     <div className="min-w-0 text-sm">
-                      <p className="truncate font-medium text-brand-800">{selectedContact.full_name}</p>
+                      <p className="truncate text-brand-800">{selectedContact.full_name}</p>
                       <p className="truncate text-xs text-brand-400">{[selectedContact.nit ? `NIT ${selectedContact.nit}` : null, selectedContact.phone].filter(Boolean).join(' · ')}</p>
                     </div>
                     <Button type="button" variant="default" size="icon-sm" onClick={() => setEditingContact(true)} aria-label={t('orders.detail.changeContactAria')} className="shrink-0">
@@ -854,19 +896,46 @@ export function OrderDetail() {
                   ya no corre. */}
               {!isNew && order && order.status === 'confirmada' && (
                 <div>
-                  <Label>{t('orders.drawer.fields.deliveryStatus')}</Label>
-                  <Select value={order.delivery_status} onValueChange={(v) => handleDeliveryStatusSelect(v as DeliveryStatus)}>
-                    <SelectTrigger className="mt-1 w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(Object.keys(DELIVERY_STATUS_LABEL_KEY) as DeliveryStatus[]).map((s) => (
-                        <SelectItem key={s} value={s}>
-                          {t(DELIVERY_STATUS_LABEL_KEY[s])}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <div className="flex items-center justify-between">
+                    <Label>{t('orders.drawer.fields.deliveryStatus')}</Label>
+                    {/* Con el módulo de Despachos habilitado, el estado real
+                        vive en dispatch_statuses (configurable, con
+                        timeline/transportadora/guía) y sincroniza este campo
+                        automáticamente -- ya no se edita a mano acá, este
+                        link es el único punto de entrada a esa vista. */}
+                    {enabledModules?.has('dispatches') && (
+                      <button type="button" onClick={() => setDispatchDrawerOpen(true)} className="text-[11px] font-medium text-accent-600 hover:text-accent-700">
+                        {t('dispatches.detail.link')}
+                      </button>
+                    )}
+                  </div>
+                  {enabledModules?.has('dispatches') ? (
+                    <p className="mt-1 flex items-center gap-1.5 text-xs">
+                      {/* Mismo tamaño que la línea secundaria de
+                          ciudad/estado en las direcciones (text-xs, sin
+                          negrita) -- "Entregado" no debe competir en
+                          jerarquía con el nombre/dirección de arriba. Solo el
+                          punto lleva el color real del estado; el texto queda
+                          en el mismo gris que esa línea secundaria (pedido
+                          explícito del usuario: nombre en negro, color solo
+                          en el punto). */}
+                      {dispatchStatus && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: dispatchStatus.color }} />}
+                      <span className="truncate text-brand-400">{dispatchStatus?.name ?? t(DELIVERY_STATUS_LABEL_KEY[order.delivery_status])}</span>
+                    </p>
+                  ) : (
+                    <Select value={order.delivery_status} onValueChange={(v) => handleDeliveryStatusSelect(v as DeliveryStatus)}>
+                      <SelectTrigger className="mt-1 w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(Object.keys(DELIVERY_STATUS_LABEL_KEY) as DeliveryStatus[]).map((s) => (
+                          <SelectItem key={s} value={s}>
+                            {t(DELIVERY_STATUS_LABEL_KEY[s])}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
               )}
             </div>
@@ -1142,7 +1211,29 @@ export function OrderDetail() {
       )}
 
       {!isNew && order && profile?.tenant_id && (
-        <PaymentDrawer open={paymentDrawerOpen} onClose={() => setPaymentDrawerOpen(false)} tenantId={profile.tenant_id} orderId={order.id} onSaved={reloadPayments} />
+        <PaymentDrawer
+          open={paymentDrawerOpen}
+          onClose={() => setPaymentDrawerOpen(false)}
+          tenantId={profile.tenant_id}
+          orderId={order.id}
+          creditEnabled={contacts.find((c) => c.id === order.contact_id)?.credit_enabled ?? false}
+          storeCreditBalance={storeCreditBalance}
+          pendingAmount={balance}
+          onSaved={reloadPayments}
+        />
+      )}
+
+      {!isNew && order && profile?.tenant_id && enabledModules?.has('dispatches') && (
+        <DispatchDrawer
+          open={dispatchDrawerOpen}
+          onClose={() => setDispatchDrawerOpen(false)}
+          tenantId={profile.tenant_id}
+          order={order}
+          onOrderChanged={() => {
+            reloadOrder()
+            reloadDispatchStatus()
+          }}
+        />
       )}
 
       <ConfirmDialog
