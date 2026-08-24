@@ -74,6 +74,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let active = true
     let currentUserId: string | null = null
+    // Set once the first onAuthStateChange callback (event `INITIAL_SESSION`)
+    // has run -- see below for why there's no separate getSession() call.
+    let initialized = false
 
     async function loadProfileFor(userId: string) {
       const nextProfile = await fetchProfile(userId)
@@ -92,25 +95,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (!active) return
-      currentUserId = session?.user?.id ?? null
-      setSession(session)
-      if (session?.user) {
-        await loadProfileFor(session.user.id)
-      }
-      setLoading(false)
-    })
-
+    // Deliberately no separate supabase.auth.getSession() call on mount --
+    // it and onAuthStateChange each resolve the session independently
+    // (supabase-js coordinates them via the Navigator LockManager), and
+    // racing both caused a real bug in production: getSession() could
+    // resolve with session=null a beat before onAuthStateChange's initial
+    // INITIAL_SESSION event delivered the real one, which was enough for
+    // RequireAuth to already have redirected to /login (loading briefly
+    // false + session null) before the correct session arrived and Login.tsx
+    // bounced back to /app -- the exact "flashes to login, then a second
+    // later recovers" bug reported by the user on
+    // https://leadly.lexycolombia.com/app. onAuthStateChange alone fires
+    // once immediately on subscribe with the current session (already
+    // resolved from storage), so it's the single source of truth here.
     const { data: subscription } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (!active) return
 
       const nextUserId = session?.user?.id ?? null
-      if (nextUserId === currentUserId) {
+      if (initialized && nextUserId === currentUserId) {
         setSession(session)
         return
       }
       currentUserId = nextUserId
+      initialized = true
 
       setLoading(true)
       setSession(session)
