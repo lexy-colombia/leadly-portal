@@ -1,0 +1,12 @@
+-- Limpieza pedida por el usuario 2026-08-25 después de simplificar el
+-- efecto de stock (ver 20260825134917_simplify_stock_effects_venta_only.sql):
+-- dispatches.stock_stage quedó 100% muerta -- nada la escribe desde que se
+-- le sacó la lógica de stock al trigger de despachos, y nada la leía en el
+-- frontend salvo su propia declaración de tipo (verificado: sin selects
+-- explícitos, sin UI que la muestre). A diferencia de los movement_type
+-- 'reserva'/'salida_despacho'/'entrega_despacho' en stock_movements (que
+-- quedan intactos porque ya existen filas reales con esos valores en el
+-- kardex -- append-only, nunca se borra historial real), esta columna no
+-- tiene ningún dato que valga la pena preservar: es solo un contador de
+-- progreso interno del trigger viejo, no un registro de auditoría.
+alter table public.dispatches drop column stock_stage;

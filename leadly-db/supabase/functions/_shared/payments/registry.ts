@@ -12,10 +12,11 @@ export function getAdapter(providerKey: string): PaymentProviderAdapter {
   return adapter;
 }
 
-// merchantTenantId null resolves the platform-level credential (Leadly is
-// the merchant, today's only real consumer); non-null resolves that
-// tenant's own credential (for when a tenant bills its own end customers --
-// schema-ready, no caller uses this path yet).
+// merchantTenantId null resolves the platform-level credential (Leadly
+// billing a tenant for its own subscription, via payment_invoices);
+// non-null resolves that tenant's own credential -- used when a tenant
+// collects payment from its own end customers (generate_payment_link /
+// create-sales-order-payment-link, see _shared/payments/salesOrderPayments.ts).
 export async function resolveCredential(
   adminClient: SupabaseClient,
   merchantTenantId: string | null,

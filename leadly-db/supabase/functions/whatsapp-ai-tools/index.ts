@@ -9,18 +9,16 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { json } from "../_shared/cors.ts";
 import { AI_TOOLS, isToolAllowed } from "../_shared/aiTools.ts";
 import { sendWhatsappImage } from "../_shared/whatsapp.ts";
-import { getAdapter, makeSecretGetter, resolveCredential } from "../_shared/payments/registry.ts";
+import { chargeSalesOrderToCredit, createSalesOrderPaymentLink } from "../_shared/payments/salesOrderPayments.ts";
+import { confirmSalesOrder, getDefaultAddress, getStockTotals, getVariantStock, isPlaceholderAddressText } from "../_shared/orders/confirmSalesOrder.ts";
 import { makeIntegrationSecretGetter, resolveTenantIntegrationCredential } from "../_shared/integrations/credentials.ts";
 import { createDeal, createOrUpdateContact, getDealPipelines } from "../_shared/integrations/hubspot.ts";
 import { resolveShopifyDomain, searchCustomerByPhone, searchOrders, searchProducts } from "../_shared/integrations/shopify.ts";
 
-const ATTACHMENT_SIGNED_URL_TTL_SECONDS = 300;
 const CATALOG_SEARCH_LIMIT = 15;
 const CATEGORY_LIST_LIMIT = 5;
 const CATEGORY_TOP_PRODUCTS_LIMIT = 5;
 
-const PQR_TYPES = ["peticion", "queja", "reclamo"];
-const PQR_STATUSES = ["abierto", "en_proceso", "resuelto", "cerrado"];
 const OPPORTUNITY_PRIORITIES = ["baja", "media", "alta"];
 const LEAD_STAGES = ["lead", "contactado", "negociacion", "cliente", "perdido"];
 
@@ -142,182 +140,17 @@ async function executeTool(
   contactId: string | undefined,
   parameters: Record<string, unknown>,
 ): Promise<unknown> {
+  // whatsapp-webhook stopped auto-creating a client on every inbound
+  // message (2026-08-1x, to stop polluting the CRM with wrong numbers/
+  // spam) -- a genuinely new customer now arrives here with contactId
+  // still null. Resolve-or-create it lazily, right here, the first time
+  // the model actually tries to *do* something for them (call any tool at
+  // all) instead of on every inbound message -- explicit product decision
+  // from the 2026-08-24 session, not a silent revert of the anti-pollution
+  // change. No-op (single falsy check) once a contact is already linked.
+  contactId = await resolveOrCreateContact(adminClient, tenantId, conversationId, contactId);
+
   switch (functionName) {
-    // create_pqr/create_note/add_pqr_update/update_pqr_status/get_pqr_status/
-    // send_attachment (below) all belong to the "pqr" skill, and PQR was
-    // removed from the ai_skills catalog entirely on 2026-08-17 (the
-    // feature itself was dropped, frontend + crm_pqrs/crm_pqr_updates/
-    // crm_attachments included) -- isToolAllowed can never match "pqr"
-    // against any assistant's enabled skills anymore, so none of these
-    // cases can actually be reached from a live conversation. Left
-    // pointing at the now-dropped crm_pqrs/crm_pqr_updates/crm_attachments
-    // tables deliberately, not repointed to anything -- there's no PQR
-    // schema to repoint them to, and resurrecting one isn't part of fixing
-    // what's reachable. Dead code, not a live bug; revisit only if PQR (or
-    // AI note-taking specifically, since create_note rode along on this
-    // same skill) comes back as a product decision.
-    case "create_pqr": {
-      if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
-      const type = String(parameters.type ?? "");
-      if (!PQR_TYPES.includes(type)) throw new Error(`type inválido: ${type}`);
-      const subject = String(parameters.subject ?? "").trim();
-      if (!subject) throw new Error("subject es requerido");
-      const description = String(parameters.description ?? "").trim();
-
-      // `code` is assigned by the crm_pqrs trigger (see the pqr_codes
-      // migration) -- never set it here, just read it back so it can be
-      // relayed to the customer ("tu caso quedó registrado como PQR-7").
-      const { data, error } = await adminClient
-        .from("crm_pqrs")
-        .insert({ tenant_id: tenantId, contact_id: contactId, type, subject, description: description || null, created_by_ai: true })
-        .select("id, code, type, subject, status")
-        .single();
-      if (error) throw new Error(error.message);
-
-      await linkPendingAttachment(adminClient, tenantId, "pqr_id", data.id, parameters);
-      return data;
-    }
-
-    case "create_note": {
-      if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
-      const content = String(parameters.content ?? "").trim();
-      if (!content) throw new Error("content es requerido");
-
-      const { data, error } = await adminClient
-        .from("crm_notes")
-        .insert({ tenant_id: tenantId, contact_id: contactId, content, created_by_ai: true })
-        .select("id")
-        .single();
-      if (error) throw new Error(error.message);
-      return data;
-    }
-
-    case "add_pqr_update": {
-      const pqr = await resolveLatestPqr(adminClient, tenantId, contactId);
-      const content = String(parameters.content ?? "").trim();
-      if (!content) throw new Error("content es requerido");
-
-      const { data, error } = await adminClient
-        .from("crm_pqr_updates")
-        .insert({ tenant_id: tenantId, pqr_id: pqr.id, content, created_by_ai: true })
-        .select("id, seq")
-        .single();
-      if (error) throw new Error(error.message);
-
-      await linkPendingAttachment(adminClient, tenantId, "pqr_update_id", data.id, parameters);
-      return { ...data, pqr_id: pqr.id, pqr_code: pqr.code };
-    }
-
-    case "update_pqr_status": {
-      const pqr = await resolveLatestPqr(adminClient, tenantId, contactId);
-      const status = String(parameters.status ?? "");
-      if (!PQR_STATUSES.includes(status)) throw new Error(`status inválido: ${status}`);
-
-      const { error: updateError } = await adminClient.from("crm_pqrs").update({ status }).eq("id", pqr.id);
-      if (updateError) throw new Error(updateError.message);
-
-      // Leaves a visible trace in the PQR's own thread instead of only
-      // living in ai_tool_executions -- an agent reading the case sees why
-      // its status changed without having to check a separate audit log.
-      await adminClient
-        .from("crm_pqr_updates")
-        .insert({ tenant_id: tenantId, pqr_id: pqr.id, content: `Estado cambiado a "${status}" por la IA.`, created_by_ai: true });
-
-      return { pqr_id: pqr.id, pqr_code: pqr.code, status };
-    }
-
-    case "get_pqr_status": {
-      if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
-
-      const { data: pqr, error } = await adminClient
-        .from("crm_pqrs")
-        .select("id, code, type, subject, status, created_at")
-        .eq("tenant_id", tenantId)
-        .eq("contact_id", contactId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (error) throw new Error(error.message);
-      if (!pqr) return { found: false };
-
-      const { data: updates } = await adminClient
-        .from("crm_pqr_updates")
-        .select("id, seq, content, created_at")
-        .eq("pqr_id", pqr.id)
-        .order("seq", { ascending: false })
-        .limit(3);
-
-      // Lets the model know images exist (and their id, to pass to
-      // send_attachment) without it ever seeing the pixel content itself.
-      const { data: pqrAttachments } = await adminClient.from("crm_attachments").select("id, mime_type").eq("pqr_id", pqr.id);
-      const updateIds = (updates ?? []).map((u: { id: string }) => u.id);
-      let updateAttachments: { id: string; mime_type: string; pqr_update_id: string }[] = [];
-      if (updateIds.length > 0) {
-        const { data } = await adminClient.from("crm_attachments").select("id, mime_type, pqr_update_id").in("pqr_update_id", updateIds);
-        updateAttachments = data ?? [];
-      }
-
-      const recentUpdates = (updates ?? []).map((u: { id: string; seq: number; content: string; created_at: string }) => ({
-        seq: u.seq,
-        content: u.content,
-        created_at: u.created_at,
-        attachments: updateAttachments.filter((a) => a.pqr_update_id === u.id).map((a) => ({ id: a.id, mime_type: a.mime_type })),
-      }));
-
-      return { found: true, ...pqr, attachments: pqrAttachments ?? [], recent_updates: recentUpdates };
-    }
-
-    case "send_attachment": {
-      if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
-      const attachmentId = String(parameters.attachment_id ?? "").trim();
-      if (!attachmentId) throw new Error("attachment_id es requerido");
-
-      const { data: attachment, error: attachmentError } = await adminClient
-        .from("crm_attachments")
-        .select("id, storage_path, mime_type, pqr_id, pqr_update_id")
-        .eq("id", attachmentId)
-        .eq("tenant_id", tenantId)
-        .maybeSingle();
-      if (attachmentError) throw new Error(attachmentError.message);
-      if (!attachment) throw new Error("No se encontró ese adjunto.");
-
-      // Only ever send an attachment belonging to the customer's own most
-      // recent PQR -- same trust boundary as add_pqr_update/update_pqr_status,
-      // prevents a crafted attachment_id from leaking another contact's file.
-      const latestPqr = await resolveLatestPqr(adminClient, tenantId, contactId);
-      let belongsToLatestPqr = attachment.pqr_id === latestPqr.id;
-      if (!belongsToLatestPqr && attachment.pqr_update_id) {
-        const { data: updateRow } = await adminClient.from("crm_pqr_updates").select("pqr_id").eq("id", attachment.pqr_update_id).maybeSingle();
-        belongsToLatestPqr = updateRow?.pqr_id === latestPqr.id;
-      }
-      if (!belongsToLatestPqr) throw new Error("Ese adjunto no pertenece al caso más reciente del cliente.");
-
-      const sendContext = await resolveConversationSendContext(adminClient, conversationId);
-
-      const { data: signedUrlData, error: signedUrlError } = await adminClient.storage
-        .from("crm-attachments")
-        .createSignedUrl(attachment.storage_path, ATTACHMENT_SIGNED_URL_TTL_SECONDS);
-      if (signedUrlError || !signedUrlData) throw new Error("No se pudo generar el enlace de la imagen.");
-
-      const sendResult = await sendWhatsappImage(sendContext.phoneNumberId, sendContext.accessToken, sendContext.contactPhone, signedUrlData.signedUrl);
-      if (!sendResult.ok) throw new Error(sendResult.errorMessage ?? "No se pudo enviar la imagen.");
-
-      // Leaves a normal trace in the conversation ledger, same as any other
-      // outbound message -- the agent sees it in the Inbox like anything
-      // else the AI sent, not as a side-channel action invisible to the CRM.
-      await adminClient.from("whatsapp_messages").insert({
-        conversation_id: conversationId,
-        direction: "outbound",
-        sender_type: "ia",
-        content: "[Imagen enviada]",
-        wamid: sendResult.wamid,
-        media_storage_path: attachment.storage_path,
-        media_mime_type: attachment.mime_type,
-      });
-
-      return { sent: true };
-    }
-
     case "book_appointment": {
       if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
       const scheduledAtRaw = String(parameters.scheduled_at ?? "").trim();
@@ -626,6 +459,7 @@ async function executeTool(
       // is actually trying to buy a specific quantity.
       const search = parameters.search ? String(parameters.search).trim() : "";
       const category = parameters.category ? String(parameters.category).trim() : "";
+      const brand = parameters.brand ? String(parameters.brand).trim() : "";
 
       // A product can be in several categories now (product_category_links,
       // 2026-08-17) -- there's no direct products.category_id FK anymore for
@@ -656,6 +490,20 @@ async function executeTool(
         return (links ?? []).map((l: { product_id: string }) => l.product_id);
       }
 
+      // Unlike category, products.brand_id is a direct FK -- no join table,
+      // so this only needs to resolve the brand's id, callers filter with
+      // .eq("brand_id", ...) directly instead of an .in() over a set.
+      async function brandIdByName(brandName: string): Promise<string | null> {
+        const { data: brandRow, error: brandError } = await adminClient
+          .from("brands")
+          .select("id")
+          .eq("tenant_id", tenantId)
+          .eq("name", brandName)
+          .maybeSingle();
+        if (brandError) throw new Error(brandError.message);
+        return brandRow?.id ?? null;
+      }
+
       function mapProduct(p: any) {
         return {
           name: p.name,
@@ -666,22 +514,26 @@ async function executeTool(
         };
       }
 
-      // Category browsing (no search term) is a distinct case: pulls stock
-      // internally to rank by it (most-stocked first -- a reasonable proxy
-      // for "what to lead with" when a tenant wants a proactive salesperson
-      // tone), then strips it back out of what actually gets returned. The
-      // model never sees the numbers, only the resulting order.
-      if (category && !search) {
-        const productIds = await productIdsForCategory(category);
-        if (!productIds || productIds.length === 0) return { products: [] };
+      // Category/brand browsing (no search term) is a distinct case: pulls
+      // stock internally to rank by it (most-stocked first -- a reasonable
+      // proxy for "what to lead with" when a tenant wants a proactive
+      // salesperson tone), then strips it back out of what actually gets
+      // returned. The model never sees the numbers, only the resulting order.
+      if ((category || brand) && !search) {
+        const productIds = category ? await productIdsForCategory(category) : null;
+        if (category && (!productIds || productIds.length === 0)) return { products: [] };
+        const brandId = brand ? await brandIdByName(brand) : null;
+        if (brand && !brandId) return { products: [] };
 
-        const { data, error } = await adminClient
+        let browseQuery = adminClient
           .from("products")
           .select(categorySelect)
           .eq("tenant_id", tenantId)
           .eq("is_active", true)
-          .is("deleted_at", null)
-          .in("id", productIds);
+          .is("deleted_at", null);
+        if (productIds) browseQuery = browseQuery.in("id", productIds);
+        if (brandId) browseQuery = browseQuery.eq("brand_id", brandId);
+        const { data, error } = await browseQuery;
         if (error) throw new Error(error.message);
 
         // products carries no stock counter of its own (see
@@ -693,7 +545,7 @@ async function executeTool(
         const ranked = (data ?? [])
           .map((p: any) => ({
             ...mapProduct(p),
-            _rank: p.track_inventory ? (stockTotals.get(p.id)?.available ?? 0) - (stockTotals.get(p.id)?.reserved ?? 0) : Number.POSITIVE_INFINITY,
+            _rank: p.track_inventory ? (stockTotals.get(p.id)?.available ?? 0) : Number.POSITIVE_INFINITY,
           }))
           .sort((a: any, b: any) => b._rank - a._rank)
           .slice(0, CATEGORY_TOP_PRODUCTS_LIMIT)
@@ -704,6 +556,8 @@ async function executeTool(
 
       const categoryProductIds = category ? await productIdsForCategory(category) : null;
       if (category && (!categoryProductIds || categoryProductIds.length === 0)) return { products: [] };
+      const searchBrandId = brand ? await brandIdByName(brand) : null;
+      if (brand && !searchBrandId) return { products: [] };
 
       let query = adminClient
         .from("products")
@@ -714,6 +568,7 @@ async function executeTool(
         .order("name", { ascending: true })
         .limit(CATALOG_SEARCH_LIMIT);
       if (categoryProductIds) query = query.in("id", categoryProductIds);
+      if (searchBrandId) query = query.eq("brand_id", searchBrandId);
 
       // Full-text search (Spanish config), not a rigid ILIKE substring --
       // an ILIKE '%camiseta de algodón%' never matches "Camiseta Algodón
@@ -738,13 +593,21 @@ async function executeTool(
           .order("name", { ascending: true })
           .limit(CATALOG_SEARCH_LIMIT);
         if (categoryProductIds) fallbackQuery = fallbackQuery.in("id", categoryProductIds);
+        if (searchBrandId) fallbackQuery = fallbackQuery.eq("brand_id", searchBrandId);
         const fallback = await fallbackQuery;
         if (fallback.error) throw new Error(fallback.error.message);
         data = fallback.data;
       }
 
       const products = (data ?? []).map(mapProduct);
-      return { products };
+
+      // Auto-attach the photo when `search` pins down exactly one product --
+      // see trySendSingleProductImage's comment for why this isn't left to
+      // the model remembering to also call send_product_image afterward.
+      const isSingleSearchResult = !!search && (data?.length ?? 0) === 1;
+      const imageSent = isSingleSearchResult ? await trySendSingleProductImage(adminClient, conversationId, (data as { id: string }[])[0].id) : null;
+
+      return { products, ...(isSingleSearchResult ? { image_sent: imageSent } : {}) };
     }
 
     case "send_product_image": {
@@ -783,20 +646,70 @@ async function executeTool(
       return { sent: true, product: product.name };
     }
 
+    case "list_product_variants": {
+      const productName = String(parameters.product_name ?? "").trim();
+      if (!productName) throw new Error("product_name es requerido");
+
+      const product = await findProductByName(adminClient, tenantId, productName);
+      if (!product) throw new Error(`No se encontró el producto "${productName}" en el catálogo.`);
+      if (!product.has_variants) return { has_variants: false };
+
+      const { data, error } = await adminClient
+        .from("product_variants")
+        .select("sku, retail_price, option1_value, option2_value, option3_value")
+        .eq("tenant_id", tenantId)
+        .eq("product_id", product.id)
+        .eq("is_active", true)
+        .is("deleted_at", null);
+      if (error) throw new Error(error.message);
+
+      const variants = (data ?? []).map((v: { sku: string; retail_price: number; option1_value: string | null; option2_value: string | null; option3_value: string | null }) => ({
+        label: [v.option1_value, v.option2_value, v.option3_value].filter(Boolean).join(" / "),
+        sku: v.sku,
+        price: formatCurrencyCOP(v.retail_price),
+      }));
+
+      return { has_variants: true, variants };
+    }
+
     case "create_quote": {
       if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
       const rawItems = Array.isArray(parameters.items) ? parameters.items : [];
       if (rawItems.length === 0) throw new Error("items es requerido y no puede estar vacío.");
 
-      const resolvedItems: { product_id: string; product_name: string; sku: string | null; quantity: number; unit_price: number }[] = [];
+      const resolvedItems: { product_id: string; variant_id: string | null; product_name: string; sku: string | null; quantity: number; unit_price: number }[] = [];
       for (const rawItem of rawItems) {
         const productName = String((rawItem as Record<string, unknown>).product_name ?? "").trim();
+        const variantLabel = String((rawItem as Record<string, unknown>).variant ?? "").trim();
         const quantity = Number((rawItem as Record<string, unknown>).quantity);
         if (!productName) throw new Error("Cada línea necesita product_name.");
         if (!Number.isFinite(quantity) || quantity <= 0) throw new Error(`Cantidad inválida para "${productName}".`);
 
         const product = await findProductByName(adminClient, tenantId, productName);
         if (!product) throw new Error(`No se encontró el producto "${productName}" en el catálogo.`);
+
+        // Un producto con variantes no tiene precio/stock propio -- vender
+        // "el producto" sin elegir una variante dejaría la venta sin saber
+        // qué color/talla se descuenta del stock real (ver 2026-08-24).
+        // Obliga a consultar list_product_variants primero, mismo criterio
+        // que "nunca inventes un producto que list_catalog_products no
+        // devolvió".
+        let variantId: string | null = null;
+        let unitPrice = (product.retail_price as number) ?? 0;
+        let sku = product.sku as string | null;
+        if (product.has_variants) {
+          if (!variantLabel) {
+            const labels = await listVariantLabels(adminClient, tenantId, product.id as string);
+            throw new Error(
+              `"${productName}" tiene variantes: ${labels.join(", ")}. Si el cliente ya te dijo cuál quiere, incluí "variant" con ese valor exacto en tu próxima llamada -- volver a llamar sin "variant" va a fallar otra vez, exactamente igual. Si todavía no te lo dijo, preguntaselo primero.`,
+            );
+          }
+          const variant = await findVariantByLabel(adminClient, tenantId, product.id as string, variantLabel);
+          if (!variant) throw new Error(`No se encontró la variante "${variantLabel}" para "${productName}". Consultá list_product_variants para ver las opciones reales.`);
+          variantId = variant.id as string;
+          unitPrice = (variant.retail_price as number) ?? unitPrice;
+          sku = variant.sku as string;
+        }
 
         // Deliberately no stock check here (removed 2026-08-10, real-world
         // test feedback): a cotización is a price estimate, not a stock
@@ -806,15 +719,15 @@ async function executeTool(
         // asking for more than what's in stock silently never got an
         // opportunity created either. Availability is still a real business
         // question, just not one the AI should gate quote creation on --
-        // fulfillment/backorder is a human call. reserved_quantity (product_stock)
-        // still accumulates normally via the stock-effect trigger even past
-        // physical quantity; nothing here blocks that.
+        // fulfillment/backorder is a human call. Nothing in product_stock
+        // moves at all until the sale is confirmed (see confirm_quote).
         resolvedItems.push({
-          product_id: product.id,
-          product_name: product.name,
-          sku: product.sku,
+          product_id: product.id as string,
+          variant_id: variantId,
+          product_name: product.name as string,
+          sku,
           quantity,
-          unit_price: product.retail_price ?? 0,
+          unit_price: unitPrice,
         });
       }
 
@@ -837,6 +750,7 @@ async function executeTool(
         tenant_id: tenantId,
         order_id: order.id,
         product_id: item.product_id,
+        variant_id: item.variant_id,
         product_name: item.product_name,
         sku: item.sku,
         quantity: item.quantity,
@@ -847,15 +761,115 @@ async function executeTool(
       const { error: itemsError } = await adminClient.from("sales_order_items").insert(itemRows);
       if (itemsError) throw new Error(itemsError.message);
 
+      // Facturación se pide en esta etapa (no envío -- eso es solo relevante
+      // si el cliente confirma que va a comprar, ver confirm_quote). No
+      // bloquea la creación de la cotización -- es solo un precio, el
+      // cliente puede querer verlo antes de dar ningún dato -- pero le da al
+      // modelo la señal explícita de que falta, en vez de dejarlo adivinar.
+      const billingAddress = await getDefaultAddress(adminClient, tenantId, contactId, "is_billing");
+
       return {
         order_number: order.number,
         order_code: formatOrderCode(order.number),
+        status_label: statusLabel("cotizacion"),
         total: formatCurrencyCOP(subtotal),
         items: resolvedItems.map((i) => ({
           product: i.product_name,
           quantity: i.quantity,
           unit_price: formatCurrencyCOP(i.unit_price),
           subtotal: formatCurrencyCOP(i.quantity * i.unit_price),
+        })),
+        billing_address_on_file: !!billingAddress,
+      };
+    }
+
+    case "add_item_to_quote": {
+      const order = await resolveLatestOrder(adminClient, tenantId, contactId, "cotizacion");
+      if (!order) throw new Error("Este cliente no tiene ninguna cotización pendiente a la que agregarle productos.");
+
+      const rawItems = Array.isArray(parameters.items) ? parameters.items : [];
+      if (rawItems.length === 0) throw new Error("items es requerido y no puede estar vacío.");
+
+      const { data: existingItems, error: existingItemsError } = await adminClient
+        .from("sales_order_items")
+        .select("display_order")
+        .eq("order_id", order.id)
+        .order("display_order", { ascending: false })
+        .limit(1);
+      if (existingItemsError) throw new Error(existingItemsError.message);
+      let nextDisplayOrder = (existingItems?.[0]?.display_order ?? -1) + 1;
+
+      // Same product/variant resolution as create_quote -- no stock check, a
+      // cotización is still just a price estimate at this point.
+      const newItemRows = [];
+      let addedSubtotal = 0;
+      for (const rawItem of rawItems) {
+        const productName = String((rawItem as Record<string, unknown>).product_name ?? "").trim();
+        const variantLabel = String((rawItem as Record<string, unknown>).variant ?? "").trim();
+        const quantity = Number((rawItem as Record<string, unknown>).quantity);
+        if (!productName) throw new Error("Cada línea necesita product_name.");
+        if (!Number.isFinite(quantity) || quantity <= 0) throw new Error(`Cantidad inválida para "${productName}".`);
+
+        const product = await findProductByName(adminClient, tenantId, productName);
+        if (!product) throw new Error(`No se encontró el producto "${productName}" en el catálogo.`);
+
+        let variantId: string | null = null;
+        let unitPrice = (product.retail_price as number) ?? 0;
+        let sku = product.sku as string | null;
+        if (product.has_variants) {
+          if (!variantLabel) {
+            const labels = await listVariantLabels(adminClient, tenantId, product.id as string);
+            throw new Error(
+              `"${productName}" tiene variantes: ${labels.join(", ")}. Si el cliente ya te dijo cuál quiere, incluí "variant" con ese valor exacto en tu próxima llamada -- volver a llamar sin "variant" va a fallar otra vez, exactamente igual. Si todavía no te lo dijo, preguntaselo primero.`,
+            );
+          }
+          const variant = await findVariantByLabel(adminClient, tenantId, product.id as string, variantLabel);
+          if (!variant) throw new Error(`No se encontró la variante "${variantLabel}" para "${productName}". Consultá list_product_variants para ver las opciones reales.`);
+          variantId = variant.id as string;
+          unitPrice = (variant.retail_price as number) ?? unitPrice;
+          sku = variant.sku as string;
+        }
+
+        const lineSubtotal = quantity * (unitPrice as number);
+        addedSubtotal += lineSubtotal;
+        newItemRows.push({
+          tenant_id: tenantId,
+          order_id: order.id,
+          product_id: product.id,
+          variant_id: variantId,
+          product_name: product.name,
+          sku,
+          quantity,
+          unit_price: unitPrice,
+          subtotal: lineSubtotal,
+          display_order: nextDisplayOrder++,
+        });
+      }
+
+      const { error: insertError } = await adminClient.from("sales_order_items").insert(newItemRows);
+      if (insertError) throw new Error(insertError.message);
+
+      const newSubtotal = order.total + addedSubtotal; // order.total === subtotal here, no discounts/shipping in this flow yet
+      const { error: updateOrderError } = await adminClient.from("sales_orders").update({ subtotal: newSubtotal, total: newSubtotal }).eq("id", order.id);
+      if (updateOrderError) throw new Error(updateOrderError.message);
+
+      const { data: allItems, error: allItemsError } = await adminClient
+        .from("sales_order_items")
+        .select("product_name, quantity, unit_price, subtotal")
+        .eq("order_id", order.id)
+        .order("display_order", { ascending: true });
+      if (allItemsError) throw new Error(allItemsError.message);
+
+      return {
+        order_number: order.number,
+        order_code: formatOrderCode(order.number),
+        status_label: statusLabel("cotizacion"),
+        total: formatCurrencyCOP(newSubtotal),
+        items: (allItems ?? []).map((item: { product_name: string; quantity: number; unit_price: number; subtotal: number }) => ({
+          product: item.product_name,
+          quantity: item.quantity,
+          unit_price: formatCurrencyCOP(item.unit_price),
+          subtotal: formatCurrencyCOP(item.subtotal),
         })),
       };
     }
@@ -879,6 +893,7 @@ async function executeTool(
         order_number: order.number,
         order_code: formatOrderCode(order.number),
         status: order.status,
+        status_label: statusLabel(order.status),
         total: formatCurrencyCOP(order.total),
         total_paid: formatCurrencyCOP(totalPaid),
         balance_due: formatCurrencyCOP(balanceDue),
@@ -907,48 +922,33 @@ async function executeTool(
     }
 
     case "confirm_quote": {
+      if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
       const order = await resolveLatestOrder(adminClient, tenantId, contactId, "cotizacion");
       if (!order) throw new Error("Este cliente no tiene ninguna cotización pendiente de confirmar.");
 
-      // This is where stock actually gets checked, not at create_quote --
-      // a cotización is just a price estimate (see create_quote), but
-      // confirming it is the real commitment that turns a reservation into
-      // an actual inventory deduction (the status-change trigger in
-      // 20260809000001_order_stock_effects.sql), so it's the one place that
-      // has to know fulfillment is possible before it happens.
-      const { data: items } = await adminClient
-        .from("sales_order_items")
-        .select("product_name, quantity, product_id")
-        .eq("order_id", order.id)
-        .not("product_id", "is", null);
-      for (const item of items ?? []) {
-        const { data: product } = await adminClient
-          .from("products")
-          .select("track_inventory")
-          .eq("id", item.product_id)
-          .maybeSingle();
-        if (!product?.track_inventory) continue;
-        // products carries no stock counter of its own -- sum product_stock
-        // across warehouses for this one product (same shape as
-        // getStockTotals, just scoped to a single id here).
-        const stockTotals = await getStockTotals(adminClient, tenantId, [item.product_id]);
-        const totals = stockTotals.get(item.product_id) ?? { available: 0, reserved: 0 };
-        const available = totals.available - totals.reserved + item.quantity; // this item's own reservation still counts as "held for it"
-        if (available < item.quantity) {
-          throw new Error(`Stock insuficiente para confirmar "${item.product_name}": disponible ${Math.max(0, available)}, pedido ${item.quantity}.`);
-        }
+      // Stock check, address gate, status flip, and the opportunity move all
+      // live in confirmSalesOrder (_shared/orders/confirmSalesOrder.ts) now
+      // -- shared with the public cart checkout page, which needs to enforce
+      // exactly the same rules from a completely different entry point,
+      // instead of a second copy quietly drifting from this one.
+      const result = await confirmSalesOrder(adminClient, tenantId, contactId, order.id);
+      if (result.blocked) {
+        return { order_number: order.number, order_code: formatOrderCode(order.number), blocked: true, reason: result.reason };
       }
 
-      // Moving the linked opportunity (if any) to its pipeline's "Ganado"
-      // stage used to happen in a DB trigger (trg_crm_orders_confirmed_opportunity,
-      // 20260809170000) -- that trigger was dropped 2026-08-17 along with the
-      // rest of crm_* (see 20260817020001) and not replaced yet, so this no
-      // longer moves the pipeline automatically. The sale itself still
-      // confirms fine.
-      const { error } = await adminClient.from("sales_orders").update({ status: "confirmada" }).eq("id", order.id);
-      if (error) throw new Error(error.message);
+      // Resuelve el pago acá mismo, en la misma llamada, en vez de dejarlo
+      // como una segunda decisión aparte del modelo. Encontrado en vivo
+      // 2026-08-25: aun con una instrucción explícita en el prompt de
+      // resolver el pago "en el mismo turno", el modelo confirmó la venta y
+      // pasó directo a responderle al cliente sin generar el link -- recién
+      // lo generó un turno completo después, cuando el cliente tuvo que
+      // preguntar. Mismo criterio que ya usamos con las fotos de producto:
+      // si la acción es automática y no depende de que el cliente elija
+      // entre opciones, no tiene sentido dejarla en manos de que el modelo
+      // se acuerde de llamar una segunda tool.
+      const paymentInfo = await resolvePaymentAfterConfirm(adminClient, tenantId, conversationId, contactId, result.order.id);
 
-      return { order_number: order.number, order_code: formatOrderCode(order.number), status: "confirmada" };
+      return { order_number: result.order.number, order_code: formatOrderCode(result.order.number), status: "confirmada", status_label: statusLabel("confirmada"), ...paymentInfo };
     }
 
     case "cancel_quote": {
@@ -957,30 +957,216 @@ async function executeTool(
 
       const { error } = await adminClient.from("sales_orders").update({ status: "cancelada" }).eq("id", order.id);
       if (error) throw new Error(error.message);
-      return { order_number: order.number, order_code: formatOrderCode(order.number), status: "cancelada" };
+      return { order_number: order.number, order_code: formatOrderCode(order.number), status: "cancelada", status_label: statusLabel("cancelada") };
     }
 
     case "complete_sale": {
+      // Bug fix found while building get_dispatch_status/create_return
+      // (2026-08-24): this used to write status: "entregada", but
+      // sales_orders.status only allows cotizacion/confirmada/cancelada
+      // since the 2026-08-20 order/delivery-status split -- "entregada"
+      // was never a valid status after that point, it lives in
+      // delivery_status now (pendiente/en_camino/entregado). That update
+      // always violated the check constraint, so complete_sale has been
+      // throwing on every real call since 2026-08-20 without anyone
+      // noticing (its error just looked like "algo salió mal" to the
+      // customer). Also dropped the dead "en_proceso" status branch --
+      // never a valid value either, resolveLatestOrder covers the one
+      // real case (confirmada) fine.
+      const order = await resolveLatestOrder(adminClient, tenantId, contactId, "confirmada");
+      if (!order) throw new Error("Este cliente no tiene ninguna venta confirmada pendiente de completar.");
+
+      // Con envío físico asociado, la entrega la confirma un humano (o un
+      // despacho real con tracking) -- nunca la IA sola. Encontrado en vivo
+      // el 2026-08-24: marcaba "entregado" apenas se guardaba la dirección,
+      // sin que existiera ningún dispatches real detrás.
+      if (order.shipping_address_id) {
+        return {
+          order_number: order.number,
+          order_code: formatOrderCode(order.number),
+          blocked: true,
+          reason: "shipping_pending",
+        };
+      }
+
+      const { error } = await adminClient.from("sales_orders").update({ delivery_status: "entregado" }).eq("id", order.id);
+      if (error) throw new Error(error.message);
+      return { order_number: order.number, order_code: formatOrderCode(order.number), delivery_status: "entregado" };
+    }
+
+    case "get_dispatch_status": {
+      const order = await resolveLatestOrder(adminClient, tenantId, contactId);
+      if (!order) return { found: false };
+
+      const { data: dispatch, error: dispatchError } = await adminClient
+        .from("dispatches")
+        .select("id, carrier_name, tracking_number, tracking_url, status:dispatch_statuses(name)")
+        .eq("tenant_id", tenantId)
+        .eq("sales_order_id", order.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (dispatchError) throw new Error(dispatchError.message);
+      if (!dispatch) return { found: false };
+
+      const { data: historyRows } = await adminClient
+        .from("dispatch_status_history")
+        .select("created_at, status:dispatch_statuses!to_status_id(name)")
+        .eq("dispatch_id", dispatch.id)
+        .order("created_at", { ascending: false })
+        .limit(3);
+
+      return {
+        found: true,
+        status: (dispatch.status as { name: string } | null)?.name ?? null,
+        carrier_name: dispatch.carrier_name,
+        tracking_number: dispatch.tracking_number,
+        tracking_url: dispatch.tracking_url,
+        history: (historyRows ?? []).map((h: { created_at: string; status: { name: string } | null }) => ({
+          status: h.status?.name ?? null,
+          at: h.created_at,
+        })),
+      };
+    }
+
+    case "create_return": {
+      // Delivered is delivery_status = "entregado", not status = "entregada"
+      // -- status only tracks cotizacion/confirmada/cancelada (see the
+      // complete_sale fix above), so this can't use resolveLatestOrder's
+      // status filter and queries directly instead.
       if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
-      // Not resolveLatestOrder(status=X) -- this needs to match either of two
-      // statuses (confirmada or en_proceso), which that helper's single-value
-      // filter can't express, so it queries directly instead.
       const { data: order, error: orderError } = await adminClient
         .from("sales_orders")
         .select("id, number")
         .eq("tenant_id", tenantId)
         .eq("contact_id", contactId)
-        .in("status", ["confirmada", "en_proceso"])
+        .eq("delivery_status", "entregado")
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
       if (orderError) throw new Error(orderError.message);
-      if (!order) throw new Error("Este cliente no tiene ninguna venta confirmada pendiente de completar.");
+      if (!order) throw new Error("Este cliente no tiene ninguna venta entregada sobre la que pedir una devolución.");
 
-      const { error } = await adminClient.from("sales_orders").update({ status: "entregada" }).eq("id", order.id);
+      const rawItems = Array.isArray(parameters.items) ? parameters.items : [];
+      if (rawItems.length === 0) throw new Error("items es requerido y no puede estar vacío.");
+      const reason = String(parameters.reason ?? "").trim();
+      if (!reason) throw new Error("reason es requerido.");
+
+      const { data: orderItems, error: orderItemsError } = await adminClient
+        .from("sales_order_items")
+        .select("id, product_name, quantity")
+        .eq("order_id", order.id);
+      if (orderItemsError) throw new Error(orderItemsError.message);
+
+      // Solo se puede devolver lo que efectivamente está en esta venta -- no
+      // contra el catálogo general (a diferencia de create_quote/add_item_to_quote).
+      const returnItemRows = [];
+      for (const rawItem of rawItems) {
+        const productName = String((rawItem as Record<string, unknown>).product_name ?? "").trim();
+        const quantity = Number((rawItem as Record<string, unknown>).quantity);
+        if (!productName) throw new Error("Cada línea necesita product_name.");
+        if (!Number.isFinite(quantity) || quantity <= 0) throw new Error(`Cantidad inválida para "${productName}".`);
+
+        const orderItem = (orderItems ?? []).find((i: { product_name: string }) => i.product_name.toLowerCase() === productName.toLowerCase());
+        if (!orderItem) throw new Error(`"${productName}" no está en el pedido ${formatOrderCode(order.number)}.`);
+        if (quantity > orderItem.quantity) throw new Error(`Pediste devolver ${quantity} de "${productName}", pero la venta solo tiene ${orderItem.quantity}.`);
+
+        returnItemRows.push({ tenant_id: tenantId, sales_order_item_id: orderItem.id, quantity });
+      }
+
+      const { data: initialStatus, error: statusError } = await adminClient
+        .from("return_statuses")
+        .select("id, name")
+        .eq("tenant_id", tenantId)
+        .order("display_order", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (statusError) throw new Error(statusError.message);
+      if (!initialStatus) throw new Error("Este tenant no tiene estados de devolución configurados todavía.");
+
+      const { data: newReturn, error: returnError } = await adminClient
+        .from("returns")
+        .insert({ tenant_id: tenantId, sales_order_id: order.id, status_id: initialStatus.id, reason })
+        .select("id")
+        .single();
+      if (returnError) throw new Error(returnError.message);
+
+      const { error: itemsInsertError } = await adminClient
+        .from("return_items")
+        .insert(returnItemRows.map((row) => ({ ...row, return_id: newReturn.id })));
+      if (itemsInsertError) throw new Error(itemsInsertError.message);
+
+      return { order_code: formatOrderCode(order.number), status: initialStatus.name, created: true };
+    }
+
+    case "get_return_status": {
+      if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
+
+      // A return can belong to any past order of this contact, not just the
+      // most recent one -- resolve the contact's order ids first, same
+      // scoping principle as resolveLatestOrder, then find the most recent
+      // return among those.
+      const { data: contactOrders, error: contactOrdersError } = await adminClient
+        .from("sales_orders")
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .eq("contact_id", contactId)
+        .is("deleted_at", null);
+      if (contactOrdersError) throw new Error(contactOrdersError.message);
+      const orderIds = (contactOrders ?? []).map((o: { id: string }) => o.id);
+      if (orderIds.length === 0) return { found: false };
+
+      const { data: match, error: returnError } = await adminClient
+        .from("returns")
+        .select("reason, resolution_amount, credit_granted, status:return_statuses!status_id(name), order:sales_orders!sales_order_id(number)")
+        .eq("tenant_id", tenantId)
+        .in("sales_order_id", orderIds)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (returnError) throw new Error(returnError.message);
+      if (!match) return { found: false };
+
+      return {
+        found: true,
+        order_code: formatOrderCode((match.order as { number: number }).number),
+        status: (match.status as { name: string } | null)?.name ?? null,
+        reason: match.reason,
+        resolution_amount: match.resolution_amount != null ? formatCurrencyCOP(match.resolution_amount) : null,
+        credit_granted: match.credit_granted,
+      };
+    }
+
+    case "get_client_profile": {
+      if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
+      const { data, error } = await adminClient
+        .from("clients")
+        .select("full_name, document_type, document_number, email, credit_enabled")
+        .eq("id", contactId)
+        .maybeSingle();
       if (error) throw new Error(error.message);
-      return { order_number: order.number, order_code: formatOrderCode(order.number), status: "entregada" };
+      return data ?? { full_name: null, document_type: null, document_number: null, email: null, credit_enabled: false };
+    }
+
+    case "update_client_profile": {
+      if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
+      const updates: Record<string, string> = {};
+      for (const field of ["full_name", "document_type", "document_number", "email"] as const) {
+        if (typeof parameters[field] === "string" && (parameters[field] as string).trim()) {
+          updates[field] = (parameters[field] as string).trim();
+        }
+      }
+      if (Object.keys(updates).length === 0) throw new Error("No se recibió ningún campo para actualizar.");
+
+      const { data, error } = await adminClient
+        .from("clients")
+        .update(updates)
+        .eq("id", contactId)
+        .select("full_name, document_type, document_number, email")
+        .single();
+      if (error) throw new Error(error.message);
+      return { updated: true, ...data };
     }
 
     case "list_contact_addresses": {
@@ -1012,6 +1198,14 @@ async function executeTool(
       if (typeof parameters.is_shipping === "boolean") fields.is_shipping = parameters.is_shipping;
       if (typeof parameters.is_billing === "boolean") fields.is_billing = parameters.is_billing;
 
+      // Nunca un valor inventado para completar el flujo -- si el cliente no
+      // te dio todavía su dirección real, preguntale antes de llamar esta
+      // tool. Encontrado en vivo el 2026-08-25: el modelo guardó line1
+      // "Dirección no registrada" solo para poder confirmar la venta.
+      if (typeof fields.line1 === "string" && isPlaceholderAddressText(fields.line1)) {
+        throw new Error(`"${fields.line1}" no es una dirección real, parece un valor de relleno. Preguntale al cliente su dirección real (calle, ciudad) antes de volver a llamar esta herramienta.`);
+      }
+
       const addressId = parameters.address_id ? String(parameters.address_id) : null;
       let savedAddressId = addressId;
 
@@ -1025,9 +1219,16 @@ async function executeTool(
         if (error) throw new Error(error.message);
       } else {
         if (!fields.line1) throw new Error("line1 es requerido para guardar una dirección nueva.");
+        if (!fields.city) throw new Error("city es requerido para guardar una dirección nueva -- preguntale al cliente en qué ciudad, no lo dejes vacío.");
+        // Sin default a "es de envío" -- una dirección nueva en la etapa de
+        // cotización es de facturación, y en la etapa de confirmación es de
+        // envío; forzar cuál es evita que quede marcada como la que no es.
+        if (fields.is_shipping !== true && fields.is_billing !== true) {
+          throw new Error("Indicá is_shipping o is_billing (según en qué paso del flujo estás pidiendo esta dirección) al guardar una dirección nueva.");
+        }
         const { data: inserted, error } = await adminClient
           .from("contact_addresses")
-          .insert({ tenant_id: tenantId, contact_id: contactId, is_shipping: true, ...fields, is_default: true })
+          .insert({ tenant_id: tenantId, contact_id: contactId, is_shipping: false, is_billing: false, ...fields, is_default: true })
           .select("id")
           .single();
         if (error) throw new Error(error.message);
@@ -1050,25 +1251,39 @@ async function executeTool(
     }
 
     case "generate_payment_link": {
-      const description = String(parameters.description ?? "").trim();
-      if (!description) throw new Error("description es requerido");
-      const amount = Number(parameters.amount);
-      if (!Number.isFinite(amount) || amount <= 0) throw new Error("amount debe ser mayor a cero");
-      const reference = parameters.reference ? String(parameters.reference).trim() : `wa-${conversationId}-${Date.now()}`;
+      // Amount is never taken from the model -- it's always the exact
+      // remaining balance of the customer's confirmed order, computed
+      // server-side (see createSalesOrderPaymentLink). Found live 2026-08-25
+      // designing this: letting the model pass its own `amount` had the
+      // same failure mode as the address-placeholder bug -- nothing stopped
+      // it from inventing or misreading a number. This also persists a
+      // sales_order_payment_links row so payment-webhook-wompi can record
+      // the payment on this exact order once the customer actually pays --
+      // the old version of this tool generated a real Wompi link that led
+      // nowhere once paid.
+      if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
+      const order = await resolveLatestOrder(adminClient, tenantId, contactId, "confirmada");
+      if (!order) throw new Error("Este cliente no tiene ningún pedido confirmado para cobrar. Un pedido tiene que estar confirmado (confirm_quote) antes de poder generarle un link de pago.");
 
-      // Tenant's own Wompi account (tenant_payment_credentials with
-      // tenant_id = this tenant), not Leadly's platform credential -- same
-      // adapter/registry that already powers real invoice checkout.
-      const credential = await resolveCredential(adminClient, tenantId, "wompi");
-      const getSecret = makeSecretGetter(adminClient, credential.id);
-      const adapter = getAdapter("wompi");
-      const result = await adapter.createCheckout(credential, getSecret, {
-        invoiceId: reference,
-        amountCents: Math.round(amount * 100),
-        currency: "COP",
-        description,
-      });
-      return { checkout_url: result.checkoutUrl, reference };
+      const result = await createSalesOrderPaymentLink(adminClient, tenantId, order.id, null);
+      return {
+        checkout_url: result.checkoutUrl,
+        amount: formatCurrencyCOP(result.amount),
+        order_code: result.orderCode,
+      };
+    }
+
+    case "charge_sale_to_credit": {
+      // Same "amount is always the real balance, never invented" discipline
+      // as generate_payment_link -- see chargeSalesOrderToCredit's own
+      // comment for why this is a plain sales_order_payments insert instead
+      // of touching credit_charges directly.
+      if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
+      const order = await resolveLatestOrder(adminClient, tenantId, contactId, "confirmada");
+      if (!order) throw new Error("Este cliente no tiene ningún pedido confirmado para cargar a crédito.");
+
+      const result = await chargeSalesOrderToCredit(adminClient, tenantId, contactId, order.id);
+      return { charged: true, amount: formatCurrencyCOP(result.amount), order_code: result.orderCode };
     }
 
     case "hubspot_sync_contact": {
@@ -1197,56 +1412,6 @@ async function resolveShopifyConfig(adminClient: any, tenantId: string): Promise
   return { shop, accessToken };
 }
 
-/** If whatsapp-ai-respond injected a pending_attachment (a photo the customer
- * just sent, already downloaded and uploaded to the crm-attachments bucket
- * by whatsapp-webhook), links it to the PQR/update this call just created --
- * no file is copied, this just reuses the storage_path already uploaded.
- * Never throws: a bad/missing attachment shouldn't fail the PQR/update
- * creation itself, it just means the photo doesn't show up this time. */
-// deno-lint-ignore no-explicit-any
-async function linkPendingAttachment(
-  // deno-lint-ignore no-explicit-any
-  adminClient: any,
-  tenantId: string,
-  parentColumn: "pqr_id" | "pqr_update_id",
-  parentId: string,
-  parameters: Record<string, unknown>,
-) {
-  const pending = parameters.pending_attachment as { storage_path?: string; mime_type?: string; size_bytes?: number } | undefined;
-  if (!pending?.storage_path || !pending.mime_type) return;
-
-  const { error } = await adminClient.from("crm_attachments").insert({
-    tenant_id: tenantId,
-    [parentColumn]: parentId,
-    storage_path: pending.storage_path,
-    mime_type: pending.mime_type,
-    size_bytes: pending.size_bytes ?? 0,
-    created_by_ai: true,
-  });
-  if (error) console.error(`Failed to link pending attachment to ${parentColumn}=${parentId}`, error);
-}
-
-/** Resolves "the customer's most recent PQR" -- used by every tool that acts
- * on an existing case without the model having to (unreliably) remember an
- * id across turns. Returns the human-readable `code` alongside the id so
- * callers can relay it back to the customer. */
-// deno-lint-ignore no-explicit-any
-async function resolveLatestPqr(adminClient: any, tenantId: string, contactId: string | undefined): Promise<{ id: string; code: number }> {
-  if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
-
-  const { data, error } = await adminClient
-    .from("crm_pqrs")
-    .select("id, code")
-    .eq("tenant_id", tenantId)
-    .eq("contact_id", contactId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  if (!data) throw new Error("Este cliente todavía no tiene ningún PQR registrado.");
-  return data;
-}
-
 /** Resolves a tenant's pipeline by name (case-insensitive, as returned by
  * list_pipelines) plus its lowest-display_order stage -- lets
  * create_opportunity land a new case in whichever pipeline actually fits
@@ -1296,7 +1461,7 @@ async function resolvePipelineAndFirstStage(
   return { pipelineId: pipeline.id, stageId: stage.id, stageName: stage.name };
 }
 
-/** Same "most recent X of the contact" pattern as resolveLatestPqr, over
+/** Same "most recent X of the contact" pattern as resolveLatestOrder, over
  * opportunities -- lets update_opportunity_stage/get_opportunity_status
  * act without the model having to remember an id across turns. */
 // deno-lint-ignore no-explicit-any
@@ -1352,6 +1517,59 @@ async function resolveConversationSendContext(
   return { phoneNumberId: line.phone_number_id, accessToken, contactPhone: conversation.contact_phone };
 }
 
+/** Resolve-or-create the `clients` row for this conversation's phone number
+ * -- see the call site in executeTool for why this exists. Reads
+ * contact_phone/contact_name off whatsapp_conversations (always set by the
+ * webhook even when contact_id isn't), re-checks for a matching client by
+ * phone (another call in this same turn, or the webhook itself, may have
+ * already linked/created one), and persists the link on
+ * whatsapp_conversations.contact_id so every later call in this
+ * conversation gets it for free. Never throws -- a failure here shouldn't
+ * break whatever the model was actually trying to do; the tool call below
+ * still gets a clear "no hay contacto" error if this genuinely couldn't
+ * resolve one. */
+// deno-lint-ignore no-explicit-any
+async function resolveOrCreateContact(
+  adminClient: any,
+  tenantId: string,
+  conversationId: string,
+  contactId: string | undefined,
+): Promise<string | undefined> {
+  if (contactId) return contactId;
+
+  const { data: conversation } = await adminClient
+    .from("whatsapp_conversations")
+    .select("contact_phone, contact_name")
+    .eq("id", conversationId)
+    .maybeSingle();
+  if (!conversation?.contact_phone) return contactId;
+
+  const { data: existing } = await adminClient
+    .from("clients")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("phone", conversation.contact_phone)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  let newContactId: string | undefined = existing?.id;
+  if (!newContactId) {
+    const { data: created, error } = await adminClient
+      .from("clients")
+      .insert({ tenant_id: tenantId, full_name: conversation.contact_name || conversation.contact_phone, phone: conversation.contact_phone })
+      .select("id")
+      .single();
+    if (error) {
+      console.error("resolveOrCreateContact: failed to create client", error);
+      return contactId;
+    }
+    newContactId = created.id;
+  }
+
+  await adminClient.from("whatsapp_conversations").update({ contact_id: newContactId }).eq("id", conversationId);
+  return newContactId;
+}
+
 /** Resolves "the customer's most recent order" (cotización or venta -- same
  * entity, see 20260808000003_crm_orders.sql), optionally narrowed to a
  * specific status (e.g. confirm_quote/cancel_quote only ever act on one
@@ -1363,12 +1581,22 @@ async function resolveLatestOrder(
   tenantId: string,
   contactId: string | undefined,
   status?: string,
-): Promise<{ id: string; number: number; status: string; total: number; currency: string; notes: string | null } | null> {
+): Promise<{
+  id: string;
+  number: number;
+  status: string;
+  total: number;
+  currency: string;
+  notes: string | null;
+  shipping_address_id: string | null;
+  billing_address_id: string | null;
+  opportunity_id: string | null;
+} | null> {
   if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
 
   let query = adminClient
     .from("sales_orders")
-    .select("id, number, status, total, currency, notes")
+    .select("id, number, status, total, currency, notes, shipping_address_id, billing_address_id, opportunity_id")
     .eq("tenant_id", tenantId)
     .eq("contact_id", contactId)
     .is("deleted_at", null)
@@ -1400,6 +1628,27 @@ function formatOrderCode(number: number): string {
  * leadly-app's own frontend (Intl.NumberFormat('es-CO', ...)). */
 function formatCurrencyCOP(value: number): string {
   return new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 }).format(value);
+}
+
+/** Same reasoning as formatOrderCode/formatCurrencyCOP: found live 2026-08-25,
+ * after confirm_quote actually confirmed a sale, the model told the customer
+ * "la cotización ha sido confirmada" -- technically not wrong, but it keeps
+ * calling a real, committed sale a "cotización" (a mere price estimate),
+ * which is confusing for the customer and for whoever reads the chat later.
+ * Every ventas tool that returns an order's status now also returns this
+ * ready-to-use label instead of leaving the model to phrase the status
+ * itself off the raw enum value. */
+function statusLabel(status: string): string {
+  switch (status) {
+    case "cotizacion":
+      return "Cotización (todavía no es una compra en firme)";
+    case "confirmada":
+      return "Pedido confirmado (venta en firme)";
+    case "cancelada":
+      return "Cotización cancelada";
+    default:
+      return status;
+  }
 }
 
 /** Keeps the pipeline in sync with sales activity that happens entirely
@@ -1484,7 +1733,7 @@ async function resolveOrCreateOpportunityForQuote(
  * fetch it separately via getStockTotals, keyed off the id this returns. */
 // deno-lint-ignore no-explicit-any
 async function findProductByName(adminClient: any, tenantId: string, name: string): Promise<Record<string, unknown> | null> {
-  const columns = "id, name, sku, retail_price, track_inventory";
+  const columns = "id, name, sku, retail_price, track_inventory, has_variants";
 
   const { data: exact } = await adminClient
     .from("products")
@@ -1507,27 +1756,180 @@ async function findProductByName(adminClient: any, tenantId: string, name: strin
   return fuzzy && fuzzy.length > 0 ? fuzzy[0] : null;
 }
 
-/** Sums product_stock (per-warehouse quantity/reserved_quantity) per product
- * id, tenant-scoped -- same client-side aggregation leadly-app's own
- * listStockTotalsByTenant does (see lib/api/stockMovements.ts), since
- * products carries no stock counter of its own post-cutover. Empty id list
- * short-circuits to an empty map instead of an unnecessary round trip. */
+/** True only when this tenant has an active Wompi credential AND both
+ * secrets (private_key, integrity_key) are actually set. Deliberately
+ * duplicated from whatsapp-ai-respond's isTenantWompiConnected instead of
+ * shared -- same reasoning as formatOrderCode/formatCurrencyCOP below:
+ * keeps these two Edge Functions independently deployable. Reads
+ * payment_credential_secrets directly (not the payment_credential_configured_secrets
+ * RPC) -- that RPC's SECURITY DEFINER body gates on
+ * is_superadmin()/auth_active_tenant_id(), both of which need a real user
+ * JWT; called with the service-role key those always evaluate false, so
+ * the RPC silently returns empty for every tenant (found live 2026-08-25
+ * in whatsapp-ai-respond, same bug would reproduce here if copied as-is). */
 // deno-lint-ignore no-explicit-any
-async function getStockTotals(adminClient: any, tenantId: string, productIds: string[]): Promise<Map<string, { available: number; reserved: number }>> {
-  const totals = new Map<string, { available: number; reserved: number }>();
-  if (productIds.length === 0) return totals;
-
-  const { data } = await adminClient
-    .from("product_stock")
-    .select("product_id, quantity, reserved_quantity")
+async function isTenantWompiConnected(adminClient: any, tenantId: string): Promise<boolean> {
+  const { data: credential } = await adminClient
+    .from("tenant_payment_credentials")
+    .select("id")
     .eq("tenant_id", tenantId)
-    .in("product_id", productIds);
+    .eq("provider_key", "wompi")
+    .eq("is_active", true)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (!credential) return false;
 
-  for (const row of (data ?? []) as { product_id: string; quantity: number; reserved_quantity: number }[]) {
-    const existing = totals.get(row.product_id) ?? { available: 0, reserved: 0 };
-    existing.available += row.quantity;
-    existing.reserved += row.reserved_quantity;
-    totals.set(row.product_id, existing);
+  const { data: secretRows } = await adminClient.from("payment_credential_secrets").select("secret_name").eq("credential_id", credential.id);
+  const secrets = new Set((secretRows ?? []).map((r: { secret_name: string }) => r.secret_name));
+  return secrets.has("private_key") && secrets.has("integrity_key");
+}
+
+/** True only when this tenant has the "credit" module turned on
+ * (tenant_enabled_modules is presence-based). Same duplication reasoning as
+ * isTenantWompiConnected above. */
+// deno-lint-ignore no-explicit-any
+async function isTenantCreditModuleEnabled(adminClient: any, tenantId: string): Promise<boolean> {
+  const { data } = await adminClient.from("tenant_enabled_modules").select("id").eq("tenant_id", tenantId).eq("module_key", "credit").maybeSingle();
+  return !!data;
+}
+
+/** Runs right after confirm_quote confirms a sale, in the SAME tool call --
+ * see the call site's comment for why this can't be left to the model
+ * remembering a second, separate tool call afterward. Checks what this
+ * specific assistant/tenant/client combination can actually do:
+ * - Both credit (client has it enabled, tenant's "Crédito" module is on,
+ *   AND the assistant's "credito" skill is on) and Wompi (tenant connected
+ *   AND the assistant's "wompi" skill is on) available -> can't decide for
+ *   the customer, returns `payment_options` so the model asks which they
+ *   prefer, then calls charge_sale_to_credit/generate_payment_link itself.
+ * - Only one available -> acts immediately, no need to ask or call a
+ *   second tool.
+ * - Neither -> `payment_pending: true`, the ventas prompt already knows to
+ *   tell the customer an agent will follow up.
+ * Never throws -- a failure resolving payment shouldn't undo an
+ * already-confirmed sale, same reasoning as the opportunity-move above. */
+async function resolvePaymentAfterConfirm(
+  // deno-lint-ignore no-explicit-any
+  adminClient: any,
+  tenantId: string,
+  conversationId: string,
+  contactId: string,
+  orderId: string,
+): Promise<Record<string, unknown>> {
+  try {
+    const { data: conversation } = await adminClient.from("whatsapp_conversations").select("whatsapp_line_id").eq("id", conversationId).maybeSingle();
+    const { data: line } = conversation
+      ? await adminClient.from("whatsapp_lines").select("ai_assistant_id").eq("id", conversation.whatsapp_line_id).maybeSingle()
+      : { data: null };
+    const assistantId = line?.ai_assistant_id ?? null;
+    if (!assistantId) return { payment_pending: true };
+
+    const { data: skillRows } = await adminClient.from("ai_assistant_skills").select("skill_key").eq("ai_assistant_id", assistantId);
+    const skillKeys = new Set((skillRows ?? []).map((r: { skill_key: string }) => r.skill_key));
+
+    const { data: client } = await adminClient.from("clients").select("credit_enabled").eq("id", contactId).maybeSingle();
+
+    const creditAvailable = skillKeys.has("credito") && !!client?.credit_enabled && (await isTenantCreditModuleEnabled(adminClient, tenantId));
+    const wompiAvailable = skillKeys.has("wompi") && (await isTenantWompiConnected(adminClient, tenantId));
+
+    if (creditAvailable && wompiAvailable) {
+      return { payment_options: ["credito", "wompi"] };
+    }
+    if (creditAvailable) {
+      const result = await chargeSalesOrderToCredit(adminClient, tenantId, contactId, orderId);
+      return { payment_method: "credito", payment_charged: true, amount: formatCurrencyCOP(result.amount) };
+    }
+    if (wompiAvailable) {
+      const result = await createSalesOrderPaymentLink(adminClient, tenantId, orderId, null);
+      return { payment_method: "wompi", checkout_url: result.checkoutUrl, amount: formatCurrencyCOP(result.amount) };
+    }
+    return { payment_pending: true };
+  } catch (err) {
+    console.error(`resolvePaymentAfterConfirm failed for order ${orderId}`, err);
+    return { payment_pending: true };
   }
-  return totals;
+}
+
+/** Best-effort: sends a product's first photo via WhatsApp and logs it in
+ * the ledger, called automatically from list_catalog_products when a
+ * `search` resolves to exactly one product. Found live 2026-08-25: even
+ * with an explicit prompt instruction to call send_product_image right
+ * after showing a product's detail, the model skipped it twice in a row for
+ * two different products that DID have photos -- moving the send into the
+ * lookup call the model already has to make (it can't answer at all without
+ * calling this) removes the second, unreliable step entirely. Never
+ * throws: a product without a photo yet, or a transient send failure, just
+ * means false comes back -- the caller decides what (if anything) to tell
+ * the model about it, this never blocks the product data itself. */
+// deno-lint-ignore no-explicit-any
+async function trySendSingleProductImage(adminClient: any, conversationId: string, productId: string): Promise<boolean> {
+  try {
+    const { data: image } = await adminClient
+      .from("product_images")
+      .select("storage_path")
+      .eq("product_id", productId)
+      .order("display_order", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (!image) return false;
+
+    const { data: publicUrlData } = adminClient.storage.from("product-images").getPublicUrl(image.storage_path);
+    const sendContext = await resolveConversationSendContext(adminClient, conversationId);
+    const sendResult = await sendWhatsappImage(sendContext.phoneNumberId, sendContext.accessToken, sendContext.contactPhone, publicUrlData.publicUrl);
+    if (!sendResult.ok) return false;
+
+    await adminClient.from("whatsapp_messages").insert({
+      conversation_id: conversationId,
+      direction: "outbound",
+      sender_type: "ia",
+      content: "[Imagen enviada]",
+      wamid: sendResult.wamid,
+    });
+    return true;
+  } catch (err) {
+    console.error(`trySendSingleProductImage failed for product ${productId}`, err);
+    return false;
+  }
+}
+
+/** Resolves a product's variant by its combined label (option1/2/3_value
+ * joined with " / ", same shape list_product_variants returns) --
+ * case-insensitive, since real tenant data has inconsistent casing (seen:
+ * "Rojo" next to "azul"/"negro"). */
+// deno-lint-ignore no-explicit-any
+async function findVariantByLabel(adminClient: any, tenantId: string, productId: string, label: string): Promise<Record<string, unknown> | null> {
+  const { data } = await adminClient
+    .from("product_variants")
+    .select("id, sku, retail_price, option1_value, option2_value, option3_value")
+    .eq("tenant_id", tenantId)
+    .eq("product_id", productId)
+    .eq("is_active", true)
+    .is("deleted_at", null);
+
+  const target = label.trim().toLowerCase();
+  for (const variant of (data ?? []) as { option1_value: string | null; option2_value: string | null; option3_value: string | null }[]) {
+    const variantLabel = [variant.option1_value, variant.option2_value, variant.option3_value].filter(Boolean).join(" / ");
+    if (variantLabel.toLowerCase() === target) return variant;
+  }
+  return null;
+}
+
+/** Just the label strings for a product's active variants -- used to embed
+ * the real options directly into create_quote/add_item_to_quote's "falta
+ * variant" error, so the model can ask the customer in the very next reply
+ * instead of needing a separate list_product_variants round-trip first.
+ * Found live 2026-08-24: without this, a rejected item sometimes sent the
+ * model into an unproductive tool-calling loop instead of just asking. */
+// deno-lint-ignore no-explicit-any
+async function listVariantLabels(adminClient: any, tenantId: string, productId: string): Promise<string[]> {
+  const { data } = await adminClient
+    .from("product_variants")
+    .select("option1_value, option2_value, option3_value")
+    .eq("tenant_id", tenantId)
+    .eq("product_id", productId)
+    .eq("is_active", true)
+    .is("deleted_at", null);
+  return (data ?? []).map((v: { option1_value: string | null; option2_value: string | null; option3_value: string | null }) =>
+    [v.option1_value, v.option2_value, v.option3_value].filter(Boolean).join(" / "),
+  );
 }

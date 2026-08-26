@@ -95,6 +95,14 @@ export const wompiAdapter: PaymentProviderAdapter = {
     const ivaCents = Math.round((params.amountCents * 19) / 119);
     const body = {
       name: params.description,
+      // Wompi's /payment_links rejects the request with a 422
+      // (INPUT_VALIDATION_ERROR, "description": "No está presente") without
+      // this -- `name` and `description` are two separate required fields
+      // on Wompi's side, not one. Lost when this adapter was ported from
+      // lexy's original create-wompi-payment-link (which sends both, see
+      // that function): this one only ever carried `name`. Found live
+      // 2026-08-25, first real attempt to generate a sales-order link.
+      description: params.description,
       single_use: true,
       collect_shipping: false,
       currency: params.currency,

@@ -10,6 +10,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { json } from "../_shared/cors.ts";
 import { applyWebhookEvent } from "../_shared/payments/applyWebhookEvent.ts";
+import { applySalesOrderPaymentWebhookEvent } from "../_shared/payments/salesOrderPayments.ts";
 import { makeSecretGetter, resolveCredential } from "../_shared/payments/registry.ts";
 import { wompiAdapter } from "../_shared/payments/wompi.ts";
 
@@ -41,13 +42,35 @@ Deno.serve(async (req: Request) => {
     .select("id, merchant_tenant_id")
     .eq("provider_checkout_id", event.providerCheckoutId)
     .maybeSingle();
-  if (!invoiceRow) {
-    return json({ ok: true });
+
+  // Not every checkout this project creates is Leadly billing a tenant --
+  // a tenant collecting payment from their OWN customer (generate_payment_link/
+  // create-sales-order-payment-link) uses this exact same webhook URL, since
+  // Wompi only allows one events URL per merchant account and it's that
+  // tenant's own Wompi account registered there -- but it tracks its
+  // pending checkout in sales_order_payment_links instead of payment_invoices
+  // (a payment_invoices row means "Leadly is billing this tenant", the wrong
+  // direction for a tenant charging their own customer). Check that table
+  // when the invoice lookup misses, before giving up.
+  let merchantTenantId: string | null = null;
+  let linkRow: { id: string; tenant_id: string } | null = null;
+  if (invoiceRow) {
+    merchantTenantId = invoiceRow.merchant_tenant_id;
+  } else {
+    const { data: link } = await adminClient
+      .from("sales_order_payment_links")
+      .select("id, tenant_id")
+      .eq("provider_key", "wompi")
+      .eq("provider_checkout_id", event.providerCheckoutId)
+      .maybeSingle();
+    if (!link) return json({ ok: true });
+    linkRow = link;
+    merchantTenantId = link.tenant_id;
   }
 
   let credential;
   try {
-    credential = await resolveCredential(adminClient, invoiceRow.merchant_tenant_id, "wompi");
+    credential = await resolveCredential(adminClient, merchantTenantId, "wompi");
   } catch (err) {
     console.error("payment-webhook-wompi: could not resolve credential:", err);
     return json({ ok: true });
@@ -60,6 +83,15 @@ Deno.serve(async (req: Request) => {
     return json({ error: "Invalid signature" }, 401);
   }
 
-  await applyWebhookEvent(adminClient, "wompi", event);
+  if (invoiceRow) {
+    await applyWebhookEvent(adminClient, "wompi", event);
+  } else if (linkRow) {
+    await applySalesOrderPaymentWebhookEvent(adminClient, "wompi", event.providerCheckoutId, {
+      approved: event.approved,
+      providerTransactionId: event.providerTransactionId,
+      amountCents: event.amountCents,
+      paymentReference: event.paymentReference,
+    });
+  }
   return json({ ok: true });
 });

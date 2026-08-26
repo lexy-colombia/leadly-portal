@@ -78,6 +78,17 @@ Deno.serve(async (req: Request) => {
       let lineAccessTokenFetched = false;
 
       for (const message of value.messages) {
+        // Meta redelivers a webhook event it didn't get a fast/clean 200 for
+        // -- found live in production (2026-08-24): the same wamid landed as
+        // 3 separate rows a few seconds apart, each one independently
+        // kicking off its own whatsapp-ai-respond call, tripling both the
+        // apology message the customer saw and the LLM spend. wamid is
+        // globally unique per Meta message, so a prior row with the same one
+        // means this exact delivery was already fully processed -- skip it
+        // outright, don't even re-resolve the conversation.
+        const { data: alreadyProcessed } = await adminClient.from("whatsapp_messages").select("id").eq("wamid", message.id).maybeSingle();
+        if (alreadyProcessed) continue;
+
         const contactPhone = message.from;
         const contactName = value.contacts?.find((c) => c.wa_id === contactPhone)?.profile?.name ?? null;
         const content = extractMessageText(message);
@@ -170,7 +181,12 @@ Deno.serve(async (req: Request) => {
           conversation.mode = "ia";
         }
 
-        await adminClient.from("whatsapp_messages").insert({
+        // Race backstop for the wamid check above (two redeliveries landing
+        // within the same few hundred ms, both passing the SELECT before
+        // either INSERTs) -- whatsapp_messages_wamid_idx makes this a clean
+        // unique-violation instead of a silent duplicate row; treat it the
+        // same as "already processed" and skip triggering the AI again.
+        const { error: insertError } = await adminClient.from("whatsapp_messages").insert({
           conversation_id: conversation.id,
           direction: "inbound",
           sender_type: "contact",
@@ -180,6 +196,11 @@ Deno.serve(async (req: Request) => {
           media_mime_type: media?.mimeType ?? null,
           media_size_bytes: media?.sizeBytes ?? null,
         });
+        if (insertError) {
+          if (insertError.code === "23505") continue; // duplicate wamid, race with another delivery -- already handled
+          console.error(`Failed to insert inbound message ${message.id}`, insertError);
+          continue;
+        }
 
         if (conversation.mode === "ia" && line.status === "active") {
           // Must be awaited: Supabase Edge Functions (like Deno Deploy) tear
