@@ -27,15 +27,21 @@ export function ProductImage({
   alt = '',
   className = '',
   iconSize = 16,
+  fit = 'cover',
 }: {
   src: string | null | undefined
   name: string
   alt?: string
   className?: string
   iconSize?: number
+  /** 'cover' (default) fills and crops -- right for square catalog
+   * thumbnails. 'contain' letterboxes instead of cropping -- use it where
+   * seeing the whole product matters more than filling the box, e.g. an
+   * order line where a cropped edge could hide which variant it is. */
+  fit?: 'cover' | 'contain'
 }) {
   if (src) {
-    return <img src={src} alt={alt} className={`object-cover ${className}`} />
+    return <img src={src} alt={alt} className={`${fit === 'contain' ? 'object-contain' : 'object-cover'} ${className}`} />
   }
   const { bg, text } = colorForName(name)
   return (

@@ -3,7 +3,7 @@ import { createClient, updateClient } from '../../../lib/api/clients'
 import { listProfilesByTenant } from '../../../lib/api/users'
 import type { ClientStage, Client, Profile } from '../../../types/domain'
 import { FieldError } from '@/components/atoms'
-import { ComboboxFilter, TagInput } from '@/components/molecules'
+import { ComboboxFilter, PhoneInput, TagInput } from '@/components/molecules'
 import { Drawer } from '@/components/organisms'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -171,7 +171,7 @@ export function ContactDrawer({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="contact-phone">{t('contacts.drawer.fields.phone')}</Label>
-              <Input id="contact-phone" value={phone} aria-invalid={!!phoneError} onChange={(e) => setPhone(e.target.value)} placeholder="+573001234567" className={`mt-1 ${FIELD_CLASS}`} />
+              <PhoneInput id="contact-phone" value={phone} onChange={setPhone} placeholder="3001234567" invalid={!!phoneError} className="mt-1" />
               <FieldError message={phoneError} />
             </div>
             <div>

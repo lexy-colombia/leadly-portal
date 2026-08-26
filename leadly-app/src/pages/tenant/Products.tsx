@@ -259,7 +259,6 @@ export function Products() {
               <TableBody>
                 {products.map((product) => {
                   const lowStock = isLowStock(product, stockTotals)
-                  const reserved = stockTotals.get(product.id)?.reserved ?? 0
                   const cover = product.images[0]
                   return (
                     <TableRow key={product.id} onClick={() => navigate(`/app/products/${product.id}`)} className="cursor-pointer">
@@ -302,7 +301,6 @@ export function Products() {
                         ) : (
                           <span className="text-sm text-brand-400">{t('products.table.noControl')}</span>
                         )}
-                        {reserved > 0 && <span className="ml-1.5 text-xs text-brand-400">{t('products.table.reserved', { count: reserved })}</span>}
                       </TableCell>
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <Switch

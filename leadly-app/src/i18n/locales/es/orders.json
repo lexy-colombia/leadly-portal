@@ -10,9 +10,9 @@
   "orders.paymentMethod.cash": "Efectivo",
   "orders.paymentMethod.transfer": "Transferencia",
   "orders.paymentMethod.card": "Tarjeta",
-  "orders.paymentMethod.other": "Otro",
   "orders.paymentMethod.credit": "Crédito",
   "orders.paymentMethod.storeCredit": "Saldo a favor",
+  "orders.paymentMethod.wompi": "Wompi",
 
   "orders.errors.load": "No se pudieron cargar las cotizaciones/ventas.",
   "orders.errors.cancelQuote": "No se pudo cancelar la cotización.",
@@ -192,5 +192,13 @@
   "orders.paymentDrawer.errors.amountExceedsBalance": "No puede superar el saldo pendiente ({amount}).",
   "orders.paymentDrawer.fields.date": "Fecha de pago",
   "orders.paymentDrawer.fields.notes": "Notas (opcional)",
-  "orders.paymentDrawer.errors.save": "No se pudo registrar el pago."
+  "orders.paymentDrawer.errors.save": "No se pudo registrar el pago.",
+
+  "orders.paymentDrawer.wompi.title": "Cobrar con Wompi",
+  "orders.paymentDrawer.wompi.hint": "Genera un link de pago real por el saldo pendiente ({amount}). El pago queda registrado solo cuando el cliente paga.",
+  "orders.paymentDrawer.wompi.generate": "Generar link de pago",
+  "orders.paymentDrawer.wompi.generating": "Generando...",
+  "orders.paymentDrawer.wompi.copyAria": "Copiar link de pago",
+  "orders.paymentDrawer.wompi.copied": "Link copiado.",
+  "orders.paymentDrawer.wompi.errors.generate": "No se pudo generar el link de pago."
 }

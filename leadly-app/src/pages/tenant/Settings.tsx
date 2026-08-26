@@ -247,8 +247,39 @@ function CompanySection() {
         {logoError && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{logoError}</p>}
       </CardSection>
 
+      {tenant && <StorefrontSection tenant={tenant} />}
       {tenant && <CompanyEditDrawer open={editOpen} onClose={() => setEditOpen(false)} tenant={tenant} onSaved={setTenant} />}
     </Card>
+  )
+}
+
+/** Solo "ver" -- pedido explícito del usuario, más chico que la sección de
+ * edición completa (slug/activar) que sigue pendiente (ver CLAUDE.md). Vive
+ * como una CardSection más dentro del mismo Card que el perfil de la
+ * empresa (mismo `tenant` ya cargado ahí, sin otra llamada) en vez de una
+ * Card aparte -- es información de la empresa igual que el resto. */
+function StorefrontSection({ tenant }: { tenant: Tenant }) {
+  const { t } = useLanguage()
+  const storefrontUrl = tenant.storefront_slug ? `${window.location.origin}/tienda/${tenant.storefront_slug}` : null
+
+  return (
+    <CardSection title={t('settings.storefront.title')}>
+      {tenant.storefront_enabled && storefrontUrl ? (
+        <div className="flex items-center justify-between gap-3">
+          <p className="min-w-0 truncate text-xs text-brand-400">{storefrontUrl}</p>
+          <a
+            href={storefrontUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="shrink-0 rounded-lg border border-brand-200 px-3 py-1.5 text-xs font-medium text-brand-600 transition-colors hover:bg-brand-50"
+          >
+            {t('settings.storefront.view')}
+          </a>
+        </div>
+      ) : (
+        <p className="text-xs text-brand-400">{t('settings.storefront.disabled')}</p>
+      )}
+    </CardSection>
   )
 }
 

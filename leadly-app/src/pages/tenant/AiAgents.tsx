@@ -46,6 +46,7 @@ export function AiAgents() {
         key={reloadKey}
         tenantId={profile.tenant_id}
         canManage={isAdmin}
+        manageSkills={isAdmin}
         connectLine={{ label: t('settings.lines.connectNew'), loading: connecting, onClick: handleConnectWhatsapp }}
       />
     </div>

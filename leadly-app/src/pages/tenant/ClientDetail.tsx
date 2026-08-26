@@ -4,6 +4,7 @@ import { MoreHorizontalIcon } from 'lucide-react'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { TranslationKey } from '../../i18n/translations'
 import { formatDate, formatDateTime } from '../../lib/dates'
+import { formatPhoneDisplay } from '../../lib/phone'
 import { deleteClient, getClient, createNote, listNotes } from '../../lib/api/clients'
 import { listAppointmentsForContact, updateAppointmentStatus } from '../../lib/api/appointments'
 import { listConversationsForContact } from '../../lib/api/conversations'
@@ -394,7 +395,7 @@ function ClientDetailContent({
               {!contact.is_active && <Badge variant="outline">{t('common.status.inactive')}</Badge>}
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-brand-400">
-              <span>{contact.phone}</span>
+              <span>{formatPhoneDisplay(contact.phone)}</span>
               {contact.email && <span>{contact.email}</span>}
               {contact.company && <span>{contact.company}</span>}
               {contact.city && <span>{contact.city}</span>}

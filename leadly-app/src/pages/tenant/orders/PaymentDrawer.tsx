@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { createPayment, PAYMENT_METHOD_LABEL_KEY } from '../../../lib/api/orderPayments'
+import { createPayment, createWompiPaymentLink, PAYMENT_METHOD_LABEL_KEY } from '../../../lib/api/orderPayments'
+import { getPaymentCredentialStatus } from '../../../lib/api/billing'
 import type { OrderPaymentMethod } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import { FieldError } from '@/components/atoms'
@@ -10,6 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Copy } from 'lucide-react'
 
 function formatCurrency(value: number, currency = 'COP'): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
@@ -58,6 +60,17 @@ export function PaymentDrawer({
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
+  // Wompi: only offered once the tenant's own account is fully connected
+  // (same "Conectado" criterion as WompiIntegrationDrawer -- a credential
+  // row with empty secrets doesn't count). Independent from the manual
+  // form below: generating a link doesn't record a payment by itself, only
+  // payment-webhook-wompi does that once the customer actually pays.
+  const [wompiConnected, setWompiConnected] = useState(false)
+  const [wompiLink, setWompiLink] = useState<{ checkoutUrl: string; amount: number } | null>(null)
+  const [wompiGenerating, setWompiGenerating] = useState(false)
+  const [wompiError, setWompiError] = useState<string | null>(null)
+  const [wompiCopied, setWompiCopied] = useState(false)
+
   useEffect(() => {
     if (!open) return
     setMethod('efectivo')
@@ -66,8 +79,34 @@ export function PaymentDrawer({
     setNotes('')
     setTouched(false)
     setFormError(null)
+    setWompiLink(null)
+    setWompiError(null)
+    setWompiCopied(false)
+    getPaymentCredentialStatus(tenantId)
+      .then((status) => setWompiConnected(status.configuredSecrets.includes('private_key') && status.configuredSecrets.includes('integrity_key')))
+      .catch(() => setWompiConnected(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
+
+  async function handleGenerateWompiLink() {
+    setWompiGenerating(true)
+    setWompiError(null)
+    try {
+      const result = await createWompiPaymentLink(orderId)
+      setWompiLink({ checkoutUrl: result.checkoutUrl, amount: result.amount })
+    } catch (err) {
+      setWompiError(err instanceof Error ? err.message : t('orders.paymentDrawer.wompi.errors.generate'))
+    } finally {
+      setWompiGenerating(false)
+    }
+  }
+
+  async function handleCopyWompiLink() {
+    if (!wompiLink) return
+    await navigator.clipboard.writeText(wompiLink.checkoutUrl)
+    setWompiCopied(true)
+    setTimeout(() => setWompiCopied(false), 2000)
+  }
 
   const amountValue = Number(amount)
   // 'saldo_favor' has a second, tighter cap on top of pendingAmount -- can
@@ -116,6 +155,29 @@ export function PaymentDrawer({
 
   return (
     <Drawer open={open} onClose={onClose} title={t('orders.paymentDrawer.title')} description={t('orders.paymentDrawer.description')}>
+      {wompiConnected && pendingAmount > 0 && (
+        <div className="mb-4 space-y-2 rounded-lg border border-brand-100 bg-brand-50/40 p-3">
+          <p className="text-xs font-medium text-brand-700">{t('orders.paymentDrawer.wompi.title')}</p>
+          {!wompiLink ? (
+            <>
+              <p className="text-[11px] text-brand-400">{t('orders.paymentDrawer.wompi.hint', { amount: formatCurrency(pendingAmount) })}</p>
+              <Button type="button" variant="secondary" size="sm" onClick={handleGenerateWompiLink} disabled={wompiGenerating}>
+                {wompiGenerating ? t('orders.paymentDrawer.wompi.generating') : t('orders.paymentDrawer.wompi.generate')}
+              </Button>
+            </>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Input readOnly value={wompiLink.checkoutUrl} className="flex-1 text-xs" onFocus={(e) => e.target.select()} />
+              <Button type="button" variant="secondary" size="icon-sm" onClick={handleCopyWompiLink} aria-label={t('orders.paymentDrawer.wompi.copyAria')}>
+                <Copy className="size-3.5" />
+              </Button>
+            </div>
+          )}
+          {wompiCopied && <p className="text-[11px] text-emerald-600">{t('orders.paymentDrawer.wompi.copied')}</p>}
+          {wompiError && <p className="text-[11px] text-red-600">{wompiError}</p>}
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <div>
           <Label htmlFor="payment-method">{t('orders.paymentDrawer.fields.method')}</Label>
@@ -125,7 +187,11 @@ export function PaymentDrawer({
             </SelectTrigger>
             <SelectContent>
               {(Object.keys(PAYMENT_METHOD_LABEL_KEY) as OrderPaymentMethod[])
-                .filter((m) => (m !== 'credito' || creditEnabled) && (m !== 'saldo_favor' || storeCreditBalance > 0))
+                // 'wompi' never shows here -- it's only ever recorded
+                // automatically by payment-webhook-wompi once a customer
+                // actually pays a generated link (see the section above),
+                // never picked and typed in manually.
+                .filter((m) => m !== 'wompi' && (m !== 'credito' || creditEnabled) && (m !== 'saldo_favor' || storeCreditBalance > 0))
                 .map((m) => (
                   <SelectItem key={m} value={m}>
                     {t(PAYMENT_METHOD_LABEL_KEY[m])}

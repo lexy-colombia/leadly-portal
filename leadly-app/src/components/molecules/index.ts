@@ -1,4 +1,5 @@
 export { IconInput, PasswordInput, CurrencyInput } from './Input'
+export { PhoneInput } from './PhoneInput'
 export { IconSelect } from './Select'
 export { Card, CardSection } from './Card'
 export { EmptyState } from './EmptyState'

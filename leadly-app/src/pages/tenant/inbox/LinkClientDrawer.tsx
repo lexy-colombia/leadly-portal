@@ -3,6 +3,7 @@ import { createClient, searchClients } from '../../../lib/api/clients'
 import { linkConversationContact } from '../../../lib/api/conversations'
 import type { Client } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
+import { formatPhoneDisplay } from '../../../lib/phone'
 import { Drawer } from '@/components/organisms'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -126,7 +127,7 @@ export function LinkClientDrawer({
                     {results.map((c) => (
                       <CommandItem key={c.id} value={c.id} onSelect={() => setSelected(c)} className="text-xs">
                         <span className="flex-1 truncate">{c.full_name}</span>
-                        <span className="shrink-0 text-brand-400">{c.phone}</span>
+                        <span className="shrink-0 text-brand-400">{formatPhoneDisplay(c.phone)}</span>
                       </CommandItem>
                     ))}
                   </CommandGroup>

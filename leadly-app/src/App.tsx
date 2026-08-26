@@ -9,6 +9,10 @@ import { ForgotPassword } from './pages/auth/ForgotPassword'
 import { CreateCompany } from './pages/auth/CreateCompany'
 import { BackofficeLayout } from './layouts/BackofficeLayout'
 import { TenantLayout } from './layouts/TenantLayout'
+import { StorefrontLayout } from './layouts/StorefrontLayout'
+import { StorefrontCatalog } from './pages/storefront/StorefrontCatalog'
+import { StorefrontProductDetail } from './pages/storefront/StorefrontProductDetail'
+import { StorefrontCart } from './pages/storefront/StorefrontCart'
 import { Changelog } from './pages/Changelog'
 import { TenantsList } from './pages/backoffice/TenantsList'
 import { TenantDetail } from './pages/backoffice/TenantDetail'
@@ -51,6 +55,14 @@ export default function App() {
               RequireAuth, since RequireAuth's own unprovisioned check redirects here --
               wrapping it would just bounce this route back to itself. */}
           <Route path="/create-company" element={<CreateCompany />} />
+          {/* Tienda pública por tenant (marketplace) -- sin auth, hermana de
+              /login, StorefrontLayout resuelve el tenant por :slug y no
+              TenantLayout/RequireAuth (esos asumen una sesión). */}
+          <Route path="/tienda/:slug" element={<StorefrontLayout />}>
+            <Route index element={<StorefrontCatalog />} />
+            <Route path="producto/:productId" element={<StorefrontProductDetail />} />
+            <Route path="carrito" element={<StorefrontCart />} />
+          </Route>
           <Route path="/" element={<RootRedirect />} />
 
           <Route

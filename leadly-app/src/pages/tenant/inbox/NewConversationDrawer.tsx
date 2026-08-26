@@ -13,6 +13,8 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { isNotBlank, isValidE164Phone } from '../../../lib/validation'
+import { formatPhoneDisplay } from '../../../lib/phone'
+import { PhoneInput } from '@/components/molecules'
 import { useLanguage } from '../../../contexts/LanguageContext'
 
 const FIELD_CLASS = '!h-7 !rounded-lg !text-xs'
@@ -257,7 +259,7 @@ export function NewConversationDrawer({
                     {contacts.map((c) => (
                       <CommandItem key={c.id} value={`${c.full_name} ${c.phone}`} onSelect={() => setSelectedContactId(c.id)} className="text-xs">
                         <span className="flex-1 truncate">{c.full_name}</span>
-                        <span className="shrink-0 text-brand-400">{c.phone}</span>
+                        <span className="shrink-0 text-brand-400">{formatPhoneDisplay(c.phone)}</span>
                       </CommandItem>
                     ))}
                   </CommandGroup>
@@ -287,14 +289,7 @@ export function NewConversationDrawer({
             </div>
             <div>
               <Label htmlFor="new-conv-phone">{t('inbox.newConv.phone')}</Label>
-              <Input
-                id="new-conv-phone"
-                value={newPhone}
-                aria-invalid={!!newPhoneError}
-                onChange={(e) => setNewPhone(e.target.value)}
-                placeholder="+573001234567"
-                className={`mt-1 ${FIELD_CLASS}`}
-              />
+              <PhoneInput id="new-conv-phone" value={newPhone} onChange={setNewPhone} invalid={!!newPhoneError} placeholder="3001234567" className="mt-1" />
               <FieldError message={newPhoneError} />
             </div>
           </div>

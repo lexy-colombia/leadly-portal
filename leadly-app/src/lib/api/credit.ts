@@ -8,7 +8,6 @@ export const CREDIT_PAYMENT_METHOD_LABEL_KEY: Record<CreditPaymentMethod, Transl
   efectivo: 'orders.paymentMethod.cash',
   transferencia: 'orders.paymentMethod.transfer',
   tarjeta: 'orders.paymentMethod.card',
-  otro: 'orders.paymentMethod.other',
 }
 
 export interface ClientCreditSummary {

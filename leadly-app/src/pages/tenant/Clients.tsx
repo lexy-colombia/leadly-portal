@@ -6,6 +6,7 @@ import { useLanguage } from '../../contexts/LanguageContext'
 import { useHeaderSearchSlot } from '@/contexts/HeaderSearchSlotContext'
 import type { Language } from '../../i18n/translations'
 import { formatDate } from '../../lib/dates'
+import { formatPhoneDisplay } from '../../lib/phone'
 import { deleteClient, listClients } from '../../lib/api/clients'
 import { listLastContactTimesByTenant } from '../../lib/api/conversations'
 import { listProfilesByTenant } from '../../lib/api/users'
@@ -223,7 +224,7 @@ export function Clients() {
                         </span>
                       </span>
                     </TableCell>
-                    <TableCell className="text-xs text-brand-700">{contact.phone}</TableCell>
+                    <TableCell className="text-xs text-brand-700">{formatPhoneDisplay(contact.phone)}</TableCell>
                     {showStage && (
                       <TableCell>
                         <Badge variant="outline" className={STAGE_BADGE_CLASS[contact.stage]}>

@@ -8,6 +8,8 @@ import { listWhatsappLinesByTenant } from '../../../lib/api/whatsappLines'
 import { listClients } from '../../../lib/api/clients'
 import type { Client, WhatsappLine, WhatsappMessageTemplate } from '../../../types/domain'
 import { FieldError } from '@/components/atoms'
+import { PhoneInput } from '@/components/molecules'
+import { formatPhoneDisplay, splitPhone } from '../../../lib/phone'
 import { Drawer } from '@/components/organisms'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -25,23 +27,6 @@ import { useLanguage } from '../../../contexts/LanguageContext'
 const FIELD_CLASS = '!h-7 !rounded-lg !text-xs'
 const TEXTAREA_CLASS = '!rounded-lg !py-1.5 !text-xs'
 const FORM_ID = 'campaign-form'
-
-/** Indicativos para el tab "Número nuevo" -- lista corta a mano, no un
- * catálogo exhaustivo de +200 países, cubre los mercados donde opera la
- * base de tenants hoy. Colombia primero porque es el valor por defecto. */
-const DIAL_CODES = [
-  { code: '57', label: 'Colombia (+57)' },
-  { code: '1', label: 'Estados Unidos (+1)' },
-  { code: '52', label: 'México (+52)' },
-  { code: '34', label: 'España (+34)' },
-  { code: '54', label: 'Argentina (+54)' },
-  { code: '56', label: 'Chile (+56)' },
-  { code: '51', label: 'Perú (+51)' },
-  { code: '593', label: 'Ecuador (+593)' },
-  { code: '58', label: 'Venezuela (+58)' },
-  { code: '507', label: 'Panamá (+507)' },
-  { code: '506', label: 'Costa Rica (+506)' },
-]
 
 /** Un destinatario en construcción dentro del drawer -- `key` identifica la
  * fila en la UI: el id del cliente si vino del picker de contactos, o un
@@ -116,7 +101,6 @@ export function CampaignFormDrawer({
   const [formError, setFormError] = useState<string | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [manualName, setManualName] = useState('')
-  const [manualDialCode, setManualDialCode] = useState(DIAL_CODES[0].code)
   const [manualPhone, setManualPhone] = useState('')
   const [manualError, setManualError] = useState<string | null>(null)
 
@@ -179,12 +163,11 @@ export function CampaignFormDrawer({
   }
 
   function handleAddManual() {
-    const localDigits = manualPhone.trim().replace(/\D/g, '')
-    if (!localDigits) {
+    const phone = manualPhone.trim()
+    if (!splitPhone(phone).localNumber) {
       setManualError(t('campaigns.newDrawer.errors.manualPhoneRequired'))
       return
     }
-    const phone = `${manualDialCode}${localDigits}`
     if (recipients.some((r) => r.contact_phone === phone)) {
       setManualError(t('campaigns.newDrawer.errors.manualDuplicate'))
       return
@@ -325,8 +308,8 @@ export function CampaignFormDrawer({
             <div className="flex min-h-7 flex-wrap items-center gap-1.5 rounded-lg border border-input px-1.5 py-1">
               {recipients.map((r) => (
                 <Badge key={r.key} variant="secondary" className="gap-1 pr-1 text-xs font-normal">
-                  {r.contact_name || r.contact_phone}
-                  <button type="button" onClick={() => removeRecipient(r.key)} aria-label={r.contact_name || r.contact_phone} className="rounded-full p-0.5 hover:bg-black/10">
+                  {r.contact_name || formatPhoneDisplay(r.contact_phone)}
+                  <button type="button" onClick={() => removeRecipient(r.key)} aria-label={r.contact_name || formatPhoneDisplay(r.contact_phone)} className="rounded-full p-0.5 hover:bg-black/10">
                     <XIcon className="size-3" />
                   </button>
                 </Badge>
@@ -362,7 +345,7 @@ export function CampaignFormDrawer({
                                     {checked && <CheckIcon className="size-2.5" />}
                                   </span>
                                   <span className="flex-1 truncate">{c.full_name}</span>
-                                  <span className="shrink-0 text-brand-400">{c.phone}</span>
+                                  <span className="shrink-0 text-brand-400">{formatPhoneDisplay(c.phone)}</span>
                                 </CommandItem>
                               )
                             })}
@@ -381,27 +364,7 @@ export function CampaignFormDrawer({
                         <Label htmlFor="manual-phone" className="text-xs">
                           {t('campaigns.newDrawer.manualPhoneLabel')}
                         </Label>
-                        <div className="mt-1 flex gap-1.5">
-                          <Select value={manualDialCode} onValueChange={setManualDialCode}>
-                            <SelectTrigger id="manual-dial-code" className={`w-24 shrink-0 ${FIELD_CLASS}`}>
-                              <SelectValue>{`+${manualDialCode}`}</SelectValue>
-                            </SelectTrigger>
-                            <SelectContent>
-                              {DIAL_CODES.map((c) => (
-                                <SelectItem key={c.code} value={c.code} className="text-xs">
-                                  {c.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <Input
-                            id="manual-phone"
-                            value={manualPhone}
-                            onChange={(e) => setManualPhone(e.target.value)}
-                            placeholder={t('campaigns.newDrawer.manualPhonePlaceholder')}
-                            className={FIELD_CLASS}
-                          />
-                        </div>
+                        <PhoneInput id="manual-phone" value={manualPhone} onChange={setManualPhone} placeholder={t('campaigns.newDrawer.manualPhonePlaceholder')} className="mt-1" />
                       </div>
                       {manualError && <p className="text-xs text-red-600">{manualError}</p>}
                       <Button type="button" size="sm" className="w-full" onClick={handleAddManual}>
@@ -428,7 +391,7 @@ export function CampaignFormDrawer({
                   <TableBody>
                     {recipients.map((r) => (
                       <TableRow key={r.key}>
-                        <TableCell className="text-xs font-medium text-brand-800">{r.contact_name || r.contact_phone}</TableCell>
+                        <TableCell className="text-xs font-medium text-brand-800">{r.contact_name || formatPhoneDisplay(r.contact_phone)}</TableCell>
                         {Array.from({ length: variableCount }).map((_, i) => (
                           <TableCell key={i}>
                             <Input value={r.variables[i] ?? ''} onChange={(e) => setVariable(r.key, i, e.target.value)} className={FIELD_CLASS} />

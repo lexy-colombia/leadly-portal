@@ -4,6 +4,7 @@ import { useLanguage } from '../../contexts/LanguageContext'
 import { listReturns, type ReturnWithOrder } from '../../lib/api/returns'
 import { RETURN_REASON_LABEL_KEY } from '../../lib/returnReasons'
 import { formatDate } from '../../lib/dates'
+import { formatPhoneDisplay } from '../../lib/phone'
 import { PageSpinner } from '@/components/atoms'
 import { Card, EmptyState, Pagination } from '@/components/molecules'
 import { Badge } from '@/components/ui/badge'
@@ -106,7 +107,7 @@ export function Returns() {
                       <TableCell className="text-xs font-medium text-brand-800">{r.sales_order ? `#${r.sales_order.number}` : '—'}</TableCell>
                       <TableCell className="text-xs text-brand-700">
                         <p className="font-medium text-brand-800">{r.sales_order?.contact?.full_name ?? '—'}</p>
-                        {r.sales_order?.contact?.phone && <p className="text-[11px] font-normal text-brand-400">{r.sales_order.contact.phone}</p>}
+                        {r.sales_order?.contact?.phone && <p className="text-[11px] font-normal text-brand-400">{formatPhoneDisplay(r.sales_order.contact.phone)}</p>}
                       </TableCell>
                       <TableCell className="text-xs text-brand-600">{t(RETURN_REASON_LABEL_KEY[r.reason])}</TableCell>
                       <TableCell>
