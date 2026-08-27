@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, Outlet, useParams } from 'react-router-dom'
 import { ShoppingCartIcon } from 'lucide-react'
 import { useLanguage } from '../contexts/LanguageContext'
-import { getStorefront, getStorefrontCart, type StorefrontInfo } from '../lib/api/storefront'
+import { getStorefront, getStorefrontCart, type StorefrontCartItem, type StorefrontInfo } from '../lib/api/storefront'
 import { getStorefrontCartToken } from '../lib/storefrontCart'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -13,8 +13,20 @@ export interface StorefrontOutletContext {
   slug: string
   tenant: StorefrontInfo
   /** Recalcula el badge del carrito en el header -- las páginas hijas la
-   * llaman después de cualquier mutación (agregar/editar/quitar ítems). */
-  refreshCartCount: () => void
+   * llaman después de cualquier mutación (agregar/editar/quitar ítems). Toda
+   * mutación del carrito (add/update/remove_cart_item) ya devuelve el arreglo
+   * `items` actualizado en su propia respuesta -- pasarlo acá evita un
+   * get_cart de más por click, que era la causa real de la lentitud
+   * percibida al agregar un producto (dos round-trips a la Edge Function en
+   * vez de uno). Sin argumento, cae al fetch de red (solo hace falta al
+   * montar el layout, cuando todavía no hay ninguna respuesta de mutación).
+   * También acepta un número directo -- el catálogo, al agregar varios
+   * productos distintos en paralelo, ya no puede pasar "el items completo"
+   * de una sola respuesta (cada respuesta de add_to_cart solo refleja ESE
+   * producto de forma confiable bajo clicks concurrentes, ver
+   * StorefrontCatalog.tsx) y en su lugar manda el total ya recalculado de su
+   * propio estado local combinado. */
+  refreshCartCount: (items?: StorefrontCartItem[] | number) => void
   /** Todos los errores de la tienda se muestran en un modal (pedido
    * explícito del usuario) en vez de texto inline -- una sola instancia acá
    * arriba, las páginas hijas solo la invocan. */
@@ -54,16 +66,27 @@ export function StorefrontLayout() {
     }
   }, [slug])
 
-  const refreshCartCount = useCallback(() => {
-    const token = getStorefrontCartToken(slug)
-    if (!token) {
-      setCartCount(0)
-      return
-    }
-    getStorefrontCart(token)
-      .then((res) => setCartCount(res.items.reduce((sum, item) => sum + item.quantity, 0)))
-      .catch(() => setCartCount(0))
-  }, [slug])
+  const refreshCartCount = useCallback(
+    (items?: StorefrontCartItem[] | number) => {
+      if (typeof items === 'number') {
+        setCartCount(items)
+        return
+      }
+      if (items) {
+        setCartCount(items.reduce((sum, item) => sum + item.quantity, 0))
+        return
+      }
+      const token = getStorefrontCartToken(slug)
+      if (!token) {
+        setCartCount(0)
+        return
+      }
+      getStorefrontCart(token)
+        .then((res) => setCartCount(res.items.reduce((sum, item) => sum + item.quantity, 0)))
+        .catch(() => setCartCount(0))
+    },
+    [slug],
+  )
 
   useEffect(() => {
     refreshCartCount()
@@ -113,7 +136,10 @@ export function StorefrontLayout() {
             <Link to={`/tienda/${slug}/carrito`} aria-label={t('storefront.header.cart')}>
               <ShoppingCartIcon className="size-5" />
               {cartCount > 0 && (
-                <Badge variant="destructive" className="absolute -top-1.5 -right-1.5 h-4.5 min-w-4.5 justify-center rounded-full px-1 text-[10px]">
+                <Badge
+                  variant="secondary"
+                  className="absolute -top-1.5 -right-1.5 h-4.5 min-w-4.5 justify-center rounded-full border-2 border-background px-1 text-[10px]"
+                >
                   {cartCount > 99 ? '99+' : cartCount}
                 </Badge>
               )}

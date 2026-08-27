@@ -83,7 +83,7 @@ export function PaymentDrawer({
     setWompiError(null)
     setWompiCopied(false)
     getPaymentCredentialStatus(tenantId)
-      .then((status) => setWompiConnected(status.configuredSecrets.includes('private_key') && status.configuredSecrets.includes('integrity_key')))
+      .then((status) => setWompiConnected(status.configuredSecrets.includes('private_key') && status.configuredSecrets.includes('events_key')))
       .catch(() => setWompiConnected(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])

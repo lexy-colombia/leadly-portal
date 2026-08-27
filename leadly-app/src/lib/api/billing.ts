@@ -322,7 +322,7 @@ export async function setPaymentMode(tenantId: string | null, mode: 'sandbox' | 
   if (error) throw error
 }
 
-export async function setPaymentCredentialSecret(tenantId: string | null, secretName: 'private_key' | 'integrity_key', value: string): Promise<void> {
+export async function setPaymentCredentialSecret(tenantId: string | null, secretName: 'private_key' | 'integrity_key' | 'events_key', value: string): Promise<void> {
   const credentialId = await ensureWompiCredential(tenantId, 'sandbox')
   const { error } = await supabase.rpc('set_payment_credential_secret', {
     p_credential_id: credentialId,
