@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { PackageIcon, PlusIcon, SearchIcon, XIcon } from 'lucide-react'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import { descendantIds } from '../../../lib/api/productCategories'
@@ -25,6 +26,18 @@ function formatCurrency(value: number, currency = 'COP'): string {
 function availableStock(rows: ProductWarehouseStockRow[], productId: string | null | undefined, variantId: string | null | undefined, warehouseId: string | null | undefined): number | null {
   if (!productId || !warehouseId) return null
   return rows.filter((r) => r.product_id === productId && r.warehouse_id === warehouseId && r.variant_id === (variantId ?? null)).reduce((sum, r) => sum + r.quantity, 0)
+}
+
+/** Picks the line's photo: the variant's own image if one was uploaded for
+ * it, else the product's general (variant-less) image, else whatever's
+ * first -- never just images[0], which used to show whichever variant photo
+ * happened to load first regardless of what was actually ordered. */
+function resolveItemImage(product: ProductWithImages | undefined, variantId: string | null | undefined): string | null {
+  if (!product) return null
+  const image = (variantId && product.images.find((img) => img.variant_id === variantId))
+    || product.images.find((img) => !img.variant_id)
+    || product.images[0]
+  return image ? getProductImageUrl(image.storage_path) : null
 }
 
 /** Line-item editor for an order -- one bordered card per product (image +
@@ -221,12 +234,14 @@ export function OrderItemsEditor({
           return (
             <div key={index} className="border-b border-brand-100 py-2 last:border-b-0">
               <div className="flex flex-wrap items-start gap-2.5">
-                <ProductImage src={selectedProduct?.images[0] ? getProductImageUrl(selectedProduct.images[0].storage_path) : null} name={item.product_name || '?'} className="mt-4 size-9 shrink-0 rounded-lg" iconSize={15} />
+                <ProductImage src={resolveItemImage(selectedProduct, item.variant_id)} name={item.product_name || '?'} className="mt-4 size-9 shrink-0 rounded-lg" iconSize={15} fit="contain" />
 
                 <div className="min-w-[160px] flex-1 space-y-1">
                   {item.product_id ? (
                     <>
-                      <p className="truncate text-sm font-medium text-brand-800">{item.product_name}</p>
+                      <Link to={`/app/products/${item.product_id}`} className="block truncate text-sm font-medium text-brand-800 hover:underline">
+                        {item.product_name}
+                      </Link>
                       <p className="truncate text-xs text-brand-400">{item.sku ? `SKU: ${item.sku}` : '—'}</p>
                     </>
                   ) : (

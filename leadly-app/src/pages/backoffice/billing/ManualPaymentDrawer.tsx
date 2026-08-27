@@ -1,9 +1,14 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { recordManualPayment } from '../../../lib/api/billing'
 import type { PaymentInvoice } from '../../../types/domain'
-import { Button, FieldError, Input, Label, Select, Textarea } from '@/components/atoms'
+import { FieldError } from '@/components/atoms'
 import { CurrencyInput } from '@/components/molecules'
 import { Drawer } from '@/components/organisms'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import { useLanguage } from '../../../contexts/LanguageContext'
 
 const PAYMENT_METHODS = ['efectivo', 'transferencia', 'tarjeta', 'otro'] as const
@@ -83,12 +88,17 @@ export function ManualPaymentDrawer({
 
         <div>
           <Label htmlFor="manual-payment-method">{t('backoffice.manualPaymentDrawer.method')}</Label>
-          <Select id="manual-payment-method" value={method} onChange={(e) => setMethod(e.target.value as typeof method)}>
-            {PAYMENT_METHODS.map((m) => (
-              <option key={m} value={m}>
-                {t(`backoffice.manualPaymentDrawer.method.${m}`)}
-              </option>
-            ))}
+          <Select value={method} onValueChange={(v) => setMethod(v as typeof method)}>
+            <SelectTrigger id="manual-payment-method" className="mt-1 w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PAYMENT_METHODS.map((m) => (
+                <SelectItem key={m} value={m}>
+                  {t(`backoffice.manualPaymentDrawer.method.${m}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
           </Select>
         </div>
 
@@ -110,7 +120,7 @@ export function ManualPaymentDrawer({
         {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
 
         <div className="flex gap-2 border-t border-brand-100 pt-5">
-          <Button type="submit" variant="secondary" disabled={submitting}>
+          <Button type="submit" disabled={submitting}>
             {submitting ? t('backoffice.manualPaymentDrawer.saving') : t('backoffice.manualPaymentDrawer.save')}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>

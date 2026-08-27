@@ -208,12 +208,13 @@ export const AI_TOOLS: AiToolDefinition[] = [
     name: "list_catalog_products",
     skill: "catalogo",
     description:
-      "Busca productos activos del catálogo del tenant por nombre y/o categoría, con su nombre, precio, categorías (un producto puede tener varias) y descripción completa (no incluye stock -- eso solo se revisa al momento de crear una cotización, ver create_quote). La descripción puede incluir detalle extendido según el rubro del tenant (ej. para instituciones educativas: duración, modalidad, horarios, plan de estudios, requisitos de admisión, título otorgado) -- si el cliente pide ese tipo de detalle sobre un producto puntual, usá esta herramienta (con `search` por el nombre exacto) y respondé con lo que la descripción realmente dice, nunca lo inventes. Úsala cuando el cliente pregunte qué productos hay, pida precios o detalles, o mencione algo que querés confirmar que existe en el catálogo antes de ofrecerlo. Si pasás solo `category` (sin `search`), te devuelve hasta 5 productos de esa categoría, ya priorizados internamente -- mostralos en ese orden.",
+      "Busca productos activos del catálogo del tenant por nombre, categoría y/o marca, con su nombre, precio, categorías (un producto puede tener varias) y descripción completa (no incluye stock -- eso solo se revisa al momento de crear una cotización, ver create_quote). La descripción puede incluir detalle extendido según el rubro del tenant (ej. para instituciones educativas: duración, modalidad, horarios, plan de estudios, requisitos de admisión, título otorgado) -- si el cliente pide ese tipo de detalle sobre un producto puntual, usá esta herramienta (con `search` por el nombre exacto) y respondé con lo que la descripción realmente dice, nunca lo inventes. Úsala cuando el cliente pregunte qué productos hay, pida precios o detalles, o mencione algo que querés confirmar que existe en el catálogo antes de ofrecerlo. Si pasás solo `category` y/o `brand` (sin `search`), te devuelve hasta 5 productos ya priorizados internamente -- mostralos en ese orden. Cuando `search` deja un único producto (típico de un pedido de detalle), la respuesta trae `image_sent: true|false` -- la foto ya se mandó sola en ese caso, NO llames send_product_image de nuevo para el mismo producto en el mismo turno. Si viene en false, avisale al cliente con naturalidad que todavía no hay foto cargada de ese producto.",
     parameters: {
       type: "object",
       properties: {
         search: { type: "string", description: "Texto a buscar en el nombre del producto (opcional, ej. \"camiseta\")." },
         category: { type: "string", description: "Nombre de categoría para filtrar (opcional, ej. \"Ropa\"). Si se pasa sola, devuelve hasta 5 productos destacados de esa categoría." },
+        brand: { type: "string", description: "Nombre de marca para filtrar (opcional, ej. \"Nike\"). Si se pasa sola, devuelve hasta 5 productos destacados de esa marca." },
       },
       required: [],
     },
@@ -221,7 +222,21 @@ export const AI_TOOLS: AiToolDefinition[] = [
   {
     name: "send_product_image",
     skill: "catalogo",
-    description: "Envía por WhatsApp, directo al cliente, la foto principal de un producto del catálogo. Usa el nombre exacto que te devolvió list_catalog_products.",
+    description:
+      "Envía por WhatsApp, directo al cliente, la foto principal de un producto del catálogo -- ya la está viendo en su pantalla apenas esta herramienta devuelve éxito, es una foto real, no una descripción. Usa el nombre exacto que te devolvió list_catalog_products. Tu mensaje de texto después de esto es solo un complemento breve (ej. preguntar si quiere avanzar) -- nunca repitas ni \"muestres\" la imagen de nuevo con markdown/links (WhatsApp no los renderiza, el cliente solo ve texto roto), y nunca digas que no podés enviar imágenes: encontrado en vivo, dijiste eso mismo justo después de haber enviado una con éxito.",
+    parameters: {
+      type: "object",
+      properties: {
+        product_name: { type: "string", description: "Nombre exacto del producto, tal como lo devolvió list_catalog_products." },
+      },
+      required: ["product_name"],
+    },
+  },
+  {
+    name: "list_product_variants",
+    skill: "catalogo",
+    description:
+      "Consulta si un producto tiene variantes (ej. color, talla) y, si las tiene, las lista con su precio propio. Llamala SIEMPRE antes de crear una cotización con un producto que pueda tener variantes -- si `has_variants` da true, tenés que preguntarle al cliente cuál quiere (usando el `label` exacto de cada una) antes de pasar a create_quote/add_item_to_quote. Si `has_variants` da false, el producto no tiene variantes y no hace falta preguntar nada.",
     parameters: {
       type: "object",
       properties: {
@@ -234,7 +249,7 @@ export const AI_TOOLS: AiToolDefinition[] = [
     name: "create_quote",
     skill: "ventas",
     description:
-      "Crea una cotización para este cliente con uno o más productos del catálogo. Cotización y venta son la misma entidad -- crearla acá la deja en estado \"cotizacion\" y reserva el stock pedido (no lo descuenta todavía). Si no sabés el nombre exacto de un producto o su precio, consultá list_catalog_products primero -- nunca inventes un producto ni un precio.",
+      "Crea una cotización para este cliente con uno o más productos del catálogo. Cotización y venta son la misma entidad -- crearla acá la deja en estado \"cotizacion\", todavía sin tocar el inventario (eso pasa recién en confirm_quote). Si no sabés el nombre exacto de un producto o su precio, consultá list_catalog_products primero -- nunca inventes un producto ni un precio. Si un producto tiene variantes (list_product_variants con has_variants=true) y no pasás `variant`, la línea se rechaza -- consultá list_product_variants y confirmá con el cliente antes de llamar a esta herramienta. La respuesta incluye `billing_address_on_file`: si viene en false, es el momento de pedirle al cliente sus datos de FACTURACIÓN (no de envío todavía -- eso se pide recién si confirma la compra) y guardarlos con save_contact_address (is_billing: true).",
     parameters: {
       type: "object",
       properties: {
@@ -245,6 +260,11 @@ export const AI_TOOLS: AiToolDefinition[] = [
             type: "object",
             properties: {
               product_name: { type: "string", description: "Nombre exacto del producto, tal como lo devolvió list_catalog_products." },
+              variant: {
+                type: "string",
+                description:
+                  "OBLIGATORIO si el producto tiene variantes -- label exacto de list_product_variants, ej. \"Rojo\". Si el cliente pide unidades de colores/tallas distintos (ej. \"una azul y una rojo\"), cada línea es un item separado con su propio variant -- nunca los agrupes en una sola línea ni dejes variant vacío. Si ya intentaste esta herramienta y te rechazó una línea por falta de variant, tu próxima llamada tiene que incluirlo -- repetir la misma llamada sin variant vuelve a fallar exactamente igual.",
+              },
               quantity: { type: "number", description: "Cantidad pedida." },
             },
             required: ["product_name", "quantity"],
@@ -256,9 +276,38 @@ export const AI_TOOLS: AiToolDefinition[] = [
     },
   },
   {
+    name: "add_item_to_quote",
+    skill: "ventas",
+    description:
+      "Agrega uno o más productos a la cotización más reciente de este cliente, solo si todavía está en estado \"cotizacion\" (no una venta ya confirmada). Úsala cuando el cliente pida sumar algo a un pedido que ya armaste, en vez de crear una cotización nueva. Si no sabés el nombre exacto de un producto o su precio, consultá list_catalog_products primero -- nunca inventes un producto ni un precio. Mismo requisito de variante que create_quote: si el producto tiene variantes, pasá `variant` (de list_product_variants) o la línea se rechaza.",
+    parameters: {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          description: "Líneas a agregar.",
+          items: {
+            type: "object",
+            properties: {
+              product_name: { type: "string", description: "Nombre exacto del producto, tal como lo devolvió list_catalog_products." },
+              variant: {
+                type: "string",
+                description:
+                  "OBLIGATORIO si el producto tiene variantes -- label exacto de list_product_variants, ej. \"Rojo\". Si el cliente pide unidades de colores/tallas distintos (ej. \"una azul y una rojo\"), cada línea es un item separado con su propio variant -- nunca los agrupes en una sola línea ni dejes variant vacío. Si ya intentaste esta herramienta y te rechazó una línea por falta de variant, tu próxima llamada tiene que incluirlo -- repetir la misma llamada sin variant vuelve a fallar exactamente igual.",
+              },
+              quantity: { type: "number", description: "Cantidad pedida." },
+            },
+            required: ["product_name", "quantity"],
+          },
+        },
+      },
+      required: ["items"],
+    },
+  },
+  {
     name: "get_quote_status",
     skill: "ventas",
-    description: "Consulta la cotización o venta más reciente de este cliente: número, estado, productos, total, notas que un agente haya dejado (si hay alguna, comunicásela al cliente), y cuánto lleva pagado / cuánto falta (total_paid/balance_due). Úsala cuando el cliente pregunte por el estado de su pedido/cotización, o por su saldo pendiente.",
+    description: "Consulta la cotización o venta más reciente de este cliente: número, estado, productos, total, notas que un agente haya dejado (si hay alguna, comunicásela al cliente), y cuánto lleva pagado / cuánto falta (total_paid/balance_due). Úsala cuando el cliente pregunte por el estado de su pedido/cotización, o por su saldo pendiente. `status` es el valor crudo (cotizacion/confirmada/cancelada); `status_label` es el texto ya listo para decirle al cliente -- usalo en vez de inventar tu propia palabra a partir de `status`.",
     parameters: { type: "object", properties: {}, required: [] },
   },
   {
@@ -277,14 +326,14 @@ export const AI_TOOLS: AiToolDefinition[] = [
     name: "confirm_quote",
     skill: "ventas",
     description:
-      "Confirma la cotización más reciente de este cliente como venta (pasa de \"cotizacion\" a \"confirmada\") -- solo cuando el cliente confirme explícitamente que quiere seguir adelante con la compra. El stock reservado se descuenta del inventario real en ese momento.",
+      "Confirma la cotización más reciente de este cliente como venta (pasa de \"cotizacion\" a \"confirmada\") -- solo cuando el cliente confirme explícitamente que quiere seguir adelante con la compra. El inventario real se descuenta ahí mismo. Esta es la etapa en la que se pide la dirección de ENVÍO (no antes). La herramienta exige que ya exista una dirección de facturación y una de envío guardadas -- si falta alguna, en vez de confirmar devuelve { blocked: true, reason: \"billing_address_required\" | \"shipping_address_required\" } y no cambia nada. Ante eso, pedile al cliente el dato que falta (nunca lo inventes), guardalo con save_contact_address, y recién ahí volvé a llamar confirm_quote. Si confirma con éxito, la respuesta trae `status_label: \"Pedido confirmado (venta en firme)\"` -- usá ese texto (o una paráfrasis que mantenga la idea de \"pedido/venta confirmada\") en tu mensaje al cliente. Una vez que esto se ejecutó, dejá de llamarlo \"cotización\": ya es una compra en firme, no una estimación de precio.\n\nAl confirmar con éxito, la respuesta también resuelve el pago sola -- nunca llames generate_payment_link/charge_sale_to_credit por tu cuenta después de esto salvo en el caso que se explica abajo, ya se hizo o se te está pidiendo que preguntes: `payment_method: \"wompi\"` + `checkout_url` (ya se generó el link, compartíselo tal cual en tu misma respuesta), `payment_method: \"credito\"` + `payment_charged: true` (ya se cargó a la cuenta de crédito del cliente, solo confirmaselo), `payment_options: [\"credito\",\"wompi\"]` (hay más de una forma de cobrar disponible -- esta es la ÚNICA situación en la que preguntás al cliente cuál prefiere, y recién ahí llamás charge_sale_to_credit o generate_payment_link según lo que elija), o `payment_pending: true` (no hay ninguna forma de cobro automática disponible -- decile al cliente que el pago queda pendiente y que un agente se va a poner en contacto).",
     parameters: { type: "object", properties: {}, required: [] },
   },
   {
     name: "cancel_quote",
     skill: "ventas",
     description:
-      "Cancela la cotización más reciente de este cliente (solo si todavía está en estado \"cotizacion\", no una venta ya confirmada) y libera el stock que tenía reservado. Solo cuando el cliente lo pida explícitamente.",
+      "Cancela la cotización más reciente de este cliente (solo si todavía está en estado \"cotizacion\", no una venta ya confirmada). No hay stock que liberar -- una cotización nunca lo tocó. Solo cuando el cliente lo pida explícitamente.",
     parameters: { type: "object", properties: {}, required: [] },
   },
   {
@@ -295,29 +344,89 @@ export const AI_TOOLS: AiToolDefinition[] = [
     parameters: { type: "object", properties: {}, required: [] },
   },
   {
-    name: "list_contact_addresses",
+    name: "get_dispatch_status",
     skill: "ventas",
+    description:
+      "Consulta el despacho más reciente de la venta más reciente de este cliente: transportadora, número y link de seguimiento, estado actual, y un historial breve de cambios de estado. Úsala cuando el cliente pregunte dónde está su pedido o cuándo llega. Si todavía no se generó ningún despacho, te lo indica -- no inventes un estado de envío.",
+    parameters: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "create_return",
+    skill: "ventas",
+    description:
+      "Solicita una devolución sobre la venta más reciente de este cliente -- solo aplica si esa venta ya quedó marcada como entregada (ver complete_sale/get_dispatch_status), y solo sobre productos que efectivamente están en esa venta (si el nombre o la cantidad no coinciden con lo comprado, la herramienta lo rechaza). Queda registrada para que un agente humano la revise y decida la resolución (reembolso, nota crédito, cambio) -- vos nunca decidís ni comunicás un reembolso concreto, solo confirmale al cliente que quedó registrada.",
+    parameters: {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          description: "Productos a devolver, tal como aparecen en la venta.",
+          items: {
+            type: "object",
+            properties: {
+              product_name: { type: "string", description: "Nombre del producto tal como aparece en la venta (ver get_quote_status)." },
+              quantity: { type: "number", description: "Cantidad a devolver." },
+            },
+            required: ["product_name", "quantity"],
+          },
+        },
+        reason: { type: "string", description: "Motivo de la devolución, en palabras del cliente." },
+      },
+      required: ["items", "reason"],
+    },
+  },
+  {
+    name: "get_return_status",
+    skill: "ventas",
+    description: "Consulta la devolución más reciente de este cliente: estado, motivo, y su resolución si un agente ya la resolvió. Úsala cuando el cliente pregunte por el estado de una devolución que ya pidió.",
+    parameters: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "get_client_profile",
+    skill: "clientes",
+    description: "Devuelve los datos guardados del contacto de esta conversación (nombre completo, documento de identidad, email, y credit_enabled -- si tiene crédito/fiado habilitado). Úsala antes de pedirle un dato al cliente, para no preguntar algo que ya está cargado.",
+    parameters: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "update_client_profile",
+    skill: "clientes",
+    description:
+      "Guarda o actualiza datos del contacto de esta conversación -- nunca de otra persona. Actualiza solo los campos que recibe. Necesario antes de facturar una venta (documento de identidad) o para completar el nombre si el de WhatsApp no es el nombre real del cliente.",
+    parameters: {
+      type: "object",
+      properties: {
+        full_name: { type: "string", description: "Nombre completo del cliente (opcional)." },
+        document_type: { type: "string", enum: ["NIT", "CC", "CE", "RUC", "RFC", "PASAPORTE", "OTRO"], description: "Tipo de documento de identidad (opcional)." },
+        document_number: { type: "string", description: "Número de documento de identidad (opcional)." },
+        email: { type: "string", description: "Correo electrónico del cliente (opcional)." },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "list_contact_addresses",
+    skill: "clientes",
     description: "Lista las direcciones guardadas de este cliente (envío y/o facturación), con su id. Consultala antes de pedir una dirección nueva -- si ya hay una marcada como predeterminada, confirmale al cliente si es la misma antes de pedirle que la repita.",
     parameters: { type: "object", properties: {}, required: [] },
   },
   {
     name: "save_contact_address",
-    skill: "ventas",
+    skill: "clientes",
     description:
-      "Guarda o actualiza una dirección de este cliente, y opcionalmente la aplica a su cotización/venta más reciente. Para reutilizar una dirección ya guardada (ej. el cliente dijo \"la misma de siempre\"), pasá su address_id junto con apply_as_shipping/apply_as_billing sin repetir el resto de los campos. Para una dirección nueva, pedile al cliente los datos completos -- nunca inventes ni completes una dirección a medias.",
+      "Guarda o actualiza una dirección de este cliente, y opcionalmente la aplica a su cotización/venta más reciente. Para reutilizar una dirección ya guardada (ej. el cliente dijo \"la misma de siempre\"), pasá su address_id junto con apply_as_shipping/apply_as_billing sin repetir el resto de los campos. Para una dirección NUEVA: pedile al cliente los datos reales completos -- nunca inventes ni completes una dirección a medias, ni con un valor de relleno tipo \"no registrada\" o \"pendiente\" solo para poder avanzar (la herramienta lo rechaza igual). line1 y city son obligatorios en una dirección nueva, y hay que indicar explícitamente is_shipping o is_billing (no hay un valor por defecto) según en qué paso del flujo de venta estás: dirección de FACTURACIÓN al cotizar, dirección de ENVÍO recién si el cliente confirma la compra.",
     parameters: {
       type: "object",
       properties: {
         address_id: { type: "string", description: "Id de una dirección ya guardada (de list_contact_addresses) para actualizarla o reutilizarla, en vez de crear una nueva." },
         label: { type: "string", description: "Nombre corto para identificarla (ej. \"Casa\", \"Oficina\"), opcional." },
-        is_shipping: { type: "boolean", description: "Si es una dirección de envío (por defecto true)." },
-        is_billing: { type: "boolean", description: "Si es una dirección/datos de facturación (por defecto false)." },
+        is_shipping: { type: "boolean", description: "Si es una dirección de envío. Obligatorio (junto con is_billing) al crear una dirección nueva -- no tiene valor por defecto." },
+        is_billing: { type: "boolean", description: "Si es una dirección/datos de facturación. Obligatorio (junto con is_shipping) al crear una dirección nueva -- no tiene valor por defecto." },
         recipient_name: { type: "string", description: "A nombre de quién se recibe o factura, si es distinto del contacto (opcional)." },
         phone: { type: "string", description: "Teléfono de contacto para la entrega (opcional)." },
         tax_id: { type: "string", description: "Documento/NIT para facturación, si aplica (opcional)." },
-        line1: { type: "string", description: "Dirección (calle, número, barrio). Requerida si es una dirección nueva." },
+        line1: { type: "string", description: "Dirección real (calle, número, barrio) tal como te la dio el cliente. Requerida si es una dirección nueva -- nunca un valor inventado." },
         line2: { type: "string", description: "Complemento (apto, torre, indicaciones), opcional." },
-        city: { type: "string", description: "Ciudad (opcional)." },
+        city: { type: "string", description: "Ciudad. Requerida si es una dirección nueva." },
         state_province: { type: "string", description: "Departamento/estado/provincia (opcional)." },
         postal_code: { type: "string", description: "Código postal (opcional)." },
         country: { type: "string", description: "País (opcional, por defecto Colombia)." },
@@ -332,16 +441,15 @@ export const AI_TOOLS: AiToolDefinition[] = [
     name: "generate_payment_link",
     skill: "wompi",
     description:
-      "Genera un enlace de pago real de Wompi (la cuenta del propio tenant, no la de Leadly) y devuelve la URL para compartir con el cliente. Solo cuando ya sabés el monto exacto a cobrar y el cliente confirmó que quiere pagar -- nunca inventes un monto.",
-    parameters: {
-      type: "object",
-      properties: {
-        description: { type: "string", description: "Descripción breve del cobro (ej. \"Orden #1234 - Juan Pérez\")." },
-        amount: { type: "number", description: "Monto a cobrar en pesos colombianos (COP), sin centavos (ej. 50000 = $50.000 COP)." },
-        reference: { type: "string", description: "Referencia única del cobro, opcional (si no se pasa, se genera una automáticamente)." },
-      },
-      required: ["description", "amount"],
-    },
+      "Genera un enlace de pago real de Wompi (la cuenta del propio tenant, no la de Leadly) por el pedido confirmado más reciente del cliente, y devuelve la URL para compartir. Sin parámetros -- el monto NUNCA lo elegís vos: la herramienta cobra automáticamente el saldo pendiente exacto de ese pedido (total menos lo ya pagado), para que nunca puedas cobrar de más ni de menos por error. Solo funciona sobre un pedido ya confirmado (confirm_quote) -- si el cliente todavía tiene una cotización sin confirmar, confirmala primero. Si el pedido ya está pagado por completo, la herramienta lo rechaza. NO la llames por defecto después de confirm_quote -- esa herramienta ya genera el link sola cuando corresponde. Usala únicamente cuando confirm_quote te haya devuelto `payment_options` (más de una forma de cobro disponible) y el cliente, al preguntarle, haya elegido pagar con Wompi.",
+    parameters: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "charge_sale_to_credit",
+    skill: "credito",
+    description:
+      "Carga el saldo pendiente exacto del pedido confirmado más reciente del cliente a su cuenta de crédito (fiado), en vez de cobrarlo ahora. Sin parámetros -- el monto NUNCA lo elegís vos, es siempre el saldo pendiente real del pedido. Solo funciona si get_client_profile (habilidad de Gestión de clientes) o el contexto de esta conversación ya indicó que este cliente tiene crédito habilitado -- si no lo tiene, la herramienta lo rechaza. Solo funciona sobre un pedido ya confirmado (confirm_quote). NO la llames por defecto después de confirm_quote -- esa herramienta ya carga a crédito sola cuando corresponde. Usala únicamente cuando confirm_quote te haya devuelto `payment_options` (más de una forma de cobro disponible) y el cliente, al preguntarle, haya elegido pagar a crédito.",
+    parameters: { type: "object", properties: {}, required: [] },
   },
   {
     name: "hubspot_sync_contact",

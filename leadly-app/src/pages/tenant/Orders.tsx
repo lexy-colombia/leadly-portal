@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { MoreHorizontalIcon } from 'lucide-react'
@@ -6,6 +6,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import { useHeaderSearchSlot } from '@/contexts/HeaderSearchSlotContext'
 import { formatDate, formatTime } from '../../lib/dates'
+import { formatPhoneDisplay } from '../../lib/phone'
 import {
   deleteOrder,
   listOrders,
@@ -20,7 +21,7 @@ import { listClients } from '../../lib/api/clients'
 import { listPaymentsForTenant, PAYMENT_METHOD_LABEL_KEY } from '../../lib/api/orderPayments'
 import type { Client, OrderStatus, OrderPaymentMethod, SalesOrderPayment } from '../../types/domain'
 import { PageSpinner } from '@/components/atoms'
-import { Card, ComboboxFilter, EmptyState, IconInput, Pagination } from '@/components/molecules'
+import { Card, ComboboxFilter, EmptyState, FilterField, IconInput, Pagination } from '@/components/molecules'
 import { ConfirmDialog } from '@/components/organisms'
 import { ChevronLeftIcon, PlusIcon, SearchIcon } from '@/components/atoms/icons'
 import { Button } from '@/components/ui/button'
@@ -66,19 +67,6 @@ function SummaryTile({ label, value }: { label: string; value: string }) {
     <div className="min-w-0 rounded-lg border border-brand-100 bg-white px-2.5 py-1.5">
       <p className="truncate text-[10px] text-brand-400">{label}</p>
       <p className="truncate text-sm font-bold text-brand-800">{value}</p>
-    </div>
-  )
-}
-
-/** Etiqueta pequeña sobre cada filtro (Estado/Cliente/Período) -- el usuario
- * pidió dejar claro qué tipo de filtro es cada uno, como en la referencia
- * de POS. Mismo tamaño/color que la etiqueta de MetricTile, para no
- * inventar una escala tipográfica nueva. */
-function FilterField({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-[10px] font-medium text-brand-400">{label}</span>
-      {children}
     </div>
   )
 }
@@ -207,7 +195,7 @@ export function Orders() {
     const currency = confirmed[0]?.currency ?? 'COP'
 
     const paidByOrder = new Map<string, number>()
-    const byMethod: Record<OrderPaymentMethod, number> = { efectivo: 0, transferencia: 0, tarjeta: 0, credito: 0, otro: 0, saldo_favor: 0 }
+    const byMethod: Record<OrderPaymentMethod, number> = { efectivo: 0, transferencia: 0, tarjeta: 0, credito: 0, saldo_favor: 0, wompi: 0 }
     for (const p of payments) {
       if (!orderIds.has(p.order_id)) continue
       byMethod[p.method] += p.amount
@@ -471,7 +459,7 @@ export function Orders() {
                     <TableCell className="text-xs font-medium text-brand-800">ORD-{order.number}</TableCell>
                     <TableCell className="text-xs text-brand-700">
                       <p className="font-medium text-brand-800">{order.contact?.full_name ?? '-'}</p>
-                      {order.contact?.phone && <p className="text-[11px] font-normal text-brand-400">{order.contact.phone}</p>}
+                      {order.contact?.phone && <p className="text-[11px] font-normal text-brand-400">{formatPhoneDisplay(order.contact.phone)}</p>}
                       {order.opportunity && <p className="text-[11px] font-normal text-brand-400">{order.opportunity.title}</p>}
                     </TableCell>
                     <TableCell>

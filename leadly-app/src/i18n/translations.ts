@@ -20,6 +20,7 @@ import esProducts from './locales/es/products.json'
 import esSettings from './locales/es/settings.json'
 import esTasks from './locales/es/tasks.json'
 import esTemplates from './locales/es/templates.json'
+import esStorefront from './locales/es/storefront.json'
 
 import enAccount from './locales/en/account.json'
 import enAuth from './locales/en/auth.json'
@@ -43,6 +44,7 @@ import enProducts from './locales/en/products.json'
 import enSettings from './locales/en/settings.json'
 import enTasks from './locales/en/tasks.json'
 import enTemplates from './locales/en/templates.json'
+import enStorefront from './locales/en/storefront.json'
 
 export type Language = 'es' | 'en'
 
@@ -79,6 +81,7 @@ export const translations = {
     ...esBackoffice,
     ...esAccount,
     ...esChangelog,
+    ...esStorefront,
   },
   en: {
     ...enCommon,
@@ -103,6 +106,7 @@ export const translations = {
     ...enBackoffice,
     ...enAccount,
     ...enChangelog,
+    ...enStorefront,
   },
 } as const satisfies Record<Language, Record<string, string>>
 

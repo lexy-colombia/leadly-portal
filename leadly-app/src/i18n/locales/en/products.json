@@ -4,6 +4,10 @@
   "products.tabs.suppliers": "Suppliers",
 
   "products.list.searchPlaceholder": "Search by name or SKU",
+  "products.list.labels.category": "Category",
+  "products.list.labels.brand": "Brand",
+  "products.list.labels.warehouse": "Warehouse",
+  "products.list.labels.stock": "Stock",
   "products.list.allCategories": "All categories",
   "products.list.searchCategory": "Search category...",
   "products.list.noCategoryResults": "No results.",
@@ -34,7 +38,6 @@
   "products.table.available": "{count} avail.",
   "products.table.low": "· low",
   "products.table.noControl": "Not tracked",
-  "products.table.reserved": "({count} reserved)",
 
   "products.detail.loadError": "Couldn't load the product.",
   "products.detail.notFound": "We couldn't find this product.",
@@ -62,7 +65,6 @@
   "products.detail.fields.retail": "Retail",
   "products.detail.fields.margin": "Margin",
   "products.detail.noInventoryControl": "This product doesn't track inventory.",
-  "products.detail.fields.reserved": "Reserved",
   "products.detail.fields.available": "Available",
   "products.detail.fields.lowStockAlert": "Low stock alert",
   "products.detail.fields.supplierName": "Name",

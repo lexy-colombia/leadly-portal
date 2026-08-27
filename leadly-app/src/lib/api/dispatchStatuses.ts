@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient'
-import type { DispatchStatus, DispatchStockEffect } from '../../types/domain'
+import type { DispatchStatus } from '../../types/domain'
 
 export async function listDispatchStatuses(tenantId: string): Promise<DispatchStatus[]> {
   const { data, error } = await supabase.from('dispatch_statuses').select('*').eq('tenant_id', tenantId).order('display_order')
@@ -10,7 +10,6 @@ export async function listDispatchStatuses(tenantId: string): Promise<DispatchSt
 export interface DispatchStatusInput {
   name: string
   color: string
-  stock_effect: DispatchStockEffect
   is_terminal: boolean
 }
 

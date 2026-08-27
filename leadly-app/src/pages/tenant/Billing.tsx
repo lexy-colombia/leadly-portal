@@ -10,8 +10,11 @@ import {
   listInvoicesForTenant,
 } from '../../lib/api/billing'
 import type { BillingPlan, BillingSubscription, PaymentInvoice, PaymentInvoiceStatus } from '../../types/domain'
-import { Badge, Button, PageSpinner, Table, TBody, TD, TH, THead, TRow } from '@/components/atoms'
+import { PageSpinner } from '@/components/atoms'
 import { Card, CardSection, EmptyState, Pagination } from '@/components/molecules'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 const PAGE_SIZE = 8
 
 const STATUS_KEY: Record<PaymentInvoiceStatus, TranslationKey> = {
@@ -22,12 +25,15 @@ const STATUS_KEY: Record<PaymentInvoiceStatus, TranslationKey> = {
   REFUNDED: 'billing.invoiceStatus.refunded',
 }
 
-const STATUS_TONE: Record<PaymentInvoiceStatus, 'success' | 'warning' | 'danger' | 'neutral'> = {
-  PENDING: 'warning',
-  PAID: 'success',
-  OVERDUE: 'danger',
-  CANCELLED: 'neutral',
-  REFUNDED: 'neutral',
+// bg/text pair on top of shadcn Badge's `outline` variant -- shadcn's own
+// variants (default/secondary/destructive/outline/ghost) have no "warning"/
+// "success" tone, unlike the legacy atoms Badge this replaces.
+const STATUS_BADGE_CLASS: Record<PaymentInvoiceStatus, string> = {
+  PENDING: 'border-transparent bg-amber-100 text-amber-700',
+  PAID: 'border-transparent bg-emerald-100 text-emerald-700',
+  OVERDUE: 'border-transparent bg-red-100 text-red-700',
+  CANCELLED: 'border-transparent bg-slate-100 text-slate-600',
+  REFUNDED: 'border-transparent bg-slate-100 text-slate-600',
 }
 
 const SUBSCRIPTION_STATUS_KEY: Record<BillingSubscription['status'], TranslationKey> = {
@@ -36,6 +42,14 @@ const SUBSCRIPTION_STATUS_KEY: Record<BillingSubscription['status'], Translation
   PAST_DUE: 'billing.subscriptionStatus.pastDue',
   EXPIRED: 'billing.subscriptionStatus.expired',
   PENDING_PAYMENT: 'billing.subscriptionStatus.pendingPayment',
+}
+
+const SUBSCRIPTION_STATUS_BADGE_CLASS: Record<BillingSubscription['status'], string> = {
+  ACTIVE: 'border-transparent bg-emerald-100 text-emerald-700',
+  PENDING_PAYMENT: 'border-transparent bg-amber-100 text-amber-700',
+  CANCELLED: 'border-transparent bg-red-100 text-red-700',
+  PAST_DUE: 'border-transparent bg-red-100 text-red-700',
+  EXPIRED: 'border-transparent bg-red-100 text-red-700',
 }
 
 function formatMoney(amountCents: number, currency: string): string {
@@ -63,7 +77,7 @@ function PayButton({ invoice }: { invoice: PaymentInvoice }) {
 
   return (
     <div className="text-right">
-      <Button variant="secondary" onClick={handlePay} disabled={loading} className="!px-3 !py-1.5 text-xs">
+      <Button onClick={handlePay} disabled={loading} size="sm">
         {loading ? t('billing.invoices.generating') : t('billing.invoices.payNow')}
       </Button>
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
@@ -124,7 +138,7 @@ export function Billing() {
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-brand-400">{t('billing.plan.nextDue', { date: formatDate(subscription.current_period_end) })}</span>
-                <Badge tone={subscription.status === 'ACTIVE' ? 'success' : subscription.status === 'PENDING_PAYMENT' ? 'warning' : 'danger'}>
+                <Badge variant="outline" className={SUBSCRIPTION_STATUS_BADGE_CLASS[subscription.status]}>
                   {t(SUBSCRIPTION_STATUS_KEY[subscription.status])}
                 </Badge>
               </div>
@@ -137,30 +151,32 @@ export function Billing() {
           {invoices && invoices.length === 0 && <EmptyState>{t('billing.invoices.empty')}</EmptyState>}
           {pageItems && pageItems.length > 0 && (
             <>
-              <Table bare>
-                <THead>
-                  <tr>
-                    <TH>{t('billing.invoices.table.invoice')}</TH>
-                    <TH>{t('billing.invoices.table.amount')}</TH>
-                    <TH>{t('billing.invoices.table.status')}</TH>
-                    <TH>{t('billing.invoices.table.dueDate')}</TH>
-                    <TH className="text-right">{t('billing.invoices.table.actions')}</TH>
-                  </tr>
-                </THead>
-                <TBody>
-                  {pageItems.map((invoice) => (
-                    <TRow key={invoice.id}>
-                      <TD className="font-medium text-brand-800">{invoice.invoice_number ?? invoice.id.slice(0, 8)}</TD>
-                      <TD>{formatMoney(invoice.amount_cents, invoice.currency)}</TD>
-                      <TD>
-                        <Badge tone={STATUS_TONE[invoice.status]}>{t(STATUS_KEY[invoice.status])}</Badge>
-                      </TD>
-                      <TD className="text-brand-400">{formatDate(invoice.due_date)}</TD>
-                      <TD>{invoice.status === 'PENDING' || invoice.status === 'OVERDUE' ? <PayButton invoice={invoice} /> : null}</TD>
-                    </TRow>
-                  ))}
-                </TBody>
-              </Table>
+              <div className="overflow-hidden rounded-2xl border border-brand-100 bg-white">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{t('billing.invoices.table.invoice')}</TableHead>
+                      <TableHead>{t('billing.invoices.table.amount')}</TableHead>
+                      <TableHead>{t('billing.invoices.table.status')}</TableHead>
+                      <TableHead>{t('billing.invoices.table.dueDate')}</TableHead>
+                      <TableHead className="text-right">{t('billing.invoices.table.actions')}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pageItems.map((invoice) => (
+                      <TableRow key={invoice.id}>
+                        <TableCell className="font-medium text-brand-800">{invoice.invoice_number ?? invoice.id.slice(0, 8)}</TableCell>
+                        <TableCell>{formatMoney(invoice.amount_cents, invoice.currency)}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={STATUS_BADGE_CLASS[invoice.status]}>{t(STATUS_KEY[invoice.status])}</Badge>
+                        </TableCell>
+                        <TableCell className="text-brand-400">{formatDate(invoice.due_date)}</TableCell>
+                        <TableCell>{invoice.status === 'PENDING' || invoice.status === 'OVERDUE' ? <PayButton invoice={invoice} /> : null}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
               <Pagination page={page} totalPages={totalPages} onChange={setPage} />
             </>
           )}

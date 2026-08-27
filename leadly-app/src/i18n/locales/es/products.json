@@ -4,6 +4,10 @@
   "products.tabs.suppliers": "Proveedores",
 
   "products.list.searchPlaceholder": "Buscar por nombre o SKU",
+  "products.list.labels.category": "Categoría",
+  "products.list.labels.brand": "Marca",
+  "products.list.labels.warehouse": "Bodega",
+  "products.list.labels.stock": "Stock",
   "products.list.allCategories": "Todas las categorías",
   "products.list.searchCategory": "Buscar categoría...",
   "products.list.noCategoryResults": "Sin resultados.",
@@ -34,7 +38,6 @@
   "products.table.available": "{count} disp.",
   "products.table.low": "· bajo",
   "products.table.noControl": "Sin control",
-  "products.table.reserved": "({count} reservado)",
 
   "products.detail.loadError": "No se pudo cargar el producto.",
   "products.detail.notFound": "No encontramos este producto.",
@@ -62,7 +65,6 @@
   "products.detail.fields.retail": "Público",
   "products.detail.fields.margin": "Margen",
   "products.detail.noInventoryControl": "Este producto no controla inventario.",
-  "products.detail.fields.reserved": "Reservado",
   "products.detail.fields.available": "Disponible",
   "products.detail.fields.lowStockAlert": "Alerta bajo",
   "products.detail.fields.supplierName": "Nombre",

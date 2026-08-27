@@ -41,6 +41,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import { isNotBlank } from '../../lib/validation'
 import { formatDate, formatDateTime } from '../../lib/dates'
+import { formatPhoneDisplay } from '../../lib/phone'
 import { FieldError, InitialsAvatar, PageSpinner } from '@/components/atoms'
 import { ComboboxFilter, CurrencyInput, ImageAttachmentPicker, SignedImage } from '@/components/molecules'
 import { ConfirmDialog } from '@/components/organisms'
@@ -822,7 +823,7 @@ export function OrderDetail() {
             {payments.map((p) => (
               <li key={p.id} className="flex items-center justify-between gap-2 text-xs text-brand-600">
                 <span className="min-w-0 truncate">
-                  {t(PAYMENT_METHOD_LABEL_KEY[p.method])} · {formatDate(p.paid_at)}
+                  {p.method === 'wompi' && p.provider_reference ? `${t(PAYMENT_METHOD_LABEL_KEY.wompi)} · ${p.provider_reference}` : t(PAYMENT_METHOD_LABEL_KEY[p.method])} · {formatDate(p.paid_at)}
                 </span>
                 <span className="flex shrink-0 items-center gap-1.5">
                   <span className="font-medium text-brand-800">{formatCurrency(p.amount, p.currency)}</span>
@@ -864,7 +865,7 @@ export function OrderDetail() {
                   <div className="mt-1 flex items-start justify-between gap-2">
                     <div className="min-w-0 text-sm">
                       <p className="truncate text-brand-800">{selectedContact.full_name}</p>
-                      <p className="truncate text-xs text-brand-400">{[selectedContact.nit ? `NIT ${selectedContact.nit}` : null, selectedContact.phone].filter(Boolean).join(' · ')}</p>
+                      <p className="truncate text-xs text-brand-400">{[selectedContact.nit ? `NIT ${selectedContact.nit}` : null, formatPhoneDisplay(selectedContact.phone)].filter(Boolean).join(' · ')}</p>
                     </div>
                     <Button type="button" variant="default" size="icon-sm" onClick={() => setEditingContact(true)} aria-label={t('orders.detail.changeContactAria')} className="shrink-0">
                       <PencilIcon width={12} height={12} />

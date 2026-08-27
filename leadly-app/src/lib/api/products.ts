@@ -389,11 +389,17 @@ export function validateProductImageFile(file: File): TranslationKey | null {
 }
 
 /** Downscales to at most PRODUCT_IMAGE_MAX_DIMENSION px on the longest side
- * and re-encodes as WebP -- run client-side, before the file ever reaches
+ * and re-encodes as JPEG -- run client-side, before the file ever reaches
  * Storage, so a phone photo (often 3-4MB) typically uploads as a few
- * hundred KB instead. Falls back to the original file untouched if the
- * browser can't decode/encode it (very old browser, or a corrupt file) --
- * upload still proceeds, it just skips the optimization. */
+ * hundred KB instead. JPEG, not WebP (reverted 2026-08-25): these photos get
+ * sent back out to customers via WhatsApp (send_product_image), and the
+ * WhatsApp Cloud API's image message type only accepts JPEG/PNG -- a WebP
+ * upload silently fails to display on the customer's phone even though the
+ * Graph API call itself returns success, which is exactly what happened in
+ * production (8 catalog photos, none of them ever actually reached a
+ * customer). Falls back to the original file untouched if the browser can't
+ * decode/encode it (very old browser, or a corrupt file) -- upload still
+ * proceeds, it just skips the optimization. */
 async function resizeImageForUpload(file: File): Promise<{ blob: Blob; ext: string }> {
   try {
     const bitmap = await createImageBitmap(file)
@@ -411,9 +417,9 @@ async function resizeImageForUpload(file: File): Promise<{ blob: Blob; ext: stri
     if (!ctx) return { blob: file, ext: file.name.split('.').pop()?.toLowerCase() || 'jpg' }
     ctx.drawImage(bitmap, 0, 0, width, height)
 
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', PRODUCT_IMAGE_QUALITY))
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', PRODUCT_IMAGE_QUALITY))
     if (!blob) return { blob: file, ext: file.name.split('.').pop()?.toLowerCase() || 'jpg' }
-    return { blob, ext: 'webp' }
+    return { blob, ext: 'jpg' }
   } catch {
     return { blob: file, ext: file.name.split('.').pop()?.toLowerCase() || 'jpg' }
   }

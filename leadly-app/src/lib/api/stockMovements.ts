@@ -5,19 +5,23 @@ import type { TranslationKey } from '../../i18n/translations'
 export type ProductStockWithWarehouse = ProductStock & { warehouse: { id: string; name: string } }
 export type StockMovementWithWarehouse = StockMovement & { warehouse: { id: string; name: string } }
 
-const STOCK_ENTRY_TYPES: StockMovementType[] = ['entrada', 'ajuste_positivo', 'transferencia_entrada', 'liberacion_reserva', 'reversion_dano']
+const STOCK_ENTRY_TYPES: StockMovementType[] = ['entrada', 'ajuste_positivo', 'transferencia_entrada', 'reversion_dano', 'entrada_devolucion']
 
 /** true if this movement type adds to the product's available quantity,
  * false if it subtracts from it -- used by the UI to pick a sign/icon
  * without duplicating the DB trigger's bucket logic. Movements that only
- * shift stock between buckets without changing what's available (reserva,
- * salida_despacho, entrega_despacho, ajuste_dano) read as subtracting from
- * "available" here, which matches how they actually affect quantity. */
+ * shift stock between buckets without changing what's available
+ * (ajuste_dano) read as subtracting from "available" here, which matches
+ * how they actually affect quantity. reserva/liberacion_reserva/
+ * salida_despacho/entrega_despacho removed 2026-08-25 along with the rest
+ * of the despacho stock-effect logic -- only a venta confirmada touches
+ * stock now (see 20260825134917_simplify_stock_effects_venta_only.sql /
+ * 20260825142125_remove_dispatch_stock_movement_types.sql). */
 export function isStockEntry(type: StockMovementType): boolean {
   return STOCK_ENTRY_TYPES.includes(type)
 }
 
-/** Translation key per movement_type -- keeps the 12 DB values (see
+/** Translation key per movement_type -- keeps the DB values (see
  * stock_movements_movement_type_check) in sync with a label everywhere the
  * UI shows a movement, not just the 4 offered in the manual-entry drawer. */
 export const MOVEMENT_TYPE_KEY: Record<StockMovementType, TranslationKey> = {
@@ -27,12 +31,10 @@ export const MOVEMENT_TYPE_KEY: Record<StockMovementType, TranslationKey> = {
   ajuste_negativo: 'inventory.movementType.ajuste_negativo',
   transferencia_salida: 'inventory.movementType.transferencia_salida',
   transferencia_entrada: 'inventory.movementType.transferencia_entrada',
-  reserva: 'inventory.movementType.reserva',
-  liberacion_reserva: 'inventory.movementType.liberacion_reserva',
-  salida_despacho: 'inventory.movementType.salida_despacho',
-  entrega_despacho: 'inventory.movementType.entrega_despacho',
   ajuste_dano: 'inventory.movementType.ajuste_dano',
   reversion_dano: 'inventory.movementType.reversion_dano',
+  entrada_devolucion: 'inventory.movementType.entrada_devolucion',
+  devolucion_danada: 'inventory.movementType.devolucion_danada',
 }
 
 export async function listStockByProduct(productId: string): Promise<ProductStockWithWarehouse[]> {
@@ -47,7 +49,6 @@ export async function listStockByProduct(productId: string): Promise<ProductStoc
 
 export interface ProductStockTotal {
   available: number
-  reserved: number
 }
 
 /** One query, summed client-side per product -- used by the products LIST
@@ -59,14 +60,13 @@ export interface ProductStockTotal {
  * of variant_id, so a variant product's total here still reads correctly
  * (see listStockTotalsByVariant below for the per-variant breakdown). */
 export async function listStockTotalsByTenant(tenantId: string): Promise<Map<string, ProductStockTotal>> {
-  const { data, error } = await supabase.from('product_stock').select('product_id, quantity, reserved_quantity').eq('tenant_id', tenantId)
+  const { data, error } = await supabase.from('product_stock').select('product_id, quantity').eq('tenant_id', tenantId)
   if (error) throw error
 
   const totals = new Map<string, ProductStockTotal>()
-  for (const row of data as { product_id: string; quantity: number; reserved_quantity: number }[]) {
-    const existing = totals.get(row.product_id) ?? { available: 0, reserved: 0 }
+  for (const row of data as { product_id: string; quantity: number }[]) {
+    const existing = totals.get(row.product_id) ?? { available: 0 }
     existing.available += row.quantity
-    existing.reserved += row.reserved_quantity
     totals.set(row.product_id, existing)
   }
   return totals
@@ -80,14 +80,13 @@ export async function listStockTotalsByTenant(tenantId: string): Promise<Map<str
  * is true, but could linger from before it was toggled on) are skipped --
  * they don't belong to any variant. */
 export async function listStockTotalsByVariant(productId: string): Promise<Map<string, ProductStockTotal>> {
-  const { data, error } = await supabase.from('product_stock').select('variant_id, quantity, reserved_quantity').eq('product_id', productId).not('variant_id', 'is', null)
+  const { data, error } = await supabase.from('product_stock').select('variant_id, quantity').eq('product_id', productId).not('variant_id', 'is', null)
   if (error) throw error
 
   const totals = new Map<string, ProductStockTotal>()
-  for (const row of data as { variant_id: string; quantity: number; reserved_quantity: number }[]) {
-    const existing = totals.get(row.variant_id) ?? { available: 0, reserved: 0 }
+  for (const row of data as { variant_id: string; quantity: number }[]) {
+    const existing = totals.get(row.variant_id) ?? { available: 0 }
     existing.available += row.quantity
-    existing.reserved += row.reserved_quantity
     totals.set(row.variant_id, existing)
   }
   return totals

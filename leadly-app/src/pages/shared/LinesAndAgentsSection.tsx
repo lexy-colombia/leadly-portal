@@ -88,7 +88,9 @@ export function LinesAndAgentsSection({
   /** Whether the current viewer can delete lines/agents (tenant: only
    * tenant_admin; backoffice: always, superadmin-only screen already). */
   canManage: boolean
-  /** Only the backoffice passes this through to AiAssistantDrawer. */
+  /** Passed through to AiAssistantDrawer. Backoffice always passes true;
+   * the tenant panel passes it for tenant_admin (self-service skill
+   * toggling, 2026-08-24) so a tenant_agent still only gets read-only. */
   manageSkills?: boolean
   showMetrics?: boolean
   /** Backoffice: renders WhatsappLineDrawer for manual create/edit -- rows

@@ -7,7 +7,7 @@ import {
   updateDispatchStatus,
   type DispatchStatusInput,
 } from '../../../lib/api/dispatchStatuses'
-import type { DispatchStatus, DispatchStockEffect } from '../../../types/domain'
+import type { DispatchStatus } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import type { TranslationKey } from '../../../i18n/translations'
 import { PageSpinner } from '@/components/atoms'
@@ -15,18 +15,10 @@ import { ConfirmDialog } from '@/components/organisms'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ChevronLeftIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
 
 const FIELD_CLASS = '!h-7 !rounded-lg !text-xs'
-
-const STOCK_EFFECT_LABEL: Record<DispatchStockEffect, TranslationKey> = {
-  none: 'dispatches.settings.stockEffect.none',
-  reserve: 'dispatches.settings.stockEffect.reserve',
-  ship: 'dispatches.settings.stockEffect.ship',
-  deliver: 'dispatches.settings.stockEffect.deliver',
-}
 
 function resolveError(err: unknown, t: (key: TranslationKey) => string, fallback: TranslationKey): string {
   return err instanceof Error ? t(err.message as TranslationKey) : t(fallback)
@@ -65,7 +57,6 @@ export function DispatchStatusesSection({ tenantId }: { tenantId: string }) {
       await createDispatchStatus(tenantId, {
         name: t('dispatches.settings.newStatusName'),
         color: '#94A3B8',
-        stock_effect: 'none',
         is_terminal: false,
       })
       reload()
@@ -122,7 +113,6 @@ export function DispatchStatusesSection({ tenantId }: { tenantId: string }) {
               <TableRow>
                 <TableHead className="w-10" />
                 <TableHead>{t('dispatches.settings.status.name')}</TableHead>
-                <TableHead>{t('dispatches.settings.status.stockEffect')}</TableHead>
                 <TableHead>{t('dispatches.settings.status.terminal')}</TableHead>
                 <TableHead className="w-10" />
               </TableRow>
@@ -170,21 +160,6 @@ export function DispatchStatusesSection({ tenantId }: { tenantId: string }) {
                         className={`!w-32 ${FIELD_CLASS}`}
                       />
                     </div>
-                  </TableCell>
-
-                  <TableCell>
-                    <Select defaultValue={status.stock_effect} onValueChange={(v) => handleFieldSave(status, { stock_effect: v as DispatchStockEffect })}>
-                      <SelectTrigger className={`!w-64 ${FIELD_CLASS}`}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(Object.keys(STOCK_EFFECT_LABEL) as DispatchStockEffect[]).map((effect) => (
-                          <SelectItem key={effect} value={effect} className="text-xs">
-                            {t(STOCK_EFFECT_LABEL[effect])}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
                   </TableCell>
 
                   <TableCell>

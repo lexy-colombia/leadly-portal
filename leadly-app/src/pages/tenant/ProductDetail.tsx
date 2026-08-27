@@ -242,10 +242,8 @@ export function ProductDetail() {
   // types/domain.ts) -- los totales se derivan de la suma por bodega
   // (product_stock), no de un contador plano en el producto.
   const totalAvailable = stockByWarehouse?.reduce((sum, row) => sum + row.quantity, 0) ?? null
-  const totalReserved = stockByWarehouse?.reduce((sum, row) => sum + row.reserved_quantity, 0) ?? null
-  const totalDeparture = stockByWarehouse?.reduce((sum, row) => sum + row.departure_quantity, 0) ?? 0
   const totalDamaged = stockByWarehouse?.reduce((sum, row) => sum + row.damaged_quantity, 0) ?? 0
-  const totalOverall = (totalAvailable ?? 0) + (totalReserved ?? 0) + totalDeparture + totalDamaged
+  const totalOverall = (totalAvailable ?? 0) + totalDamaged
   const lowStock = product.track_inventory && totalAvailable != null && totalAvailable <= product.low_stock_threshold
   const margin = product.retail_price != null && product.purchase_price != null ? product.retail_price - product.purchase_price : null
   const marginPct = margin != null && product.retail_price ? (margin / product.retail_price) * 100 : null
@@ -389,8 +387,6 @@ export function ProductDetail() {
                       <TableRow>
                         <TableHead>{t('inventory.product.table.warehouse')}</TableHead>
                         <TableHead className="text-right">{t('inventory.product.table.available')}</TableHead>
-                        <TableHead className="text-right">{t('products.detail.fields.reserved')}</TableHead>
-                        <TableHead className="text-right">{t('inventory.movementType.salida_despacho')}</TableHead>
                         <TableHead className="text-right">{t('inventory.movementType.ajuste_dano')}</TableHead>
                         <TableHead className="text-right">{t('products.detail.table.total')}</TableHead>
                       </TableRow>
@@ -400,19 +396,13 @@ export function ProductDetail() {
                         <TableRow key={row.id}>
                           <TableCell className="text-xs font-medium text-brand-800">{row.warehouse.name}</TableCell>
                           <TableCell className="text-right text-xs text-brand-700">{row.quantity}</TableCell>
-                          <TableCell className="text-right text-xs text-brand-500">{row.reserved_quantity}</TableCell>
-                          <TableCell className="text-right text-xs text-brand-500">{row.departure_quantity}</TableCell>
                           <TableCell className="text-right text-xs text-brand-500">{row.damaged_quantity}</TableCell>
-                          <TableCell className="text-right text-xs font-semibold text-brand-800">
-                            {row.quantity + row.reserved_quantity + row.departure_quantity + row.damaged_quantity}
-                          </TableCell>
+                          <TableCell className="text-right text-xs font-semibold text-brand-800">{row.quantity + row.damaged_quantity}</TableCell>
                         </TableRow>
                       ))}
                       <TableRow className="bg-brand-50/60">
                         <TableCell className="text-xs font-semibold text-brand-800">{t('products.detail.table.totalGeneral')}</TableCell>
                         <TableCell className="text-right text-xs font-semibold text-emerald-600">{totalAvailable ?? 0}</TableCell>
-                        <TableCell className="text-right text-xs font-semibold text-brand-700">{totalReserved ?? 0}</TableCell>
-                        <TableCell className="text-right text-xs font-semibold text-brand-700">{totalDeparture}</TableCell>
                         <TableCell className="text-right text-xs font-semibold text-red-600">{totalDamaged}</TableCell>
                         <TableCell className="text-right text-xs font-bold text-brand-800">{totalOverall}</TableCell>
                       </TableRow>

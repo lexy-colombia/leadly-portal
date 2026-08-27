@@ -10,9 +10,9 @@
   "orders.paymentMethod.cash": "Cash",
   "orders.paymentMethod.transfer": "Bank transfer",
   "orders.paymentMethod.card": "Card",
-  "orders.paymentMethod.other": "Other",
   "orders.paymentMethod.credit": "Credit",
   "orders.paymentMethod.storeCredit": "Store credit",
+  "orders.paymentMethod.wompi": "Wompi",
 
   "orders.errors.load": "Couldn't load quotes/sales.",
   "orders.errors.cancelQuote": "Couldn't cancel the quote.",
@@ -192,5 +192,13 @@
   "orders.paymentDrawer.errors.amountExceedsBalance": "Can't exceed the balance due ({amount}).",
   "orders.paymentDrawer.fields.date": "Payment date",
   "orders.paymentDrawer.fields.notes": "Notes (optional)",
-  "orders.paymentDrawer.errors.save": "Couldn't log the payment."
+  "orders.paymentDrawer.errors.save": "Couldn't log the payment.",
+
+  "orders.paymentDrawer.wompi.title": "Charge with Wompi",
+  "orders.paymentDrawer.wompi.hint": "Generates a real payment link for the balance due ({amount}). The payment is only recorded once the customer actually pays.",
+  "orders.paymentDrawer.wompi.generate": "Generate payment link",
+  "orders.paymentDrawer.wompi.generating": "Generating...",
+  "orders.paymentDrawer.wompi.copyAria": "Copy payment link",
+  "orders.paymentDrawer.wompi.copied": "Link copied.",
+  "orders.paymentDrawer.wompi.errors.generate": "Couldn't generate the payment link."
 }

@@ -13,7 +13,7 @@ import { listBrands } from '../../lib/api/brands'
 import { listWarehouses } from '../../lib/api/warehouses'
 import type { Brand, ProductCategory, Warehouse } from '../../types/domain'
 import { PageSpinner, ProductImage } from '@/components/atoms'
-import { Card, CategoryTreeFilter, ComboboxFilter, EmptyState, IconInput, Pagination } from '@/components/molecules'
+import { Card, CategoryTreeFilter, ComboboxFilter, EmptyState, FilterField, IconInput, Pagination } from '@/components/molecules'
 import { AlertIcon, PencilIcon, PlusIcon, SearchIcon, TrashIcon } from '@/components/atoms/icons'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -186,47 +186,55 @@ export function Products() {
           headerSearchSlot,
         )}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <CategoryTreeFilter
-          categories={categories}
-          value={categoryId}
-          onChange={setCategoryId}
-          placeholder={t('products.list.allCategories')}
-          searchPlaceholder={t('products.list.searchCategory')}
-          emptyLabel={t('products.list.noCategoryResults')}
-          rootLabel={t('products.list.allCategories')}
-          triggerClassName={FILTER_TRIGGER_CLASS}
-        />
+      <div className="flex flex-wrap items-end gap-2 rounded-2xl border border-brand-100 bg-brand-50/40 p-3">
+        <FilterField label={t('products.list.labels.category')}>
+          <CategoryTreeFilter
+            categories={categories}
+            value={categoryId}
+            onChange={setCategoryId}
+            placeholder={t('products.list.allCategories')}
+            searchPlaceholder={t('products.list.searchCategory')}
+            emptyLabel={t('products.list.noCategoryResults')}
+            rootLabel={t('products.list.allCategories')}
+            triggerClassName={FILTER_TRIGGER_CLASS}
+          />
+        </FilterField>
 
-        <ComboboxFilter
-          options={brands.map((b) => ({ id: b.id, label: b.name }))}
-          value={brandId}
-          onChange={setBrandId}
-          placeholder={t('products.list.allBrands')}
-          searchPlaceholder={t('products.list.searchBrand')}
-          emptyLabel={t('products.list.noBrandResults')}
-          triggerClassName={FILTER_TRIGGER_CLASS}
-        />
+        <FilterField label={t('products.list.labels.brand')}>
+          <ComboboxFilter
+            options={brands.map((b) => ({ id: b.id, label: b.name }))}
+            value={brandId}
+            onChange={setBrandId}
+            placeholder={t('products.list.allBrands')}
+            searchPlaceholder={t('products.list.searchBrand')}
+            emptyLabel={t('products.list.noBrandResults')}
+            triggerClassName={FILTER_TRIGGER_CLASS}
+          />
+        </FilterField>
 
-        <ComboboxFilter
-          options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
-          value={warehouseId}
-          onChange={setWarehouseId}
-          placeholder={t('products.list.allWarehouses')}
-          searchPlaceholder={t('products.list.searchWarehouse')}
-          emptyLabel={t('products.list.noWarehouseResults')}
-          triggerClassName={FILTER_TRIGGER_CLASS}
-        />
+        <FilterField label={t('products.list.labels.warehouse')}>
+          <ComboboxFilter
+            options={warehouses.map((w) => ({ id: w.id, label: w.name }))}
+            value={warehouseId}
+            onChange={setWarehouseId}
+            placeholder={t('products.list.allWarehouses')}
+            searchPlaceholder={t('products.list.searchWarehouse')}
+            emptyLabel={t('products.list.noWarehouseResults')}
+            triggerClassName={FILTER_TRIGGER_CLASS}
+          />
+        </FilterField>
 
-        <Button type="button" variant={lowStockOnly ? 'secondary' : 'outline'} size="sm" className={FILTER_TRIGGER_CLASS} onClick={() => setLowStockOnly((v) => !v)}>
-          <AlertIcon width={13} height={13} /> {t('products.list.lowStockFilter')}
-        </Button>
+        <FilterField label={t('products.list.labels.stock')}>
+          <Button type="button" variant={lowStockOnly ? 'secondary' : 'outline'} size="sm" className={FILTER_TRIGGER_CLASS} onClick={() => setLowStockOnly((v) => !v)}>
+            <AlertIcon width={13} height={13} /> {t('products.list.lowStockFilter')}
+          </Button>
+        </FilterField>
 
-        <span className="shrink-0 text-xs text-brand-400">
+        <span className="shrink-0 pb-1.5 text-xs text-brand-400">
           {totalCount} {t(totalCount === 1 ? 'products.count.singular' : 'products.count.plural')}
         </span>
 
-        <Button onClick={() => setDrawer({ open: true, product: null })} size="sm" className="ml-auto">
+        <Button onClick={() => setDrawer({ open: true, product: null })} size="sm" className="ml-auto self-center">
           <PlusIcon width={14} height={14} /> {t('products.actions.new')}
         </Button>
       </div>
@@ -259,7 +267,6 @@ export function Products() {
               <TableBody>
                 {products.map((product) => {
                   const lowStock = isLowStock(product, stockTotals)
-                  const reserved = stockTotals.get(product.id)?.reserved ?? 0
                   const cover = product.images[0]
                   return (
                     <TableRow key={product.id} onClick={() => navigate(`/app/products/${product.id}`)} className="cursor-pointer">
@@ -302,7 +309,6 @@ export function Products() {
                         ) : (
                           <span className="text-sm text-brand-400">{t('products.table.noControl')}</span>
                         )}
-                        {reserved > 0 && <span className="ml-1.5 text-xs text-brand-400">{t('products.table.reserved', { count: reserved })}</span>}
                       </TableCell>
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <Switch

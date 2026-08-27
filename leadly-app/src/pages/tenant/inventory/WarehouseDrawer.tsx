@@ -2,11 +2,20 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { createWarehouse, updateWarehouse } from '../../../lib/api/warehouses'
 import type { Warehouse, WarehouseType } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { Button, FieldError, Input, Label, Select, Switch } from '@/components/atoms'
+import { FieldError } from '@/components/atoms'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Drawer } from '@/components/organisms'
 import { isNotBlank } from '../../../lib/validation'
 
 const WAREHOUSE_TYPES: WarehouseType[] = ['bodega', 'punto_venta', 'transito']
+
+// Same compact sizing as ContactDrawer/StockMovementDrawer -- todo campo de
+// este drawer se pin a esto para no sentirse un design system aparte.
+const FIELD_CLASS = '!h-7 !rounded-lg !text-xs'
 
 export function WarehouseDrawer({
   open,
@@ -93,31 +102,37 @@ export function WarehouseDrawer({
           <Input
             id="warehouse-name"
             value={name}
-            invalid={!!nameError}
+            aria-invalid={!!nameError}
             onChange={(e) => setName(e.target.value)}
             placeholder={t('inventory.warehouseDrawer.field.namePlaceholder')}
+            className={`mt-1 ${FIELD_CLASS}`}
           />
           <FieldError message={nameError} />
         </div>
 
         <div>
           <Label htmlFor="warehouse-address">{t('inventory.warehouseDrawer.field.address')}</Label>
-          <Input id="warehouse-address" value={address} onChange={(e) => setAddress(e.target.value)} />
+          <Input id="warehouse-address" value={address} onChange={(e) => setAddress(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
             <Label htmlFor="warehouse-city">{t('inventory.warehouseDrawer.field.city')}</Label>
-            <Input id="warehouse-city" value={city} onChange={(e) => setCity(e.target.value)} />
+            <Input id="warehouse-city" value={city} onChange={(e) => setCity(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
           </div>
           <div>
             <Label htmlFor="warehouse-type">{t('inventory.warehouseDrawer.field.type')}</Label>
-            <Select id="warehouse-type" value={type} onChange={(e) => setType(e.target.value as WarehouseType)}>
-              {WAREHOUSE_TYPES.map((wt) => (
-                <option key={wt} value={wt}>
-                  {t(`inventory.warehouseType.${wt}`)}
-                </option>
-              ))}
+            <Select value={type} onValueChange={(v) => setType(v as WarehouseType)}>
+              <SelectTrigger id="warehouse-type" className={`mt-1 w-full ${FIELD_CLASS}`}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {WAREHOUSE_TYPES.map((wt) => (
+                  <SelectItem key={wt} value={wt} className="text-xs">
+                    {t(`inventory.warehouseType.${wt}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
             </Select>
           </div>
         </div>
@@ -125,22 +140,22 @@ export function WarehouseDrawer({
         <div className="grid grid-cols-2 gap-4">
           <div>
             <Label htmlFor="warehouse-manager">{t('inventory.warehouseDrawer.field.managerName')}</Label>
-            <Input id="warehouse-manager" value={managerName} onChange={(e) => setManagerName(e.target.value)} />
+            <Input id="warehouse-manager" value={managerName} onChange={(e) => setManagerName(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
           </div>
           <div>
             <Label htmlFor="warehouse-phone">{t('inventory.warehouseDrawer.field.phone')}</Label>
-            <Input id="warehouse-phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
+            <Input id="warehouse-phone" value={phone} onChange={(e) => setPhone(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
           </div>
         </div>
 
         <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
           <span className="text-sm text-brand-700">{t('inventory.warehouseDrawer.field.isDefault')}</span>
-          <Switch checked={isDefault} onChange={setIsDefault} />
+          <Switch checked={isDefault} onCheckedChange={setIsDefault} />
         </div>
 
         <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
           <span className="text-sm text-brand-700">{t('inventory.warehouseDrawer.field.isActive')}</span>
-          <Switch checked={isActive} onChange={setIsActive} />
+          <Switch checked={isActive} onCheckedChange={setIsActive} />
         </div>
 
         {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}

@@ -27,6 +27,8 @@ export interface Tenant {
   billing_address: string | null
   preferred_language: TenantLanguage
   logo_url: string | null
+  storefront_slug: string | null
+  storefront_enabled: boolean
   created_at: string
   updated_at: string
 }
@@ -434,14 +436,13 @@ export interface Supplier {
 export type OrderStatus = 'cotizacion' | 'confirmada' | 'cancelada'
 
 // Genérico a propósito -- se mantiene solo como el estado "resumen" de 3
-// valores que usa el badge/filtro de la lista de Órdenes. Desde 2026-08-23
-// (Fase 2, Despachos) se deriva automáticamente de DispatchStatus.stock_effect
-// (reserve->pendiente, ship->en_camino, deliver->entregado, none->no lo
-// toca) en vez de editarse a mano cuando el módulo 'dispatches' está
-// habilitado -- no hay ningún mapeo manual, a propósito (feedback del
-// usuario: un select aparte para esto era confuso). La orden en sí muestra
-// el nombre real del estado de despacho (ver Dispatch/DispatchStatus más
-// abajo), no este bucket traducido.
+// valores que usa el badge/filtro de la lista de Órdenes. Ya no se deriva
+// automáticamente de nada (el mapeo por DispatchStatus.stock_effect se sacó
+// el 2026-08-25, decisión del usuario: un despacho es puro seguimiento
+// logístico) -- se actualiza a mano vía updateDeliveryStatus
+// (lib/api/orders.ts). La orden en sí muestra el nombre real del estado de
+// despacho (ver Dispatch/DispatchStatus más abajo), no este bucket
+// traducido.
 export type DeliveryStatus = 'pendiente' | 'en_camino' | 'entregado'
 
 export interface SalesOrder {
@@ -510,14 +511,16 @@ export interface SalesOrderItem {
   created_at: string
 }
 
-export type OrderPaymentMethod = 'efectivo' | 'transferencia' | 'tarjeta' | 'otro' | 'credito' | 'saldo_favor'
+export type OrderPaymentMethod = 'efectivo' | 'transferencia' | 'tarjeta' | 'credito' | 'saldo_favor' | 'wompi'
 
 /** Subset of OrderPaymentMethod valid for paying down a credit balance
  * (credit_payments.method) -- 'credito' is deliberately excluded (paying
  * credit debt with more credit doesn't make sense), same for
  * 'saldo_favor' (that's the opposite ledger entirely, ver
- * store_credit_grants -- "el cliente me debe" vs "yo le debo al cliente"). */
-export type CreditPaymentMethod = Exclude<OrderPaymentMethod, 'credito' | 'saldo_favor'>
+ * store_credit_grants -- "el cliente me debe" vs "yo le debo al cliente").
+ * 'wompi' excluded too for now -- this round only wired it into sales order
+ * collection, not the separate credit-repayment flow. */
+export type CreditPaymentMethod = Exclude<OrderPaymentMethod, 'credito' | 'saldo_favor' | 'wompi'>
 
 export interface SalesOrderPayment {
   id: string
@@ -529,6 +532,15 @@ export interface SalesOrderPayment {
   paid_at: string
   notes: string | null
   created_by: string | null
+  /** Only set when method === 'wompi' (payment recorded automatically by
+   * payment-webhook-wompi, see leadly-db) -- null for every manually-typed
+   * payment. */
+  provider_key: string | null
+  provider_transaction_id: string | null
+  /** Human-readable detail of the Wompi transaction, e.g. "PSE - Bancolombia"
+   * or "VISA ****1234" -- shown instead of the generic "Wompi" label. */
+  provider_reference: string | null
+  payment_link_id: string | null
   deleted_at: string | null
   deleted_by: string | null
   created_at: string
@@ -583,30 +595,25 @@ export interface CreditPayment {
   updated_at: string
 }
 
-/** In real-life order: 'none' (informational only, e.g. "En camino") ->
- * 'reserve' (earmarks stock without moving it out) -> 'ship' (physically
- * leaves the warehouse) -> 'deliver' (confirmed with the customer, gone
- * for good). Drives which stock_movements the DB trigger fires when a
- * dispatch enters that status -- see apply_dispatch_stock_and_delivery_effect(). */
-export type DispatchStockEffect = 'none' | 'reserve' | 'ship' | 'deliver'
-
 /** Per-tenant configurable dispatch status catalog (Configuración ->
  * Despachos) -- same spirit as PipelineStage, one flat ordered list per
- * tenant instead of several "pipelines". */
+ * tenant instead of several "pipelines". No stock/delivery-status effect
+ * of its own anymore (removed 2026-08-25, decisión del usuario): un
+ * despacho es puro seguimiento logístico (transportadora, guía) -- si
+ * hace falta actualizar sales_orders.delivery_status a mano, ver
+ * updateDeliveryStatus en lib/api/orders.ts. */
 export interface DispatchStatus {
   id: string
   tenant_id: string
   name: string
   color: string
   display_order: number
-  stock_effect: DispatchStockEffect
   is_terminal: boolean
   created_at: string
   updated_at: string
 }
 
 export type DispatchCarrierType = 'propio' | 'tercero'
-export type DispatchStockStage = 'none' | 'reserved' | 'shipped' | 'delivered'
 
 /** One dispatch per order (1:1, no partial shipments yet). carrier_key
  * comes from the fixed frontend catalog (lib/carriers.ts) when
@@ -622,7 +629,6 @@ export interface Dispatch {
   carrier_name: string | null
   tracking_number: string | null
   tracking_url: string | null
-  stock_stage: DispatchStockStage
   notes: string | null
   created_by: string | null
   created_at: string
@@ -990,8 +996,6 @@ export interface ProductStock {
   warehouse_id: string
   variant_id: string | null
   quantity: number
-  reserved_quantity: number
-  departure_quantity: number
   damaged_quantity: number
   created_at: string
   updated_at: string
@@ -1004,13 +1008,11 @@ export type StockMovementType =
   | 'ajuste_negativo'
   | 'transferencia_salida'
   | 'transferencia_entrada'
-  | 'reserva'
-  | 'liberacion_reserva'
-  | 'salida_despacho'
-  | 'entrega_despacho'
   | 'ajuste_dano'
   | 'reversion_dano'
-export type StockReferenceType = 'carga_inicial' | 'compra' | 'despacho' | 'ajuste_manual' | 'transferencia'
+  | 'entrada_devolucion'
+  | 'devolucion_danada'
+export type StockReferenceType = 'carga_inicial' | 'compra' | 'despacho' | 'ajuste_manual' | 'transferencia' | 'devolucion' | 'venta'
 
 export interface StockMovement {
   id: string

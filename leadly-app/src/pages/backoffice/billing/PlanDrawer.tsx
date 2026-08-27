@@ -1,9 +1,14 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { createBillingPlan, updateBillingPlan, type BillingPlanInput } from '../../../lib/api/billing'
 import type { BillingPlan } from '../../../types/domain'
-import { Button, FieldError, Input, Label, Select, Switch } from '@/components/atoms'
+import { FieldError } from '@/components/atoms'
 import { CurrencyInput } from '@/components/molecules'
 import { Drawer } from '@/components/organisms'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { isNotBlank } from '../../../lib/validation'
 import { useLanguage } from '../../../contexts/LanguageContext'
 
@@ -89,13 +94,13 @@ export function PlanDrawer({
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <div>
           <Label htmlFor="plan-name">{t('backoffice.planDrawer.name')}</Label>
-          <Input id="plan-name" value={name} invalid={!!nameError} onChange={(e) => setName(e.target.value)} placeholder="Plan Pro" />
+          <Input id="plan-name" value={name} aria-invalid={!!nameError} onChange={(e) => setName(e.target.value)} placeholder="Plan Pro" />
           <FieldError message={nameError} />
         </div>
 
         <div>
           <Label htmlFor="plan-key">{t('backoffice.planDrawer.key')}</Label>
-          <Input id="plan-key" value={key} invalid={!!keyError} onChange={(e) => setKey(e.target.value)} placeholder="pro" disabled={!!plan} />
+          <Input id="plan-key" value={key} aria-invalid={!!keyError} onChange={(e) => setKey(e.target.value)} placeholder="pro" disabled={!!plan} />
           <FieldError message={keyError} />
         </div>
 
@@ -107,9 +112,14 @@ export function PlanDrawer({
           </div>
           <div>
             <Label htmlFor="plan-interval">{t('backoffice.planDrawer.interval')}</Label>
-            <Select id="plan-interval" value={billingInterval} onChange={(e) => setBillingInterval(e.target.value as 'monthly' | 'yearly')}>
-              <option value="monthly">{t('backoffice.facturacion.interval.monthly')}</option>
-              <option value="yearly">{t('backoffice.facturacion.interval.yearly')}</option>
+            <Select value={billingInterval} onValueChange={(v) => setBillingInterval(v as 'monthly' | 'yearly')}>
+              <SelectTrigger id="plan-interval" className="mt-1 w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="monthly">{t('backoffice.facturacion.interval.monthly')}</SelectItem>
+                <SelectItem value="yearly">{t('backoffice.facturacion.interval.yearly')}</SelectItem>
+              </SelectContent>
             </Select>
           </div>
         </div>
@@ -148,13 +158,13 @@ export function PlanDrawer({
 
         <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
           <span className="text-sm text-brand-700">{t('backoffice.planDrawer.activePlan')}</span>
-          <Switch checked={isActive} onChange={setIsActive} />
+          <Switch checked={isActive} onCheckedChange={setIsActive} />
         </div>
 
         {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
 
         <div className="flex gap-2 border-t border-brand-100 pt-5">
-          <Button type="submit" variant="secondary" disabled={submitting}>
+          <Button type="submit" disabled={submitting}>
             {submitting ? t('common.actions.saving') : t('common.actions.save')}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>
