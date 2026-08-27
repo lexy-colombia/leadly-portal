@@ -204,6 +204,15 @@ export function verifyCheckoutOtp(sessionToken: string, phone: string, code: str
   return callStorefront('verify_checkout_otp', { session_token: sessionToken, phone, code })
 }
 
+/** Se llama al recargar la página con una identidad ya verificada en esta
+ * misma sesión de navegador (ver storefrontCart.ts, StorefrontIdentityDraft)
+ * -- reusa la ventana de 30 min que la verificación ya tiene del lado del
+ * servidor en vez de pedir el código de nuevo. Mismo shape de respuesta que
+ * verifyCheckoutOtp (menos `verified`, que acá siempre es true o tira). */
+export function getStorefrontVerifiedIdentity(sessionToken: string, phone: string): Promise<VerifyOtpResult> {
+  return callStorefront('get_verified_identity', { session_token: sessionToken, phone })
+}
+
 export function checkoutStorefrontCart(params: {
   session_token: string
   full_name: string

@@ -1757,7 +1757,7 @@ async function findProductByName(adminClient: any, tenantId: string, name: strin
 }
 
 /** True only when this tenant has an active Wompi credential AND both
- * secrets (private_key, integrity_key) are actually set. Deliberately
+ * secrets (private_key, events_key) are actually set. Deliberately
  * duplicated from whatsapp-ai-respond's isTenantWompiConnected instead of
  * shared -- same reasoning as formatOrderCode/formatCurrencyCOP below:
  * keeps these two Edge Functions independently deployable. Reads
@@ -1781,7 +1781,7 @@ async function isTenantWompiConnected(adminClient: any, tenantId: string): Promi
 
   const { data: secretRows } = await adminClient.from("payment_credential_secrets").select("secret_name").eq("credential_id", credential.id);
   const secrets = new Set((secretRows ?? []).map((r: { secret_name: string }) => r.secret_name));
-  return secrets.has("private_key") && secrets.has("integrity_key");
+  return secrets.has("private_key") && secrets.has("events_key");
 }
 
 /** True only when this tenant has the "credit" module turned on

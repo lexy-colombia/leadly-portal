@@ -143,23 +143,32 @@ export const wompiAdapter: PaymentProviderAdapter = {
       });
       return false;
     }
-    const integrityKey = await getSecret("integrity_key");
-    if (!integrityKey) {
-      console.error("wompi verifyWebhookSignature: no integrity_key secret configured for this credential");
+    // Bug real encontrado probando un pago real de sandbox (2026-08-27): esto
+    // usaba "integrity_key" (el "Secreto de integridad" de Wompi, que firma
+    // la creación de un Web Checkout del lado del cliente) para validar el
+    // checksum de un webhook -- pero Wompi firma sus eventos con un secreto
+    // DISTINTO ("Secreto de eventos", en la pestaña de configuración de
+    // eventos del dashboard de Wompi, no en la de API Keys). Como esta
+    // integración crea el link de pago server-side vía /payment_links con la
+    // llave privada, integrity_key no tiene ningún otro uso real en este
+    // adapter -- el mismatch era 100% esperable con cualquier llave real.
+    const eventsKey = await getSecret("events_key");
+    if (!eventsKey) {
+      console.error("wompi verifyWebhookSignature: no events_key secret configured for this credential");
       return false;
     }
 
     const toHash =
       body.signature.properties.map((prop) => String(resolvePath(body.data, prop) ?? "")).join("") +
       String(body.timestamp) +
-      integrityKey;
+      eventsKey;
     const hashHex = await sha256Hex(toHash);
     // Comparación case-insensitive -- Wompi no documenta explícitamente el
     // casing del checksum que manda, y un hex mismatch por mayúsculas sería
     // indistinguible de una clave mal configurada sin este margen.
     const matches = hashHex.toLowerCase() === body.signature.checksum.toLowerCase();
     if (!matches) {
-      // Nunca loguea integrityKey -- solo lo necesario para diagnosticar un
+      // Nunca loguea eventsKey -- solo lo necesario para diagnosticar un
       // mismatch real (qué propiedades/timestamp se usaron y los dos hashes)
       // sin exponer el secreto.
       console.error("wompi verifyWebhookSignature: checksum mismatch", {

@@ -430,9 +430,9 @@ async function buildCustomerContext(adminClient: any, tenantId: string, contactI
 }
 
 /** True only when this tenant has an active Wompi credential AND both
- * secrets (private_key, integrity_key) are actually set -- mirrors the
+ * secrets (private_key, events_key) are actually set -- mirrors the
  * "Conectado" check leadly-app's WompiIntegrationDrawer shows the tenant
- * (fullyConfigured = privateKeyConfigured && integrityKeyConfigured), so the
+ * (fullyConfigured = privateKeyConfigured && eventsKeyConfigured), so the
  * AI's gate matches what the tenant sees in Integraciones. A credential row
  * existing with is_active=true but empty secrets (a tenant who started but
  * didn't finish connecting) must NOT count as connected. */
@@ -460,7 +460,7 @@ async function isTenantWompiConnected(adminClient: any, tenantId: string): Promi
   // table read is both correct and simpler here.
   const { data: secretRows } = await adminClient.from("payment_credential_secrets").select("secret_name").eq("credential_id", credential.id);
   const secrets = new Set((secretRows ?? []).map((r: { secret_name: string }) => r.secret_name));
-  return secrets.has("private_key") && secrets.has("integrity_key");
+  return secrets.has("private_key") && secrets.has("events_key");
 }
 
 /** True only when this tenant has the "credit" module turned on

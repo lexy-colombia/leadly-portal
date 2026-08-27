@@ -7,6 +7,7 @@ import {
   checkoutStorefrontCart,
   getStorefrontCart,
   getStorefrontOrderStatus,
+  getStorefrontVerifiedIdentity,
   removeStorefrontCartItem,
   requestCheckoutOtp,
   selectStorefrontPaymentMethod,
@@ -17,8 +18,15 @@ import {
   type OrderStatusResult,
   type StorefrontCartItem,
   type StorefrontSavedAddress,
+  type VerifyOtpResult,
 } from '../../lib/api/storefront'
-import { getStorefrontCartToken, clearStorefrontCartToken } from '../../lib/storefrontCart'
+import {
+  getStorefrontCartToken,
+  clearStorefrontCartToken,
+  getStorefrontIdentityDraft,
+  setStorefrontIdentityDraft,
+  clearStorefrontIdentityDraft,
+} from '../../lib/storefrontCart'
 import { useDebouncedQuantity } from '../../lib/useDebouncedQuantity'
 import { DOCUMENT_TYPES } from '../../lib/referenceData'
 import type { StorefrontOutletContext } from '../../layouts/StorefrontLayout'
@@ -107,6 +115,7 @@ export function StorefrontCart() {
           if (status.paid || attempts >= 4) {
             setPaymentReturn(status.paid ? status : 'timeout')
             clearStorefrontCartToken(slug)
+            clearStorefrontIdentityDraft(slug)
             refreshCartCount([])
             return
           }
@@ -214,6 +223,26 @@ export function StorefrontCart() {
     }
   }
 
+  // Compartido entre handleVerifyOtp (código recién confirmado) y el efecto
+  // de restauración al montar (ver más abajo, después de handleVerifyOtp) --
+  // las dos formas de llegar a este punto ya con el teléfono probado
+  // devuelven el mismo shape.
+  function applyVerifiedIdentity(res: VerifyOtpResult) {
+    if (res.client) {
+      setFullName(res.client.full_name)
+      if (res.client.document_type) setDocumentType(res.client.document_type)
+      if (res.client.document_number) setDocumentNumber(res.client.document_number)
+    }
+    setSavedAddresses(res.addresses)
+    // Mismo criterio que shippingAddresses/billingAddresses de abajo: la
+    // preselección mira TODAS las direcciones guardadas, no solo las
+    // marcadas para ese rol puntual.
+    const defaultAddressId = res.addresses.find((a) => a.is_default)?.id ?? res.addresses[0]?.id ?? null
+    setSelectedShippingId(defaultAddressId)
+    setSelectedBillingId(defaultAddressId)
+    setStep('details')
+  }
+
   // Acepta el código como parámetro (con `otp` state como default) para que
   // el auto-submit de InputOTP (onComplete, ver abajo) pueda pasar el valor
   // recién completado directo, sin depender de que el state ya se haya
@@ -223,25 +252,60 @@ export function StorefrontCart() {
     setBusy(true)
     try {
       const res = await verifyCheckoutOtp(token, phone, code)
-      if (res.client) {
-        setFullName(res.client.full_name)
-        if (res.client.document_type) setDocumentType(res.client.document_type)
-        if (res.client.document_number) setDocumentNumber(res.client.document_number)
-      }
-      setSavedAddresses(res.addresses)
-      // Mismo criterio que shippingAddresses/billingAddresses de abajo: la
-      // preselección mira TODAS las direcciones guardadas, no solo las
-      // marcadas para ese rol puntual.
-      const defaultAddressId = res.addresses.find((a) => a.is_default)?.id ?? res.addresses[0]?.id ?? null
-      setSelectedShippingId(defaultAddressId)
-      setSelectedBillingId(defaultAddressId)
-      setStep('details')
+      setStorefrontIdentityDraft(slug, { phone, documentType, documentNumber })
+      applyVerifiedIdentity(res)
     } catch (err) {
       showError(err instanceof Error ? err.message : t('storefront.cart.otpError'))
     } finally {
       setBusy(false)
     }
   }
+
+  // Recarga de página estando ya pasado el paso de OTP -- pedido explícito
+  // del usuario: antes, un simple refresh volvía a pedir el código de cero.
+  // Si hay un StorefrontIdentityDraft de esta misma pestaña, intenta
+  // retomar directo en "details" reusando la ventana de 30 min que la
+  // verificación ya tiene del lado del servidor (get_verified_identity) --
+  // si venció (o el carrito cambió), se resigna en silencio: precarga
+  // documento/teléfono en "identify" así al menos no hay que retipearlos,
+  // pero sí hace falta un código nuevo. No corre mientras se está volviendo
+  // del checkout de Wompi (paymentReturn ya se encarga de ese caso aparte).
+  const [checkingIdentity, setCheckingIdentity] = useState(() => !!getStorefrontIdentityDraft(slug))
+
+  useEffect(() => {
+    if (paymentReturn || !token) {
+      setCheckingIdentity(false)
+      return
+    }
+    const draft = getStorefrontIdentityDraft(slug)
+    if (!draft) {
+      setCheckingIdentity(false)
+      return
+    }
+    let cancelled = false
+    getStorefrontVerifiedIdentity(token, draft.phone)
+      .then((res) => {
+        if (cancelled) return
+        setPhone(draft.phone)
+        setDocumentType(draft.documentType)
+        setDocumentNumber(draft.documentNumber)
+        applyVerifiedIdentity(res)
+      })
+      .catch(() => {
+        if (cancelled) return
+        clearStorefrontIdentityDraft(slug)
+        setPhone(draft.phone)
+        setDocumentType(draft.documentType)
+        setDocumentNumber(draft.documentNumber)
+      })
+      .finally(() => {
+        if (!cancelled) setCheckingIdentity(false)
+      })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, slug, paymentReturn])
 
   // Deliberadamente NO se filtra por is_shipping/is_billing acá -- a
   // diferencia de OrderDetail.tsx (portal interno, un agente eligiendo entre
@@ -275,7 +339,10 @@ export function StorefrontCart() {
       setStep('choose_payment')
     } else {
       refreshCartCount([])
-      if (res.payment_method !== 'wompi') clearStorefrontCartToken(slug)
+      if (res.payment_method !== 'wompi') {
+        clearStorefrontCartToken(slug)
+        clearStorefrontIdentityDraft(slug)
+      }
       setStep('success')
     }
   }
@@ -357,7 +424,7 @@ export function StorefrontCart() {
     return <PaymentReturnScreen state={paymentReturn} slug={slug} />
   }
 
-  if (items === null) {
+  if (items === null || checkingIdentity) {
     return (
       <div className="mx-auto max-w-2xl space-y-3">
         <Skeleton className="h-20 w-full" />

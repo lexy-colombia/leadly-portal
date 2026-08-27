@@ -534,36 +534,40 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       // WhatsApp), se revela si ese teléfono ya es cliente del tenant --
       // nunca antes de este punto, para no convertir el checkout en un
       // oráculo de "este teléfono es cliente sí/no" para cualquiera que
-      // solo sepa el número. Precarga nombre/documento + sus direcciones
-      // guardadas (mismo `contact_addresses` que ya usa el flujo de ventas
-      // de la IA) para que el paso siguiente no le vuelva a pedir todo de
-      // cero a un cliente que ya compró antes.
-      const { data: existingClient } = await adminClient
-        .from("clients")
-        .select("id, full_name, document_type, document_number")
-        .eq("tenant_id", cart.tenant_id)
+      // solo sepa el número.
+      return { verified: true, ...(await loadClientIdentity(adminClient, cart.tenant_id, phone)) };
+    }
+
+    // Se llama al recargar la página estando ya pasado el paso de OTP --
+    // pedido explícito del usuario: antes, un simple refresh volvía a pedir
+    // el código de cero aunque la verificación server-side (30 minutos de
+    // validez, ver OTP_VERIFIED_VALID_MINUTES) siguiera vigente. Reusa esa
+    // misma ventana en vez de una nueva: si ya hay un
+    // storefront_phone_verifications vigente para este carrito+teléfono, no
+    // hace falta un código nuevo -- solo re-arma la misma respuesta que
+    // verify_checkout_otp para que el frontend pueda saltar directo al paso
+    // de detalles.
+    case "get_verified_identity": {
+      const sessionToken = String(body.session_token ?? "").trim();
+      const phone = String(body.phone ?? "").trim();
+      if (!sessionToken) throw new StorefrontError("session_token es requerido.");
+      if (!phone) throw new StorefrontError("phone es requerido.");
+
+      const cart = await resolveCart(adminClient, sessionToken);
+
+      const { data: verification } = await adminClient
+        .from("storefront_phone_verifications")
+        .select("id")
+        .eq("cart_id", cart.id)
         .eq("phone", phone)
-        .is("deleted_at", null)
+        .not("verified_at", "is", null)
+        .gte("verified_at", new Date(Date.now() - OTP_VERIFIED_VALID_MINUTES * 60_000).toISOString())
+        .order("verified_at", { ascending: false })
+        .limit(1)
         .maybeSingle();
+      if (!verification) throw new StorefrontError("Tu verificación venció -- pedí un código nuevo.", 401);
 
-      let addresses: Record<string, unknown>[] = [];
-      if (existingClient) {
-        const { data: addressRows } = await adminClient
-          .from("contact_addresses")
-          .select("id, label, recipient_name, phone, line1, line2, city, state_province, postal_code, country, is_shipping, is_billing, is_default")
-          .eq("tenant_id", cart.tenant_id)
-          .eq("contact_id", existingClient.id)
-          .is("deleted_at", null)
-          .order("is_default", { ascending: false })
-          .order("created_at", { ascending: false });
-        addresses = addressRows ?? [];
-      }
-
-      return {
-        verified: true,
-        client: existingClient ? { full_name: existingClient.full_name, document_type: existingClient.document_type, document_number: existingClient.document_number } : null,
-        addresses,
-      };
+      return { verified: true, ...(await loadClientIdentity(adminClient, cart.tenant_id, phone)) };
     }
 
     case "checkout": {
@@ -953,6 +957,42 @@ async function resolveOrderAddress(
   return addressRow.id;
 }
 
+/** Precarga nombre/documento + direcciones guardadas (mismo
+ * `contact_addresses` que ya usa el flujo de ventas de la IA) de un cliente
+ * ya existente por teléfono -- compartido entre verify_checkout_otp (recién
+ * verificado el código) y get_verified_identity (recargó la página con una
+ * verificación server-side todavía vigente), las dos únicas dos formas de
+ * llegar acá ya con el teléfono probado. */
+async function loadClientIdentity(
+  adminClient: SupabaseClient,
+  tenantId: string,
+  phone: string,
+): Promise<{ client: { full_name: string; document_type: string | null; document_number: string | null } | null; addresses: Record<string, unknown>[] }> {
+  const { data: existingClient } = await adminClient
+    .from("clients")
+    .select("id, full_name, document_type, document_number")
+    .eq("tenant_id", tenantId)
+    .eq("phone", phone)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (!existingClient) return { client: null, addresses: [] };
+
+  const { data: addressRows } = await adminClient
+    .from("contact_addresses")
+    .select("id, label, recipient_name, phone, line1, line2, city, state_province, postal_code, country, is_shipping, is_billing, is_default")
+    .eq("tenant_id", tenantId)
+    .eq("contact_id", existingClient.id)
+    .is("deleted_at", null)
+    .order("is_default", { ascending: false })
+    .order("created_at", { ascending: false });
+
+  return {
+    client: { full_name: existingClient.full_name, document_type: existingClient.document_type, document_number: existingClient.document_number },
+    addresses: addressRows ?? [],
+  };
+}
+
 /** Resolve-or-create el `clients` por teléfono -- mismo patrón que
  * resolveOrCreateContact (whatsapp-ai-tools/index.ts), sin el paso de
  * conversationId porque acá no existe ninguna conversación de WhatsApp. Se
@@ -1076,7 +1116,7 @@ async function isTenantWompiConnected(adminClient: SupabaseClient, tenantId: str
 
   const { data: secretRows } = await adminClient.from("payment_credential_secrets").select("secret_name").eq("credential_id", credential.id);
   const secrets = new Set((secretRows ?? []).map((r: { secret_name: string }) => r.secret_name));
-  return secrets.has("private_key") && secrets.has("integrity_key");
+  return secrets.has("private_key") && secrets.has("events_key");
 }
 
 async function isTenantCreditModuleEnabled(adminClient: SupabaseClient, tenantId: string): Promise<boolean> {
