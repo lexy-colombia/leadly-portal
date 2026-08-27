@@ -4,6 +4,10 @@
   "products.tabs.suppliers": "Proveedores",
 
   "products.list.searchPlaceholder": "Buscar por nombre o SKU",
+  "products.list.labels.category": "Categoría",
+  "products.list.labels.brand": "Marca",
+  "products.list.labels.warehouse": "Bodega",
+  "products.list.labels.stock": "Stock",
   "products.list.allCategories": "Todas las categorías",
   "products.list.searchCategory": "Buscar categoría...",
   "products.list.noCategoryResults": "Sin resultados.",

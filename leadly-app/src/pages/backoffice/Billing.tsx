@@ -1,9 +1,13 @@
 import { useEffect, useState } from 'react'
 import { listBillingPlans } from '../../lib/api/billing'
 import type { BillingPlan } from '../../types/domain'
-import { Badge, Button, PageSpinner, Table, TBody, TD, TH, THead, TRow } from '@/components/atoms'
+import { PageSpinner } from '@/components/atoms'
 import { Card, EmptyState, Pagination } from '@/components/molecules'
 import { CreditCardIcon, PencilIcon, PlusIcon, ReceiptIcon } from '@/components/atoms/icons'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PlanDrawer } from './billing/PlanDrawer'
 import { InvoicesSection } from './billing/InvoicesSection'
 import { useLanguage } from '../../contexts/LanguageContext'
@@ -53,7 +57,7 @@ function PlansSection() {
       <Card>
         <div className="mb-3 flex items-center justify-between">
           <p className="text-sm text-brand-400">{t('backoffice.facturacion.plansSubtitle')}</p>
-          <Button variant="secondary" onClick={() => setDrawer({ open: true, plan: null })} className="!px-3 !py-1.5 text-xs">
+          <Button size="sm" onClick={() => setDrawer({ open: true, plan: null })}>
             <PlusIcon width={14} height={14} /> {t('backoffice.facturacion.newPlan')}
           </Button>
         </div>
@@ -62,38 +66,45 @@ function PlansSection() {
         {plans && plans.length === 0 && <EmptyState>{t('backoffice.facturacion.plansEmpty')}</EmptyState>}
         {pageItems && pageItems.length > 0 && (
           <>
-            <Table bare>
-              <THead>
-                <tr>
-                  <TH>{t('backoffice.facturacion.table.plan')}</TH>
-                  <TH>{t('backoffice.facturacion.table.price')}</TH>
-                  <TH>{t('backoffice.facturacion.table.interval')}</TH>
-                  <TH>{t('backoffice.facturacion.table.maxUsers')}</TH>
-                  <TH>{t('backoffice.facturacion.table.maxWhatsappLines')}</TH>
-                  <TH>{t('backoffice.facturacion.table.status')}</TH>
-                  <TH className="text-right">{t('backoffice.facturacion.table.actions')}</TH>
-                </tr>
-              </THead>
-              <TBody>
-                {pageItems.map((plan) => (
-                  <TRow key={plan.id} clickable onClick={() => setDrawer({ open: true, plan })}>
-                    <TD className="font-medium text-brand-800">{plan.name}</TD>
-                    <TD>{new Intl.NumberFormat('es-CO', { style: 'currency', currency: plan.currency, maximumFractionDigits: 0 }).format(plan.amount_cents / 100)}</TD>
-                    <TD>{plan.billing_interval === 'monthly' ? t('backoffice.facturacion.interval.monthly') : t('backoffice.facturacion.interval.yearly')}</TD>
-                    <TD className="text-brand-500">{plan.max_users ?? t('backoffice.facturacion.table.maxUsers.unlimited')}</TD>
-                    <TD className="text-brand-500">{plan.max_whatsapp_lines ?? t('backoffice.facturacion.table.maxUsers.unlimited')}</TD>
-                    <TD>
-                      <Badge tone={plan.is_active ? 'success' : 'neutral'}>{plan.is_active ? t('common.status.active') : t('common.status.inactive')}</Badge>
-                    </TD>
-                    <TD className="text-right" onClick={(e) => e.stopPropagation()}>
-                      <Button variant="ghost" onClick={() => setDrawer({ open: true, plan })} className="!px-3 !py-1.5 text-xs">
-                        <PencilIcon width={14} height={14} /> {t('common.actions.edit')}
-                      </Button>
-                    </TD>
-                  </TRow>
-                ))}
-              </TBody>
-            </Table>
+            <div className="overflow-hidden rounded-2xl border border-brand-100 bg-white">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t('backoffice.facturacion.table.plan')}</TableHead>
+                    <TableHead>{t('backoffice.facturacion.table.price')}</TableHead>
+                    <TableHead>{t('backoffice.facturacion.table.interval')}</TableHead>
+                    <TableHead>{t('backoffice.facturacion.table.maxUsers')}</TableHead>
+                    <TableHead>{t('backoffice.facturacion.table.maxWhatsappLines')}</TableHead>
+                    <TableHead>{t('backoffice.facturacion.table.status')}</TableHead>
+                    <TableHead className="text-right">{t('backoffice.facturacion.table.actions')}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {pageItems.map((plan) => (
+                    <TableRow key={plan.id} onClick={() => setDrawer({ open: true, plan })} className="cursor-pointer">
+                      <TableCell className="font-medium text-brand-800">{plan.name}</TableCell>
+                      <TableCell>{new Intl.NumberFormat('es-CO', { style: 'currency', currency: plan.currency, maximumFractionDigits: 0 }).format(plan.amount_cents / 100)}</TableCell>
+                      <TableCell>{plan.billing_interval === 'monthly' ? t('backoffice.facturacion.interval.monthly') : t('backoffice.facturacion.interval.yearly')}</TableCell>
+                      <TableCell className="text-brand-500">{plan.max_users ?? t('backoffice.facturacion.table.maxUsers.unlimited')}</TableCell>
+                      <TableCell className="text-brand-500">{plan.max_whatsapp_lines ?? t('backoffice.facturacion.table.maxUsers.unlimited')}</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="outline"
+                          className={plan.is_active ? 'border-transparent bg-emerald-100 text-emerald-700' : 'border-transparent bg-slate-100 text-slate-600'}
+                        >
+                          {plan.is_active ? t('common.status.active') : t('common.status.inactive')}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                        <Button variant="ghost" size="xs" onClick={() => setDrawer({ open: true, plan })}>
+                          <PencilIcon width={14} height={14} /> {t('common.actions.edit')}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
             <Pagination page={page} totalPages={totalPages} onChange={setPage} />
           </>
         )}
@@ -110,28 +121,25 @@ export function Billing() {
 
   return (
     <div className="space-y-3">
-      <div className="flex gap-4 overflow-x-auto border-b border-brand-100">
-        {TABS.map((tabKey) => {
-          const Icon = TAB_ICON[tabKey]
-          return (
-            <button
-              key={tabKey}
-              onClick={() => setTab(tabKey)}
-              className={`flex shrink-0 items-center gap-1.5 border-b-2 pb-2 text-xs font-medium transition-colors ${
-                tab === tabKey ? 'border-accent-500 text-accent-600' : 'border-transparent text-brand-400 hover:text-brand-700'
-              }`}
-            >
-              <Icon width={13} height={13} />
-              {t(TAB_LABEL_KEY[tabKey])}
-            </button>
-          )
-        })}
-      </div>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
+        <TabsList>
+          {TABS.map((tabKey) => {
+            const Icon = TAB_ICON[tabKey]
+            return (
+              <TabsTrigger key={tabKey} value={tabKey} className="text-xs">
+                <Icon width={13} height={13} /> {t(TAB_LABEL_KEY[tabKey])}
+              </TabsTrigger>
+            )
+          })}
+        </TabsList>
 
-      <div key={tab} className="animate-tab-fade-in">
-        {tab === 'planes' && <PlansSection />}
-        {tab === 'facturas' && <InvoicesSection />}
-      </div>
+        <TabsContent value="planes">
+          <PlansSection />
+        </TabsContent>
+        <TabsContent value="facturas">
+          <InvoicesSection />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

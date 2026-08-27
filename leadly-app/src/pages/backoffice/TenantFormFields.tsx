@@ -1,4 +1,8 @@
-import { FieldError, Input, Label, Select, Textarea } from '@/components/atoms'
+import { FieldError } from '@/components/atoms'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { COUNTRIES, DOCUMENT_TYPES, LANGUAGES } from '../../lib/referenceData'
 import type { TenantFormState } from './useTenantForm'
 import { useLanguage } from '../../contexts/LanguageContext'
@@ -43,9 +47,10 @@ export function TenantFormFields({ form, hideNotes = false, compact = false }: {
           <Input
             id="tenant-name"
             value={form.name}
-            invalid={!!form.nameError}
+            aria-invalid={!!form.nameError}
             onChange={(e) => form.setName(e.target.value)}
             placeholder={t('backoffice.tenantForm.name.placeholder')}
+            className="mt-1"
           />
           <FieldError message={form.nameError} />
         </div>
@@ -57,9 +62,10 @@ export function TenantFormFields({ form, hideNotes = false, compact = false }: {
           <Input
             id="tenant-legal-name"
             value={form.legalName}
-            invalid={!!form.legalNameError}
+            aria-invalid={!!form.legalNameError}
             onChange={(e) => form.setLegalName(e.target.value)}
             placeholder={form.entityType === 'empresa' ? t('backoffice.tenantForm.legalName.placeholder.empresa') : t('backoffice.tenantForm.legalName.placeholder.persona')}
+            className="mt-1"
           />
           <FieldError message={form.legalNameError} />
         </div>
@@ -68,18 +74,17 @@ export function TenantFormFields({ form, hideNotes = false, compact = false }: {
       <div className={`${rowCols2} ${rowGap}`}>
         <div>
           <Label htmlFor="tenant-document-type">{t('backoffice.tenantForm.documentType')}</Label>
-          <Select
-            id="tenant-document-type"
-            value={form.documentType}
-            invalid={!!form.documentTypeError}
-            onChange={(e) => form.setDocumentType(e.target.value as typeof form.documentType)}
-          >
-            <option value="">{t('common.form.selectPlaceholder')}</option>
-            {DOCUMENT_TYPES.map((d) => (
-              <option key={d.value} value={d.value}>
-                {t(d.labelKey)}
-              </option>
-            ))}
+          <Select value={form.documentType} onValueChange={(v) => form.setDocumentType(v as typeof form.documentType)}>
+            <SelectTrigger id="tenant-document-type" aria-invalid={!!form.documentTypeError} className="mt-1 w-full">
+              <SelectValue placeholder={t('common.form.selectPlaceholder')} />
+            </SelectTrigger>
+            <SelectContent>
+              {DOCUMENT_TYPES.map((d) => (
+                <SelectItem key={d.value} value={d.value}>
+                  {t(d.labelKey)}
+                </SelectItem>
+              ))}
+            </SelectContent>
           </Select>
           <FieldError message={form.documentTypeError} />
         </div>
@@ -89,9 +94,10 @@ export function TenantFormFields({ form, hideNotes = false, compact = false }: {
           <Input
             id="tenant-document-number"
             value={form.documentNumber}
-            invalid={!!form.documentNumberError}
+            aria-invalid={!!form.documentNumberError}
             onChange={(e) => form.setDocumentNumber(e.target.value)}
             placeholder={t('backoffice.tenantForm.documentNumber.placeholder')}
+            className="mt-1"
           />
           <FieldError message={form.documentNumberError} />
         </div>
@@ -104,9 +110,10 @@ export function TenantFormFields({ form, hideNotes = false, compact = false }: {
             id="tenant-email"
             type="email"
             value={form.contactEmail}
-            invalid={!!form.emailError}
+            aria-invalid={!!form.emailError}
             onChange={(e) => form.setContactEmail(e.target.value)}
             placeholder="contacto@empresa.com"
+            className="mt-1"
           />
           <FieldError message={form.emailError} />
         </div>
@@ -116,9 +123,10 @@ export function TenantFormFields({ form, hideNotes = false, compact = false }: {
           <Input
             id="tenant-phone"
             value={form.contactPhone}
-            invalid={!!form.phoneError}
+            aria-invalid={!!form.phoneError}
             onChange={(e) => form.setContactPhone(e.target.value)}
             placeholder="+573001234567"
+            className="mt-1"
           />
           <FieldError message={form.phoneError} />
         </div>
@@ -127,18 +135,17 @@ export function TenantFormFields({ form, hideNotes = false, compact = false }: {
       <div className={`${rowCols3} ${rowGap}`}>
         <div>
           <Label htmlFor="tenant-country">{t('backoffice.tenantForm.country')}</Label>
-          <Select
-            id="tenant-country"
-            value={form.country}
-            invalid={!!form.countryError}
-            onChange={(e) => form.setCountry(e.target.value)}
-          >
-            <option value="">{t('common.form.selectPlaceholder')}</option>
-            {COUNTRIES.map((c) => (
-              <option key={c.code} value={c.code}>
-                {t(c.labelKey)}
-              </option>
-            ))}
+          <Select value={form.country} onValueChange={(v) => form.setCountry(v)}>
+            <SelectTrigger id="tenant-country" aria-invalid={!!form.countryError} className="mt-1 w-full">
+              <SelectValue placeholder={t('common.form.selectPlaceholder')} />
+            </SelectTrigger>
+            <SelectContent>
+              {COUNTRIES.map((c) => (
+                <SelectItem key={c.code} value={c.code}>
+                  {t(c.labelKey)}
+                </SelectItem>
+              ))}
+            </SelectContent>
           </Select>
           <FieldError message={form.countryError} />
         </div>
@@ -148,21 +155,27 @@ export function TenantFormFields({ form, hideNotes = false, compact = false }: {
           <Input
             id="tenant-state"
             value={form.stateProvince}
-            invalid={!!form.stateProvinceError}
+            aria-invalid={!!form.stateProvinceError}
             onChange={(e) => form.setStateProvince(e.target.value)}
             placeholder={t('backoffice.tenantForm.stateProvince.placeholder')}
+            className="mt-1"
           />
           <FieldError message={form.stateProvinceError} />
         </div>
 
         <div>
           <Label htmlFor="tenant-language">{t('backoffice.tenantForm.preferredLanguage')}</Label>
-          <Select id="tenant-language" value={form.preferredLanguage} onChange={(e) => form.setPreferredLanguage(e.target.value as typeof form.preferredLanguage)}>
-            {LANGUAGES.map((l) => (
-              <option key={l.value} value={l.value}>
-                {t(l.labelKey)}
-              </option>
-            ))}
+          <Select value={form.preferredLanguage} onValueChange={(v) => form.setPreferredLanguage(v as typeof form.preferredLanguage)}>
+            <SelectTrigger id="tenant-language" className="mt-1 w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {LANGUAGES.map((l) => (
+                <SelectItem key={l.value} value={l.value}>
+                  {t(l.labelKey)}
+                </SelectItem>
+              ))}
+            </SelectContent>
           </Select>
         </div>
       </div>
@@ -174,13 +187,14 @@ export function TenantFormFields({ form, hideNotes = false, compact = false }: {
           value={form.billingAddress}
           onChange={(e) => form.setBillingAddress(e.target.value)}
           placeholder={t('backoffice.tenantForm.billingAddress.placeholder')}
+          className="mt-1"
         />
       </div>
 
       {!hideNotes && (
         <div>
           <Label htmlFor="tenant-notes">{t('backoffice.tenantForm.notes')}</Label>
-          <Textarea id="tenant-notes" rows={3} value={form.notes} onChange={(e) => form.setNotes(e.target.value)} />
+          <Textarea id="tenant-notes" rows={3} value={form.notes} onChange={(e) => form.setNotes(e.target.value)} className="mt-1" />
         </div>
       )}
     </div>

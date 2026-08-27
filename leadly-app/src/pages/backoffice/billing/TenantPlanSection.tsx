@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
 import { assignTenantToPlan, cancelSubscription, getActiveSubscriptionForTenant, listBillingPlans, reactivateSubscription } from '../../../lib/api/billing'
 import type { BillingPlan, BillingSubscription } from '../../../types/domain'
-import { Badge, Button, PageSpinner, Select } from '@/components/atoms'
+import { PageSpinner } from '@/components/atoms'
 import { ConfirmDialog } from '@/components/organisms'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import type { TranslationKey } from '../../../i18n/translations'
 import { formatDate } from '../../../lib/dates'
@@ -110,23 +113,27 @@ export function TenantPlanSection({ tenantId, onPlanChange }: { tenantId: string
 
       {subscription !== undefined && showAssignForm && (
         <div className="space-y-2">
-          <Select value={selectedPlanId} onChange={(e) => setSelectedPlanId(e.target.value)} className="!py-1.5 text-sm">
-            <option value="">{t('backoffice.tenantBilling.selectPlan')}</option>
-            {plans
-              ?.filter((p) => p.is_active)
-              .map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} — {formatMoney(p.amount_cents, p.currency)}/
-                  {p.billing_interval === 'monthly' ? t('backoffice.tenantBilling.perMonth') : t('backoffice.tenantBilling.perYear')}
-                </option>
-              ))}
+          <Select value={selectedPlanId} onValueChange={setSelectedPlanId}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder={t('backoffice.tenantBilling.selectPlan')} />
+            </SelectTrigger>
+            <SelectContent>
+              {plans
+                ?.filter((p) => p.is_active)
+                .map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name} — {formatMoney(p.amount_cents, p.currency)}/
+                    {p.billing_interval === 'monthly' ? t('backoffice.tenantBilling.perMonth') : t('backoffice.tenantBilling.perYear')}
+                  </SelectItem>
+                ))}
+            </SelectContent>
           </Select>
           <div className="flex gap-1.5">
-            <Button variant="secondary" onClick={handleAssignPlan} disabled={!selectedPlanId || assigning} className="!px-2.5 !py-1.5 text-xs">
+            <Button size="xs" onClick={handleAssignPlan} disabled={!selectedPlanId || assigning}>
               {assigning ? t('backoffice.tenantBilling.assigning') : t('backoffice.tenantBilling.assignPlan')}
             </Button>
             {changingPlan && (
-              <Button variant="ghost" onClick={() => setChangingPlan(false)} className="!px-2.5 !py-1.5 text-xs">
+              <Button variant="ghost" size="xs" onClick={() => setChangingPlan(false)}>
                 {t('common.actions.cancel')}
               </Button>
             )}
@@ -138,7 +145,16 @@ export function TenantPlanSection({ tenantId, onPlanChange }: { tenantId: string
         <div className="space-y-1.5">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-brand-800">{plan?.name ?? t('backoffice.tenantBilling.plan')}</span>
-            <Badge tone={subscription.status === 'ACTIVE' ? 'success' : subscription.status === 'PENDING_PAYMENT' ? 'warning' : 'danger'}>
+            <Badge
+              variant="outline"
+              className={
+                subscription.status === 'ACTIVE'
+                  ? 'border-transparent bg-emerald-100 text-emerald-700'
+                  : subscription.status === 'PENDING_PAYMENT'
+                    ? 'border-transparent bg-amber-100 text-amber-700'
+                    : 'border-transparent bg-red-100 text-red-700'
+              }
+            >
               {t(SUBSCRIPTION_STATUS_LABEL_KEY[subscription.status])}
             </Badge>
           </div>

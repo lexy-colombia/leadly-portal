@@ -3,8 +3,12 @@ import { inviteTenantUser } from '../../lib/api/users'
 import type { Profile } from '../../types/domain'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { TranslationKey } from '../../i18n/translations'
-import { Button, FieldError, Input, Label, Select } from '@/components/atoms'
+import { FieldError } from '@/components/atoms'
 import { Drawer } from '@/components/organisms'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { isNotBlank, isValidE164Phone, isValidEmail } from '../../lib/validation'
 
 const ROLE_LABEL_KEY: Record<'tenant_admin' | 'tenant_agent', TranslationKey> = {
@@ -94,7 +98,7 @@ export function UserInviteDrawer({
             <Input
               id="invite-full-name"
               value={fullName}
-              invalid={!!fullNameError}
+              aria-invalid={!!fullNameError}
               onChange={(e) => setFullName(e.target.value)}
               placeholder={t('auth.namePlaceholder')}
             />
@@ -107,7 +111,7 @@ export function UserInviteDrawer({
               id="invite-email"
               type="email"
               value={email}
-              invalid={!!emailError}
+              aria-invalid={!!emailError}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="persona@empresa.com"
             />
@@ -119,7 +123,7 @@ export function UserInviteDrawer({
             <Input
               id="invite-phone"
               value={phone}
-              invalid={!!phoneError}
+              aria-invalid={!!phoneError}
               onChange={(e) => setPhone(e.target.value)}
               placeholder="+573001234567"
             />
@@ -128,12 +132,17 @@ export function UserInviteDrawer({
 
           <div>
             <Label htmlFor="invite-role">{t('account.invite.role')}</Label>
-            <Select id="invite-role" value={role} onChange={(e) => setRole(e.target.value as typeof role)}>
-              {(['tenant_admin', 'tenant_agent'] as const).map((r) => (
-                <option key={r} value={r}>
-                  {t(ROLE_LABEL_KEY[r])}
-                </option>
-              ))}
+            <Select value={role} onValueChange={(v) => setRole(v as typeof role)}>
+              <SelectTrigger id="invite-role" className="mt-1 w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(['tenant_admin', 'tenant_agent'] as const).map((r) => (
+                  <SelectItem key={r} value={r}>
+                    {t(ROLE_LABEL_KEY[r])}
+                  </SelectItem>
+                ))}
+              </SelectContent>
             </Select>
           </div>
 

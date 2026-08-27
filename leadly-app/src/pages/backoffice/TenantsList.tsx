@@ -2,12 +2,23 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { listTenants } from '../../lib/api/tenants'
 import type { Tenant, TenantEntityType, TenantStatus } from '../../types/domain'
-import { Badge, Button, InitialsAvatar, PageSpinner, Select, Table, TBody, TD, TH, THead, TRow } from '@/components/atoms'
-import { Card, EmptyState, IconInput, Pagination } from '@/components/molecules'
+import { InitialsAvatar, PageSpinner } from '@/components/atoms'
+import { Card, ComboboxFilter, EmptyState, IconInput, Pagination } from '@/components/molecules'
 import { FilterIcon, PlusIcon, SearchIcon } from '@/components/atoms/icons'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { TenantDrawer } from './TenantDrawer'
 import { useLanguage } from '../../contexts/LanguageContext'
 import { formatDate } from '../../lib/dates'
+
+// bg/text pair on top of shadcn Badge's `outline` variant, same convention
+// as Clients.tsx's STAGE_BADGE_CLASS -- shadcn's own variants have no
+// "success"/"neutral" tone, unlike the legacy atoms Badge this replaces.
+const TENANT_STATUS_BADGE_CLASS: Record<TenantStatus, string> = {
+  active: 'border-transparent bg-emerald-100 text-emerald-700',
+  inactive: 'border-transparent bg-slate-100 text-slate-600',
+}
 
 const PAGE_SIZE = 10
 
@@ -104,31 +115,46 @@ export function TenantsList() {
             <div className="absolute left-0 top-full z-40 mt-2 w-64 max-w-[calc(100vw-2rem)] space-y-3 rounded-2xl border border-brand-100 bg-white p-4 shadow-lg">
               <div>
                 <label className="mb-1 block text-xs font-medium text-brand-400">{t('backoffice.clientesList.filters.status.label')}</label>
-                <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as TenantStatus | '')} className="!py-1.5 text-sm">
-                  <option value="">{t('backoffice.clientesList.filters.status.all')}</option>
-                  <option value="active">{t('common.status.active')}</option>
-                  <option value="inactive">{t('common.status.inactive')}</option>
-                </Select>
+                <ComboboxFilter
+                  options={[
+                    { id: 'active', label: t('common.status.active') },
+                    { id: 'inactive', label: t('common.status.inactive') },
+                  ]}
+                  value={statusFilter || null}
+                  onChange={(id) => setStatusFilter((id as TenantStatus) ?? '')}
+                  placeholder={t('backoffice.clientesList.filters.status.all')}
+                  searchPlaceholder={t('backoffice.clientesList.filters.search')}
+                  emptyLabel={t('backoffice.clientesList.filters.noResults')}
+                  triggerClassName="w-full"
+                />
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium text-brand-400">{t('backoffice.clientesList.filters.entityType.label')}</label>
-                <Select value={entityFilter} onChange={(e) => setEntityFilter(e.target.value as TenantEntityType | '')} className="!py-1.5 text-sm">
-                  <option value="">{t('backoffice.clientesList.filters.entityType.all')}</option>
-                  <option value="empresa">{t('backoffice.clienteDetalle.entityType.empresa')}</option>
-                  <option value="persona">{t('backoffice.clienteDetalle.entityType.persona')}</option>
-                </Select>
+                <ComboboxFilter
+                  options={[
+                    { id: 'empresa', label: t('backoffice.clienteDetalle.entityType.empresa') },
+                    { id: 'persona', label: t('backoffice.clienteDetalle.entityType.persona') },
+                  ]}
+                  value={entityFilter || null}
+                  onChange={(id) => setEntityFilter((id as TenantEntityType) ?? '')}
+                  placeholder={t('backoffice.clientesList.filters.entityType.all')}
+                  searchPlaceholder={t('backoffice.clientesList.filters.search')}
+                  emptyLabel={t('backoffice.clientesList.filters.noResults')}
+                  triggerClassName="w-full"
+                />
               </div>
               {allCountries.length > 0 && (
                 <div>
                   <label className="mb-1 block text-xs font-medium text-brand-400">{t('backoffice.clientesList.filters.country.label')}</label>
-                  <Select value={countryFilter} onChange={(e) => setCountryFilter(e.target.value)} className="!py-1.5 text-sm">
-                    <option value="">{t('backoffice.clientesList.filters.country.all')}</option>
-                    {allCountries.map((country) => (
-                      <option key={country} value={country}>
-                        {country}
-                      </option>
-                    ))}
-                  </Select>
+                  <ComboboxFilter
+                    options={allCountries.map((country) => ({ id: country, label: country }))}
+                    value={countryFilter || null}
+                    onChange={(id) => setCountryFilter(id ?? '')}
+                    placeholder={t('backoffice.clientesList.filters.country.all')}
+                    searchPlaceholder={t('backoffice.clientesList.filters.search')}
+                    emptyLabel={t('backoffice.clientesList.filters.noResults')}
+                    triggerClassName="w-full"
+                  />
                 </div>
               )}
               {hasActiveFilters && (
@@ -154,7 +180,7 @@ export function TenantsList() {
           {t((filtered?.length ?? 0) === 1 ? 'backoffice.clientesList.count.singular' : 'backoffice.clientesList.count.plural')}
         </span>
 
-        <Button variant="secondary" onClick={() => setDrawerOpen(true)} className="!ml-auto !py-1.5 !text-sm">
+        <Button variant="secondary" size="sm" onClick={() => setDrawerOpen(true)} className="ml-auto">
           <PlusIcon width={16} height={16} /> {t('backoffice.clientesList.new')}
         </Button>
       </div>
@@ -172,43 +198,45 @@ export function TenantsList() {
 
       {pageItems && pageItems.length > 0 && (
         <>
-          <Table>
-            <THead>
-              <tr>
-                <TH>{t('backoffice.clientesList.table.name')}</TH>
-                <TH>{t('backoffice.clientesList.table.status')}</TH>
-                <TH className="hidden sm:table-cell">{t('backoffice.clientesList.table.contact')}</TH>
-                <TH className="hidden md:table-cell">{t('backoffice.clientesList.table.country')}</TH>
-                <TH className="hidden md:table-cell">{t('backoffice.clientesList.table.created')}</TH>
-              </tr>
-            </THead>
-            <TBody>
-              {pageItems.map((tenant) => (
-                <TRow key={tenant.id} clickable onClick={() => navigate(`/backoffice/clients/${tenant.id}`)}>
-                  <TD>
-                    <span className="flex items-center gap-3 font-medium text-brand-800">
-                      {tenant.logo_url ? (
-                        <img src={tenant.logo_url} alt="" className="h-8 w-8 rounded-full object-cover" />
-                      ) : (
-                        <InitialsAvatar name={tenant.name} size="sm" />
-                      )}
-                      {tenant.name}
-                    </span>
-                  </TD>
-                  <TD>
-                    <Badge tone={tenant.status === 'active' ? 'success' : 'neutral'}>
-                      {tenant.status === 'active' ? t('common.status.active') : t('common.status.inactive')}
-                    </Badge>
-                  </TD>
-                  <TD className="hidden sm:table-cell text-brand-400">{tenant.contact_email ?? '—'}</TD>
-                  <TD className="hidden md:table-cell text-brand-400">{tenant.country ?? '—'}</TD>
-                  <TD className="hidden md:table-cell text-brand-400">
-                    {formatDate(tenant.created_at)}
-                  </TD>
-                </TRow>
-              ))}
-            </TBody>
-          </Table>
+          <div className="overflow-hidden rounded-2xl border border-brand-100 bg-white">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t('backoffice.clientesList.table.name')}</TableHead>
+                  <TableHead>{t('backoffice.clientesList.table.status')}</TableHead>
+                  <TableHead className="hidden sm:table-cell">{t('backoffice.clientesList.table.contact')}</TableHead>
+                  <TableHead className="hidden md:table-cell">{t('backoffice.clientesList.table.country')}</TableHead>
+                  <TableHead className="hidden md:table-cell">{t('backoffice.clientesList.table.created')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pageItems.map((tenant) => (
+                  <TableRow key={tenant.id} onClick={() => navigate(`/backoffice/clients/${tenant.id}`)} className="cursor-pointer">
+                    <TableCell>
+                      <span className="flex items-center gap-3 font-medium text-brand-800">
+                        {tenant.logo_url ? (
+                          <img src={tenant.logo_url} alt="" className="h-8 w-8 rounded-full object-cover" />
+                        ) : (
+                          <InitialsAvatar name={tenant.name} size="sm" />
+                        )}
+                        {tenant.name}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={TENANT_STATUS_BADGE_CLASS[tenant.status]}>
+                        {tenant.status === 'active' ? t('common.status.active') : t('common.status.inactive')}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="hidden sm:table-cell text-brand-400">{tenant.contact_email ?? '—'}</TableCell>
+                    <TableCell className="hidden md:table-cell text-brand-400">{tenant.country ?? '—'}</TableCell>
+                    <TableCell className="hidden md:table-cell text-brand-400">
+                      {formatDate(tenant.created_at)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
           <Pagination page={page} totalPages={totalPages} onChange={setPage} />
         </>
       )}

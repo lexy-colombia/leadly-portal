@@ -3,12 +3,24 @@ import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import { deleteWarehouse, listWarehouses } from '../../lib/api/warehouses'
 import type { Warehouse } from '../../types/domain'
-import { Badge, Button, PageSpinner, Table, TBody, TD, TH, THead, TRow } from '@/components/atoms'
+import { PageSpinner } from '@/components/atoms'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Card, EmptyState, Pagination } from '@/components/molecules'
 import { PencilIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
 import { WarehouseDrawer } from './inventory/WarehouseDrawer'
 
 const PAGE_SIZE = 10
+
+// bg/text pair on top of shadcn Badge's `outline` variant -- mismo criterio
+// que STAGE_BADGE_CLASS en Clients.tsx, ninguno de los tonos de fábrica de
+// shadcn (default/secondary/destructive/outline/ghost) cubre "neutral"/"success".
+const WAREHOUSE_STATUS_BADGE_CLASS: Record<'active' | 'inactive', string> = {
+  active: 'border-transparent bg-emerald-50 text-emerald-700',
+  inactive: 'border-transparent bg-brand-50 text-brand-600',
+}
+const WAREHOUSE_DEFAULT_BADGE_CLASS = 'border-transparent bg-brand-50 text-brand-600'
 
 export function Warehouses() {
   const { profile } = useAuth()
@@ -52,7 +64,7 @@ export function Warehouses() {
         <span className="text-xs text-brand-400">
           {warehouses?.length ?? 0} {t((warehouses?.length ?? 0) === 1 ? 'inventory.warehouses.count.singular' : 'inventory.warehouses.count.plural')}
         </span>
-        <Button variant="secondary" onClick={() => setDrawer({ open: true, warehouse: null })} className="!py-1 !text-xs">
+        <Button variant="secondary" size="sm" onClick={() => setDrawer({ open: true, warehouse: null })}>
           <PlusIcon width={14} height={14} /> {t('inventory.warehouses.actions.new')}
         </Button>
       </div>
@@ -68,57 +80,65 @@ export function Warehouses() {
 
       {pageItems && pageItems.length > 0 && (
         <>
-          <Table>
-            <THead>
-              <tr>
-                <TH>{t('inventory.warehouses.table.name')}</TH>
-                <TH>{t('inventory.warehouses.table.address')}</TH>
-                <TH>{t('inventory.warehouses.table.city')}</TH>
-                <TH>{t('inventory.warehouses.table.type')}</TH>
-                <TH>{t('inventory.warehouses.table.status')}</TH>
-                <TH className="text-right">{t('inventory.warehouses.table.actions')}</TH>
-              </tr>
-            </THead>
-            <TBody>
-              {pageItems.map((warehouse) => (
-                <TRow key={warehouse.id} clickable onClick={() => setDrawer({ open: true, warehouse })}>
-                  <TD className="text-xs font-medium text-brand-800">
-                    <span className="inline-flex items-center gap-2">
-                      {warehouse.name}
-                      {warehouse.is_default && <Badge tone="neutral">{t('inventory.warehouses.badge.default')}</Badge>}
-                    </span>
-                  </TD>
-                  <TD className="text-xs text-brand-500">{warehouse.address ?? '-'}</TD>
-                  <TD className="text-xs text-brand-500">{warehouse.city ?? '-'}</TD>
-                  <TD className="text-xs text-brand-500">{t(`inventory.warehouseType.${warehouse.type}`)}</TD>
-                  <TD>
-                    <Badge tone={warehouse.is_active ? 'success' : 'neutral'}>{t(warehouse.is_active ? 'common.status.active' : 'common.status.inactive')}</Badge>
-                  </TD>
-                  <TD className="text-right" onClick={(e) => e.stopPropagation()}>
-                    {deletingId === warehouse.id ? (
-                      <span className="inline-flex items-center gap-1.5">
-                        <Button variant="danger" onClick={() => handleDelete(warehouse.id)} disabled={deleting} className="!px-2 !py-1 text-xs">
-                          {deleting ? t('common.actions.deleting') : t('common.actions.confirm')}
-                        </Button>
-                        <Button variant="ghost" onClick={() => setDeletingId(null)} disabled={deleting} className="!px-2 !py-1 text-xs">
-                          {t('common.actions.cancel')}
-                        </Button>
+          <div className="overflow-hidden rounded-2xl border border-brand-100 bg-white">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t('inventory.warehouses.table.name')}</TableHead>
+                  <TableHead>{t('inventory.warehouses.table.address')}</TableHead>
+                  <TableHead>{t('inventory.warehouses.table.city')}</TableHead>
+                  <TableHead>{t('inventory.warehouses.table.type')}</TableHead>
+                  <TableHead>{t('inventory.warehouses.table.status')}</TableHead>
+                  <TableHead className="text-right">{t('inventory.warehouses.table.actions')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pageItems.map((warehouse) => (
+                  <TableRow key={warehouse.id} onClick={() => setDrawer({ open: true, warehouse })} className="cursor-pointer">
+                    <TableCell className="text-xs font-medium text-brand-800">
+                      <span className="inline-flex items-center gap-2">
+                        {warehouse.name}
+                        {warehouse.is_default && (
+                          <Badge variant="outline" className={WAREHOUSE_DEFAULT_BADGE_CLASS}>
+                            {t('inventory.warehouses.badge.default')}
+                          </Badge>
+                        )}
                       </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1">
-                        <Button variant="ghost" onClick={() => setDrawer({ open: true, warehouse })} className="!px-2 !py-1 text-xs">
-                          <PencilIcon width={12} height={12} />
-                        </Button>
-                        <Button variant="ghost" onClick={() => setDeletingId(warehouse.id)} className="!px-2 !py-1 text-xs !text-red-600 hover:!bg-red-50">
-                          <TrashIcon width={12} height={12} />
-                        </Button>
-                      </span>
-                    )}
-                  </TD>
-                </TRow>
-              ))}
-            </TBody>
-          </Table>
+                    </TableCell>
+                    <TableCell className="text-xs text-brand-500">{warehouse.address ?? '-'}</TableCell>
+                    <TableCell className="text-xs text-brand-500">{warehouse.city ?? '-'}</TableCell>
+                    <TableCell className="text-xs text-brand-500">{t(`inventory.warehouseType.${warehouse.type}`)}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={WAREHOUSE_STATUS_BADGE_CLASS[warehouse.is_active ? 'active' : 'inactive']}>
+                        {t(warehouse.is_active ? 'common.status.active' : 'common.status.inactive')}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                      {deletingId === warehouse.id ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <Button variant="destructive" size="xs" onClick={() => handleDelete(warehouse.id)} disabled={deleting}>
+                            {deleting ? t('common.actions.deleting') : t('common.actions.confirm')}
+                          </Button>
+                          <Button variant="ghost" size="xs" onClick={() => setDeletingId(null)} disabled={deleting}>
+                            {t('common.actions.cancel')}
+                          </Button>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1">
+                          <Button variant="ghost" size="icon-xs" onClick={() => setDrawer({ open: true, warehouse })}>
+                            <PencilIcon width={12} height={12} />
+                          </Button>
+                          <Button variant="ghost" size="icon-xs" className="text-red-600 hover:bg-red-50" onClick={() => setDeletingId(warehouse.id)}>
+                            <TrashIcon width={12} height={12} />
+                          </Button>
+                        </span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
           <Pagination page={page} totalPages={totalPages} onChange={setPage} />
         </>
       )}

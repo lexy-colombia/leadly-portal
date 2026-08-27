@@ -12,6 +12,8 @@
   "backoffice.clientesList.filters.entityType.all": "All",
   "backoffice.clientesList.filters.country.label": "Country",
   "backoffice.clientesList.filters.country.all": "All",
+  "backoffice.clientesList.filters.search": "Search…",
+  "backoffice.clientesList.filters.noResults": "No results",
   "backoffice.clientesList.count.singular": "client",
   "backoffice.clientesList.count.plural": "clients",
   "backoffice.clientesList.table.name": "Name",
