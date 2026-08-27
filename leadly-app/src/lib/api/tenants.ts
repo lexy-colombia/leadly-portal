@@ -50,6 +50,23 @@ export async function setTenantStatus(id: string, status: TenantStatus): Promise
   return data
 }
 
+/** Partial update for the two storefront fields only -- the slug (save button,
+ * infrequent) and the enabled toggle (instant-apply, same pattern as
+ * ai_assistant_skills/tenant_enabled_modules) are saved independently of
+ * each other and of the rest of the company form. */
+export interface TenantStorefrontInput {
+  storefront_slug?: string
+  storefront_enabled?: boolean
+}
+
+export const STOREFRONT_SLUG_TAKEN_CODE = '23505'
+
+export async function updateTenantStorefront(id: string, input: TenantStorefrontInput): Promise<Tenant> {
+  const { data, error } = await supabase.from('tenants').update(input).eq('id', id).select().single()
+  if (error) throw error
+  return data
+}
+
 export function validateTenantLogoFile(file: File): string | null {
   if (!TENANT_LOGO_ALLOWED_TYPES.includes(file.type)) return 'El logo debe ser PNG, JPG, WEBP o SVG.'
   if (file.size > TENANT_LOGO_MAX_BYTES) return 'El logo no puede pesar más de 5MB.'

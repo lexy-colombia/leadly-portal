@@ -54,6 +54,13 @@ export async function createSalesOrderPaymentLink(
   tenantId: string,
   orderId: string,
   createdBy: string | null,
+  // Opcional a propósito: quien paga desde WhatsApp (generate_payment_link
+  // de la IA, o el link manual de create-sales-order-payment-link) no tiene
+  // sesión en ningún portal -- no hay todavía un destino público razonable
+  // para esos dos, así que siguen sin redirect (decisión explícita del
+  // usuario, 2026-08-26). Solo el checkout de la tienda pública lo manda: el
+  // comprador SÍ sigue en un browser real, en esa misma tienda.
+  redirectUrl?: string,
 ): Promise<{ checkoutUrl: string; amount: number; orderCode: string }> {
   const order = await resolveConfirmedOrderBalance(adminClient, tenantId, orderId);
   const balanceDue = order.balanceDue;
@@ -69,6 +76,7 @@ export async function createSalesOrderPaymentLink(
     amountCents: Math.round(balanceDue * 100),
     currency,
     description: `Pago pedido ${orderCode}`,
+    redirectUrl,
   });
 
   const { error: linkError } = await adminClient.from("sales_order_payment_links").insert({
