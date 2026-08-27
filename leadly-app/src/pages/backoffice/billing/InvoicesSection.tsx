@@ -2,9 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { listAllInvoices } from '../../../lib/api/billing'
 import type { PaymentInvoice, PaymentInvoiceStatus, PaymentInvoiceWithTenant } from '../../../types/domain'
-import { Badge, Button, PageSpinner, Select, Table, TBody, TD, TH, THead, TRow } from '@/components/atoms'
-import { Card, EmptyState, IconInput, Pagination } from '@/components/molecules'
+import { PageSpinner } from '@/components/atoms'
+import { Card, ComboboxFilter, EmptyState, IconInput, Pagination } from '@/components/molecules'
 import { FilterIcon, SearchIcon } from '@/components/atoms/icons'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ManualPaymentDrawer } from './ManualPaymentDrawer'
 import { InvoiceDetailDrawer } from './InvoiceDetailDrawer'
 import { useLanguage } from '../../../contexts/LanguageContext'
@@ -21,12 +24,16 @@ const STATUS_LABEL_KEY: Record<PaymentInvoiceStatus, TranslationKey> = {
   REFUNDED: 'backoffice.tenantBilling.invoiceStatus.refunded',
 }
 
-const STATUS_TONE: Record<PaymentInvoiceStatus, 'success' | 'warning' | 'danger' | 'neutral'> = {
-  PENDING: 'warning',
-  PAID: 'success',
-  OVERDUE: 'danger',
-  CANCELLED: 'neutral',
-  REFUNDED: 'neutral',
+// bg/text pair on top of shadcn Badge's `outline` variant -- shadcn's own
+// variants have no "warning"/"success"/"danger" tone, unlike the legacy
+// atoms Badge this replaces (see STAGE_BADGE_CLASS in Clients.tsx for the
+// same pattern).
+const STATUS_BADGE_CLASS: Record<PaymentInvoiceStatus, string> = {
+  PENDING: 'border-transparent bg-amber-100 text-amber-700',
+  PAID: 'border-transparent bg-emerald-100 text-emerald-700',
+  OVERDUE: 'border-transparent bg-red-100 text-red-700',
+  CANCELLED: 'border-transparent bg-slate-100 text-slate-600',
+  REFUNDED: 'border-transparent bg-slate-100 text-slate-600',
 }
 
 function formatMoney(amountCents: number, currency: string): string {
@@ -141,14 +148,15 @@ export function InvoicesSection() {
             <div className="absolute left-0 top-full z-40 mt-2 w-64 max-w-[calc(100vw-2rem)] space-y-3 rounded-2xl border border-brand-100 bg-white p-4 shadow-lg">
               <div>
                 <label className="mb-1 block text-xs font-medium text-brand-400">{t('backoffice.invoicesSection.filters.status.label')}</label>
-                <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as PaymentInvoiceStatus | '')} className="!py-1.5 text-sm">
-                  <option value="">{t('backoffice.invoicesSection.filters.status.all')}</option>
-                  {(Object.keys(STATUS_LABEL_KEY) as PaymentInvoiceStatus[]).map((s) => (
-                    <option key={s} value={s}>
-                      {t(STATUS_LABEL_KEY[s])}
-                    </option>
-                  ))}
-                </Select>
+                <ComboboxFilter
+                  options={(Object.keys(STATUS_LABEL_KEY) as PaymentInvoiceStatus[]).map((s) => ({ id: s, label: t(STATUS_LABEL_KEY[s]) }))}
+                  value={statusFilter || null}
+                  onChange={(id) => setStatusFilter((id as PaymentInvoiceStatus | null) ?? '')}
+                  placeholder={t('backoffice.invoicesSection.filters.status.all')}
+                  searchPlaceholder={t('orders.filters.search')}
+                  emptyLabel={t('orders.filters.noResults')}
+                  triggerClassName="w-full"
+                />
               </div>
               {hasActiveFilters && (
                 <button
@@ -182,47 +190,51 @@ export function InvoicesSection() {
 
       {pageItems && pageItems.length > 0 && (
         <>
-          <Table>
-            <THead>
-              <tr>
-                <TH>{t('backoffice.invoicesSection.table.invoice')}</TH>
-                <TH>{t('backoffice.invoicesSection.table.tenant')}</TH>
-                <TH>{t('backoffice.invoicesSection.table.amount')}</TH>
-                <TH>{t('backoffice.invoicesSection.table.status')}</TH>
-                <TH className="hidden sm:table-cell">{t('backoffice.invoicesSection.table.due')}</TH>
-                <TH className="text-right">{t('backoffice.invoicesSection.table.actions')}</TH>
-              </tr>
-            </THead>
-            <TBody>
-              {pageItems.map((invoice) => (
-                <TRow key={invoice.id} clickable onClick={() => setDetailDrawer(invoice)}>
-                  <TD className="font-medium text-brand-800">{invoice.invoice_number ?? invoice.id.slice(0, 8)}</TD>
-                  <TD onClick={(e) => e.stopPropagation()}>
-                    <Link to={`/backoffice/clients/${invoice.payer_tenant_id}`} className="text-brand-600 hover:text-accent-600">
-                      {invoice.tenant?.name ?? '—'}
-                    </Link>
-                  </TD>
-                  <TD>{formatMoney(invoice.amount_cents, invoice.currency)}</TD>
-                  <TD>
-                    <Badge tone={STATUS_TONE[invoice.status]}>{t(STATUS_LABEL_KEY[invoice.status])}</Badge>
-                  </TD>
-                  <TD className="hidden sm:table-cell text-brand-400">{formatDate(invoice.due_date)}</TD>
-                  <TD className="text-right" onClick={(e) => e.stopPropagation()}>
-                    <span className="inline-flex items-center gap-1">
-                      {(invoice.status === 'PENDING' || invoice.status === 'OVERDUE') && (
-                        <Button variant="ghost" onClick={() => setPaymentDrawer(invoice)} className="!px-2.5 !py-1.5 text-xs">
-                          {t('backoffice.invoicesSection.recordPayment')}
+          <div className="overflow-hidden rounded-2xl border border-brand-100 bg-white">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t('backoffice.invoicesSection.table.invoice')}</TableHead>
+                  <TableHead>{t('backoffice.invoicesSection.table.tenant')}</TableHead>
+                  <TableHead>{t('backoffice.invoicesSection.table.amount')}</TableHead>
+                  <TableHead>{t('backoffice.invoicesSection.table.status')}</TableHead>
+                  <TableHead className="hidden sm:table-cell">{t('backoffice.invoicesSection.table.due')}</TableHead>
+                  <TableHead className="text-right">{t('backoffice.invoicesSection.table.actions')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pageItems.map((invoice) => (
+                  <TableRow key={invoice.id} onClick={() => setDetailDrawer(invoice)} className="cursor-pointer">
+                    <TableCell className="font-medium text-brand-800">{invoice.invoice_number ?? invoice.id.slice(0, 8)}</TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <Link to={`/backoffice/clients/${invoice.payer_tenant_id}`} className="text-brand-600 hover:text-accent-600">
+                        {invoice.tenant?.name ?? '—'}
+                      </Link>
+                    </TableCell>
+                    <TableCell>{formatMoney(invoice.amount_cents, invoice.currency)}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={STATUS_BADGE_CLASS[invoice.status]}>
+                        {t(STATUS_LABEL_KEY[invoice.status])}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="hidden sm:table-cell text-brand-400">{formatDate(invoice.due_date)}</TableCell>
+                    <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                      <span className="inline-flex items-center gap-1">
+                        {(invoice.status === 'PENDING' || invoice.status === 'OVERDUE') && (
+                          <Button variant="ghost" size="xs" onClick={() => setPaymentDrawer(invoice)}>
+                            {t('backoffice.invoicesSection.recordPayment')}
+                          </Button>
+                        )}
+                        <Button variant="ghost" size="xs" onClick={() => setDetailDrawer(invoice)}>
+                          {t('backoffice.invoicesSection.viewDetail')}
                         </Button>
-                      )}
-                      <Button variant="ghost" onClick={() => setDetailDrawer(invoice)} className="!px-2.5 !py-1.5 text-xs">
-                        {t('backoffice.invoicesSection.viewDetail')}
-                      </Button>
-                    </span>
-                  </TD>
-                </TRow>
-              ))}
-            </TBody>
-          </Table>
+                      </span>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
           <Pagination page={page} totalPages={totalPages} onChange={setPage} />
         </>
       )}

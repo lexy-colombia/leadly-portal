@@ -1,5 +1,8 @@
 {
   "contacts.search.placeholder": "Search...",
+  "contacts.filters.labels.stage": "Stage",
+  "contacts.filters.labels.agent": "Agent",
+  "contacts.filters.labels.tag": "Tag",
   "contacts.filters.stage.all": "All stages",
   "contacts.filters.stage.search": "Search stage...",
   "contacts.filters.stage.noResults": "No results.",

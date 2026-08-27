@@ -1,5 +1,8 @@
 {
   "contacts.search.placeholder": "Buscar...",
+  "contacts.filters.labels.stage": "Etapa",
+  "contacts.filters.labels.agent": "Agente",
+  "contacts.filters.labels.tag": "Etiqueta",
   "contacts.filters.stage.all": "Todas las etapas",
   "contacts.filters.stage.search": "Buscar etapa...",
   "contacts.filters.stage.noResults": "Sin resultados.",

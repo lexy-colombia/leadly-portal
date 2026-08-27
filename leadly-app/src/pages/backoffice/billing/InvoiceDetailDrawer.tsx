@@ -1,8 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { listAttemptsForInvoice, listItemsForInvoice } from '../../../lib/api/billing'
 import type { PaymentAttempt, PaymentInvoice, PaymentInvoiceItem } from '../../../types/domain'
-import { Badge, PageSpinner, Table, TBody, TD, TH, THead, TRow } from '@/components/atoms'
+import { PageSpinner } from '@/components/atoms'
 import { Drawer } from '@/components/organisms'
+import { Badge } from '@/components/ui/badge'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import { formatDateTime } from '../../../lib/dates'
 
@@ -64,26 +66,28 @@ export function InvoiceDetailDrawer({ open, onClose, invoice }: { open: boolean;
           {items === null && <PageSpinner />}
           {items && items.length === 0 && <p className="text-sm text-brand-400">{t('backoffice.invoiceDetail.items.empty')}</p>}
           {items && items.length > 0 && (
-            <Table bare>
-              <THead>
-                <tr>
-                  <TH>{t('backoffice.invoiceDetail.items.description')}</TH>
-                  <TH className="text-right">{t('backoffice.invoiceDetail.items.quantity')}</TH>
-                  <TH className="text-right">{t('backoffice.invoiceDetail.items.unitPrice')}</TH>
-                  <TH className="text-right">{t('backoffice.invoiceDetail.items.subtotal')}</TH>
-                </tr>
-              </THead>
-              <TBody>
-                {items.map((item) => (
-                  <TRow key={item.id}>
-                    <TD>{item.description}</TD>
-                    <TD className="text-right">{item.quantity}</TD>
-                    <TD className="text-right">{formatMoney(item.unit_price_cents, invoice.currency)}</TD>
-                    <TD className="text-right">{formatMoney(item.subtotal_cents, invoice.currency)}</TD>
-                  </TRow>
-                ))}
-              </TBody>
-            </Table>
+            <div className="overflow-hidden rounded-2xl border border-brand-100 bg-white">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t('backoffice.invoiceDetail.items.description')}</TableHead>
+                    <TableHead className="text-right">{t('backoffice.invoiceDetail.items.quantity')}</TableHead>
+                    <TableHead className="text-right">{t('backoffice.invoiceDetail.items.unitPrice')}</TableHead>
+                    <TableHead className="text-right">{t('backoffice.invoiceDetail.items.subtotal')}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {items.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell>{item.description}</TableCell>
+                      <TableCell className="text-right">{item.quantity}</TableCell>
+                      <TableCell className="text-right">{formatMoney(item.unit_price_cents, invoice.currency)}</TableCell>
+                      <TableCell className="text-right">{formatMoney(item.subtotal_cents, invoice.currency)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           )}
         </section>
 
@@ -111,7 +115,12 @@ export function InvoiceDetailDrawer({ open, onClose, invoice }: { open: boolean;
                     <span className="text-sm font-medium text-brand-800">
                       {a.provider_key === 'manual' ? t('backoffice.invoiceDetail.payments.manual') : a.provider_key}
                     </span>
-                    <Badge tone={a.status === 'APPROVED' ? 'success' : 'neutral'}>{a.status}</Badge>
+                    <Badge
+                      variant="outline"
+                      className={a.status === 'APPROVED' ? 'border-transparent bg-emerald-100 text-emerald-700' : 'border-transparent bg-slate-100 text-slate-600'}
+                    >
+                      {a.status}
+                    </Badge>
                   </div>
                   <p className="mt-0.5 text-xs text-brand-400">
                     {a.amount_cents !== null ? formatMoney(a.amount_cents, a.currency ?? invoice.currency) : ''} · {formatDateTime(a.created_at, language)}

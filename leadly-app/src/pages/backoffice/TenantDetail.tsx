@@ -4,9 +4,12 @@ import { getTenant, setTenantStatus } from '../../lib/api/tenants'
 import { listProfilesByTenant } from '../../lib/api/users'
 import type { BillingPlan, Profile, Tenant } from '../../types/domain'
 import { COUNTRIES, DOCUMENT_TYPES, LANGUAGES } from '../../lib/referenceData'
-import { Badge, Button, InitialsAvatar, PageSpinner } from '@/components/atoms'
+import { InitialsAvatar, PageSpinner } from '@/components/atoms'
 import { Card } from '@/components/molecules'
 import { BuildingIcon, CreditCardIcon, GlobeIcon, IdCardIcon, MailIcon, MapPinIcon, MenuIcon, PencilIcon, PhoneIcon, PlusIcon, ReceiptIcon, UserIcon, UsersIcon } from '@/components/atoms/icons'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { TenantDrawer } from './TenantDrawer'
 import { WhatsappLineDrawer } from './WhatsappLineDrawer'
 import { UserInviteDrawer } from '../shared/UserInviteDrawer'
@@ -16,21 +19,12 @@ import { TenantBillingSection } from './billing/TenantBillingSection'
 import { TenantPlanSection } from './billing/TenantPlanSection'
 import { TenantModulesSection } from './TenantModulesSection'
 import { useLanguage } from '../../contexts/LanguageContext'
-import type { TranslationKey } from '../../i18n/translations'
 
-const TABS = ['lineas', 'usuarios', 'facturacion', 'modulos'] as const
-type Tab = (typeof TABS)[number]
-const TAB_LABEL_KEY: Record<Tab, TranslationKey> = {
-  lineas: 'backoffice.clienteDetalle.tabs.lineas',
-  usuarios: 'backoffice.clienteDetalle.tabs.usuarios',
-  facturacion: 'backoffice.clienteDetalle.tabs.facturacion',
-  modulos: 'backoffice.clienteDetalle.tabs.modulos',
-}
-const TAB_ICON: Record<Tab, typeof IdCardIcon> = {
-  lineas: PhoneIcon,
-  usuarios: UsersIcon,
-  facturacion: CreditCardIcon,
-  modulos: MenuIcon,
+// bg/text pair on top of shadcn Badge's `outline` variant, same convention
+// as TenantsList.tsx's TENANT_STATUS_BADGE_CLASS.
+const TENANT_STATUS_BADGE_CLASS: Record<Tenant['status'], string> = {
+  active: 'border-transparent bg-emerald-100 text-emerald-700',
+  inactive: 'border-transparent bg-slate-100 text-slate-600',
 }
 
 export function TenantDetail() {
@@ -83,7 +77,7 @@ function Field({ icon, label, value }: { icon: ReactNode; label: string; value: 
 
 function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onTenantChange: (t: Tenant) => void }) {
   const { t } = useLanguage()
-  const [tab, setTab] = useState<Tab>('lineas')
+  const [tab, setTab] = useState('lineas')
   const [editOpen, setEditOpen] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
   const [confirmingDeactivate, setConfirmingDeactivate] = useState(false)
@@ -159,7 +153,7 @@ function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onT
               <button onClick={() => setEditOpen(true)} aria-label={t('backoffice.clienteDetalle.editAria')} className="text-brand-300 hover:text-brand-600">
                 <PencilIcon width={14} height={14} />
               </button>
-              <Badge tone={tenant.status === 'active' ? 'success' : 'neutral'}>
+              <Badge variant="outline" className={TENANT_STATUS_BADGE_CLASS[tenant.status]}>
                 {tenant.status === 'active' ? t('common.status.active') : t('common.status.inactive')}
               </Badge>
             </div>
@@ -167,7 +161,7 @@ function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onT
         </div>
 
         <div className="relative">
-          <Button variant="ghost" onClick={() => setActionsOpen((o) => !o)} className="!px-2.5 !py-1.5 text-xs">
+          <Button variant="ghost" size="sm" onClick={() => setActionsOpen((o) => !o)} className="text-xs">
             {t('backoffice.clienteDetalle.moreActions')}
           </Button>
           {actionsOpen && (
@@ -177,10 +171,10 @@ function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onT
                 confirmingDeactivate ? (
                   <div className="space-y-1.5 p-1">
                     <p className="px-2 text-xs text-brand-500">{t('backoffice.clienteDetalle.deactivateConfirm')}</p>
-                    <Button variant="danger" onClick={handleDeactivate} disabled={statusUpdating} className="!w-full !py-1.5 text-xs">
+                    <Button variant="destructive" size="sm" onClick={handleDeactivate} disabled={statusUpdating} className="w-full text-xs">
                       {statusUpdating ? t('backoffice.clienteDetalle.deactivating') : t('backoffice.clienteDetalle.deactivateYes')}
                     </Button>
-                    <Button variant="ghost" onClick={() => setConfirmingDeactivate(false)} className="!w-full !py-1.5 text-xs">
+                    <Button variant="ghost" size="sm" onClick={() => setConfirmingDeactivate(false)} className="w-full text-xs">
                       {t('common.actions.cancel')}
                     </Button>
                   </div>
@@ -209,7 +203,7 @@ function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onT
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
         <Card className="lg:w-72 lg:shrink-0">
           <div className="flex items-center gap-2 pb-3">
-            <Badge tone="neutral">
+            <Badge variant="outline">
               {tenant.entity_type === 'empresa' ? t('backoffice.clienteDetalle.entityType.empresa') : t('backoffice.clienteDetalle.entityType.persona')}
             </Badge>
           </div>
@@ -248,29 +242,25 @@ function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onT
           )}
         </Card>
 
-        <div className="min-w-0 flex-1 space-y-4">
-          <div className="flex gap-4 overflow-x-auto border-b border-brand-100">
-            {TABS.map((tabKey) => {
-              const Icon = TAB_ICON[tabKey]
-              const count = tabKey === 'usuarios' ? users?.length : undefined
-              return (
-                <button
-                  key={tabKey}
-                  onClick={() => setTab(tabKey)}
-                  className={`flex shrink-0 items-center gap-1.5 border-b-2 pb-2 text-xs font-medium transition-colors ${
-                    tab === tabKey ? 'border-accent-500 text-accent-600' : 'border-transparent text-brand-400 hover:text-brand-700'
-                  }`}
-                >
-                  <Icon width={13} height={13} />
-                  {t(TAB_LABEL_KEY[tabKey])}
-                  {count !== undefined && count > 0 && <span className="text-[11px] text-brand-300">({count})</span>}
-                </button>
-              )
-            })}
-          </div>
+        <div className="min-w-0 flex-1">
+          <Tabs value={tab} onValueChange={setTab}>
+            <TabsList>
+              <TabsTrigger value="lineas">
+                <PhoneIcon width={13} height={13} /> {t('backoffice.clienteDetalle.tabs.lineas')}
+              </TabsTrigger>
+              <TabsTrigger value="usuarios">
+                <UsersIcon width={13} height={13} /> {t('backoffice.clienteDetalle.tabs.usuarios')}
+                {users && users.length > 0 && <span className="text-[11px] text-brand-300">({users.length})</span>}
+              </TabsTrigger>
+              <TabsTrigger value="facturacion">
+                <CreditCardIcon width={13} height={13} /> {t('backoffice.clienteDetalle.tabs.facturacion')}
+              </TabsTrigger>
+              <TabsTrigger value="modulos">
+                <MenuIcon width={13} height={13} /> {t('backoffice.clienteDetalle.tabs.modulos')}
+              </TabsTrigger>
+            </TabsList>
 
-          <div key={tab} className="animate-tab-fade-in">
-            {tab === 'lineas' && (
+            <TabsContent value="lineas">
               <LinesAndAgentsSection
                 tenantId={tenant.id}
                 canManage
@@ -279,17 +269,18 @@ function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onT
                   <WhatsappLineDrawer open={open} onClose={onClose} tenantId={tenant.id} line={line} onSaved={onSaved} />
                 )}
               />
-            )}
+            </TabsContent>
 
-            {tab === 'usuarios' && (
+            <TabsContent value="usuarios">
               <Card>
                 <div className="mb-1 flex items-center justify-between">
                   <p className="text-sm text-brand-500">{t('backoffice.clienteDetalle.usersSubtitle')}</p>
                   <Button
                     variant="secondary"
+                    size="sm"
                     onClick={() => setInviteOpen(true)}
                     disabled={atUserCapacity}
-                    className="!px-3 !py-1.5 text-xs"
+                    className="text-xs"
                     title={atUserCapacity ? t('backoffice.clienteDetalle.usersAtCapacity', { max: maxUsers ?? 0 }) : undefined}
                   >
                     <PlusIcon width={14} height={14} /> {t('backoffice.clienteDetalle.inviteUser')}
@@ -310,20 +301,20 @@ function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onT
                   />
                 )}
               </Card>
-            )}
+            </TabsContent>
 
-            {tab === 'facturacion' && (
+            <TabsContent value="facturacion">
               <Card padded={false}>
                 <TenantBillingSection tenantId={tenant.id} />
               </Card>
-            )}
+            </TabsContent>
 
-            {tab === 'modulos' && (
+            <TabsContent value="modulos">
               <Card>
                 <TenantModulesSection tenantId={tenant.id} />
               </Card>
-            )}
-          </div>
+            </TabsContent>
+          </Tabs>
         </div>
       </div>
 

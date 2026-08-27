@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { MoreHorizontalIcon } from 'lucide-react'
@@ -21,7 +21,7 @@ import { listClients } from '../../lib/api/clients'
 import { listPaymentsForTenant, PAYMENT_METHOD_LABEL_KEY } from '../../lib/api/orderPayments'
 import type { Client, OrderStatus, OrderPaymentMethod, SalesOrderPayment } from '../../types/domain'
 import { PageSpinner } from '@/components/atoms'
-import { Card, ComboboxFilter, EmptyState, IconInput, Pagination } from '@/components/molecules'
+import { Card, ComboboxFilter, EmptyState, FilterField, IconInput, Pagination } from '@/components/molecules'
 import { ConfirmDialog } from '@/components/organisms'
 import { ChevronLeftIcon, PlusIcon, SearchIcon } from '@/components/atoms/icons'
 import { Button } from '@/components/ui/button'
@@ -67,19 +67,6 @@ function SummaryTile({ label, value }: { label: string; value: string }) {
     <div className="min-w-0 rounded-lg border border-brand-100 bg-white px-2.5 py-1.5">
       <p className="truncate text-[10px] text-brand-400">{label}</p>
       <p className="truncate text-sm font-bold text-brand-800">{value}</p>
-    </div>
-  )
-}
-
-/** Etiqueta pequeña sobre cada filtro (Estado/Cliente/Período) -- el usuario
- * pidió dejar claro qué tipo de filtro es cada uno, como en la referencia
- * de POS. Mismo tamaño/color que la etiqueta de MetricTile, para no
- * inventar una escala tipográfica nueva. */
-function FilterField({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-[10px] font-medium text-brand-400">{label}</span>
-      {children}
     </div>
   )
 }
