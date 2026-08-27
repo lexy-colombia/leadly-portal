@@ -73,6 +73,51 @@ export interface CheckoutAddressInput {
   country?: string
 }
 
+/** Una dirección ya guardada del contacto (`contact_addresses`) -- mismo
+ * shape que usa el flujo de ventas de la IA (ver CLAUDE.md, "Módulo de
+ * direcciones"), reutilizado acá para que el cliente que ya compró antes
+ * elija una en vez de volver a tipearla. */
+export interface StorefrontSavedAddress {
+  id: string
+  label: string | null
+  recipient_name: string | null
+  phone: string | null
+  line1: string
+  line2: string | null
+  city: string | null
+  state_province: string | null
+  postal_code: string | null
+  country: string | null
+  /** Envío y facturación son roles independientes -- una dirección puede
+   * servir para uno, el otro, o los dos (ver CLAUDE.md, "Módulo de
+   * direcciones"). El picker de cada paso del checkout filtra por el flag
+   * que corresponde. */
+  is_shipping: boolean
+  is_billing: boolean
+  is_default: boolean
+}
+
+export interface VerifyOtpResult {
+  verified: boolean
+  /** Presente solo si ya existe un cliente con ese teléfono para este
+   * tenant -- se revela recién acá porque es lo primero que pasa DESPUÉS de
+   * probar que el visitante es dueño de ese WhatsApp (el código correcto),
+   * nunca antes. */
+  client: { full_name: string; document_type: string | null; document_number: string | null } | null
+  addresses: StorefrontSavedAddress[]
+}
+
+/** Respuesta de get_order_status -- se consulta al volver del checkout
+ * externo de Wompi (ver checkoutStorefrontCart's redirect_url), cuando ya no
+ * queda nada en memoria de React porque el visitante recargó la página
+ * entera al volver. */
+export interface OrderStatusResult {
+  order_number: number
+  order_code: string
+  total: number
+  paid: boolean
+}
+
 export interface CheckoutResult {
   confirmed: boolean
   order_number: number
@@ -120,8 +165,8 @@ export function listStorefrontBrands(slug: string): Promise<{ brands: Brand[] }>
 
 export function listStorefrontProducts(
   slug: string,
-  opts?: { search?: string; category_ids?: string[]; brand_id?: string; sort?: string },
-): Promise<{ products: StorefrontProductSummary[] }> {
+  opts?: { search?: string; category_ids?: string[]; brand_id?: string; sort?: string; offset?: number; limit?: number },
+): Promise<{ products: StorefrontProductSummary[]; has_more: boolean }> {
   return callStorefront('list_products', { slug, ...opts })
 }
 
@@ -155,16 +200,62 @@ export function requestCheckoutOtp(sessionToken: string, phone: string): Promise
   return callStorefront('request_checkout_otp', { session_token: sessionToken, phone })
 }
 
-export function verifyCheckoutOtp(sessionToken: string, phone: string, code: string): Promise<{ verified: boolean }> {
+export function verifyCheckoutOtp(sessionToken: string, phone: string, code: string): Promise<VerifyOtpResult> {
   return callStorefront('verify_checkout_otp', { session_token: sessionToken, phone, code })
+}
+
+/** Se llama al recargar la página con una identidad ya verificada en esta
+ * misma sesión de navegador (ver storefrontCart.ts, StorefrontIdentityDraft)
+ * -- reusa la ventana de 30 min que la verificación ya tiene del lado del
+ * servidor en vez de pedir el código de nuevo. Mismo shape de respuesta que
+ * verifyCheckoutOtp (menos `verified`, que acá siempre es true o tira). */
+export function getStorefrontVerifiedIdentity(sessionToken: string, phone: string): Promise<VerifyOtpResult> {
+  return callStorefront('get_verified_identity', { session_token: sessionToken, phone })
 }
 
 export function checkoutStorefrontCart(params: {
   session_token: string
   full_name: string
   phone: string
-  address: CheckoutAddressInput
+  document_type?: string
+  document_number?: string
+  /** Exactamente uno de los dos: reusar una dirección de envío ya guardada,
+   * o cargar una nueva (que además queda guardada para la próxima compra). */
+  address_id?: string
+  address?: CheckoutAddressInput
+  /** Default true en el backend si se omite -- factura a la misma dirección
+   * de envío. En false, se necesita billing_address_id o billing_address
+   * (misma lógica de "uno de los dos" que la de envío). */
+  billing_same_as_shipping?: boolean
+  billing_address_id?: string
+  billing_address?: CheckoutAddressInput
   payment_method?: 'wompi' | 'credito'
+  /** A dónde vuelve el cliente después de pagar en Wompi -- el browser es
+   * quien sabe su propio origin real (ver storefront/index.ts::checkout),
+   * más simple y confiable que hardcodear la URL de la tienda del lado del
+   * servidor. */
+  redirect_url?: string
 }): Promise<CheckoutResult> {
   return callStorefront('checkout', params)
+}
+
+/** Se llama al volver del checkout externo de Wompi -- scoped por
+ * session_token, nunca por un order_id suelto en la URL (ver
+ * storefront/index.ts::get_order_status). */
+export function getStorefrontOrderStatus(sessionToken: string): Promise<OrderStatusResult> {
+  return callStorefront('get_order_status', { session_token: sessionToken })
+}
+
+/** Segundo paso cuando checkoutStorefrontCart devolvió payment_options (más
+ * de un método disponible) -- a diferencia de volver a llamar
+ * checkoutStorefrontCart (bug real: el pedido ya se creó y el carrito ya
+ * quedó "converted" en esa primera llamada, así que un segundo checkout
+ * choca con "Este carrito ya fue completado" y de paso duplicaría el
+ * pedido), esta acción solo resuelve el pago sobre el pedido que ya existe. */
+export function selectStorefrontPaymentMethod(params: {
+  session_token: string
+  payment_method: 'wompi' | 'credito'
+  redirect_url?: string
+}): Promise<CheckoutResult> {
+  return callStorefront('select_payment_method', params)
 }

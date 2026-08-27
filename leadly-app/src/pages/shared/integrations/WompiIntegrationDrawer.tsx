@@ -37,6 +37,7 @@ export function WompiIntegrationDrawer({
   const [error, setError] = useState<string | null>(null)
   const [privateKey, setPrivateKey] = useState('')
   const [integrityKey, setIntegrityKey] = useState('')
+  const [eventsKey, setEventsKey] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [saved, setSaved] = useState(false)
 
@@ -57,6 +58,7 @@ export function WompiIntegrationDrawer({
     setSaved(false)
     setPrivateKey('')
     setIntegrityKey('')
+    setEventsKey('')
     reload()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, tenantId])
@@ -72,15 +74,17 @@ export function WompiIntegrationDrawer({
   }
 
   async function handleSubmit() {
-    if (!privateKey.trim() && !integrityKey.trim()) return
+    if (!privateKey.trim() && !integrityKey.trim() && !eventsKey.trim()) return
     setSubmitting(true)
     setError(null)
     setSaved(false)
     try {
       if (privateKey.trim()) await setPaymentCredentialSecret(tenantId, 'private_key', privateKey.trim())
       if (integrityKey.trim()) await setPaymentCredentialSecret(tenantId, 'integrity_key', integrityKey.trim())
+      if (eventsKey.trim()) await setPaymentCredentialSecret(tenantId, 'events_key', eventsKey.trim())
       setPrivateKey('')
       setIntegrityKey('')
+      setEventsKey('')
       setSaved(true)
       reload()
     } catch (err) {
@@ -92,7 +96,13 @@ export function WompiIntegrationDrawer({
 
   const privateKeyConfigured = configuredSecrets.includes('private_key')
   const integrityKeyConfigured = configuredSecrets.includes('integrity_key')
-  const fullyConfigured = privateKeyConfigured && integrityKeyConfigured
+  const eventsKeyConfigured = configuredSecrets.includes('events_key')
+  // La conexión funcional solo depende de private_key (crear el link de
+  // cobro) + events_key (validar el webhook que confirma el pago) -- el link
+  // de pago se crea server-side vía la API de Payment Links, que nunca manda
+  // un signature:integrity, así que integrity_key no tiene ningún efecto real
+  // hoy (se deja como campo opcional para un futuro flujo de Web Checkout).
+  const fullyConfigured = privateKeyConfigured && eventsKeyConfigured
 
   return (
     <Drawer open={open} onClose={onClose} title="Wompi" description={description}>
@@ -152,6 +162,29 @@ export function WompiIntegrationDrawer({
                   className={FIELD_CLASS}
                 />
               </div>
+              <div>
+                <IntegrationFieldLabel
+                  htmlFor="wompi-integration-events-key"
+                  label={t('integrations.eventsKey')}
+                  badge={
+                    eventsKeyConfigured && (
+                      <Badge variant="outline" className="border-transparent bg-emerald-100 text-emerald-700">
+                        {t('integrations.configured')}
+                      </Badge>
+                    )
+                  }
+                />
+                <Input
+                  id="wompi-integration-events-key"
+                  type="password"
+                  value={eventsKey}
+                  onChange={(e) => setEventsKey(e.target.value)}
+                  placeholder={eventsKeyConfigured ? t('integrations.replaceValue') : undefined}
+                  autoComplete="off"
+                  className={FIELD_CLASS}
+                />
+                <p className="mt-1 text-[11px] text-brand-400">{t('integrations.eventsKeyHint')}</p>
+              </div>
             </div>
           </IntegrationSection>
 
@@ -177,7 +210,7 @@ export function WompiIntegrationDrawer({
           {error && <FieldError message={error} />}
 
           <div className="flex items-center gap-2 border-t border-brand-100 pt-4">
-            <Button type="button" onClick={handleSubmit} disabled={submitting || (!privateKey.trim() && !integrityKey.trim())}>
+            <Button type="button" onClick={handleSubmit} disabled={submitting || (!privateKey.trim() && !integrityKey.trim() && !eventsKey.trim())}>
               {submitting ? t('common.actions.saving') : t('common.actions.save')}
             </Button>
             {saved && <span className="text-xs text-emerald-600">{t('integrations.configSaved')}</span>}

@@ -70,7 +70,7 @@ export function StorefrontProductDetail() {
         quantity,
       })
       setStorefrontCartToken(slug, result.session_token)
-      refreshCartCount()
+      refreshCartCount(result.items)
       navigate(`/tienda/${slug}/carrito`)
     } catch (err) {
       showError(err instanceof Error ? err.message : t('storefront.product.addError'))

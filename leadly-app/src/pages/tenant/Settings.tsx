@@ -2,9 +2,16 @@ import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type Rea
 import { createPortal } from 'react-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
-import { getTenant, updateTenant, uploadTenantLogo, validateTenantLogoFile } from '../../lib/api/tenants'
+import {
+  getTenant,
+  STOREFRONT_SLUG_TAKEN_CODE,
+  updateTenant,
+  updateTenantStorefront,
+  uploadTenantLogo,
+  validateTenantLogoFile,
+} from '../../lib/api/tenants'
 import type { Tenant } from '../../types/domain'
-import { Button, InitialsAvatar, PageSpinner } from '@/components/atoms'
+import { Button, InitialsAvatar, PageSpinner, Switch } from '@/components/atoms'
 import { Card, CardSection } from '@/components/molecules'
 import { Drawer } from '@/components/organisms'
 import { PencilIcon, XCircleIcon } from '@/components/atoms/icons'
@@ -247,38 +254,129 @@ function CompanySection() {
         {logoError && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{logoError}</p>}
       </CardSection>
 
-      {tenant && <StorefrontSection tenant={tenant} />}
+      {tenant && <StorefrontSection tenant={tenant} onSaved={setTenant} />}
       {tenant && <CompanyEditDrawer open={editOpen} onClose={() => setEditOpen(false)} tenant={tenant} onSaved={setTenant} />}
     </Card>
   )
 }
 
-/** Solo "ver" -- pedido explícito del usuario, más chico que la sección de
- * edición completa (slug/activar) que sigue pendiente (ver CLAUDE.md). Vive
- * como una CardSection más dentro del mismo Card que el perfil de la
+/** Vive como una CardSection más dentro del mismo Card que el perfil de la
  * empresa (mismo `tenant` ya cargado ahí, sin otra llamada) en vez de una
- * Card aparte -- es información de la empresa igual que el resto. */
-function StorefrontSection({ tenant }: { tenant: Tenant }) {
+ * Card aparte -- es información de la empresa igual que el resto. La
+ * dirección (slug) y el interruptor de "tienda activa" se guardan cada uno
+ * por su lado (mismo patrón instant-apply que TenantModulesSection para el
+ * toggle) en vez de compartir el botón "Guardar cambios" del resto del
+ * formulario de empresa. El toggle queda deshabilitado sin un slug guardado
+ * -- no tiene sentido activar una tienda sin URL. */
+function StorefrontSection({ tenant, onSaved }: { tenant: Tenant; onSaved: (tenant: Tenant) => void }) {
   const { t } = useLanguage()
-  const storefrontUrl = tenant.storefront_slug ? `${window.location.origin}/tienda/${tenant.storefront_slug}` : null
+  const [slugInput, setSlugInput] = useState(tenant.storefront_slug ?? '')
+  const [savingSlug, setSavingSlug] = useState(false)
+  const [togglingEnabled, setTogglingEnabled] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setSlugInput(tenant.storefront_slug ?? '')
+  }, [tenant.storefront_slug])
+
+  const origin = window.location.origin
+  const storefrontUrl = tenant.storefront_slug ? `${origin}/tienda/${tenant.storefront_slug}` : null
+  const normalizedInput = slugInput.trim().toLowerCase()
+  const slugChanged = normalizedInput !== (tenant.storefront_slug ?? '')
+
+  async function handleSaveSlug(e: FormEvent) {
+    e.preventDefault()
+    if (!normalizedInput) {
+      setError(t('settings.storefront.errors.slugRequired'))
+      return
+    }
+    if (!/^[a-z0-9-]+$/.test(normalizedInput)) {
+      setError(t('settings.storefront.errors.slugFormat'))
+      return
+    }
+    setError(null)
+    setSavingSlug(true)
+    try {
+      const updated = await updateTenantStorefront(tenant.id, { storefront_slug: normalizedInput })
+      onSaved(updated)
+    } catch (err) {
+      const code = (err as { code?: string })?.code
+      setError(
+        code === STOREFRONT_SLUG_TAKEN_CODE
+          ? t('settings.storefront.errors.slugTaken')
+          : err instanceof Error
+            ? err.message
+            : t('settings.storefront.errors.save'),
+      )
+    } finally {
+      setSavingSlug(false)
+    }
+  }
+
+  async function handleToggleEnabled(enabled: boolean) {
+    setTogglingEnabled(true)
+    setError(null)
+    try {
+      const updated = await updateTenantStorefront(tenant.id, { storefront_enabled: enabled })
+      onSaved(updated)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('settings.storefront.errors.save'))
+    } finally {
+      setTogglingEnabled(false)
+    }
+  }
 
   return (
     <CardSection title={t('settings.storefront.title')}>
-      {tenant.storefront_enabled && storefrontUrl ? (
-        <div className="flex items-center justify-between gap-3">
-          <p className="min-w-0 truncate text-xs text-brand-400">{storefrontUrl}</p>
-          <a
-            href={storefrontUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="shrink-0 rounded-lg border border-brand-200 px-3 py-1.5 text-xs font-medium text-brand-600 transition-colors hover:bg-brand-50"
-          >
-            {t('settings.storefront.view')}
-          </a>
+      <div className="space-y-3.5">
+        <p className="text-xs text-brand-400">{t('settings.storefront.description')}</p>
+
+        <form onSubmit={handleSaveSlug} className="flex flex-wrap items-end gap-2">
+          <div className="min-w-0 flex-1">
+            <label htmlFor="storefront-slug" className="text-xs text-brand-400">
+              {t('settings.storefront.slugLabel')}
+            </label>
+            <div className="mt-1 flex min-w-0 items-center gap-1 rounded-lg border border-brand-200 bg-white px-2.5 py-2 focus-within:border-accent-400">
+              <span className="shrink-0 text-xs text-brand-300">{origin}/tienda/</span>
+              <input
+                id="storefront-slug"
+                value={slugInput}
+                onChange={(e) => setSlugInput(e.target.value)}
+                placeholder={t('settings.storefront.slugPlaceholder')}
+                className="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm text-brand-800 outline-none"
+              />
+            </div>
+          </div>
+          <Button type="submit" variant="secondary" disabled={savingSlug || !slugChanged} className="!px-4 !py-2 shrink-0 text-sm">
+            {savingSlug ? t('common.actions.saving') : t('common.actions.save')}
+          </Button>
+        </form>
+        <p className="-mt-2 text-[11px] text-brand-300">{t('settings.storefront.slugHint')}</p>
+
+        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+
+        <div className="flex items-center justify-between gap-3 border-t border-brand-100 pt-3.5">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-brand-700">{t('settings.storefront.enabledLabel')}</p>
+            <p className="text-xs text-brand-400">{t('settings.storefront.enabledDescription')}</p>
+          </div>
+          <Switch checked={tenant.storefront_enabled} disabled={togglingEnabled || !tenant.storefront_slug} onChange={handleToggleEnabled} />
         </div>
-      ) : (
-        <p className="text-xs text-brand-400">{t('settings.storefront.disabled')}</p>
-      )}
+
+        {tenant.storefront_enabled && storefrontUrl && (
+          <div className="flex items-center justify-between gap-3 rounded-lg bg-brand-50 px-3 py-2">
+            <p className="min-w-0 truncate text-xs text-brand-500">{storefrontUrl}</p>
+            <a
+              href={storefrontUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="shrink-0 rounded-lg border border-brand-200 bg-white px-3 py-1.5 text-xs font-medium text-brand-600 transition-colors hover:bg-brand-50"
+            >
+              {t('settings.storefront.view')}
+            </a>
+          </div>
+        )}
+      </div>
     </CardSection>
   )
 }

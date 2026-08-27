@@ -16,7 +16,7 @@ import { confirmSalesOrder } from "../_shared/orders/confirmSalesOrder.ts";
 import { chargeSalesOrderToCredit, createSalesOrderPaymentLink } from "../_shared/payments/salesOrderPayments.ts";
 import { sendWhatsappTemplate } from "../_shared/whatsapp.ts";
 
-const CATALOG_SEARCH_LIMIT = 120;
+const CATALOG_PAGE_SIZE = 20;
 const OTP_TTL_MINUTES = 10;
 const OTP_MAX_ATTEMPTS = 5;
 const OTP_RATE_LIMIT_WINDOW_MINUTES = 15;
@@ -145,12 +145,20 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       // del tenant) para no reimplementar la lógica de árbol dos veces.
       const categoryIds = Array.isArray(body.category_ids) ? (body.category_ids as unknown[]).map((id) => String(id)) : [];
       const sort = String(body.sort ?? "name_asc");
+      // Scroll infinito: de a CATALOG_PAGE_SIZE, no toda la lista de una --
+      // pedido explícito del usuario, la carga inicial del catálogo completo
+      // (hasta 120 productos) se sentía pesada. `offset` lo maneja el
+      // frontend acumulando cuántos productos ya cargó; acá se pide
+      // `limit + 1` filas y se recorta una para saber si hay más página sin
+      // gastar una consulta de count aparte.
+      const offset = Math.max(0, Number(body.offset) || 0);
+      const limit = Math.min(CATALOG_PAGE_SIZE, Math.max(1, Number(body.limit) || CATALOG_PAGE_SIZE));
 
       let categoryProductIds: string[] | null = null;
       if (categoryIds.length > 0) {
         const { data: links } = await adminClient.from("product_category_links").select("product_id").eq("tenant_id", tenant.id).in("category_id", categoryIds);
         categoryProductIds = [...new Set((links ?? []).map((l: { product_id: string }) => l.product_id))];
-        if (categoryProductIds.length === 0) return { products: [] };
+        if (categoryProductIds.length === 0) return { products: [], has_more: false };
       }
 
       const columns =
@@ -164,6 +172,9 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
         return query.order("name", { ascending: true });
       }
 
+      // Se pide `limit + 1` (via range) y se recorta la fila de más abajo --
+      // barato para saber si hay una página siguiente sin una consulta de
+      // count aparte.
       let query = adminClient
         .from("products")
         .select(columns)
@@ -171,7 +182,7 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
         .eq("is_active", true)
         .eq("is_visible_in_catalog", true)
         .is("deleted_at", null)
-        .limit(CATALOG_SEARCH_LIMIT);
+        .range(offset, offset + limit);
       query = applySort(query);
       if (categoryProductIds) query = query.in("id", categoryProductIds);
       if (brandId) query = query.eq("brand_id", brandId);
@@ -188,7 +199,7 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
           .eq("is_visible_in_catalog", true)
           .is("deleted_at", null)
           .ilike("name", `%${search}%`)
-          .limit(CATALOG_SEARCH_LIMIT);
+          .range(offset, offset + limit);
         fallbackQuery = applySort(fallbackQuery);
         if (categoryProductIds) fallbackQuery = fallbackQuery.in("id", categoryProductIds);
         if (brandId) fallbackQuery = fallbackQuery.eq("brand_id", brandId);
@@ -196,6 +207,9 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
         if (fallback.error) throw new Error(fallback.error.message);
         data = fallback.data;
       }
+
+      const hasMore = (data ?? []).length > limit;
+      if (hasMore) data = (data ?? []).slice(0, limit);
 
       const productIds = (data ?? []).map((p: { id: string }) => p.id);
       const images = await loadFirstImages(adminClient, productIds);
@@ -228,7 +242,7 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
           categories: (p.categories ?? []).map((c: any) => c.category?.name).filter(Boolean),
         };
       });
-      return { products };
+      return { products, has_more: hasMore };
     }
 
     case "get_product": {
@@ -305,26 +319,40 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       if (!productId) throw new StorefrontError("product_id es requerido.");
       if (!Number.isFinite(quantity) || quantity <= 0) throw new StorefrontError("Cantidad inválida.");
 
+      const sessionToken = body.session_token ? String(body.session_token).trim() : "";
+      const slug = String(body.slug ?? "").trim();
+      if (!sessionToken && !slug) throw new StorefrontError("slug es requerido para iniciar un carrito nuevo.");
+
+      // El carrito existente (por token) y el tenant (por slug) son lookups
+      // independientes -- el frontend siempre manda el slug en cada request,
+      // no solo cuando hace falta crear un carrito nuevo -- así que se
+      // resuelven en paralelo en vez de esperar uno para recién arrancar el
+      // otro. Este paralelismo, más el de abajo, es lo que baja los ~7
+      // round-trips secuenciales que tenía esta acción (la causa real de la
+      // demora al agregar un producto) a 3 tandas.
+      const [existingCartRow, tenant] = await Promise.all([
+        sessionToken
+          ? adminClient
+              .from("storefront_carts")
+              .select("id, tenant_id, status, session_token")
+              .eq("session_token", sessionToken)
+              .maybeSingle()
+              .then((r) => r.data as { id: string; tenant_id: string; status: string; session_token: string } | null)
+          : Promise.resolve(null),
+        slug ? resolveStorefront(adminClient, slug) : Promise.resolve(null),
+      ]);
+
       // A diferencia de las demás acciones, acá un session_token que ya no
       // resuelve a ningún carrito (el visitante volvió con un localStorage
       // viejo de un carrito que se completó o se limpió del lado del
       // servidor) NO es un error -- desde su perspectiva solo quiere agregar
       // el producto, así que se le arma un carrito nuevo en silencio en vez
       // de mostrarle "este carrito no existe".
-      let cart: { id: string; tenant_id: string; status: string };
-      const sessionToken = body.session_token ? String(body.session_token).trim() : "";
-      let existingCart: { id: string; tenant_id: string; status: string } | null = null;
-      if (sessionToken) {
-        const { data } = await adminClient.from("storefront_carts").select("id, tenant_id, status").eq("session_token", sessionToken).maybeSingle();
-        existingCart = data ?? null;
-      }
-
-      if (existingCart && existingCart.status === "active") {
-        cart = existingCart;
+      let cart: { id: string; tenant_id: string; session_token: string };
+      if (existingCartRow && existingCartRow.status === "active") {
+        cart = existingCartRow;
       } else {
-        const slug = String(body.slug ?? "").trim();
-        if (!slug) throw new StorefrontError("slug es requerido para iniciar un carrito nuevo.");
-        const tenant = await resolveStorefront(adminClient, slug);
+        if (!tenant) throw new StorefrontError("slug es requerido para iniciar un carrito nuevo.");
         const { data: created, error } = await adminClient
           .from("storefront_carts")
           .insert({ tenant_id: tenant.id })
@@ -334,37 +362,49 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
         cart = created;
       }
 
-      const { data: product } = await adminClient
-        .from("products")
-        .select("id, has_variants, retail_price")
-        .eq("id", productId)
-        .eq("tenant_id", cart.tenant_id)
-        .eq("is_active", true)
-        .eq("is_visible_in_catalog", true)
-        .is("deleted_at", null)
-        .maybeSingle();
+      // Validación de producto/variante + búsqueda del ítem que ya podría
+      // estar en el carrito, las 3 en paralelo -- son lookups independientes
+      // entre sí, solo dependen del cart/tenant ya resuelto arriba (nunca
+      // del resultado de las otras dos).
+      const [productResult, variantResult, existingItemResult] = await Promise.all([
+        adminClient
+          .from("products")
+          .select("id, has_variants, retail_price")
+          .eq("id", productId)
+          .eq("tenant_id", cart.tenant_id)
+          .eq("is_active", true)
+          .eq("is_visible_in_catalog", true)
+          .is("deleted_at", null)
+          .maybeSingle(),
+        variantIdParam
+          ? adminClient
+              .from("product_variants")
+              .select("id")
+              .eq("id", variantIdParam)
+              .eq("product_id", productId)
+              .eq("tenant_id", cart.tenant_id)
+              .eq("is_active", true)
+              .is("deleted_at", null)
+              .maybeSingle()
+          : Promise.resolve({ data: null as { id: string } | null }),
+        (() => {
+          let q = adminClient.from("storefront_cart_items").select("id, quantity").eq("cart_id", cart.id).eq("product_id", productId);
+          q = variantIdParam ? q.eq("variant_id", variantIdParam) : q.is("variant_id", null);
+          return q.maybeSingle();
+        })(),
+      ]);
+
+      const product = productResult.data;
       if (!product) throw new StorefrontError("Producto no encontrado.", 404);
 
       let variantId: string | null = null;
       if (product.has_variants) {
         if (!variantIdParam) throw new StorefrontError("Este producto tiene variantes -- elegí una primero.");
-        const { data: variant } = await adminClient
-          .from("product_variants")
-          .select("id")
-          .eq("id", variantIdParam)
-          .eq("product_id", product.id)
-          .eq("tenant_id", cart.tenant_id)
-          .eq("is_active", true)
-          .is("deleted_at", null)
-          .maybeSingle();
-        if (!variant) throw new StorefrontError("Variante no encontrada.", 404);
-        variantId = variant.id;
+        if (!variantResult.data) throw new StorefrontError("Variante no encontrada.", 404);
+        variantId = variantResult.data.id;
       }
 
-      let existingQuery = adminClient.from("storefront_cart_items").select("id, quantity").eq("cart_id", cart.id).eq("product_id", product.id);
-      existingQuery = variantId ? existingQuery.eq("variant_id", variantId) : existingQuery.is("variant_id", null);
-      const { data: existingItem } = await existingQuery.maybeSingle();
-
+      const existingItem = existingItemResult.data;
       if (existingItem) {
         const { error } = await adminClient.from("storefront_cart_items").update({ quantity: existingItem.quantity + quantity }).eq("id", existingItem.id);
         if (error) throw new Error(error.message);
@@ -373,8 +413,7 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
         if (error) throw new Error(error.message);
       }
 
-      const { data: freshCart } = await adminClient.from("storefront_carts").select("session_token").eq("id", cart.id).single();
-      return { session_token: freshCart!.session_token, items: await loadCartItems(adminClient, cart.id) };
+      return { session_token: cart.session_token, items: await loadCartItems(adminClient, cart.id) };
     }
 
     case "update_cart_item": {
@@ -388,11 +427,13 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       const cart = await resolveCart(adminClient, sessionToken);
       assertCartOpen(cart);
 
-      const { data: item } = await adminClient.from("storefront_cart_items").select("id").eq("id", itemId).eq("cart_id", cart.id).maybeSingle();
-      if (!item) throw new StorefrontError("Ítem no encontrado.", 404);
-
-      const { error } = await adminClient.from("storefront_cart_items").update({ quantity }).eq("id", item.id);
+      // Update con el filtro de pertenencia (cart_id) incluido en la misma
+      // consulta, en vez de un select aparte solo para confirmar que el ítem
+      // existe y es de este carrito -- el `select("id")` de la respuesta ya
+      // dice si algo matcheó.
+      const { data: updated, error } = await adminClient.from("storefront_cart_items").update({ quantity }).eq("id", itemId).eq("cart_id", cart.id).select("id");
       if (error) throw new Error(error.message);
+      if (!updated || updated.length === 0) throw new StorefrontError("Ítem no encontrado.", 404);
       return { items: await loadCartItems(adminClient, cart.id) };
     }
 
@@ -405,8 +446,9 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       const cart = await resolveCart(adminClient, sessionToken);
       assertCartOpen(cart);
 
-      const { error } = await adminClient.from("storefront_cart_items").delete().eq("id", itemId).eq("cart_id", cart.id);
+      const { data: removed, error } = await adminClient.from("storefront_cart_items").delete().eq("id", itemId).eq("cart_id", cart.id).select("id");
       if (error) throw new Error(error.message);
+      if (!removed || removed.length === 0) throw new StorefrontError("Ítem no encontrado.", 404);
       return { items: await loadCartItems(adminClient, cart.id) };
     }
 
@@ -443,6 +485,15 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
 
       const components: Record<string, unknown>[] = [];
       if (template.variable_count > 0) components.push({ type: "body", parameters: [{ type: "text", text: code }] });
+      // Las plantillas AUTHENTICATION creadas con el botón estándar de Meta
+      // ("Copiar código") tienen un botón URL con un placeholder dinámico
+      // ({{1}} en la URL, ver whatsapp_message_templates.buttons) -- Meta
+      // exige su propio componente "button" con el mismo código como
+      // parámetro, aparte del "body". Sin esto, el envío falla con
+      // "(#131008) Required parameter is missing".
+      if (template.buttons.some((b) => b.type === "URL")) {
+        components.push({ type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: code }] });
+      }
       const sendResult = await sendWhatsappTemplate(phoneNumberId, accessToken, phone, template.name, template.language, components);
       if (!sendResult.ok) throw new StorefrontError(sendResult.errorMessage ?? "No se pudo enviar el código.", 502);
 
@@ -478,21 +529,76 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       }
 
       await adminClient.from("storefront_phone_verifications").update({ verified_at: new Date().toISOString() }).eq("id", verification.id);
-      return { verified: true };
+
+      // Recién ACÁ, con el código ya confirmado (probó ser dueño de ese
+      // WhatsApp), se revela si ese teléfono ya es cliente del tenant --
+      // nunca antes de este punto, para no convertir el checkout en un
+      // oráculo de "este teléfono es cliente sí/no" para cualquiera que
+      // solo sepa el número.
+      return { verified: true, ...(await loadClientIdentity(adminClient, cart.tenant_id, phone)) };
+    }
+
+    // Se llama al recargar la página estando ya pasado el paso de OTP --
+    // pedido explícito del usuario: antes, un simple refresh volvía a pedir
+    // el código de cero aunque la verificación server-side (30 minutos de
+    // validez, ver OTP_VERIFIED_VALID_MINUTES) siguiera vigente. Reusa esa
+    // misma ventana en vez de una nueva: si ya hay un
+    // storefront_phone_verifications vigente para este carrito+teléfono, no
+    // hace falta un código nuevo -- solo re-arma la misma respuesta que
+    // verify_checkout_otp para que el frontend pueda saltar directo al paso
+    // de detalles.
+    case "get_verified_identity": {
+      const sessionToken = String(body.session_token ?? "").trim();
+      const phone = String(body.phone ?? "").trim();
+      if (!sessionToken) throw new StorefrontError("session_token es requerido.");
+      if (!phone) throw new StorefrontError("phone es requerido.");
+
+      const cart = await resolveCart(adminClient, sessionToken);
+
+      const { data: verification } = await adminClient
+        .from("storefront_phone_verifications")
+        .select("id")
+        .eq("cart_id", cart.id)
+        .eq("phone", phone)
+        .not("verified_at", "is", null)
+        .gte("verified_at", new Date(Date.now() - OTP_VERIFIED_VALID_MINUTES * 60_000).toISOString())
+        .order("verified_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!verification) throw new StorefrontError("Tu verificación venció -- pedí un código nuevo.", 401);
+
+      return { verified: true, ...(await loadClientIdentity(adminClient, cart.tenant_id, phone)) };
     }
 
     case "checkout": {
       const sessionToken = String(body.session_token ?? "").trim();
       const fullName = String(body.full_name ?? "").trim();
       const phone = String(body.phone ?? "").trim();
-      const address = body.address as Record<string, unknown> | undefined;
+      const documentType = body.document_type ? String(body.document_type).trim() : null;
+      const documentNumber = body.document_number ? String(body.document_number).trim() : null;
+      const addressId = body.address_id ? String(body.address_id).trim() : "";
+      const addressInput = body.address as Record<string, unknown> | undefined;
+      // Envío y facturación son direcciones distintas -- pedido explícito
+      // del usuario, "la facturación es de donde saco los datos para la
+      // factura". Por default van a la misma (billing_same_as_shipping !==
+      // false), pero el checkout puede pedir explícitamente una dirección
+      // de facturación separada (guardada o nueva).
+      const billingSameAsShipping = body.billing_same_as_shipping !== false;
+      const billingAddressId = body.billing_address_id ? String(body.billing_address_id).trim() : "";
+      const billingAddressInput = body.billing_address as Record<string, unknown> | undefined;
+      // El browser es quien sabe su propio origin real (localhost en dev, el
+      // dominio de producción, y se autoajusta solo si ese dominio cambia) --
+      // más simple y confiable que hardcodear una URL de la tienda acá.
+      // Nunca sensible ni explotable cross-usuario (ver salesOrderPayments.ts):
+      // en el peor caso, alguien manipula el redirect de SU PROPIO pago.
+      const redirectUrl = body.redirect_url ? String(body.redirect_url).trim() : undefined;
       if (!sessionToken) throw new StorefrontError("session_token es requerido.");
       if (!fullName) throw new StorefrontError("full_name es requerido.");
       if (!phone) throw new StorefrontError("phone es requerido.");
-      if (!address) throw new StorefrontError("address es requerido.");
-      const line1 = String(address.line1 ?? "").trim();
-      const city = String(address.city ?? "").trim();
-      if (!line1 || !city) throw new StorefrontError("La dirección necesita al menos dirección (line1) y ciudad.");
+      if (!addressId && !addressInput) throw new StorefrontError("Elegí una dirección de envío o cargá una nueva.");
+      if (!billingSameAsShipping && !billingAddressId && !billingAddressInput) {
+        throw new StorefrontError("Elegí una dirección de facturación o cargá una nueva.");
+      }
 
       const cart = await resolveCart(adminClient, sessionToken);
       assertCartOpen(cart);
@@ -511,27 +617,18 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       const cartItems = await loadCartItemsForCheckout(adminClient, cart.id);
       if (cartItems.length === 0) throw new StorefrontError("El carrito está vacío.", 400);
 
-      const clientId = await resolveOrCreateClient(adminClient, cart.tenant_id, phone, fullName);
+      const clientId = await resolveOrCreateClient(adminClient, cart.tenant_id, phone, fullName, documentType, documentNumber);
 
-      const { data: addressRow, error: addressError } = await adminClient
-        .from("contact_addresses")
-        .insert({
-          tenant_id: cart.tenant_id,
-          contact_id: clientId,
-          is_billing: true,
-          is_shipping: true,
-          recipient_name: fullName,
-          phone,
-          line1,
-          line2: address.line2 ? String(address.line2).trim() : null,
-          city,
-          state_province: address.state_province ? String(address.state_province).trim() : null,
-          postal_code: address.postal_code ? String(address.postal_code).trim() : null,
-          country: address.country ? String(address.country).trim() : "Colombia",
-        })
-        .select("id")
-        .single();
-      if (addressError) throw new Error(addressError.message);
+      const shippingAddressRowId = await resolveOrderAddress(adminClient, cart.tenant_id, clientId, addressId, addressInput, fullName, phone, {
+        is_shipping: true,
+        is_billing: billingSameAsShipping,
+      });
+      const billingAddressRowId = billingSameAsShipping
+        ? shippingAddressRowId
+        : await resolveOrderAddress(adminClient, cart.tenant_id, clientId, billingAddressId, billingAddressInput, fullName, phone, {
+            is_shipping: false,
+            is_billing: true,
+          });
 
       const subtotal = cartItems.reduce((sum, item) => sum + item.quantity * item.unit_price, 0);
       const { data: order, error: orderError } = await adminClient
@@ -539,8 +636,8 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
         .insert({
           tenant_id: cart.tenant_id,
           contact_id: clientId,
-          billing_address_id: addressRow.id,
-          shipping_address_id: addressRow.id,
+          billing_address_id: billingAddressRowId,
+          shipping_address_id: shippingAddressRowId,
           subtotal,
           total: subtotal,
           notes: "Pedido creado desde la tienda pública.",
@@ -579,31 +676,97 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       const wompiAvailable = await isTenantWompiConnected(adminClient, cart.tenant_id);
       const creditAvailable = !!client?.credit_enabled && (await isTenantCreditModuleEnabled(adminClient, cart.tenant_id));
 
-      const requestedMethod = body.payment_method ? String(body.payment_method) : null;
-      if (requestedMethod && requestedMethod !== "wompi" && requestedMethod !== "credito") throw new StorefrontError("payment_method inválido.");
-
-      if (!requestedMethod) {
-        if (wompiAvailable && creditAvailable) return { confirmed: true, order_number: confirmResult.order.number, order_code: orderCode, payment_options: ["wompi", "credito"] };
-        if (creditAvailable) {
-          const paid = await chargeSalesOrderToCredit(adminClient, cart.tenant_id, clientId, order.id);
-          return { confirmed: true, order_number: confirmResult.order.number, order_code: orderCode, payment_method: "credito", payment_charged: true, amount: paid.amount };
-        }
-        if (wompiAvailable) {
-          const link = await createSalesOrderPaymentLink(adminClient, cart.tenant_id, order.id, null);
-          return { confirmed: true, order_number: confirmResult.order.number, order_code: orderCode, payment_method: "wompi", checkout_url: link.checkoutUrl, amount: link.amount };
-        }
-        return { confirmed: true, order_number: confirmResult.order.number, order_code: orderCode, payment_pending: true };
-      }
-
-      if (requestedMethod === "credito") {
-        if (!creditAvailable) throw new StorefrontError("El pago a crédito no está disponible.");
+      // El pedido ya quedó creado y confirmado arriba (y el carrito ya quedó
+      // "converted") sin importar qué pasa acá abajo -- por eso, si hay más
+      // de un método disponible, la resolución del pago queda para
+      // "select_payment_method" (ver esa acción) en vez de intentarlo acá
+      // mismo con un `payment_method` en este mismo body: este endpoint NO
+      // se puede volver a llamar una segunda vez para el mismo carrito
+      // (assertCartOpen ya lo rechazaría, y de paso duplicaría el pedido).
+      if (wompiAvailable && creditAvailable) return { confirmed: true, order_number: confirmResult.order.number, order_code: orderCode, payment_options: ["wompi", "credito"] };
+      if (creditAvailable) {
         const paid = await chargeSalesOrderToCredit(adminClient, cart.tenant_id, clientId, order.id);
         return { confirmed: true, order_number: confirmResult.order.number, order_code: orderCode, payment_method: "credito", payment_charged: true, amount: paid.amount };
       }
+      if (wompiAvailable) {
+        const link = await createSalesOrderPaymentLink(adminClient, cart.tenant_id, order.id, null, redirectUrl);
+        return { confirmed: true, order_number: confirmResult.order.number, order_code: orderCode, payment_method: "wompi", checkout_url: link.checkoutUrl, amount: link.amount };
+      }
+      return { confirmed: true, order_number: confirmResult.order.number, order_code: orderCode, payment_pending: true };
+    }
 
+    // Segundo paso cuando "checkout" devolvió payment_options (más de un
+    // método disponible) -- el pedido, el cliente y las direcciones YA se
+    // crearon en esa primera llamada y el carrito YA quedó "converted" ahí
+    // mismo. Bug real encontrado: antes, elegir un método en la pantalla de
+    // "¿cómo querés pagar?" volvía a llamar a "checkout" desde cero, que
+    // choca con assertCartOpen (el carrito ya no está "active") y tira
+    // "Este carrito ya fue completado" -- y aunque no chocara, habría
+    // intentado crear un SEGUNDO pedido duplicado con los mismos ítems. Esta
+    // acción nunca crea nada: solo resuelve el pago sobre el pedido que ya
+    // existe, ubicado por session_token -> storefront_carts.converted_order_id
+    // (nunca por un order_id suelto en el body).
+    case "select_payment_method": {
+      const sessionToken = String(body.session_token ?? "").trim();
+      const paymentMethod = String(body.payment_method ?? "").trim();
+      if (!sessionToken) throw new StorefrontError("session_token es requerido.");
+      if (paymentMethod !== "wompi" && paymentMethod !== "credito") throw new StorefrontError("payment_method inválido.");
+
+      const cart = await resolveCart(adminClient, sessionToken);
+      const { data: cartRow } = await adminClient.from("storefront_carts").select("converted_order_id").eq("id", cart.id).maybeSingle();
+      if (!cartRow?.converted_order_id) throw new StorefrontError("Este carrito todavía no generó ningún pedido.", 404);
+
+      const { data: order } = await adminClient
+        .from("sales_orders")
+        .select("id, number, contact_id")
+        .eq("id", cartRow.converted_order_id)
+        .eq("tenant_id", cart.tenant_id)
+        .maybeSingle();
+      if (!order) throw new StorefrontError("Pedido no encontrado.", 404);
+      const orderCode = formatOrderCode(order.number);
+
+      if (paymentMethod === "credito") {
+        const { data: client } = await adminClient.from("clients").select("credit_enabled").eq("id", order.contact_id).maybeSingle();
+        const creditAvailable = !!client?.credit_enabled && (await isTenantCreditModuleEnabled(adminClient, cart.tenant_id));
+        if (!creditAvailable) throw new StorefrontError("El pago a crédito no está disponible.");
+        const paid = await chargeSalesOrderToCredit(adminClient, cart.tenant_id, order.contact_id, order.id);
+        return { confirmed: true, order_number: order.number, order_code: orderCode, payment_method: "credito", payment_charged: true, amount: paid.amount };
+      }
+
+      const wompiAvailable = await isTenantWompiConnected(adminClient, cart.tenant_id);
       if (!wompiAvailable) throw new StorefrontError("El pago con Wompi no está disponible.");
-      const link = await createSalesOrderPaymentLink(adminClient, cart.tenant_id, order.id, null);
-      return { confirmed: true, order_number: confirmResult.order.number, order_code: orderCode, payment_method: "wompi", checkout_url: link.checkoutUrl, amount: link.amount };
+      const redirectUrl = body.redirect_url ? String(body.redirect_url).trim() : undefined;
+      const link = await createSalesOrderPaymentLink(adminClient, cart.tenant_id, order.id, null, redirectUrl);
+      return { confirmed: true, order_number: order.number, order_code: orderCode, payment_method: "wompi", checkout_url: link.checkoutUrl, amount: link.amount };
+    }
+
+    // Se llama al volver del checkout externo de Wompi (ver el redirect_url
+    // de arriba) -- el visitante vuelve a la MISMA página del carrito, así
+    // que hace falta reconstruir el estado del pedido desde cero (recargó la
+    // página entera, no quedó nada en memoria de React). Scoped por
+    // session_token, igual que toda otra acción acá -- nunca por un order_id
+    // suelto en la URL, para no convertir esto en una forma de consultar el
+    // estado de pago de un pedido ajeno.
+    case "get_order_status": {
+      const sessionToken = String(body.session_token ?? "").trim();
+      if (!sessionToken) throw new StorefrontError("session_token es requerido.");
+
+      const cart = await resolveCart(adminClient, sessionToken);
+      const { data: cartRow } = await adminClient.from("storefront_carts").select("converted_order_id").eq("id", cart.id).maybeSingle();
+      if (!cartRow?.converted_order_id) throw new StorefrontError("Este carrito todavía no generó ningún pedido.", 404);
+
+      const { data: order } = await adminClient
+        .from("sales_orders")
+        .select("id, number, total")
+        .eq("id", cartRow.converted_order_id)
+        .eq("tenant_id", cart.tenant_id)
+        .maybeSingle();
+      if (!order) throw new StorefrontError("Pedido no encontrado.", 404);
+
+      const { data: payments } = await adminClient.from("sales_order_payments").select("amount").eq("order_id", order.id).is("deleted_at", null);
+      const totalPaid = (payments ?? []).reduce((sum: number, p: { amount: number }) => sum + Number(p.amount), 0);
+
+      return { order_number: order.number, order_code: formatOrderCode(order.number), total: order.total, paid: totalPaid >= order.total - 0.01 };
     }
 
     default:
@@ -736,18 +899,143 @@ async function loadCartItemsForCheckout(
   }));
 }
 
+/** Resuelve la dirección de envío O de facturación de un pedido -- misma
+ * función para las dos, solo cambian los flags que se les ponen a una
+ * dirección NUEVA (una reusada ya sabe su rol por cuál picker la eligió, no
+ * hace falta tocarle los flags). Con `addressId` reutiliza una guardada,
+ * verificando SIEMPRE que sea de este cliente y este tenant (nunca se confía
+ * en un id que mande el visitante sin comprobar dueño primero -- si no,
+ * cualquiera podría mandar el id de la dirección de otro cliente y hacer que
+ * un pedido propio se facture/envíe ahí, filtrando esa dirección ajena). Sin
+ * `addressId`, crea una nueva a partir de `addressInput`. */
+async function resolveOrderAddress(
+  adminClient: SupabaseClient,
+  tenantId: string,
+  clientId: string,
+  addressId: string,
+  addressInput: Record<string, unknown> | undefined,
+  fullName: string,
+  phone: string,
+  newAddressFlags: { is_shipping: boolean; is_billing: boolean },
+): Promise<string> {
+  if (addressId) {
+    const { data: ownedAddress } = await adminClient
+      .from("contact_addresses")
+      .select("id")
+      .eq("id", addressId)
+      .eq("tenant_id", tenantId)
+      .eq("contact_id", clientId)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (!ownedAddress) throw new StorefrontError("Esa dirección no es válida.", 403);
+    return ownedAddress.id;
+  }
+
+  const address = addressInput!;
+  const line1 = String(address.line1 ?? "").trim();
+  const city = String(address.city ?? "").trim();
+  if (!line1 || !city) throw new StorefrontError("La dirección necesita al menos dirección (line1) y ciudad.");
+  const { data: addressRow, error: addressError } = await adminClient
+    .from("contact_addresses")
+    .insert({
+      tenant_id: tenantId,
+      contact_id: clientId,
+      is_shipping: newAddressFlags.is_shipping,
+      is_billing: newAddressFlags.is_billing,
+      recipient_name: fullName,
+      phone,
+      line1,
+      line2: address.line2 ? String(address.line2).trim() : null,
+      city,
+      state_province: address.state_province ? String(address.state_province).trim() : null,
+      postal_code: address.postal_code ? String(address.postal_code).trim() : null,
+      country: address.country ? String(address.country).trim() : "Colombia",
+    })
+    .select("id")
+    .single();
+  if (addressError) throw new Error(addressError.message);
+  return addressRow.id;
+}
+
+/** Precarga nombre/documento + direcciones guardadas (mismo
+ * `contact_addresses` que ya usa el flujo de ventas de la IA) de un cliente
+ * ya existente por teléfono -- compartido entre verify_checkout_otp (recién
+ * verificado el código) y get_verified_identity (recargó la página con una
+ * verificación server-side todavía vigente), las dos únicas dos formas de
+ * llegar acá ya con el teléfono probado. */
+async function loadClientIdentity(
+  adminClient: SupabaseClient,
+  tenantId: string,
+  phone: string,
+): Promise<{ client: { full_name: string; document_type: string | null; document_number: string | null } | null; addresses: Record<string, unknown>[] }> {
+  const { data: existingClient } = await adminClient
+    .from("clients")
+    .select("id, full_name, document_type, document_number")
+    .eq("tenant_id", tenantId)
+    .eq("phone", phone)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (!existingClient) return { client: null, addresses: [] };
+
+  const { data: addressRows } = await adminClient
+    .from("contact_addresses")
+    .select("id, label, recipient_name, phone, line1, line2, city, state_province, postal_code, country, is_shipping, is_billing, is_default")
+    .eq("tenant_id", tenantId)
+    .eq("contact_id", existingClient.id)
+    .is("deleted_at", null)
+    .order("is_default", { ascending: false })
+    .order("created_at", { ascending: false });
+
+  return {
+    client: { full_name: existingClient.full_name, document_type: existingClient.document_type, document_number: existingClient.document_number },
+    addresses: addressRows ?? [],
+  };
+}
+
 /** Resolve-or-create el `clients` por teléfono -- mismo patrón que
  * resolveOrCreateContact (whatsapp-ai-tools/index.ts), sin el paso de
  * conversationId porque acá no existe ninguna conversación de WhatsApp. Se
  * llama recién después de que checkout ya verificó el teléfono por OTP, así
  * que resolver a un cliente EXISTENTE acá es seguro -- ya probamos que quien
- * está comprando es dueño de ese número. */
-async function resolveOrCreateClient(adminClient: SupabaseClient, tenantId: string, phone: string, fullName: string): Promise<string> {
-  const { data: existing } = await adminClient.from("clients").select("id").eq("tenant_id", tenantId).eq("phone", phone).is("deleted_at", null).maybeSingle();
-  if (existing) return existing.id;
+ * está comprando es dueño de ese número. Si ya existe y no tenía documento
+ * cargado, lo completa con lo que mandó el checkout -- nunca pisa uno que ya
+ * tenía (mismo criterio "no perder lo que el tenant ya cargó" que
+ * whatsapp-webhook usa para el nombre). El índice único de
+ * `clients(tenant_id, document_number)` puede rechazar el update/insert si
+ * ese documento ya es de otro cliente -- se traduce a un mensaje claro en
+ * vez de un 500 crudo. */
+async function resolveOrCreateClient(
+  adminClient: SupabaseClient,
+  tenantId: string,
+  phone: string,
+  fullName: string,
+  documentType: string | null,
+  documentNumber: string | null,
+): Promise<string> {
+  const documentConflict = "Ese número de documento ya está registrado con otro cliente -- escribinos por WhatsApp si es un error.";
 
-  const { data: created, error } = await adminClient.from("clients").insert({ tenant_id: tenantId, full_name: fullName, phone }).select("id").single();
-  if (error) throw new Error(error.message);
+  const { data: existing } = await adminClient.from("clients").select("id, document_number").eq("tenant_id", tenantId).eq("phone", phone).is("deleted_at", null).maybeSingle();
+  if (existing) {
+    if (documentNumber && !existing.document_number) {
+      const { error } = await adminClient.from("clients").update({ document_type: documentType, document_number: documentNumber }).eq("id", existing.id);
+      if (error) {
+        if (error.code === "23505") throw new StorefrontError(documentConflict, 409);
+        throw new Error(error.message);
+      }
+    }
+    return existing.id;
+  }
+
+  const { data: created, error } = await adminClient
+    .from("clients")
+    .insert({ tenant_id: tenantId, full_name: fullName, phone, document_type: documentType, document_number: documentNumber })
+    .select("id")
+    .single();
+  if (error) {
+    if (error.code === "23505") throw new StorefrontError(documentConflict, 409);
+    throw new Error(error.message);
+  }
   return created.id;
 }
 
@@ -760,12 +1048,16 @@ async function resolveOrCreateClient(adminClient: SupabaseClient, tenantId: stri
 async function resolveAuthTemplateSendContext(
   adminClient: SupabaseClient,
   tenantId: string,
-): Promise<{ phoneNumberId: string; accessToken: string; template: { name: string; language: string; variable_count: number } }> {
+): Promise<{
+  phoneNumberId: string;
+  accessToken: string;
+  template: { name: string; language: string; variable_count: number; buttons: { type: string }[] };
+}> {
   const unavailable = "Esta tienda todavía no puede verificar tu teléfono -- escribinos por WhatsApp para completar tu compra.";
 
   const { data: template } = await adminClient
     .from("whatsapp_message_templates")
-    .select("name, language, variable_count, business_account_id")
+    .select("name, language, variable_count, business_account_id, buttons")
     .eq("tenant_id", tenantId)
     .eq("category", "AUTHENTICATION")
     .eq("status", "APPROVED")
@@ -788,7 +1080,11 @@ async function resolveAuthTemplateSendContext(
   const { data: accessToken } = await adminClient.rpc("get_whatsapp_line_access_token", { p_line_id: line.id });
   if (!accessToken) throw new StorefrontError(unavailable, 409);
 
-  return { phoneNumberId: line.phone_number_id, accessToken, template: { name: template.name, language: template.language, variable_count: template.variable_count } };
+  return {
+    phoneNumberId: line.phone_number_id,
+    accessToken,
+    template: { name: template.name, language: template.language, variable_count: template.variable_count, buttons: template.buttons ?? [] },
+  };
 }
 
 function cryptoRandomInt(min: number, max: number): number {
@@ -820,7 +1116,7 @@ async function isTenantWompiConnected(adminClient: SupabaseClient, tenantId: str
 
   const { data: secretRows } = await adminClient.from("payment_credential_secrets").select("secret_name").eq("credential_id", credential.id);
   const secrets = new Set((secretRows ?? []).map((r: { secret_name: string }) => r.secret_name));
-  return secrets.has("private_key") && secrets.has("integrity_key");
+  return secrets.has("private_key") && secrets.has("events_key");
 }
 
 async function isTenantCreditModuleEnabled(adminClient: SupabaseClient, tenantId: string): Promise<boolean> {

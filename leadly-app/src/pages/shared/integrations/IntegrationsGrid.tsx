@@ -37,7 +37,10 @@ const PROVIDER_LOGO: Record<string, string> = {
 async function checkConnected(providerKey: string, tenantId: string | null): Promise<boolean> {
   if (providerKey === 'wompi') {
     const status = await getPaymentCredentialStatus(tenantId)
-    return status.configuredSecrets.includes('private_key') && status.configuredSecrets.includes('integrity_key')
+    // private_key crea el link de cobro; events_key valida el webhook que
+    // confirma el pago -- integrity_key no tiene ningún uso funcional hoy
+    // (ver WompiIntegrationDrawer), así que no se exige acá.
+    return status.configuredSecrets.includes('private_key') && status.configuredSecrets.includes('events_key')
   }
   const credential = await getIntegrationCredential(providerKey, tenantId)
   if (!credential) return false
