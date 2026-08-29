@@ -3,7 +3,6 @@ import { inviteTenantUser } from '../../lib/api/users'
 import { listTenantRoles } from '../../lib/api/permissions'
 import type { Profile, TenantRole } from '../../types/domain'
 import { useLanguage } from '../../contexts/LanguageContext'
-import type { TranslationKey } from '../../i18n/translations'
 import { FieldError } from '@/components/atoms'
 import { Drawer } from '@/components/organisms'
 import { Button } from '@/components/ui/button'
@@ -12,10 +11,11 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { isNotBlank, isValidE164Phone, isValidEmail } from '../../lib/validation'
 
-const ROLE_LABEL_KEY: Record<'tenant_admin' | 'tenant_agent', TranslationKey> = {
-  tenant_admin: 'account.role.tenantAdmin',
-  tenant_agent: 'account.role.tenantAgent',
-}
+/** Un solo select de "Rol" -- no dos (pedido explícito del usuario: pedir
+ * el rol dos veces, uno de plataforma y otro de tenant_role, se sentía
+ * como un error). ADMIN_VALUE es el único valor que no es un uuid real de
+ * tenant_roles, así que no puede colisionar. */
+const ADMIN_VALUE = 'admin'
 
 /** Shared by the backoffice (from a Cliente's "Usuarios" section) and the
  * tenant panel (from "Usuarios", tenant_admin only) -- tenantId is always
@@ -36,9 +36,9 @@ export function UserInviteDrawer({
   const [email, setEmail] = useState('')
   const [fullName, setFullName] = useState('')
   const [phone, setPhone] = useState('')
-  const [role, setRole] = useState<'tenant_admin' | 'tenant_agent'>('tenant_agent')
   const [tenantRoles, setTenantRoles] = useState<TenantRole[]>([])
-  const [tenantRoleId, setTenantRoleId] = useState<string | null>(null)
+  /** ADMIN_VALUE o el id de un tenant_role. */
+  const [selectedRole, setSelectedRole] = useState<string>('')
   const [touched, setTouched] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -49,8 +49,7 @@ export function UserInviteDrawer({
     setEmail('')
     setFullName('')
     setPhone('')
-    setRole('tenant_agent')
-    setTenantRoleId(null)
+    setSelectedRole('')
     setTouched(false)
     setFormError(null)
     setSuccess(false)
@@ -61,7 +60,7 @@ export function UserInviteDrawer({
     listTenantRoles(tenantId)
       .then((roles) => {
         setTenantRoles(roles)
-        setTenantRoleId((prev) => prev ?? roles[0]?.id ?? null)
+        setSelectedRole((prev) => prev || roles[0]?.id || ADMIN_VALUE)
       })
       .catch(() => {})
   }, [open, tenantId])
@@ -69,23 +68,24 @@ export function UserInviteDrawer({
   const emailError = touched && !isValidEmail(email) ? t('auth.errors.invalidEmail') : undefined
   const fullNameError = touched && !isNotBlank(fullName) ? t('auth.errors.nameRequired') : undefined
   const phoneError = touched && isNotBlank(phone) && !isValidE164Phone(phone) ? t('inbox.newConv.errors.invalidPhone') : undefined
-  const tenantRoleError = touched && role === 'tenant_agent' && !tenantRoleId ? t('account.invite.errors.tenantRoleRequired') : undefined
+  const roleError = touched && !selectedRole ? t('account.invite.errors.tenantRoleRequired') : undefined
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setTouched(true)
     setFormError(null)
-    if (!isValidEmail(email) || !isNotBlank(fullName) || (isNotBlank(phone) && !isValidE164Phone(phone)) || (role === 'tenant_agent' && !tenantRoleId)) return
+    if (!isValidEmail(email) || !isNotBlank(fullName) || (isNotBlank(phone) && !isValidE164Phone(phone)) || !selectedRole) return
 
     setSubmitting(true)
     try {
+      const isAdmin = selectedRole === ADMIN_VALUE
       const profile = await inviteTenantUser({
         email: email.trim(),
         full_name: fullName.trim(),
         phone: phone.trim() || null,
-        role,
+        role: isAdmin ? 'tenant_admin' : 'tenant_agent',
         tenant_id: tenantId,
-        tenant_role_id: role === 'tenant_agent' ? tenantRoleId : null,
+        tenant_role_id: isAdmin ? null : selectedRole,
       })
       onInvited(profile)
       setSuccess(true)
@@ -148,38 +148,21 @@ export function UserInviteDrawer({
 
           <div>
             <Label htmlFor="invite-role">{t('account.invite.role')}</Label>
-            <Select value={role} onValueChange={(v) => setRole(v as typeof role)}>
-              <SelectTrigger id="invite-role" className="mt-1 w-full">
-                <SelectValue />
+            <Select value={selectedRole} onValueChange={setSelectedRole}>
+              <SelectTrigger id="invite-role" aria-invalid={!!roleError} className="mt-1 w-full">
+                <SelectValue placeholder={t('account.invite.tenantRolePlaceholder')} />
               </SelectTrigger>
               <SelectContent>
-                {(['tenant_admin', 'tenant_agent'] as const).map((r) => (
-                  <SelectItem key={r} value={r}>
-                    {t(ROLE_LABEL_KEY[r])}
+                <SelectItem value={ADMIN_VALUE}>{t('account.role.tenantAdmin')}</SelectItem>
+                {tenantRoles.map((r) => (
+                  <SelectItem key={r.id} value={r.id}>
+                    {r.name}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            <FieldError message={roleError} />
           </div>
-
-          {role === 'tenant_agent' && (
-            <div>
-              <Label htmlFor="invite-tenant-role">{t('account.invite.tenantRole')}</Label>
-              <Select value={tenantRoleId ?? ''} onValueChange={setTenantRoleId}>
-                <SelectTrigger id="invite-tenant-role" aria-invalid={!!tenantRoleError} className="mt-1 w-full">
-                  <SelectValue placeholder={t('account.invite.tenantRolePlaceholder')} />
-                </SelectTrigger>
-                <SelectContent>
-                  {tenantRoles.map((r) => (
-                    <SelectItem key={r.id} value={r.id}>
-                      {r.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <FieldError message={tenantRoleError} />
-            </div>
-          )}
 
           {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
 

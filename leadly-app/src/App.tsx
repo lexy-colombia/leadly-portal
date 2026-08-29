@@ -98,37 +98,37 @@ export default function App() {
               </RequireAuth>
             }
           >
-            <Route index element={<RequireModule moduleKey="conversations"><Inbox /></RequireModule>} />
+            <Route index element={<RequireModule moduleKey="conversations" action="conversations.view"><Inbox /></RequireModule>} />
             <Route path="dashboard" element={<RequireModule moduleKey="dashboard"><TenantDashboard /></RequireModule>} />
-            <Route path="clients" element={<RequireModule moduleKey="contacts"><Clients /></RequireModule>} />
-            <Route path="clients/:id" element={<RequireModule moduleKey="contacts"><ClientDetail /></RequireModule>} />
+            <Route path="clients" element={<RequireModule moduleKey="contacts" action="contacts.view"><Clients /></RequireModule>} />
+            <Route path="clients/:id" element={<RequireModule moduleKey="contacts" action="contacts.view"><ClientDetail /></RequireModule>} />
             {/* Empresas se fusionó dentro de Clients (crm_accounts fue
                 eliminada) -- este redirect solo cubre links/bookmarks viejos,
                 se deja en español a propósito porque es lo que un bookmark
                 viejo real todavía puede traer. */}
             <Route path="empresas" element={<Navigate to="/app/clients" replace />} />
-            <Route path="opportunities" element={<RequireModule moduleKey="pipeline"><Opportunities /></RequireModule>} />
-            <Route path="products" element={<RequireModule moduleKey="products"><Products /></RequireModule>} />
-            <Route path="products/categories" element={<RequireModule moduleKey="products"><Categories /></RequireModule>} />
-            <Route path="products/brands" element={<RequireModule moduleKey="products"><Brands /></RequireModule>} />
-            <Route path="products/suppliers" element={<RequireModule moduleKey="products"><Suppliers /></RequireModule>} />
-            <Route path="products/:id" element={<RequireModule moduleKey="products"><ProductDetail /></RequireModule>} />
+            <Route path="opportunities" element={<RequireModule moduleKey="pipeline" action="pipeline.view"><Opportunities /></RequireModule>} />
+            <Route path="products" element={<RequireModule moduleKey="products" action="products.view"><Products /></RequireModule>} />
+            <Route path="products/categories" element={<RequireModule moduleKey="products" action="products.view"><Categories /></RequireModule>} />
+            <Route path="products/brands" element={<RequireModule moduleKey="products" action="products.view"><Brands /></RequireModule>} />
+            <Route path="products/suppliers" element={<RequireModule moduleKey="products" action="products.view"><Suppliers /></RequireModule>} />
+            <Route path="products/:id" element={<RequireModule moduleKey="products" action="products.view"><ProductDetail /></RequireModule>} />
             {/* Warehouses (Inventario Fase 1) se movió al perfil de la empresa
                 (Configuración) el 2026-08-16 -- ya no tiene ruta propia. */}
             <Route path="inventario" element={<Navigate to="/app/settings" replace />} />
-            <Route path="sales" element={<RequireModule moduleKey="sales"><Orders /></RequireModule>} />
-            <Route path="sales/new" element={<RequireModule moduleKey="sales"><OrderDetail /></RequireModule>} />
-            <Route path="sales/:id" element={<RequireModule moduleKey="sales"><OrderDetail /></RequireModule>} />
-            <Route path="credit" element={<RequireModule moduleKey="credit"><Credit /></RequireModule>} />
-            <Route path="returns" element={<RequireModule moduleKey="returns"><Returns /></RequireModule>} />
+            <Route path="sales" element={<RequireModule moduleKey="sales" action="sales.view"><Orders /></RequireModule>} />
+            <Route path="sales/new" element={<RequireModule moduleKey="sales" action="sales.view"><OrderDetail /></RequireModule>} />
+            <Route path="sales/:id" element={<RequireModule moduleKey="sales" action="sales.view"><OrderDetail /></RequireModule>} />
+            <Route path="credit" element={<RequireModule moduleKey="credit" action="credit.view"><Credit /></RequireModule>} />
+            <Route path="returns" element={<RequireModule moduleKey="returns" action="returns.view"><Returns /></RequireModule>} />
             {/* Tareas se fusionó dentro de Calendario el 2026-08-19 -- ya no
                 tiene ruta propia. */}
             <Route path="tasks" element={<Navigate to="/app/calendar" replace />} />
-            <Route path="calendar" element={<RequireModule moduleKey="calendar"><Calendar /></RequireModule>} />
-            <Route path="ai-agents" element={<RequireModule moduleKey="aiAgents"><AiAgents /></RequireModule>} />
+            <Route path="calendar" element={<RequireModule moduleKey="calendar" action="calendar.view"><Calendar /></RequireModule>} />
+            <Route path="ai-agents" element={<RequireModule moduleKey="aiAgents" action="aiAgents.view"><AiAgents /></RequireModule>} />
             <Route path="billing" element={<RequireModule moduleKey="billing"><TenantBilling /></RequireModule>} />
             <Route path="integrations" element={<RequireModule moduleKey="integrations"><TenantIntegrations /></RequireModule>} />
-            <Route path="campaigns" element={<RequireModule moduleKey="campaigns"><Campaigns /></RequireModule>} />
+            <Route path="campaigns" element={<RequireModule moduleKey="campaigns" action="campaigns.view"><Campaigns /></RequireModule>} />
             <Route
               path="users"
               element={

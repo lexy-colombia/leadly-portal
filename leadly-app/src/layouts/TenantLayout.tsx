@@ -5,10 +5,11 @@ import { CRM_GROUP_ICON, CRM_GROUP_MODULE_KEYS, TENANT_MODULES } from '../lib/mo
 
 export function TenantLayout() {
   const { t } = useLanguage()
-  const { enabledModules, profile } = useAuth()
+  const { enabledModules, permissions, profile } = useAuth()
 
   const enabled = TENANT_MODULES.filter((module) => {
     if (module.adminOnly && profile?.role !== 'tenant_admin') return false
+    if (module.viewAction && !permissions?.has(module.viewAction)) return false
     const moduleEnabled = module.alwaysEnabled || enabledModules?.has(module.key)
     return moduleEnabled && !module.hideFromNav
   })

@@ -37,18 +37,27 @@ export interface TenantModuleDefinition {
    * content (2026-08-29, explicit user request for Usuarios/Roles y
    * permisos) -- checked against `profile.role`, not RLS/enabledModules. */
   adminOnly?: boolean
+  /** permission_actions key (see lib/api/permissions.ts) required to see
+   * this item at all -- 2026-08-29, explicit user request: a tenant_agent
+   * without the module's "view" action shouldn't see the link, and hitting
+   * the route directly must show the same lock screen RequireModule's
+   * `action` prop already enforces (routes/guards.tsx), not just a hidden
+   * button once inside. Modules outside the granular-permission system
+   * (dashboard/billing/integrations/settings) have none. */
+  viewAction?: string
 }
 
 export const TENANT_MODULES: TenantModuleDefinition[] = [
   { key: 'dashboard', labelKey: 'common.nav.dashboard', to: '/app/dashboard', icon: DashboardIcon },
-  { key: 'conversations', labelKey: 'common.nav.conversations', to: '/app', icon: ChatBubbleIcon },
-  { key: 'contacts', labelKey: 'common.nav.contacts', to: '/app/clients', icon: BuildingIcon },
-  { key: 'pipeline', labelKey: 'common.nav.pipeline', to: '/app/opportunities', icon: TargetIcon },
+  { key: 'conversations', labelKey: 'common.nav.conversations', to: '/app', icon: ChatBubbleIcon, viewAction: 'conversations.view' },
+  { key: 'contacts', labelKey: 'common.nav.contacts', to: '/app/clients', icon: BuildingIcon, viewAction: 'contacts.view' },
+  { key: 'pipeline', labelKey: 'common.nav.pipeline', to: '/app/opportunities', icon: TargetIcon, viewAction: 'pipeline.view' },
   {
     key: 'products',
     labelKey: 'common.nav.products',
     to: '/app/products',
     icon: BoxIcon,
+    viewAction: 'products.view',
     subRoutes: [
       { labelKey: 'common.nav.productCategories', to: '/app/products/categories' },
       { labelKey: 'common.nav.brands', to: '/app/products/brands' },
@@ -56,8 +65,8 @@ export const TENANT_MODULES: TenantModuleDefinition[] = [
     ],
   },
   { key: 'inventory', labelKey: 'common.nav.inventory', to: '/app/settings', icon: ArchiveIcon, hideFromNav: true },
-  { key: 'sales', labelKey: 'common.nav.sales', to: '/app/sales', icon: ReceiptIcon },
-  { key: 'credit', labelKey: 'common.nav.credit', to: '/app/credit', icon: WalletIcon },
+  { key: 'sales', labelKey: 'common.nav.sales', to: '/app/sales', icon: ReceiptIcon, viewAction: 'sales.view' },
+  { key: 'credit', labelKey: 'common.nav.credit', to: '/app/credit', icon: WalletIcon, viewAction: 'credit.view' },
   // Igual que 'inventory': vive dentro de una orden (DispatchDrawer, "Ver
   // detalle" junto a Estado de envío) y dentro de Configuración
   // (DispatchStatusesSection) -- sin ítem de nav propio.
@@ -65,7 +74,7 @@ export const TENANT_MODULES: TenantModuleDefinition[] = [
   // A diferencia de credit/dispatches, Devoluciones sí tiene nav propio --
   // es una lista de tickets propia (Returns.tsx), no vive adentro de otra
   // pantalla.
-  { key: 'returns', labelKey: 'common.nav.returns', to: '/app/returns', icon: RefreshIcon },
+  { key: 'returns', labelKey: 'common.nav.returns', to: '/app/returns', icon: RefreshIcon, viewAction: 'returns.view' },
   // Tareas se fusionó dentro de Calendario (2026-08-19, pedido explícito del
   // usuario: "el calendario debería ser la matriz de mi CRM") -- mismo
   // patrón que 'inventory': el module_key/gating por tenant se conserva
@@ -74,9 +83,9 @@ export const TENANT_MODULES: TenantModuleDefinition[] = [
   // calendario, que solo renderiza la capa de tareas si este módulo sigue
   // habilitado para el tenant (ver Calendar.tsx, enabledModules.has('tasks')).
   { key: 'tasks', labelKey: 'common.nav.tasks', to: '/app/calendar', icon: CheckIcon, hideFromNav: true },
-  { key: 'calendar', labelKey: 'common.nav.calendar', to: '/app/calendar', icon: CalendarIcon },
-  { key: 'campaigns', labelKey: 'common.nav.campaigns', to: '/app/campaigns', icon: MegaphoneIcon },
-  { key: 'aiAgents', labelKey: 'common.nav.aiAgents', to: '/app/ai-agents', icon: AiSparkleIcon },
+  { key: 'calendar', labelKey: 'common.nav.calendar', to: '/app/calendar', icon: CalendarIcon, viewAction: 'calendar.view' },
+  { key: 'campaigns', labelKey: 'common.nav.campaigns', to: '/app/campaigns', icon: MegaphoneIcon, viewAction: 'campaigns.view' },
+  { key: 'aiAgents', labelKey: 'common.nav.aiAgents', to: '/app/ai-agents', icon: AiSparkleIcon, viewAction: 'aiAgents.view' },
   { key: 'billing', labelKey: 'common.nav.billing', to: '/app/billing', icon: CreditCardIcon },
   { key: 'integrations', labelKey: 'common.nav.integrations', to: '/app/integrations', icon: GlobeIcon },
   { key: 'users', labelKey: 'common.nav.users', to: '/app/users', icon: UsersIcon, alwaysEnabled: true, adminOnly: true },
