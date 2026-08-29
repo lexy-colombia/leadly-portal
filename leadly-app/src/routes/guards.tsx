@@ -58,15 +58,27 @@ export function RequireRole({ allowed, children }: { allowed: UserRole[]; childr
  * for this tenant must show a lock, not silently bounce or (worse) render the
  * page. `enabledModules` is null only for superadmin (never reaches /app
  * routes) or while AuthContext is still loading -- both already covered by
- * `loading` here, so a null set past that point reads as "nothing enabled". */
-export function RequireModule({ moduleKey, children }: { moduleKey: string; children: ReactNode }) {
-  const { enabledModules, loading } = useAuth()
+ * `loading` here, so a null set past that point reads as "nothing enabled".
+ *
+ * `action` (2026-08-29) additionally gates the route behind one action key
+ * from permission_actions (see lib/api/permissions.ts) -- a tenant_agent
+ * whose tenant_role doesn't grant it hits the same lock screen, not just
+ * hidden buttons once inside. superadmin/tenant_admin always pass (their
+ * `permissions` set is the full catalog, see listMyPermissionKeys). Only
+ * the module's own "view" action belongs here -- finer actions (create/
+ * edit/delete/...) stay button-level via usePermission, not a route lock. */
+export function RequireModule({ moduleKey, action, children }: { moduleKey: string; action?: string; children: ReactNode }) {
+  const { enabledModules, permissions, loading } = useAuth()
 
   if (loading) {
     return <PageSpinner />
   }
 
   if (!enabledModules?.has(moduleKey)) {
+    return <AccessDenied />
+  }
+
+  if (action && !permissions?.has(action)) {
     return <AccessDenied />
   }
 
