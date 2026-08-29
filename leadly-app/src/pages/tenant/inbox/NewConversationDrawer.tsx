@@ -100,7 +100,6 @@ export function NewConversationDrawer({
           tenant_id: tenantId,
           full_name: newName.trim(),
           phone: newPhone.trim(),
-          stage: 'lead',
           tags: [],
         })
         // Reflect the new contact as "existing" so going back to this step

@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { inviteTenantUser } from '../../lib/api/users'
-import type { Profile } from '../../types/domain'
+import { listTenantRoles } from '../../lib/api/permissions'
+import type { Profile, TenantRole } from '../../types/domain'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { TranslationKey } from '../../i18n/translations'
 import { FieldError } from '@/components/atoms'
@@ -36,6 +37,8 @@ export function UserInviteDrawer({
   const [fullName, setFullName] = useState('')
   const [phone, setPhone] = useState('')
   const [role, setRole] = useState<'tenant_admin' | 'tenant_agent'>('tenant_agent')
+  const [tenantRoles, setTenantRoles] = useState<TenantRole[]>([])
+  const [tenantRoleId, setTenantRoleId] = useState<string | null>(null)
   const [touched, setTouched] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -47,20 +50,32 @@ export function UserInviteDrawer({
     setFullName('')
     setPhone('')
     setRole('tenant_agent')
+    setTenantRoleId(null)
     setTouched(false)
     setFormError(null)
     setSuccess(false)
   }, [open])
 
+  useEffect(() => {
+    if (!open) return
+    listTenantRoles(tenantId)
+      .then((roles) => {
+        setTenantRoles(roles)
+        setTenantRoleId((prev) => prev ?? roles[0]?.id ?? null)
+      })
+      .catch(() => {})
+  }, [open, tenantId])
+
   const emailError = touched && !isValidEmail(email) ? t('auth.errors.invalidEmail') : undefined
   const fullNameError = touched && !isNotBlank(fullName) ? t('auth.errors.nameRequired') : undefined
   const phoneError = touched && isNotBlank(phone) && !isValidE164Phone(phone) ? t('inbox.newConv.errors.invalidPhone') : undefined
+  const tenantRoleError = touched && role === 'tenant_agent' && !tenantRoleId ? t('account.invite.errors.tenantRoleRequired') : undefined
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setTouched(true)
     setFormError(null)
-    if (!isValidEmail(email) || !isNotBlank(fullName) || (isNotBlank(phone) && !isValidE164Phone(phone))) return
+    if (!isValidEmail(email) || !isNotBlank(fullName) || (isNotBlank(phone) && !isValidE164Phone(phone)) || (role === 'tenant_agent' && !tenantRoleId)) return
 
     setSubmitting(true)
     try {
@@ -70,6 +85,7 @@ export function UserInviteDrawer({
         phone: phone.trim() || null,
         role,
         tenant_id: tenantId,
+        tenant_role_id: role === 'tenant_agent' ? tenantRoleId : null,
       })
       onInvited(profile)
       setSuccess(true)
@@ -145,6 +161,25 @@ export function UserInviteDrawer({
               </SelectContent>
             </Select>
           </div>
+
+          {role === 'tenant_agent' && (
+            <div>
+              <Label htmlFor="invite-tenant-role">{t('account.invite.tenantRole')}</Label>
+              <Select value={tenantRoleId ?? ''} onValueChange={setTenantRoleId}>
+                <SelectTrigger id="invite-tenant-role" aria-invalid={!!tenantRoleError} className="mt-1 w-full">
+                  <SelectValue placeholder={t('account.invite.tenantRolePlaceholder')} />
+                </SelectTrigger>
+                <SelectContent>
+                  {tenantRoles.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>
+                      {r.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FieldError message={tenantRoleError} />
+            </div>
+          )}
 
           {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
 

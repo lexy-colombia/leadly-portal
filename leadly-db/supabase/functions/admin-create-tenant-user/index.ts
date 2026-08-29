@@ -60,14 +60,21 @@ Deno.serve(async (req: Request) => {
     return json({ error: "Only superadmins or tenant admins can create users" }, 403);
   }
 
-  let body: { email?: string; full_name?: string; phone?: string | null; role?: string; tenant_id?: string | null };
+  let body: {
+    email?: string;
+    full_name?: string;
+    phone?: string | null;
+    role?: string;
+    tenant_id?: string | null;
+    tenant_role_id?: string | null;
+  };
   try {
     body = await req.json();
   } catch {
     return json({ error: "Invalid JSON body" }, 400);
   }
 
-  const { email, full_name, phone = null, role, tenant_id = null } = body;
+  const { email, full_name, phone = null, role, tenant_id = null, tenant_role_id = null } = body;
 
   if (!email || !full_name || !role) {
     return json({ error: "email, full_name and role are required" }, 400);
@@ -78,6 +85,9 @@ Deno.serve(async (req: Request) => {
   if (role !== "superadmin" && !tenant_id) {
     return json({ error: "tenant_id is required for non-superadmin roles" }, 400);
   }
+  if (role === "tenant_agent" && !tenant_role_id) {
+    return json({ error: "tenant_role_id is required for tenant_agent" }, 400);
+  }
 
   if (isTenantAdmin) {
     // A tenant_admin caller may only invite users within their own tenant, and
@@ -87,6 +97,22 @@ Deno.serve(async (req: Request) => {
     }
     if (role === "superadmin") {
       return json({ error: "Only a platform superadmin can grant the superadmin role" }, 403);
+    }
+  }
+
+  // A tenant_role_id must belong to the same tenant this user is being
+  // created for -- never trust an id the caller sends without checking
+  // ownership first (same principle as resolveOrderAddress in storefront).
+  if (role === "tenant_agent" && tenant_role_id) {
+    const { data: roleRow, error: roleError } = await adminClient
+      .from("tenant_roles")
+      .select("id")
+      .eq("id", tenant_role_id)
+      .eq("tenant_id", tenant_id)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (roleError || !roleRow) {
+      return json({ error: "tenant_role_id does not belong to this tenant" }, 400);
     }
   }
 
@@ -107,6 +133,7 @@ Deno.serve(async (req: Request) => {
       email,
       phone,
       role,
+      tenant_role_id: role === "tenant_agent" ? tenant_role_id : null,
     })
     .select()
     .single();

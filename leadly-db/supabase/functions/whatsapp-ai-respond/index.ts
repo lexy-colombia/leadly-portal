@@ -5,7 +5,7 @@
 // would let anyone trigger AI replies / burn API credits on any conversation).
 //
 // Since 2026-08-04 this also drives a bounded tool-calling loop -- the model
-// can call functions (create_pqr, create_note, ...) defined in
+// can call functions (book_appointment, create_quote, ...) defined in
 // _shared/aiTools.ts. Actually executing a tool is delegated to the
 // whatsapp-ai-tools function (see its own header comment for why that's a
 // separate function instead of inline here), never done directly in this
@@ -260,7 +260,7 @@ async function respondToConversation(
   // the query below is unfiltered, same as before this feature existed.
   let contextQuery = adminClient
     .from("whatsapp_messages")
-    .select("direction, sender_type, content, created_at, media_storage_path, media_mime_type, media_size_bytes")
+    .select("direction, sender_type, content, created_at")
     .eq("conversation_id", conversation.id)
     .order("created_at", { ascending: false })
     .limit(CONTEXT_MESSAGE_LIMIT);
@@ -291,16 +291,7 @@ async function respondToConversation(
     return json({ handoff: true, sent: sendResult.ok }, 200);
   }
 
-  // If the message that triggered this turn came with an image (a customer
-  // photo the webhook already downloaded), let the tool-calling loop attach
-  // it automatically to whatever PQR/seguimiento the model creates/updates
-  // -- injected server-side, same trust boundary as tenant_id/contact_id
-  // below, the model never sees or chooses this itself.
-  const pendingAttachment: PendingAttachment | null =
-    lastInbound?.media_storage_path
-      ? { storage_path: lastInbound.media_storage_path, mime_type: lastInbound.media_mime_type!, size_bytes: lastInbound.media_size_bytes! }
-      : null;
-  const conversationContext: ConversationContext = { id: conversation.id, tenant_id: conversation.tenant_id, contact_id: conversation.contact_id, pendingAttachment };
+  const conversationContext: ConversationContext = { id: conversation.id, tenant_id: conversation.tenant_id, contact_id: conversation.contact_id };
 
   let replyText: string;
   let tokensUsed: number | null = null;
@@ -502,28 +493,13 @@ interface HistoryMessage {
   direction: string;
   sender_type: string;
   content: string;
-  media_storage_path?: string | null;
-  media_mime_type?: string | null;
-  media_size_bytes?: number | null;
-}
-
-interface PendingAttachment {
-  storage_path: string;
-  mime_type: string;
-  size_bytes: number;
 }
 
 interface ConversationContext {
   id: string;
   tenant_id: string;
   contact_id: string | null;
-  pendingAttachment?: PendingAttachment | null;
 }
-
-// Only these tools create/update a PQR -- an image only ever makes sense
-// attached to one of those, never to create_note/update_pqr_status/
-// get_pqr_status.
-const ATTACHABLE_TOOLS = new Set(["create_pqr", "add_pqr_update"]);
 
 interface ToolCall {
   id: string;
@@ -599,7 +575,6 @@ async function callAiTool(
           tenant_id: conversation.tenant_id,
           conversation_id: conversation.id,
           contact_id: conversation.contact_id,
-          ...(conversation.pendingAttachment && ATTACHABLE_TOOLS.has(call.name) ? { pending_attachment: conversation.pendingAttachment } : {}),
         },
       }),
     });

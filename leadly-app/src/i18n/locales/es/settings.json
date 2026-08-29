@@ -110,5 +110,22 @@
   "settings.assistant.form.errors.systemPromptRequired": "El system prompt es obligatorio para activar el asistente.",
   "settings.assistant.form.errors.temperatureRange": "Debe estar entre 0 y 2.",
   "settings.assistant.form.errors.maxTokensRange": "Debe ser un número entero entre 1 y 8192.",
-  "settings.assistant.form.errors.saveFailed": "No se pudo guardar el agente."
+  "settings.assistant.form.errors.saveFailed": "No se pudo guardar el agente.",
+  "settings.roles.new": "Nuevo rol",
+  "settings.roles.empty": "Todavía no creaste ningún rol.",
+  "settings.roles.errors.load": "No se pudieron cargar los roles.",
+  "settings.roles.errors.loadActions": "No se pudieron cargar los permisos.",
+  "settings.roles.errors.delete": "No se pudo eliminar el rol.",
+  "settings.roles.deleteConfirm.title": "Eliminar rol",
+  "settings.roles.deleteConfirm.description": "¿Eliminar \"{name}\"? Los agentes que lo tengan asignado se quedan sin permisos hasta que les asignes otro rol.",
+  "settings.roles.aria.edit": "Editar rol",
+  "settings.roles.aria.delete": "Eliminar rol",
+  "settings.roles.drawer.newTitle": "Nuevo rol",
+  "settings.roles.drawer.editTitle": "Editar rol",
+  "settings.roles.drawer.description": "Elegí qué puede hacer este rol en cada módulo.",
+  "settings.roles.drawer.fields.name": "Nombre",
+  "settings.roles.drawer.fields.description": "Descripción (opcional)",
+  "settings.roles.drawer.permissionsTitle": "Permisos",
+  "settings.roles.drawer.errors.nameRequired": "Ponle un nombre al rol.",
+  "settings.roles.drawer.errors.saveFailed": "No se pudo guardar el rol."
 }

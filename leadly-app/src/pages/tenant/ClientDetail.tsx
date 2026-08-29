@@ -16,6 +16,7 @@ import { listAddressesForContact, deleteAddress } from '../../lib/api/addresses'
 import { listTasksForAccount, type TaskWithRelations } from '../../lib/api/tasks'
 import { listPipelinesByTenant } from '../../lib/api/pipelines'
 import { listCreditCharges, listCreditPayments, deleteCreditPayment, CREDIT_PAYMENT_METHOD_LABEL_KEY } from '../../lib/api/credit'
+import { COUNTRIES } from '../../lib/referenceData'
 import type {
   Appointment,
   Client,
@@ -37,14 +38,14 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { CalendarIcon, CheckIcon, ChatBubbleIcon, PencilIcon, PlusIcon, ReceiptIcon, TrashIcon, XCircleIcon } from '@/components/atoms/icons'
-import { ContactDrawer, STAGE_LABEL } from './clients/ContactDrawer'
+import { ContactDrawer } from './clients/ContactDrawer'
 import { AppointmentDrawer } from './clients/AppointmentDrawer'
 import { AddressDrawer } from './clients/AddressDrawer'
 import { CreditPaymentDrawer } from './clients/CreditPaymentDrawer'
 import { CreditReceiptDialog } from './clients/CreditReceiptDialog'
 import { OpportunityPanel } from './opportunities/OpportunityPanel'
 import { OpportunityDrawer } from './opportunities/OpportunityDrawer'
-import type { AppointmentStatus, ClientStage } from '../../types/domain'
+import type { AppointmentStatus } from '../../types/domain'
 
 type CreditMovement =
   | { kind: 'charge'; date: string; charge: CreditCharge }
@@ -66,14 +67,6 @@ const ORDER_STATUS_BADGE_CLASS: Record<OrderStatus, string> = {
 // language -- it's the real business currency, not a language preference.
 function formatCurrency(value: number, currency = 'COP'): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
-}
-
-const STAGE_BADGE_CLASS: Record<ClientStage, string> = {
-  lead: 'border-transparent bg-slate-100 text-slate-600',
-  contactado: 'border-transparent bg-amber-100 text-amber-700',
-  negociacion: 'border-transparent bg-amber-100 text-amber-700',
-  cliente: 'border-transparent bg-emerald-100 text-emerald-700',
-  perdido: 'border-transparent bg-red-100 text-red-700',
 }
 
 const APPOINTMENT_STATUS_LABEL: Record<AppointmentStatus, TranslationKey> = {
@@ -176,10 +169,9 @@ function ClientDetailContent({
   const { profile, enabledModules } = useAuth()
   const { t, language } = useLanguage()
   const navigate = useNavigate()
-  // Same rule as the Clientes list: "etapa" only means something when the
-  // tenant has the Pipeline module on -- otherwise it's a badge nobody can
-  // act on (explicit user call, see Clients.tsx).
-  const showStage = enabledModules?.has('pipeline') ?? false
+  // "Oportunidades abiertas" solo tiene sentido si el tenant usa el módulo
+  // Pipeline -- si no, siempre sería 0 y confundiría más que informar.
+  const showPipelineModule = enabledModules?.has('pipeline') ?? false
   // Deep-link support (e.g. from the Cartera list, `/app/clients/:id?tab=credito`) --
   // same one-shot-read-on-mount criterion as Inbox's `?c=<id>`.
   const [searchParams] = useSearchParams()
@@ -387,18 +379,13 @@ function ClientDetailContent({
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-xl font-bold text-brand-800">{contact.full_name}</h1>
-              {showStage && (
-                <Badge variant="outline" className={STAGE_BADGE_CLASS[contact.stage]}>
-                  {t(STAGE_LABEL[contact.stage])}
-                </Badge>
-              )}
               {!contact.is_active && <Badge variant="outline">{t('common.status.inactive')}</Badge>}
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-brand-400">
               <span>{formatPhoneDisplay(contact.phone)}</span>
               {contact.email && <span>{contact.email}</span>}
               {contact.company && <span>{contact.company}</span>}
-              {contact.city && <span>{contact.city}</span>}
+              {contact.country && <span>{t(COUNTRIES.find((c) => c.code === contact.country)?.labelKey ?? 'backoffice.countries.OT')}</span>}
             </div>
             {contact.tags.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1.5">
@@ -435,7 +422,7 @@ function ClientDetailContent({
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <StatCard title={t('contacts.detail.sections.summary')}>
           <div className="grid grid-cols-2 gap-3">
-            {showStage && (
+            {showPipelineModule && (
               <Field
                 label={t('contacts.detail.summary.openOpportunities')}
                 value={opportunities ? `${openOpportunities.length}${openOpportunities.length > 0 ? ` · ${formatCurrency(openOpportunitiesValue)}` : ''}` : '—'}

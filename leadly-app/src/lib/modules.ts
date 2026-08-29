@@ -1,4 +1,4 @@
-import { AiSparkleIcon, ArchiveIcon, BoxIcon, BuildingIcon, CalendarIcon, ChatBubbleIcon, CheckIcon, CreditCardIcon, DashboardIcon, GlobeIcon, MegaphoneIcon, ReceiptIcon, RefreshIcon, SettingsIcon, TargetIcon, UsersIcon, WalletIcon } from '@/components/atoms/icons'
+import { AiSparkleIcon, ArchiveIcon, BoxIcon, BuildingIcon, CalendarIcon, ChatBubbleIcon, CheckIcon, CreditCardIcon, DashboardIcon, GlobeIcon, KeyIcon, MegaphoneIcon, ReceiptIcon, RefreshIcon, SettingsIcon, TargetIcon, UsersIcon, WalletIcon } from '@/components/atoms/icons'
 import type { TranslationKey } from '../i18n/translations'
 import type { ComponentType } from 'react'
 
@@ -28,6 +28,15 @@ export interface TenantModuleDefinition {
    * CRM_GROUP_MODULE_KEYS below, which groups several independently-gated
    * top-level modules -- this is one module with an intrinsic sub-nav. */
   subRoutes?: { labelKey: TranslationKey; to: string }[]
+  /** True for a nav item that is inherent tenant administration, not a
+   * togglable business module the superadmin sells per plan -- bypasses
+   * `enabledModules`/`tenant_enabled_modules` entirely (2026-08-29: Usuarios/
+   * Roles y permisos, every tenant always has these, nothing to enable). */
+  alwaysEnabled?: boolean
+  /** True to hide this item from tenant_agent entirely, not just gate its
+   * content (2026-08-29, explicit user request for Usuarios/Roles y
+   * permisos) -- checked against `profile.role`, not RLS/enabledModules. */
+  adminOnly?: boolean
 }
 
 export const TENANT_MODULES: TenantModuleDefinition[] = [
@@ -70,6 +79,8 @@ export const TENANT_MODULES: TenantModuleDefinition[] = [
   { key: 'aiAgents', labelKey: 'common.nav.aiAgents', to: '/app/ai-agents', icon: AiSparkleIcon },
   { key: 'billing', labelKey: 'common.nav.billing', to: '/app/billing', icon: CreditCardIcon },
   { key: 'integrations', labelKey: 'common.nav.integrations', to: '/app/integrations', icon: GlobeIcon },
+  { key: 'users', labelKey: 'common.nav.users', to: '/app/users', icon: UsersIcon, alwaysEnabled: true, adminOnly: true },
+  { key: 'roles', labelKey: 'common.nav.roles', to: '/app/roles', icon: KeyIcon, alwaysEnabled: true, adminOnly: true },
   { key: 'settings', labelKey: 'common.nav.settings', to: '/app/settings', icon: SettingsIcon },
 ]
 

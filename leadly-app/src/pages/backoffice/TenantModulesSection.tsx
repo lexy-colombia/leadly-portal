@@ -49,7 +49,7 @@ export function TenantModulesSection({ tenantId }: { tenantId: string }) {
       {!enabledKeys && !error && <PageSpinner />}
       {enabledKeys && (
         <div className="grid gap-1.5 sm:grid-cols-2">
-          {TENANT_MODULES.map((module) => {
+          {TENANT_MODULES.filter((module) => !module.alwaysEnabled).map((module) => {
             const Icon = module.icon
             const enabled = enabledKeys.has(module.key)
             return (

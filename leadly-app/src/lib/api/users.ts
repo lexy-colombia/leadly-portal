@@ -7,6 +7,9 @@ export interface InviteTenantUserInput {
   phone: string | null
   role: UserRole
   tenant_id: string | null
+  /** Requerido cuando role='tenant_agent' -- a qué tenant_role queda
+   * asignado (ver lib/api/permissions.ts). Ignorado para los demás roles. */
+  tenant_role_id?: string | null
 }
 
 export async function listProfilesByTenant(tenantId: string): Promise<Profile[]> {

@@ -40,6 +40,8 @@ import { Billing as TenantBilling } from './pages/tenant/Billing'
 import { Integrations as TenantIntegrations } from './pages/tenant/Integrations'
 import { AiAgents } from './pages/tenant/AiAgents'
 import { Campaigns } from './pages/tenant/Campaigns'
+import { Users as TenantUsers } from './pages/tenant/Users'
+import { Roles as TenantRoles } from './pages/tenant/Roles'
 import { MyAccount } from './pages/shared/MyAccount'
 
 export default function App() {
@@ -127,6 +129,22 @@ export default function App() {
             <Route path="billing" element={<RequireModule moduleKey="billing"><TenantBilling /></RequireModule>} />
             <Route path="integrations" element={<RequireModule moduleKey="integrations"><TenantIntegrations /></RequireModule>} />
             <Route path="campaigns" element={<RequireModule moduleKey="campaigns"><Campaigns /></RequireModule>} />
+            <Route
+              path="users"
+              element={
+                <RequireRole allowed={['tenant_admin']}>
+                  <TenantUsers />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="roles"
+              element={
+                <RequireRole allowed={['tenant_admin']}>
+                  <TenantRoles />
+                </RequireRole>
+              }
+            />
             {/* Catálogo se fusionó dentro de Products (mismo catálogo, no dos
                 pantallas separadas) -- este redirect solo cubre links/bookmarks viejos. */}
             <Route path="catalogo" element={<Navigate to="/app/products" replace />} />

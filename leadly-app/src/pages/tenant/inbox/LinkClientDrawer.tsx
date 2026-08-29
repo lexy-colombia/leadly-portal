@@ -84,7 +84,6 @@ export function LinkClientDrawer({
                 tenant_id: tenantId,
                 full_name: newName.trim() || contactPhone,
                 phone: contactPhone,
-                stage: 'lead',
                 tags: [],
               })
             ).id

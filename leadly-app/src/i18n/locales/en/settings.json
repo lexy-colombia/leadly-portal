@@ -110,5 +110,22 @@
   "settings.assistant.form.errors.systemPromptRequired": "The system prompt is required to activate the assistant.",
   "settings.assistant.form.errors.temperatureRange": "Must be between 0 and 2.",
   "settings.assistant.form.errors.maxTokensRange": "Must be a whole number between 1 and 8192.",
-  "settings.assistant.form.errors.saveFailed": "Couldn't save the agent."
+  "settings.assistant.form.errors.saveFailed": "Couldn't save the agent.",
+  "settings.roles.new": "New role",
+  "settings.roles.empty": "You haven't created any roles yet.",
+  "settings.roles.errors.load": "Couldn't load roles.",
+  "settings.roles.errors.loadActions": "Couldn't load permissions.",
+  "settings.roles.errors.delete": "Couldn't delete the role.",
+  "settings.roles.deleteConfirm.title": "Delete role",
+  "settings.roles.deleteConfirm.description": "Delete \"{name}\"? Agents assigned to it lose their permissions until you assign them another role.",
+  "settings.roles.aria.edit": "Edit role",
+  "settings.roles.aria.delete": "Delete role",
+  "settings.roles.drawer.newTitle": "New role",
+  "settings.roles.drawer.editTitle": "Edit role",
+  "settings.roles.drawer.description": "Choose what this role can do in each module.",
+  "settings.roles.drawer.fields.name": "Name",
+  "settings.roles.drawer.fields.description": "Description (optional)",
+  "settings.roles.drawer.permissionsTitle": "Permissions",
+  "settings.roles.drawer.errors.nameRequired": "Give the role a name.",
+  "settings.roles.drawer.errors.saveFailed": "Couldn't save the role."
 }

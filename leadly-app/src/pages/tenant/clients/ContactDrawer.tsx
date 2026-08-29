@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { createClient, updateClient } from '../../../lib/api/clients'
 import { listProfilesByTenant } from '../../../lib/api/users'
-import type { ClientStage, Client, Profile } from '../../../types/domain'
+import type { Client, Profile, TenantDocumentType } from '../../../types/domain'
 import { FieldError } from '@/components/atoms'
 import { ComboboxFilter, PhoneInput, TagInput } from '@/components/molecules'
 import { Drawer } from '@/components/organisms'
@@ -11,18 +11,9 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { COUNTRIES, DOCUMENT_TYPES } from '../../../lib/referenceData'
 import { isNotBlank, isValidE164Phone, isValidEmail } from '../../../lib/validation'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { useAuth } from '../../../contexts/AuthContext'
-import type { TranslationKey } from '../../../i18n/translations'
-
-export const STAGE_LABEL: Record<ClientStage, TranslationKey> = {
-  lead: 'contacts.stage.lead',
-  contactado: 'contacts.stage.contactado',
-  negociacion: 'contacts.stage.negociacion',
-  cliente: 'contacts.stage.cliente',
-  perdido: 'contacts.stage.perdido',
-}
 
 // Same compact sizing as ProductDrawer/CategoryDrawer -- every field in this
 // form is pinned to it so it doesn't feel like a visually separate, bigger
@@ -55,24 +46,17 @@ export function ContactDrawer({
   onSaved: (contact: Client) => void
 }) {
   const { t } = useLanguage()
-  const { enabledModules } = useAuth()
-  // Same criterion as the Clients list/detail: "etapa" only shows up where
-  // the Pipeline module is actually enabled for the tenant -- otherwise
-  // it's a field nobody downstream can see or filter by.
-  const showStage = enabledModules?.has('pipeline') ?? false
   const [fullName, setFullName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
   const [company, setCompany] = useState('')
-  const [stage, setStage] = useState<ClientStage>('lead')
   const [tags, setTags] = useState<string[]>([])
   const [assignedTo, setAssignedTo] = useState<string | null>(null)
   const [agents, setAgents] = useState<Profile[]>([])
   const [nit, setNit] = useState('')
-  const [industry, setIndustry] = useState('')
-  const [website, setWebsite] = useState('')
-  const [address, setAddress] = useState('')
-  const [city, setCity] = useState('')
+  const [documentType, setDocumentType] = useState<TenantDocumentType | ''>('')
+  const [documentNumber, setDocumentNumber] = useState('')
+  const [country, setCountry] = useState('')
   const [notes, setNotes] = useState('')
   const [isActive, setIsActive] = useState(true)
   const [creditEnabled, setCreditEnabled] = useState(false)
@@ -86,14 +70,12 @@ export function ContactDrawer({
     setPhone(contact?.phone ?? '')
     setEmail(contact?.email ?? '')
     setCompany(contact?.company ?? '')
-    setStage(contact?.stage ?? 'lead')
     setTags(contact?.tags ?? [])
     setAssignedTo(contact?.assigned_to ?? null)
     setNit(contact?.nit ?? '')
-    setIndustry(contact?.industry ?? '')
-    setWebsite(contact?.website ?? '')
-    setAddress(contact?.address ?? '')
-    setCity(contact?.city ?? '')
+    setDocumentType(contact?.document_type ?? '')
+    setDocumentNumber(contact?.document_number ?? '')
+    setCountry(contact?.country ?? '')
     setNotes(contact?.notes ?? '')
     setIsActive(contact?.is_active ?? true)
     setCreditEnabled(contact?.credit_enabled ?? false)
@@ -124,14 +106,12 @@ export function ContactDrawer({
         phone: phone.trim(),
         email: email.trim() || null,
         company: company.trim() || null,
-        stage,
         tags,
         assigned_to: assignedTo,
         nit: nit.trim() || null,
-        industry: industry.trim() || null,
-        website: website.trim() || null,
-        address: address.trim() || null,
-        city: city.trim() || null,
+        document_type: documentType || null,
+        document_number: documentNumber.trim() || null,
+        country: country || null,
         notes: notes.trim() || null,
         is_active: isActive,
         credit_enabled: creditEnabled,
@@ -202,42 +182,6 @@ export function ContactDrawer({
                 className={`mt-1 ${FIELD_CLASS}`}
               />
             </div>
-            {showStage ? (
-              <div>
-                <Label htmlFor="contact-stage">{t('contacts.drawer.fields.stage')}</Label>
-                <Select value={stage} onValueChange={(v) => setStage(v as ClientStage)}>
-                  <SelectTrigger id="contact-stage" className={`mt-1 w-full ${FIELD_CLASS}`}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(Object.keys(STAGE_LABEL) as ClientStage[]).map((s) => (
-                      <SelectItem key={s} value={s} className="text-xs">
-                        {t(STAGE_LABEL[s])}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            ) : (
-              <div>
-                <Label>{t('contacts.drawer.fields.assignedAgent')}</Label>
-                <div className="mt-1">
-                  <ComboboxFilter
-                    options={agents.map((a) => ({ id: a.id, label: a.full_name }))}
-                    value={assignedTo}
-                    onChange={setAssignedTo}
-                    placeholder={t('contacts.drawer.fields.unassigned')}
-                    searchPlaceholder={t('contacts.filters.agent.search')}
-                    emptyLabel={t('contacts.filters.agent.noResults')}
-                    className="w-full"
-                    triggerClassName={COMBOBOX_TRIGGER_CLASS}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          {showStage && (
             <div>
               <Label>{t('contacts.drawer.fields.assignedAgent')}</Label>
               <div className="mt-1">
@@ -253,7 +197,7 @@ export function ContactDrawer({
                 />
               </div>
             </div>
-          )}
+          </div>
 
           <div>
             <Label htmlFor="contact-tags">{t('contacts.drawer.fields.tags')}</Label>
@@ -268,23 +212,41 @@ export function ContactDrawer({
               <Input id="contact-nit" value={nit} onChange={(e) => setNit(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
             </div>
             <div>
-              <Label htmlFor="contact-industry">{t('contacts.drawer.fields.industry')}</Label>
-              <Input id="contact-industry" value={industry} onChange={(e) => setIndustry(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
+              <Label htmlFor="contact-document-type">{t('contacts.drawer.fields.documentType')}</Label>
+              <Select value={documentType} onValueChange={(v) => setDocumentType(v as TenantDocumentType)}>
+                <SelectTrigger id="contact-document-type" className={`mt-1 w-full ${FIELD_CLASS}`}>
+                  <SelectValue placeholder={t('common.form.selectPlaceholder')} />
+                </SelectTrigger>
+                <SelectContent>
+                  {DOCUMENT_TYPES.map((d) => (
+                    <SelectItem key={d.value} value={d.value}>
+                      {t(d.labelKey)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label htmlFor="contact-city">{t('contacts.drawer.fields.city')}</Label>
-              <Input id="contact-city" value={city} onChange={(e) => setCity(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
+              <Label htmlFor="contact-document-number">{t('contacts.drawer.fields.documentNumber')}</Label>
+              <Input id="contact-document-number" value={documentNumber} onChange={(e) => setDocumentNumber(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
             </div>
             <div>
-              <Label htmlFor="contact-website">{t('contacts.drawer.fields.website')}</Label>
-              <Input id="contact-website" value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="https://" className={`mt-1 ${FIELD_CLASS}`} />
+              <Label htmlFor="contact-country">{t('contacts.drawer.fields.country')}</Label>
+              <Select value={country} onValueChange={setCountry}>
+                <SelectTrigger id="contact-country" className={`mt-1 w-full ${FIELD_CLASS}`}>
+                  <SelectValue placeholder={t('common.form.selectPlaceholder')} />
+                </SelectTrigger>
+                <SelectContent>
+                  {COUNTRIES.map((c) => (
+                    <SelectItem key={c.code} value={c.code}>
+                      {t(c.labelKey)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-          </div>
-          <div>
-            <Label htmlFor="contact-address">{t('contacts.drawer.fields.address')}</Label>
-            <Input id="contact-address" value={address} onChange={(e) => setAddress(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
           </div>
           <div>
             <Label htmlFor="contact-notes">{t('contacts.drawer.fields.notes')}</Label>
