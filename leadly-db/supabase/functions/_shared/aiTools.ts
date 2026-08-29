@@ -2,12 +2,6 @@
 // same name/description/parameters schema is used by whatsapp-ai-respond (to
 // build each provider's `tools` payload) and by whatsapp-ai-tools (to know
 // what a given function_name means), so the two can never drift apart.
-//
-// Deliberately no `pqr_id` parameter on add_pqr_update/update_pqr_status:
-// the LLM has no reliable way to remember an id it saw in an earlier turn
-// (context is rebuilt stateless per-turn, see CLAUDE.md 3.3), so both
-// resolve to "the contact's most recent PQR" server-side instead of trusting
-// an id the model would have to invent or misremember.
 export interface AiToolDefinition {
   name: string;
   // Which ai_skills.key this tool belongs to -- whatsapp-ai-respond only
@@ -27,80 +21,6 @@ export interface AiToolDefinition {
 }
 
 export const AI_TOOLS: AiToolDefinition[] = [
-  {
-    name: "create_pqr",
-    skill: "pqr",
-    description:
-      "Crea una Petición, Queja o Reclamo (PQR) formal para el cliente de esta conversación. Úsala cuando el cliente exprese una queja o un reclamo, o haga una petición formal que un agente humano deba dar seguimiento.",
-    parameters: {
-      type: "object",
-      properties: {
-        type: { type: "string", enum: ["peticion", "queja", "reclamo"], description: "Tipo de caso." },
-        subject: { type: "string", description: "Resumen breve del caso, en una línea." },
-        description: { type: "string", description: "Detalle completo de lo que el cliente reportó." },
-      },
-      required: ["type", "subject", "description"],
-    },
-  },
-  {
-    name: "create_note",
-    skill: "pqr",
-    description:
-      "Deja una nota libre en el historial del cliente, para información útil que no amerita un PQR (ej. el cliente mencionó un dato de contacto o un detalle de contexto).",
-    parameters: {
-      type: "object",
-      properties: {
-        content: { type: "string", description: "Contenido de la nota." },
-      },
-      required: ["content"],
-    },
-  },
-  {
-    name: "add_pqr_update",
-    skill: "pqr",
-    description:
-      "Agrega un seguimiento al PQR más reciente de este cliente -- úsala cuando el cliente vuelva a escribir sobre un caso que ya había reportado antes. Si el cliente no tiene ningún PQR todavía, usa create_pqr en vez de esta función.",
-    parameters: {
-      type: "object",
-      properties: {
-        content: { type: "string", description: "Texto del seguimiento." },
-      },
-      required: ["content"],
-    },
-  },
-  {
-    name: "update_pqr_status",
-    skill: "pqr",
-    description:
-      "Cambia el estado del PQR más reciente de este cliente. Solo debe usarse cuando el cliente confirma explícitamente que su caso se resolvió o pide cancelarlo -- no cambies el estado por tu cuenta sin esa confirmación.",
-    parameters: {
-      type: "object",
-      properties: {
-        status: { type: "string", enum: ["abierto", "en_proceso", "resuelto", "cerrado"], description: "Nuevo estado del PQR." },
-      },
-      required: ["status"],
-    },
-  },
-  {
-    name: "get_pqr_status",
-    skill: "pqr",
-    description:
-      "Consulta el PQR más reciente de este cliente: su código, tipo, asunto, estado actual, sus últimos seguimientos, y las imágenes (attachments, con su id) adjuntas al caso o a esos seguimientos. Úsala cuando el cliente pregunte cómo va su caso, pida el número/código de su PQR, pregunte por el estado de un reclamo, petición o queja anterior, o pregunte si hay una foto/soporte adjunto.",
-    parameters: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "send_attachment",
-    skill: "pqr",
-    description:
-      "Envía por WhatsApp, directo al cliente, una imagen que ya está adjunta a su PQR más reciente o a uno de sus seguimientos (por ejemplo, un comprobante de reembolso). Usa el attachment_id que te devolvió get_pqr_status -- consulta esa función primero si no sabés el id. Solo puede enviar adjuntos del caso más reciente del cliente.",
-    parameters: {
-      type: "object",
-      properties: {
-        attachment_id: { type: "string", description: "id del adjunto a enviar, tal como lo devolvió get_pqr_status." },
-      },
-      required: ["attachment_id"],
-    },
-  },
   {
     name: "book_appointment",
     skill: "calendario",
@@ -183,18 +103,6 @@ export const AI_TOOLS: AiToolDefinition[] = [
         note: { type: "string", description: "Contexto breve para el agente que va a hacer el seguimiento (opcional)." },
       },
       required: ["product_name"],
-    },
-  },
-  {
-    name: "set_lead_stage",
-    skill: "leads",
-    description: "Actualiza la etapa del contacto en el pipeline de contactos, a medida que la conversación avanza.",
-    parameters: {
-      type: "object",
-      properties: {
-        stage: { type: "string", enum: ["lead", "contactado", "negociacion", "cliente", "perdido"], description: "Nueva etapa del contacto." },
-      },
-      required: ["stage"],
     },
   },
   {

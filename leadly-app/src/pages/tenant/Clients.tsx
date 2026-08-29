@@ -10,7 +10,7 @@ import { formatPhoneDisplay } from "../../lib/phone";
 import { deleteClient, listClients } from "../../lib/api/clients";
 import { listLastContactTimesByTenant } from "../../lib/api/conversations";
 import { listProfilesByTenant } from "../../lib/api/users";
-import type { ClientStage, Client, Profile } from "../../types/domain";
+import type { Client, Profile } from "../../types/domain";
 import { PageSpinner, InitialsAvatar } from "@/components/atoms";
 import {
   Card,
@@ -27,7 +27,6 @@ import {
   TrashIcon,
 } from "@/components/atoms/icons";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -36,24 +35,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ContactDrawer, STAGE_LABEL } from "./clients/ContactDrawer";
+import { ContactDrawer } from "./clients/ContactDrawer";
 
 const PAGE_SIZE = 8;
 
 // Same trigger sizing convention as Products.tsx's filter pills, so this
 // list doesn't feel like a separate design system from the rest of the app.
 const FILTER_TRIGGER_CLASS = "w-40 rounded-lg text-xs";
-
-// bg/text pair on top of shadcn Badge's `outline` variant -- shadcn's own
-// variants (default/secondary/destructive/outline/ghost) have no "warning"/
-// "success" tone, unlike the legacy atoms Badge this replaces.
-const STAGE_BADGE_CLASS: Record<ClientStage, string> = {
-  lead: "border-transparent bg-slate-100 text-slate-600",
-  contactado: "border-transparent bg-amber-100 text-amber-700",
-  negociacion: "border-transparent bg-amber-100 text-amber-700",
-  cliente: "border-transparent bg-emerald-100 text-emerald-700",
-  perdido: "border-transparent bg-red-100 text-red-700",
-};
 
 function formatLastContact(
   iso: string | undefined,
@@ -70,17 +58,10 @@ function formatLastContact(
 }
 
 export function Clients() {
-  const { profile, enabledModules } = useAuth();
+  const { profile } = useAuth();
   const { t, language } = useLanguage();
   const navigate = useNavigate();
   const { slot: headerSearchSlot } = useHeaderSearchSlot();
-  // "Etapa" is the client-side pipeline concept (lead/contactado/.../perdido)
-  // -- only worth a column/filter when the tenant actually has the Pipeline
-  // module enabled (see lib/modules.ts). Without it, every row would show
-  // the same meaningless default and the filter would have nothing real to
-  // filter by (explicit user call: a column nobody can act on is clutter,
-  // not information).
-  const showStage = enabledModules?.has("pipeline") ?? false;
 
   const [contacts, setContacts] = useState<Client[] | null>(null);
   const [agents, setAgents] = useState<Profile[]>([]);
@@ -89,7 +70,6 @@ export function Clients() {
   );
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [stageFilter, setStageFilter] = useState<ClientStage | null>(null);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [agentFilter, setAgentFilter] = useState<string | null>(null);
   const [page, setPage] = useState(1);
@@ -123,7 +103,6 @@ export function Clients() {
     if (!contacts) return null;
     const term = search.trim().toLowerCase();
     return contacts.filter((c) => {
-      if (showStage && stageFilter && c.stage !== stageFilter) return false;
       if (tagFilter && !c.tags.includes(tagFilter)) return false;
       if (agentFilter && c.assigned_to !== agentFilter) return false;
       if (!term) return true;
@@ -131,15 +110,14 @@ export function Clients() {
         c.full_name.toLowerCase().includes(term) ||
         c.phone.includes(term) ||
         c.company?.toLowerCase().includes(term) ||
-        c.city?.toLowerCase().includes(term) ||
         c.tags.some((tag) => tag.toLowerCase().includes(term))
       );
     });
-  }, [contacts, search, showStage, stageFilter, tagFilter, agentFilter]);
+  }, [contacts, search, tagFilter, agentFilter]);
 
   useEffect(() => {
     setPage(1);
-  }, [search, stageFilter, tagFilter, agentFilter]);
+  }, [search, tagFilter, agentFilter]);
 
   const totalPages = filtered
     ? Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
@@ -181,23 +159,6 @@ export function Clients() {
         )}
 
       <div className="flex flex-wrap items-end gap-2 rounded-2xl border border-brand-100 bg-brand-50/40 p-3">
-        {showStage && (
-          <FilterField label={t("contacts.filters.labels.stage")}>
-            <ComboboxFilter
-              options={(Object.keys(STAGE_LABEL) as ClientStage[]).map((s) => ({
-                id: s,
-                label: t(STAGE_LABEL[s]),
-              }))}
-              value={stageFilter}
-              onChange={(id) => setStageFilter(id as ClientStage | null)}
-              placeholder={t("contacts.filters.stage.all")}
-              searchPlaceholder={t("contacts.filters.stage.search")}
-              emptyLabel={t("contacts.filters.stage.noResults")}
-              triggerClassName={FILTER_TRIGGER_CLASS}
-            />
-          </FilterField>
-        )}
-
         {agents.length > 0 && (
           <FilterField label={t("contacts.filters.labels.agent")}>
             <ComboboxFilter
@@ -269,9 +230,6 @@ export function Clients() {
                 <TableRow>
                   <TableHead>{t("contacts.table.contact")}</TableHead>
                   <TableHead>{t("contacts.table.phone")}</TableHead>
-                  {showStage && (
-                    <TableHead>{t("contacts.table.stage")}</TableHead>
-                  )}
                   <TableHead>{t("contacts.table.agent")}</TableHead>
                   <TableHead>{t("contacts.table.lastContact")}</TableHead>
                   <TableHead className="text-right">
@@ -302,16 +260,6 @@ export function Clients() {
                     <TableCell className="text-xs text-brand-700">
                       {formatPhoneDisplay(contact.phone)}
                     </TableCell>
-                    {showStage && (
-                      <TableCell>
-                        <Badge
-                          variant="outline"
-                          className={STAGE_BADGE_CLASS[contact.stage]}
-                        >
-                          {t(STAGE_LABEL[contact.stage])}
-                        </Badge>
-                      </TableCell>
-                    )}
                     <TableCell className="text-xs text-brand-500">
                       {agents.find((a) => a.id === contact.assigned_to)
                         ?.full_name ?? "-"}

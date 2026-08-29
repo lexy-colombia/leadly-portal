@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient'
-import type { ClientStage, Client, Note } from '../../types/domain'
+import type { Client, Note, TenantDocumentType } from '../../types/domain'
 
 export interface ClientInput {
   tenant_id: string
@@ -8,13 +8,11 @@ export interface ClientInput {
   email?: string | null
   company?: string | null
   nit?: string | null
-  industry?: string | null
-  website?: string | null
-  address?: string | null
-  city?: string | null
+  document_type?: TenantDocumentType | null
+  document_number?: string | null
+  country?: string | null
   notes?: string | null
   is_active?: boolean
-  stage: ClientStage
   tags: string[]
   assigned_to?: string | null
   credit_enabled?: boolean

@@ -5,9 +5,13 @@ import { CRM_GROUP_ICON, CRM_GROUP_MODULE_KEYS, TENANT_MODULES } from '../lib/mo
 
 export function TenantLayout() {
   const { t } = useLanguage()
-  const { enabledModules } = useAuth()
+  const { enabledModules, profile } = useAuth()
 
-  const enabled = TENANT_MODULES.filter((module) => enabledModules?.has(module.key) && !module.hideFromNav)
+  const enabled = TENANT_MODULES.filter((module) => {
+    if (module.adminOnly && profile?.role !== 'tenant_admin') return false
+    const moduleEnabled = module.alwaysEnabled || enabledModules?.has(module.key)
+    return moduleEnabled && !module.hideFromNav
+  })
   const crmChildren: NavItem[] = enabled
     .filter((module) => CRM_GROUP_MODULE_KEYS.includes(module.key))
     .map((module) => ({ to: module.to, label: t(module.labelKey), icon: module.icon, badge: module.badge ? t(module.badge) : undefined }))

@@ -20,7 +20,6 @@ const CATEGORY_LIST_LIMIT = 5;
 const CATEGORY_TOP_PRODUCTS_LIMIT = 5;
 
 const OPPORTUNITY_PRIORITIES = ["baja", "media", "alta"];
-const LEAD_STAGES = ["lead", "contactado", "negociacion", "cliente", "perdido"];
 
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") {
@@ -420,16 +419,6 @@ async function executeTool(
       if (error) throw new Error(error.message);
 
       return { flagged: true, product: productName };
-    }
-
-    case "set_lead_stage": {
-      if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
-      const stage = String(parameters.stage ?? "");
-      if (!LEAD_STAGES.includes(stage)) throw new Error(`stage inválido: ${stage}`);
-
-      const { error } = await adminClient.from("clients").update({ stage }).eq("id", contactId);
-      if (error) throw new Error(error.message);
-      return { contact_id: contactId, stage };
     }
 
     case "list_catalog_categories": {

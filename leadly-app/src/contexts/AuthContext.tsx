@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import type { Session, User } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabaseClient'
 import { listEnabledModuleKeys } from '../lib/api/tenantModules'
+import { listMyPermissionKeys } from '../lib/api/permissions'
 import type { Profile, Tenant } from '../types/domain'
 
 type TenantSummary = Pick<Tenant, 'id' | 'name' | 'status'>
@@ -18,6 +19,11 @@ interface AuthContextValue {
    * TenantLayout's nav filtering and the RequireModule route guard, from the same
    * fetch so there's no duplicate query between the two call sites. */
   enabledModules: Set<string> | null
+  /** Action keys (see lib/api/permissions.ts) the current user can perform --
+   * all of permission_actions for superadmin/tenant_admin, or the granted set
+   * of the tenant_agent's tenant_role_id. Null while loading; empty set fails
+   * closed, same as enabledModules. */
+  permissions: Set<string> | null
   /** True only while the auth.users row exists but no matching profiles row was found —
    * i.e. someone authenticated (Google or email/password) whose account hasn't created or
    * joined a tenant yet. Guards route these to the onboarding screen, not "not authorized". */
@@ -63,11 +69,24 @@ async function fetchEnabledModules(tenantId: string): Promise<Set<string>> {
   }
 }
 
+/** Fails closed (empty set = no actions allowed), same reasoning as
+ * fetchEnabledModules -- a broken fetch must never fall back to "everything
+ * unlocked". */
+async function fetchPermissions(role: string, tenantRoleId: string | null): Promise<Set<string>> {
+  try {
+    return await listMyPermissionKeys(role, tenantRoleId)
+  } catch (error) {
+    console.error('Failed to load permissions', error)
+    return new Set()
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [tenant, setTenant] = useState<TenantSummary | null>(null)
   const [enabledModules, setEnabledModules] = useState<Set<string> | null>(null)
+  const [permissions, setPermissions] = useState<Set<string> | null>(null)
   const [unprovisioned, setUnprovisioned] = useState(false)
   const [loading, setLoading] = useState(true)
 
@@ -85,13 +104,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUnprovisioned(nextProfile === null)
 
       if (nextProfile?.tenant_id) {
-        const [nextTenant, nextModules] = await Promise.all([fetchTenant(nextProfile.tenant_id), fetchEnabledModules(nextProfile.tenant_id)])
+        const [nextTenant, nextModules, nextPermissions] = await Promise.all([
+          fetchTenant(nextProfile.tenant_id),
+          fetchEnabledModules(nextProfile.tenant_id),
+          fetchPermissions(nextProfile.role, nextProfile.tenant_role_id),
+        ])
         if (!active) return
         setTenant(nextTenant)
         setEnabledModules(nextModules)
+        setPermissions(nextPermissions)
       } else {
         setTenant(null)
         setEnabledModules(null)
+        const nextPermissions = nextProfile ? await fetchPermissions(nextProfile.role, nextProfile.tenant_role_id) : null
+        if (!active) return
+        setPermissions(nextPermissions)
       }
     }
 
@@ -124,6 +151,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile(null)
       setTenant(null)
       setEnabledModules(null)
+      setPermissions(null)
       setUnprovisioned(false)
       if (session?.user) {
         await loadProfileFor(session.user.id)
@@ -172,12 +200,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile(nextProfile)
       setUnprovisioned(nextProfile === null)
       if (nextProfile?.tenant_id) {
-        const [nextTenant, nextModules] = await Promise.all([fetchTenant(nextProfile.tenant_id), fetchEnabledModules(nextProfile.tenant_id)])
+        const [nextTenant, nextModules, nextPermissions] = await Promise.all([
+          fetchTenant(nextProfile.tenant_id),
+          fetchEnabledModules(nextProfile.tenant_id),
+          fetchPermissions(nextProfile.role, nextProfile.tenant_role_id),
+        ])
         setTenant(nextTenant)
         setEnabledModules(nextModules)
+        setPermissions(nextPermissions)
       } else {
         setTenant(null)
         setEnabledModules(null)
+        setPermissions(nextProfile ? await fetchPermissions(nextProfile.role, nextProfile.tenant_role_id) : null)
       }
     }
   }
@@ -188,6 +222,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     profile,
     tenant,
     enabledModules,
+    permissions,
     unprovisioned,
     loading,
     signInWithPassword,
@@ -204,4 +239,14 @@ export function useAuth() {
   const ctx = useContext(AuthContext)
   if (!ctx) throw new Error('useAuth must be used within an AuthProvider')
   return ctx
+}
+
+/** Whether the current user can perform `actionKey` (see permission_actions
+ * / lib/api/permissions.ts). Only for showing/hiding UI -- the real boundary
+ * is RLS's has_permission() on the DB side, this never substitutes for it.
+ * `permissions === null` (still loading) reads as false, same fail-closed
+ * default as the rest of this file. */
+export function usePermission(actionKey: string): boolean {
+  const { permissions } = useAuth()
+  return permissions?.has(actionKey) ?? false
 }

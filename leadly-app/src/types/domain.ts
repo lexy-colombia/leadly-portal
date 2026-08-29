@@ -40,8 +40,35 @@ export interface Profile {
   email: string
   phone: string | null
   role: UserRole
+  /** Solo aplica a role='tenant_agent' -- qué tenant_role tiene asignado.
+   * tenant_admin/superadmin lo ignoran (siempre tienen acceso total). */
+  tenant_role_id: string | null
   active: boolean
   last_login_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** Catálogo fijo de acciones posibles (ver permission_actions) -- de código,
+ * nadie lo edita desde la UI. */
+export interface PermissionAction {
+  key: string
+  module_key: string
+  name: string
+  description: string | null
+  display_order: number
+}
+
+/** Un rol que un tenant creó para sus agentes (ver tenant_roles) -- el
+ * tenant se autogestiona esto, a diferencia de tenant_enabled_modules. */
+export interface TenantRole {
+  id: string
+  tenant_id: string
+  name: string
+  description: string | null
+  created_by: string | null
+  deleted_at: string | null
+  deleted_by: string | null
   created_at: string
   updated_at: string
 }
@@ -214,8 +241,6 @@ export interface ConversationTag {
   created_at: string
 }
 
-export type ClientStage = 'lead' | 'contactado' | 'negociacion' | 'cliente' | 'perdido'
-
 export interface Client {
   id: string
   tenant_id: string
@@ -224,13 +249,11 @@ export interface Client {
   email: string | null
   company: string | null
   nit: string | null
-  industry: string | null
-  website: string | null
-  address: string | null
-  city: string | null
+  document_type: TenantDocumentType | null
+  document_number: string | null
+  country: string | null
   notes: string | null
   is_active: boolean
-  stage: ClientStage
   tags: string[]
   assigned_to: string | null
   hubspot_contact_id: string | null
