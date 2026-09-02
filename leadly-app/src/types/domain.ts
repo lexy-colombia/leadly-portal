@@ -325,6 +325,9 @@ export interface Task {
   priority: TaskPriority
   status: TaskStatus
   due_date: string
+  completed_at: string | null
+  completed_by: string | null
+  reminder_sent_at: string | null
   deleted_at: string | null
   deleted_by: string | null
   created_at: string
@@ -777,6 +780,7 @@ export interface Appointment {
   notes: string | null
   status: AppointmentStatus
   created_by: string | null
+  assigned_to: string | null
   reminder_sent_at: string | null
   created_at: string
   updated_at: string
