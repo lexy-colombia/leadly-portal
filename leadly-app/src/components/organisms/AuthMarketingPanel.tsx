@@ -1,11 +1,17 @@
 import { useLanguage } from '@/contexts/LanguageContext'
 import { Logo } from '@/components/atoms/Logo'
-import { BarChartIcon, ChatBubbleIcon, TargetIcon } from '@/components/atoms/icons'
+import { BoxIcon, CalendarIcon, ChatBubbleIcon } from '@/components/atoms/icons'
 
+// Copy reescrita 2026-09-02, pedido explícito del usuario: "esto no es un
+// CRM, es la plataforma que centraliza la operación de una empresa" -- el
+// panel hablaba solo de leads/pipeline/cierre de ventas (un CRM angosto),
+// cuando el producto real ya cubre ventas+inventario+crédito+tareas+
+// calendario+campañas (ver CLAUDE.md, pivote a ERP del 2026-08-15). Los 3
+// pilares nuevos reflejan esa cobertura real sin listar cada módulo.
 const FEATURES = [
   { icon: ChatBubbleIcon, titleKey: 'auth.marketing.feature1.title', descriptionKey: 'auth.marketing.feature1.description' },
-  { icon: TargetIcon, titleKey: 'auth.marketing.feature2.title', descriptionKey: 'auth.marketing.feature2.description' },
-  { icon: BarChartIcon, titleKey: 'auth.marketing.feature3.title', descriptionKey: 'auth.marketing.feature3.description' },
+  { icon: BoxIcon, titleKey: 'auth.marketing.feature2.title', descriptionKey: 'auth.marketing.feature2.description' },
+  { icon: CalendarIcon, titleKey: 'auth.marketing.feature3.title', descriptionKey: 'auth.marketing.feature3.description' },
 ] as const
 
 /** Left-hand marketing panel shared by every auth screen (login, forgot

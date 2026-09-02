@@ -9,7 +9,7 @@ import type { AppointmentStatus, AppointmentWithContact, TaskStatus } from '../.
 import { PageSpinner } from '@/components/atoms'
 import { Card } from '@/components/molecules'
 import { Button } from '@/components/ui/button'
-import { ChevronLeftIcon, PlusIcon, CheckIcon, XCircleIcon } from '@/components/atoms/icons'
+import { ChevronLeftIcon, PlusIcon, CheckIcon, XCircleIcon, CalendarIcon } from '@/components/atoms/icons'
 import { AppointmentFormDrawer, type AppointmentEditInitial } from './calendar/AppointmentFormDrawer'
 import { AppointmentDetailDrawer } from './calendar/AppointmentDetailDrawer'
 import { TaskDrawer } from './tasks/TaskDrawer'
@@ -36,30 +36,32 @@ const VIEW_KEYS: Record<ViewMode, TranslationKey> = {
   day: 'calendar.view.day',
 }
 
-const APPOINTMENT_STATUS_DOT: Record<AppointmentStatus, string> = {
-  activa: 'bg-amber-500',
-  completada: 'bg-emerald-500',
-  cancelada: 'bg-brand-300',
+type EntryType = 'appointment' | 'task'
+
+/** Antes había 7 colores distintos repartidos en 4 mapas (uno por cada
+ * combinación de tipo × estado) sin ninguna leyenda -- feedback directo del
+ * usuario (2026-09-02): "no se como manejarlo ni como entenderlo". Ahora hay
+ * un único lugar que decide el color, y el color codifica UNA sola cosa
+ * (nunca dos a la vez): normalmente el TIPO (cita=celeste, tarea=violeta);
+ * si está vencida, vencida gana y todo se pinta rojo sin importar el tipo;
+ * completada/cancelada tienen su propio color fijo sin importar el tipo. La
+ * leyenda de arriba del calendario (JSX de `Calendar`, debajo del header)
+ * solo necesita explicar 3 colores en vez de 7. */
+function entryVisual(type: EntryType, status: AppointmentStatus | TaskStatus, overdue: boolean): { dot: string; chip: string; label: TranslationKey } {
+  if (status === 'cancelada') return { dot: 'bg-brand-300', chip: 'bg-brand-50 text-brand-400 hover:bg-brand-100 line-through', label: 'calendar.status.cancelada' }
+  if (status === 'completada') return { dot: 'bg-emerald-500', chip: 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100', label: 'calendar.status.completada' }
+  if (overdue) return { dot: 'bg-red-500', chip: 'bg-red-50 text-red-700 hover:bg-red-100', label: 'calendar.overdue' }
+  return type === 'appointment'
+    ? { dot: 'bg-sky-500', chip: 'bg-sky-50 text-sky-700 hover:bg-sky-100', label: 'calendar.type.appointment' }
+    : { dot: 'bg-violet-500', chip: 'bg-violet-50 text-violet-700 hover:bg-violet-100', label: 'calendar.type.task' }
 }
 
-const APPOINTMENT_STATUS_CHIP: Record<AppointmentStatus, string> = {
-  activa: 'bg-amber-50 text-amber-700 hover:bg-amber-100',
-  completada: 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
-  cancelada: 'bg-brand-50 text-brand-400 hover:bg-brand-100 line-through',
-}
-
-const TASK_STATUS_DOT: Record<TaskStatus, string> = {
-  pendiente: 'bg-violet-500',
-  en_proceso: 'bg-blue-500',
-  completada: 'bg-emerald-500',
-  cancelada: 'bg-brand-300',
-}
-
-const TASK_STATUS_CHIP: Record<TaskStatus, string> = {
-  pendiente: 'bg-violet-50 text-violet-700 hover:bg-violet-100',
-  en_proceso: 'bg-blue-50 text-blue-700 hover:bg-blue-100',
-  completada: 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
-  cancelada: 'bg-brand-50 text-brand-400 hover:bg-brand-100 line-through',
+/** Una cita/tarea sigue "abierta" (activa/pendiente/en_proceso) y su fecha ya
+ * pasó -- Fase 2 de "oportunidades/tareas/citas transversal" (2026-09-02):
+ * antes no había ninguna señal visual de esto en ningún lado del sistema. */
+function isEntryOverdue(entry: CalendarEntry, nowMs: number): boolean {
+  if (entry.kind === 'task') return (entry.task.status === 'pendiente' || entry.task.status === 'en_proceso') && entry.time < nowMs
+  return entry.appointment.status === 'activa' && entry.time < nowMs
 }
 
 function dateKey(d: Date): string {
@@ -119,6 +121,7 @@ export function Calendar() {
   const tasksEnabled = enabledModules?.has('tasks') ?? false
 
   const [viewMode, setViewMode] = useState<ViewMode>('month')
+  const [typeFilter, setTypeFilter] = useState<'all' | EntryType>('all')
   const [anchorDate, setAnchorDate] = useState(() => new Date())
   const [appointments, setAppointments] = useState<AppointmentWithContact[] | null>(null)
   const [tasks, setTasks] = useState<TaskWithRelations[] | null>(null)
@@ -168,25 +171,29 @@ export function Calendar() {
   // El calendario es la "matriz" del CRM (pedido explícito del usuario,
   // 2026-08-19): citas y tareas conviven en la misma grilla en vez de vivir
   // en módulos separados -- se combinan acá en un único feed por día,
-  // ordenado por hora, distinguibles solo por el tipo de indicador (punto de
-  // color = cita, círculo tipo checkbox = tarea, ver CalendarEntryRow).
+  // ordenado por hora. `typeFilter` (2026-09-02, ver entryVisual) puede
+  // dejar afuera uno de los dos tipos sin tocar los datos ya cargados.
   const entriesByDay = useMemo(() => {
     const map = new Map<string, CalendarEntry[]>()
-    for (const appt of appointments ?? []) {
-      const key = dateKey(new Date(appt.scheduled_at))
-      const entry: CalendarEntry = { kind: 'appointment', time: new Date(appt.scheduled_at).getTime(), appointment: appt }
-      if (!map.has(key)) map.set(key, [])
-      map.get(key)!.push(entry)
+    if (typeFilter !== 'task') {
+      for (const appt of appointments ?? []) {
+        const key = dateKey(new Date(appt.scheduled_at))
+        const entry: CalendarEntry = { kind: 'appointment', time: new Date(appt.scheduled_at).getTime(), appointment: appt }
+        if (!map.has(key)) map.set(key, [])
+        map.get(key)!.push(entry)
+      }
     }
-    for (const task of tasks ?? []) {
-      const key = dateKey(new Date(task.due_date))
-      const entry: CalendarEntry = { kind: 'task', time: new Date(task.due_date).getTime(), task }
-      if (!map.has(key)) map.set(key, [])
-      map.get(key)!.push(entry)
+    if (typeFilter !== 'appointment') {
+      for (const task of tasks ?? []) {
+        const key = dateKey(new Date(task.due_date))
+        const entry: CalendarEntry = { kind: 'task', time: new Date(task.due_date).getTime(), task }
+        if (!map.has(key)) map.set(key, [])
+        map.get(key)!.push(entry)
+      }
     }
     for (const list of map.values()) list.sort((a, b) => a.time - b.time)
     return map
-  }, [appointments, tasks])
+  }, [appointments, tasks, typeFilter])
 
   function upsertAppointment(updated: AppointmentWithContact) {
     setAppointments((prev) => {
@@ -244,6 +251,7 @@ export function Calendar() {
 
   const today = new Date()
   const todayKey = dateKey(today)
+  const nowMs = today.getTime()
 
   const headerLabel = useMemo(() => {
     if (viewMode === 'day') return capitalizeFirst(day.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }))
@@ -304,6 +312,44 @@ export function Calendar() {
         </div>
       </div>
 
+      {/* Solo tiene sentido filtrar/explicar la diferencia cita-vs-tarea si el
+          tenant tiene el módulo de tareas -- sin él, todo en este calendario
+          es una cita, no hay nada que distinguir. Agregado a pedido directo
+          del usuario (2026-09-02): "no se como manejarlo ni como
+          entenderlo" -- antes no había ningún filtro ni leyenda. */}
+      {tasksEnabled && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center rounded-lg border border-brand-100 bg-white p-0.5">
+            {(['all', 'appointment', 'task'] as const).map((f) => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setTypeFilter(f)}
+                className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                  typeFilter === f ? 'bg-accent-500 text-white' : 'text-brand-500 hover:bg-brand-50'
+                }`}
+              >
+                {t(f === 'all' ? 'calendar.filter.all' : f === 'appointment' ? 'calendar.type.appointment' : 'calendar.type.task')}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-brand-400">
+            <span className="flex items-center gap-1">
+              <span className="h-2 w-2 rounded-full bg-sky-500" />
+              {t('calendar.type.appointment')}
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="h-2 w-2 rounded-full bg-violet-500" />
+              {t('calendar.type.task')}
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="h-2 w-2 rounded-full bg-red-500" />
+              {t('calendar.overdue')}
+            </span>
+          </div>
+        </div>
+      )}
+
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
       {!loaded && <PageSpinner />}
@@ -344,8 +390,9 @@ export function Calendar() {
                   <div className="mt-1 space-y-1">
                     {visible.map((entry) => {
                       const entryKey = entry.kind === 'appointment' ? entry.appointment.id : entry.task.id
-                      const chipClass = entry.kind === 'appointment' ? APPOINTMENT_STATUS_CHIP[entry.appointment.status] : TASK_STATUS_CHIP[entry.task.status]
-                      const dotClass = entry.kind === 'appointment' ? APPOINTMENT_STATUS_DOT[entry.appointment.status] : TASK_STATUS_DOT[entry.task.status]
+                      const overdue = isEntryOverdue(entry, nowMs)
+                      const status = entry.kind === 'appointment' ? entry.appointment.status : entry.task.status
+                      const { dot, chip } = entryVisual(entry.kind, status, overdue)
                       const label = entry.kind === 'appointment' ? entry.appointment.contact_full_name : entry.task.title
                       return (
                         <button
@@ -355,9 +402,9 @@ export function Calendar() {
                             if (entry.kind === 'appointment') setDetailDrawer({ open: true, appointment: entry.appointment })
                             else setTaskDrawer({ open: true, task: entry.task })
                           }}
-                          className={`flex w-full items-center gap-1 truncate rounded px-1.5 py-0.5 text-left text-[10px] font-medium transition-colors ${chipClass}`}
+                          className={`flex w-full items-center gap-1 truncate rounded px-1.5 py-0.5 text-left text-[10px] font-medium transition-colors ${chip}`}
                         >
-                          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass}`} />
+                          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />
                           <span className="truncate">
                             {new Date(entry.time).toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' })} {label}
                           </span>
@@ -402,6 +449,7 @@ export function Calendar() {
                         key={entry.kind === 'appointment' ? entry.appointment.id : entry.task.id}
                         entry={entry}
                         locale={locale}
+                        nowMs={nowMs}
                         compact
                         busy={quickUpdating === (entry.kind === 'appointment' ? entry.appointment.id : entry.task.id)}
                         onOpen={() =>
@@ -428,6 +476,7 @@ export function Calendar() {
               key={entry.kind === 'appointment' ? entry.appointment.id : entry.task.id}
               entry={entry}
               locale={locale}
+              nowMs={nowMs}
               busy={quickUpdating === (entry.kind === 'appointment' ? entry.appointment.id : entry.task.id)}
               onOpen={() => (entry.kind === 'appointment' ? setDetailDrawer({ open: true, appointment: entry.appointment }) : setTaskDrawer({ open: true, task: entry.task }))}
               onCompleteAppointment={() => entry.kind === 'appointment' && quickSetAppointmentStatus(entry.appointment, 'completada')}
@@ -477,6 +526,7 @@ export function Calendar() {
 function CalendarEntryRow({
   entry,
   locale,
+  nowMs,
   compact,
   busy,
   onOpen,
@@ -486,6 +536,7 @@ function CalendarEntryRow({
 }: {
   entry: CalendarEntry
   locale: string
+  nowMs: number
   compact?: boolean
   busy: boolean
   onOpen: () => void
@@ -495,15 +546,19 @@ function CalendarEntryRow({
 }) {
   const { t } = useLanguage()
   const isTask = entry.kind === 'task'
+  const overdue = isEntryOverdue(entry, nowMs)
+  const status = isTask ? entry.task.status : entry.appointment.status
+  const { dot, label: typeLabelKey } = entryVisual(entry.kind, status, overdue)
   const time = new Date(entry.time).toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' })
   const label = isTask ? entry.task.title : entry.appointment.contact_full_name
-  const struckThrough = isTask ? entry.task.status === 'cancelada' : entry.appointment.status === 'cancelada'
-  const dotClass = isTask ? TASK_STATUS_DOT[entry.task.status] : APPOINTMENT_STATUS_DOT[entry.appointment.status]
+  const struckThrough = status === 'cancelada'
   const taskDone = isTask && entry.task.status === 'completada'
   const canActAppointment = !isTask && entry.appointment.status === 'activa' && !busy
+  const badgeSize = compact ? 'h-4 w-4' : 'h-5 w-5'
+  const badgeIconSize = compact ? 8 : 10
 
   return (
-    <div className={`flex items-center gap-1 rounded-lg border border-brand-100 bg-white transition-colors hover:border-accent-200 ${compact ? 'px-1.5 py-1' : 'px-3 py-2'}`}>
+    <div className={`flex items-center gap-1.5 rounded-lg border border-brand-100 bg-white transition-colors hover:border-accent-200 ${compact ? 'px-1.5 py-1' : 'px-3 py-2'}`}>
       {isTask ? (
         <button
           type="button"
@@ -513,21 +568,33 @@ function CalendarEntryRow({
           }}
           disabled={busy}
           aria-label={taskDone ? t('tasks.aria.markPending') : t('tasks.aria.markCompleted')}
-          className={`flex shrink-0 items-center justify-center rounded-full border transition-colors ${compact ? 'h-3.5 w-3.5' : 'h-4 w-4'} ${
-            taskDone ? 'border-accent-500 bg-accent-500 text-white' : 'border-brand-300 text-transparent hover:border-accent-400'
+          className={`flex shrink-0 items-center justify-center rounded-full border-2 transition-colors ${badgeSize} ${
+            taskDone ? 'border-emerald-500 bg-emerald-500 text-white' : `border-violet-300 text-transparent hover:border-violet-500 ${overdue ? '!border-red-400' : ''}`
           }`}
         >
-          <CheckIcon width={compact ? 8 : 10} height={compact ? 8 : 10} />
+          <CheckIcon width={badgeIconSize} height={badgeIconSize} />
         </button>
       ) : (
-        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass}`} />
+        <span className={`flex shrink-0 items-center justify-center rounded-full text-white ${badgeSize} ${dot}`} title={t(typeLabelKey)}>
+          <CalendarIcon width={badgeIconSize} height={badgeIconSize} />
+        </span>
       )}
-      <button onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
+      <button onClick={onOpen} className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-left">
         <span className={`shrink-0 font-semibold text-brand-800 ${compact ? 'text-[10px]' : 'text-xs'}`}>{time}</span>
-        <span className={`truncate ${struckThrough || taskDone ? 'text-brand-400 line-through' : 'text-brand-700'} ${compact ? 'text-[10px]' : 'text-xs'}`}>{label}</span>
+        {!compact && (
+          <span className={`shrink-0 rounded px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${isTask ? 'bg-violet-50 text-violet-600' : 'bg-sky-50 text-sky-600'}`}>
+            {t(isTask ? 'calendar.type.task' : 'calendar.type.appointment')}
+          </span>
+        )}
+        <span className={`truncate ${struckThrough || taskDone ? 'text-brand-400 line-through' : overdue ? 'text-red-700' : 'text-brand-700'} ${compact ? 'text-[10px]' : 'text-xs'}`}>
+          {label}
+        </span>
+        {overdue && (
+          <span className={`shrink-0 rounded bg-red-50 px-1 font-semibold text-red-600 ${compact ? 'text-[8px]' : 'text-[9px]'}`}>{t('calendar.overdue')}</span>
+        )}
       </button>
       {canActAppointment && (
-        <div className="flex shrink-0 items-center gap-0.5">
+        <div className="flex shrink-0 items-center gap-1">
           <button
             type="button"
             onClick={(e) => {
@@ -535,7 +602,7 @@ function CalendarEntryRow({
               onCompleteAppointment()
             }}
             aria-label={t('calendar.detail.markCompleted')}
-            className="rounded p-1 text-emerald-600 hover:bg-emerald-50"
+            className="rounded-md border border-emerald-200 bg-emerald-50 p-1 text-emerald-700 hover:bg-emerald-100"
           >
             <CheckIcon width={compact ? 11 : 13} height={compact ? 11 : 13} />
           </button>
@@ -546,7 +613,7 @@ function CalendarEntryRow({
               onCancelAppointment()
             }}
             aria-label={t('calendar.detail.cancelAppointment')}
-            className="rounded p-1 text-red-500 hover:bg-red-50"
+            className="rounded-md border border-red-200 bg-red-50 p-1 text-red-600 hover:bg-red-100"
           >
             <XCircleIcon width={compact ? 11 : 13} height={compact ? 11 : 13} />
           </button>

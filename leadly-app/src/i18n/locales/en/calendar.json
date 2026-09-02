@@ -22,6 +22,11 @@
   "calendar.errors.updateFailed": "Couldn't update the appointment.",
   "calendar.errors.createFailed": "Couldn't schedule the appointment.",
 
+  "calendar.overdue": "Overdue",
+  "calendar.filter.all": "All",
+  "calendar.type.appointment": "Appointment",
+  "calendar.type.task": "Task",
+
   "calendar.status.activa": "Scheduled",
   "calendar.status.completada": "Completed",
   "calendar.status.cancelada": "Cancelled",

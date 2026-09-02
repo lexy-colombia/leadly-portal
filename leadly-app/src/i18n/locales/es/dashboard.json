@@ -16,6 +16,29 @@
   "dashboard.upcomingTasks.title": "Tareas próximas",
   "dashboard.upcomingTasks.empty": "No tenés tareas pendientes. 🎉",
   "dashboard.upcomingTasks.generalTask": "Tarea general",
-  "dashboard.recentConversations.title": "Conversaciones recientes",
-  "dashboard.recentConversations.empty": "Todavía no tenés conversaciones."
+
+  "dashboard.greeting.prefix": "Hola,",
+  "dashboard.greeting.subtitle": "Así va tu negocio hoy.",
+
+  "dashboard.kpi.sales.title": "Ventas · {days}d",
+  "dashboard.kpi.orders.title": "Pedidos · {days}d",
+  "dashboard.kpi.dispatches.title": "Despachos · {days}d",
+  "dashboard.kpi.receivable.title": "Cartera por cobrar",
+  "dashboard.kpi.receivable.footer": "Ver detalle",
+
+  "dashboard.recentActivity.title": "Actividad reciente",
+  "dashboard.recentActivity.empty": "Todavía no hay pedidos ni devoluciones registradas.",
+  "dashboard.recentActivity.order": "Pedido #{number}",
+  "dashboard.recentActivity.quote": "Cotización #{number}",
+  "dashboard.recentActivity.return": "Devolución #{number}",
+  "dashboard.recentActivity.client": "Cliente: {name}",
+
+  "dashboard.agentActivity.title": "Rendimiento del equipo",
+  "dashboard.agentActivity.tooltip": "Tareas y citas asignadas a cada agente -- cuánto tiene pendiente, cuánto quedó vencido, y qué porcentaje completó a tiempo.",
+  "dashboard.agentActivity.empty": "Todavía no hay tareas ni citas asignadas a tu equipo.",
+  "dashboard.agentActivity.pending": "Pendientes",
+  "dashboard.agentActivity.tasksOverdue": "Tareas vencidas",
+  "dashboard.agentActivity.appointmentsOverdue": "Citas vencidas",
+  "dashboard.agentActivity.onTimeRate": "Cumplimiento a tiempo",
+  "dashboard.agentActivity.noCompletedYet": "Sin completadas todavía"
 }

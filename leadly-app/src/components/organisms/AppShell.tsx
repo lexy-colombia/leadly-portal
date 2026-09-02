@@ -270,11 +270,23 @@ export function AppShell({
         <MobileTopBar isLight={isLight} />
 
         <Sidebar collapsible="icon">
-          <SidebarHeader className={`flex-row items-center gap-2 border-b px-4 py-3.5 ${isLight ? 'border-brand-100' : 'border-brand-800'} group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0`}>
-            <div className="group-data-[collapsible=icon]:hidden">
-              <Logo size="sm" onDark={!isLight} />
+          {/* `relative` + el toggle sacado del flujo con `absolute` (2026-09-02,
+              pedido explícito del usuario: "la imagen del sidemenu es pequeña,
+              quiero mas grande y que este centrada") -- antes el logo y el
+              toggle compartían una fila `flex` normal, así que el `ml-auto`
+              del toggle empujaba al logo hacia la izquierda en vez de dejarlo
+              centrado. Con el toggle posicionado aparte, el div del logo
+              (`flex-1 justify-center`) puede centrarse en todo el ancho del
+              header sin que el toggle le gane espacio. */}
+          <SidebarHeader
+            className={`relative flex-row items-center border-b px-4 py-4 ${isLight ? 'border-brand-100' : 'border-brand-800'} group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0 group-data-[collapsible=icon]:py-3.5`}
+          >
+            <div className="flex flex-1 justify-center group-data-[collapsible=icon]:hidden">
+              <Logo size="nav" onDark={!isLight} />
             </div>
-            <CollapseToggle isLight={isLight} />
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 group-data-[collapsible=icon]:static group-data-[collapsible=icon]:translate-y-0">
+              <CollapseToggle isLight={isLight} />
+            </div>
           </SidebarHeader>
 
           <p className="px-4 pb-2 pt-3 text-[11px] leading-tight text-brand-300 group-data-[collapsible=icon]:hidden">{subtitle}</p>
