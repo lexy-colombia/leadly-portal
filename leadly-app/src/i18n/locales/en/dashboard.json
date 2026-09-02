@@ -16,6 +16,29 @@
   "dashboard.upcomingTasks.title": "Upcoming tasks",
   "dashboard.upcomingTasks.empty": "You have no pending tasks. 🎉",
   "dashboard.upcomingTasks.generalTask": "General task",
-  "dashboard.recentConversations.title": "Recent conversations",
-  "dashboard.recentConversations.empty": "You don't have any conversations yet."
+
+  "dashboard.greeting.prefix": "Hi,",
+  "dashboard.greeting.subtitle": "Here's how your business is doing today.",
+
+  "dashboard.kpi.sales.title": "Sales · {days}d",
+  "dashboard.kpi.orders.title": "Orders · {days}d",
+  "dashboard.kpi.dispatches.title": "Dispatches · {days}d",
+  "dashboard.kpi.receivable.title": "Accounts receivable",
+  "dashboard.kpi.receivable.footer": "View detail",
+
+  "dashboard.recentActivity.title": "Recent activity",
+  "dashboard.recentActivity.empty": "No orders or returns recorded yet.",
+  "dashboard.recentActivity.order": "Order #{number}",
+  "dashboard.recentActivity.quote": "Quote #{number}",
+  "dashboard.recentActivity.return": "Return #{number}",
+  "dashboard.recentActivity.client": "Client: {name}",
+
+  "dashboard.agentActivity.title": "Team performance",
+  "dashboard.agentActivity.tooltip": "Tasks and appointments assigned to each agent -- how much is pending, how much is overdue, and what share was completed on time.",
+  "dashboard.agentActivity.empty": "No tasks or appointments assigned to your team yet.",
+  "dashboard.agentActivity.pending": "Pending",
+  "dashboard.agentActivity.tasksOverdue": "Overdue tasks",
+  "dashboard.agentActivity.appointmentsOverdue": "Overdue appointments",
+  "dashboard.agentActivity.onTimeRate": "On-time completion",
+  "dashboard.agentActivity.noCompletedYet": "None completed yet"
 }

@@ -498,3 +498,46 @@ export function UploadIcon(props: IconProps) {
     </svg>
   )
 }
+
+export function InfoIcon(props: IconProps) {
+  return (
+    <svg {...DEFAULTS} {...props}>
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M12 11v5.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx="12" cy="7.75" r="1" fill="currentColor" />
+    </svg>
+  )
+}
+
+export function DollarIcon(props: IconProps) {
+  return (
+    <svg {...DEFAULTS} {...props}>
+      <path d="M12 2.5v19" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path
+        d="M16.5 6.5H9.8a3 3 0 0 0 0 6h4.4a3 3 0 0 1 0 6H6.5"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+export function TruckIcon(props: IconProps) {
+  return (
+    <svg {...DEFAULTS} {...props}>
+      <path d="M2.5 6.5h10a1 1 0 0 1 1 1v9.5H4a1.5 1.5 0 0 1-1.5-1.5v-9Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <path
+        d="M13.5 10h3.42a1 1 0 0 1 .8.4l2.58 3.44a1 1 0 0 1 .2.6V17h-2"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M9 17h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx="7" cy="18" r="1.75" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="17.5" cy="18" r="1.75" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  )
+}

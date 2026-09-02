@@ -22,6 +22,11 @@
   "calendar.errors.updateFailed": "No se pudo actualizar la cita.",
   "calendar.errors.createFailed": "No se pudo agendar la cita.",
 
+  "calendar.overdue": "Vencida",
+  "calendar.filter.all": "Todas",
+  "calendar.type.appointment": "Cita",
+  "calendar.type.task": "Tarea",
+
   "calendar.status.activa": "Programada",
   "calendar.status.completada": "Completada",
   "calendar.status.cancelada": "Cancelada",

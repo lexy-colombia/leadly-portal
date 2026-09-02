@@ -7,6 +7,15 @@ export async function getDispatchForOrder(salesOrderId: string): Promise<Dispatc
   return data
 }
 
+/** Tenant-wide, for the Dashboard's "Despachos" KPI card -- only `id`/
+ * `created_at` needed there (count + day-bucketed trend), no need for the
+ * full row or any join. */
+export async function listDispatchesForTenant(tenantId: string): Promise<Pick<Dispatch, 'id' | 'created_at'>[]> {
+  const { data, error } = await supabase.from('dispatches').select('id, created_at').eq('tenant_id', tenantId).order('created_at', { ascending: false })
+  if (error) throw error
+  return data
+}
+
 export interface DispatchStatusSummary {
   name: string
   color: string
