@@ -646,6 +646,7 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
           tax_total: 0,
           total: 0,
           notes: "Pedido creado desde la tienda pública.",
+          sales_channel: "storefront",
         })
         .select("id, number")
         .single();

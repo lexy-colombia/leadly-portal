@@ -19,7 +19,7 @@ import {
 import type { OrderWithRelations } from '../../lib/api/orders'
 import { listClients } from '../../lib/api/clients'
 import { listPaymentsForTenant, PAYMENT_METHOD_LABEL_KEY } from '../../lib/api/orderPayments'
-import type { Client, OrderStatus, OrderPaymentMethod, SalesOrderPayment } from '../../types/domain'
+import type { Client, OrderStatus, OrderPaymentMethod, SalesOrder, SalesOrderPayment } from '../../types/domain'
 import { PageSpinner } from '@/components/atoms'
 import { Card, ComboboxFilter, EmptyState, FilterField, IconInput, Pagination } from '@/components/molecules'
 import { ConfirmDialog } from '@/components/organisms'
@@ -28,9 +28,19 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { OrderPaymentMethodCell, StatusDotLine } from './orders/OrderTableCells'
+import { SALES_CHANNEL_LABEL_KEY } from '../../lib/api/orders'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 
 const PAGE_SIZE = 10
+
+interface OrderFilters {
+  status: OrderStatus | null
+  channel: SalesOrder['sales_channel']
+  contact: string | null
+  dateFrom: string
+  dateTo: string
+}
 
 // Same trigger sizing convention as Products.tsx/Clients.tsx's filter
 // pills, so this list doesn't feel like a separate design system. Border
@@ -45,6 +55,13 @@ const FILTER_TRIGGER_CLASS = 'w-40 rounded-lg border-brand-300 text-xs'
 function todayIso(): string {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** Estado "sin filtrar": el día de hoy, ningún estado/origen/cliente
+ * elegido. Es a lo que vuelve "Borrar filtros" (una función, no una
+ * constante: "hoy" cambia). */
+function defaultOrderFilters(): OrderFilters {
+  return { status: null, channel: null, contact: null, dateFrom: todayIso(), dateTo: todayIso() }
 }
 
 /** [start, end) del rango Desde/Hasta -- end es exclusivo para poder
@@ -89,31 +106,6 @@ function PaymentMethodRow({ label, amount, total, currency }: { label: string; a
   )
 }
 
-/** Celda "Método de pago" de la tabla -- texto simple con el método
- * principal (mayor monto) de la orden, sin barra ni porcentaje (pedido
- * explícito del usuario, referencia de diseño). `methods` ya viene ordenado
- * de mayor a menor monto (ver paymentsByOrder), así que el primero es el
- * principal. */
-function OrderPaymentMethodCell({ methods }: { methods: { method: OrderPaymentMethod; amount: number }[] | undefined }) {
-  const { t } = useLanguage()
-  if (!methods || methods.length === 0) return <span className="text-xs text-brand-300">—</span>
-  return <span className="text-xs text-brand-700">{t(PAYMENT_METHOD_LABEL_KEY[methods[0].method])}</span>
-}
-
-/** Una línea de la columna "Estados" -- etiqueta ("Estado de entrega:") +
- * bullet de color + valor, en vez de un badge tipo pill (pedido explícito
- * del usuario, referencia de diseño). `null` en vez de un dot cuando el
- * estado no aplica (ej. envío de una cotización que nunca se despachó). */
-function StatusDotLine({ label, dotClass, value }: { label: string; dotClass: string | null; value: string }) {
-  return (
-    <div className="flex items-center gap-1.5 text-[11px] whitespace-nowrap">
-      <span className="text-brand-400">{label}</span>
-      {dotClass && <span className={`inline-block size-1.5 shrink-0 rounded-full ${dotClass}`} />}
-      <span className="text-brand-700">{value}</span>
-    </div>
-  )
-}
-
 export function Orders() {
   const { profile } = useAuth()
   const { t, language } = useLanguage()
@@ -124,10 +116,15 @@ export function Orders() {
   const [contacts, setContacts] = useState<Client[]>([])
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<OrderStatus | null>(null)
-  const [contactFilter, setContactFilter] = useState<string | null>(null)
-  const [dateFrom, setDateFrom] = useState(todayIso())
-  const [dateTo, setDateTo] = useState(todayIso())
+  // Los filtros se editan en un borrador y no afectan la tabla hasta tocar
+  // "Aplicar" (pedido explícito del usuario: nada de refiltrar en cada
+  // click). Mismo criterio que el drawer de filtros de la tienda pública.
+  // `channel` es por dónde entró el pedido (sales_channel): mostrador,
+  // portal, IA de WhatsApp o tienda pública.
+  const [draft, setDraft] = useState<OrderFilters>(defaultOrderFilters)
+  const [filters, setFilters] = useState<OrderFilters>(defaultOrderFilters)
+  const filtersDirty = JSON.stringify(draft) !== JSON.stringify(filters)
+  const filtersActive = JSON.stringify(filters) !== JSON.stringify(defaultOrderFilters())
   const [page, setPage] = useState(1)
   // First column, prep for a future bulk-actions bar -- no toolbar wired up
   // yet, just the ability to check rows. Selection is page-scoped: cleared
@@ -165,21 +162,22 @@ export function Orders() {
     listPaymentsForTenant(profile.tenant_id).then(setPayments).catch(() => setPayments([]))
   }, [profile?.tenant_id])
 
-  const { start: periodStart, end: periodEnd } = useMemo(() => resolveDateRange(dateFrom, dateTo), [dateFrom, dateTo])
+  const { start: periodStart, end: periodEnd } = useMemo(() => resolveDateRange(filters.dateFrom, filters.dateTo), [filters.dateFrom, filters.dateTo])
 
   const filtered = useMemo(() => {
     if (!orders) return null
     const term = search.trim().toLowerCase()
     return orders.filter((o) => {
-      if (statusFilter && o.status !== statusFilter) return false
-      if (contactFilter && o.contact_id !== contactFilter) return false
+      if (filters.status && o.status !== filters.status) return false
+      if (filters.channel && o.sales_channel !== filters.channel) return false
+      if (filters.contact && o.contact_id !== filters.contact) return false
       const createdAt = new Date(o.created_at)
       if (periodStart && createdAt < periodStart) return false
       if (periodEnd && createdAt >= periodEnd) return false
       if (!term) return true
       return `ord-${o.number}`.includes(term) || (o.contact?.full_name ?? '').toLowerCase().includes(term)
     })
-  }, [orders, statusFilter, contactFilter, periodStart, periodEnd, search])
+  }, [orders, filters, periodStart, periodEnd, search])
 
   // Ventas del período filtrado -- pedido explícito del usuario (referencia:
   // un POS de restaurante). Solo cuenta 'confirmada' (ventas reales, no
@@ -239,7 +237,7 @@ export function Orders() {
   useEffect(() => {
     setPage(1)
     setSelectedIds(new Set())
-  }, [statusFilter, contactFilter, dateFrom, dateTo, search])
+  }, [filters, search])
 
   const totalPages = filtered ? Math.max(1, Math.ceil(filtered.length / PAGE_SIZE)) : 1
   const pageItems = filtered ? filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE) : null
@@ -329,8 +327,20 @@ export function Orders() {
         <FilterField label={t('orders.filters.labels.status')}>
           <ComboboxFilter
             options={(Object.keys(ORDER_STATUS_LABEL_KEY) as OrderStatus[]).map((s) => ({ id: s, label: t(ORDER_STATUS_LABEL_KEY[s]) }))}
-            value={statusFilter}
-            onChange={(id) => setStatusFilter(id as OrderStatus | null)}
+            value={draft.status}
+            onChange={(id) => setDraft((d) => ({ ...d, status: id as OrderStatus | null }))}
+            placeholder={t('orders.filters.all')}
+            searchPlaceholder={t('orders.filters.search')}
+            emptyLabel={t('orders.filters.noResults')}
+            triggerClassName={FILTER_TRIGGER_CLASS}
+          />
+        </FilterField>
+
+        <FilterField label={t('orders.filters.labels.channel')}>
+          <ComboboxFilter
+            options={(Object.keys(SALES_CHANNEL_LABEL_KEY) as Array<keyof typeof SALES_CHANNEL_LABEL_KEY>).map((c) => ({ id: c, label: t(SALES_CHANNEL_LABEL_KEY[c]) }))}
+            value={draft.channel}
+            onChange={(id) => setDraft((d) => ({ ...d, channel: id as SalesOrder['sales_channel'] }))}
             placeholder={t('orders.filters.all')}
             searchPlaceholder={t('orders.filters.search')}
             emptyLabel={t('orders.filters.noResults')}
@@ -341,8 +351,8 @@ export function Orders() {
         <FilterField label={t('orders.filters.labels.client')}>
           <ComboboxFilter
             options={contacts.map((c) => ({ id: c.id, label: c.full_name }))}
-            value={contactFilter}
-            onChange={setContactFilter}
+            value={draft.contact}
+            onChange={(id) => setDraft((d) => ({ ...d, contact: id }))}
             placeholder={t('orders.filters.allContacts')}
             searchPlaceholder={t('orders.filters.searchContact')}
             emptyLabel={t('orders.filters.noResults')}
@@ -351,11 +361,46 @@ export function Orders() {
         </FilterField>
 
         <FilterField label={t('orders.filters.dateFrom')}>
-          <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label={t('orders.filters.dateFrom')} className="h-7 w-36 rounded-lg border-brand-300 text-xs" />
+          <Input
+            type="date"
+            value={draft.dateFrom}
+            onChange={(e) => setDraft((d) => ({ ...d, dateFrom: e.target.value }))}
+            aria-label={t('orders.filters.dateFrom')}
+            className="h-7 w-36 rounded-lg border-brand-300 text-xs"
+          />
         </FilterField>
         <FilterField label={t('orders.filters.dateTo')}>
-          <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} aria-label={t('orders.filters.dateTo')} className="h-7 w-36 rounded-lg border-brand-300 text-xs" />
+          <Input
+            type="date"
+            value={draft.dateTo}
+            onChange={(e) => setDraft((d) => ({ ...d, dateTo: e.target.value }))}
+            aria-label={t('orders.filters.dateTo')}
+            className="h-7 w-36 rounded-lg border-brand-300 text-xs"
+          />
         </FilterField>
+
+        {/* Aplicar deshabilitado mientras el borrador sea igual a lo que ya
+            está aplicado, y Borrar solo aparece si hay algo que borrar --
+            así los dos botones dicen algo real sobre el estado actual. */}
+        <div className="flex shrink-0 items-center gap-1.5 pb-0.5">
+          <Button type="button" size="sm" disabled={!filtersDirty} onClick={() => setFilters(draft)}>
+            {t('orders.filters.apply')}
+          </Button>
+          {(filtersActive || filtersDirty) && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                const cleared = defaultOrderFilters()
+                setDraft(cleared)
+                setFilters(cleared)
+              }}
+            >
+              {t('orders.filters.clear')}
+            </Button>
+          )}
+        </div>
 
         <span className="shrink-0 pb-1.5 text-xs text-brand-400">
           {filtered?.length ?? 0} {t((filtered?.length ?? 0) === 1 ? 'orders.count.singular' : 'orders.count.plural')}
@@ -456,7 +501,12 @@ export function Orders() {
                         aria-label={t('orders.table.selectRow')}
                       />
                     </TableCell>
-                    <TableCell className="text-xs font-medium text-brand-800">ORD-{order.number}</TableCell>
+                    <TableCell className="text-xs font-medium text-brand-800">
+                      ORD-{order.number}
+                      {order.sales_channel && (
+                        <p className="text-[11px] font-normal text-brand-400">{t(SALES_CHANNEL_LABEL_KEY[order.sales_channel])}</p>
+                      )}
+                    </TableCell>
                     <TableCell className="text-xs text-brand-700">
                       <p className="font-medium text-brand-800">{order.contact?.full_name ?? '-'}</p>
                       {order.contact?.phone && <p className="text-[11px] font-normal text-brand-400">{formatClientPhoneDisplay(order.contact.phone_prefix, order.contact.phone)}</p>}
@@ -469,15 +519,23 @@ export function Orders() {
                           dotClass={ORDER_STATUS_DOT_CLASS[order.status]}
                           value={t(ORDER_STATUS_LABEL_KEY[order.status])}
                         />
-                        <StatusDotLine
-                          label={t('orders.table.shippingStateLabel')}
-                          dotClass={order.status === 'confirmada' ? DELIVERY_STATUS_DOT_CLASS[order.delivery_status] : null}
-                          value={order.status === 'confirmada' ? t(DELIVERY_STATUS_LABEL_KEY[order.delivery_status]) : '—'}
-                        />
+                        {/* Un pedido de mostrador no tiene envío: la línea
+                            entera se omite en vez de mostrar un estado que
+                            no significa nada (mismo criterio que el detalle,
+                            ver showShipping en OrderDetail.tsx). */}
+                        {order.sales_channel !== 'pos' && (
+                          <StatusDotLine
+                            label={t('orders.table.shippingStateLabel')}
+                            dotClass={order.status === 'confirmada' ? DELIVERY_STATUS_DOT_CLASS[order.delivery_status] : null}
+                            value={order.status === 'confirmada' ? t(DELIVERY_STATUS_LABEL_KEY[order.delivery_status]) : '—'}
+                          />
+                        )}
                       </div>
                     </TableCell>
                     <TableCell className="text-xs text-brand-700">
-                      {order.shipping_address ? (
+                      {order.sales_channel === 'pos' ? (
+                        <span className="text-brand-300">—</span>
+                      ) : order.shipping_address ? (
                         <>
                           <p>{order.shipping_address.line1}</p>
                           {(order.shipping_address.city || order.shipping_address.state_province) && (

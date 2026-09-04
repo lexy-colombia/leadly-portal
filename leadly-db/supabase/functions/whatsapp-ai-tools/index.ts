@@ -750,7 +750,7 @@ async function executeTool(
 
       const { data: order, error: orderError } = await adminClient
         .from("sales_orders")
-        .insert({ tenant_id: tenantId, contact_id: contactId, opportunity_id: opportunityId, notes, subtotal: 0, tax_total: 0, total: 0 })
+        .insert({ tenant_id: tenantId, contact_id: contactId, opportunity_id: opportunityId, notes, subtotal: 0, tax_total: 0, total: 0, sales_channel: "whatsapp" })
         .select("id, number")
         .single();
       if (orderError) throw new Error(orderError.message);
