@@ -1,12 +1,26 @@
-/** ÚNICA puerta de escritura para el "estado editable" de un pedido desde
- * el portal: cliente, oportunidad, notas, direcciones de envío/facturación,
- * envío, e ítems (con su impuesto/totales calculados) -- todo en una sola
- * llamada, que reemplaza a sales-order-items (que solo cubría ítems) y a
- * los updates sueltos que hacía OrderDetail.tsx por campo. Pedido explícito
- * del usuario 2026-09-03: un solo proceso -- agregar un producto, cambiar
- * una cantidad, cambiar la dirección, todo pasa por acá, y el portal la
- * llama con debounce (2s de inactividad) en vez de un guardado por cada
- * campo suelto.
+/** ÚNICA puerta de escritura para armar un CARRITO (pre-pedido): cliente,
+ * oportunidad, notas, direcciones de envío/facturación, envío, e ítems --
+ * todo en una sola llamada, con debounce (2s de inactividad) del lado del
+ * caller en vez de un guardado por cada campo suelto. La usan tanto
+ * Órdenes del portal como el POS, con el mismo mecanismo -- nunca hay una
+ * segunda copia de esta lógica en ningún otro lugar.
+ *
+ * Rediseño 2026-09-04 (pedido explícito del usuario, cuarta iteración del
+ * plan de "cuentas abiertas" de POS): esta función YA NO crea pedidos.
+ * - Con `order_id`: exactamente el comportamiento de siempre, sin cambios
+ *   -- edita un pedido que YA es real (candados de bloqueo, headerPatch,
+ *   persistOrderItems directo a sales_order_items).
+ * - Sin `order_id`: en vez de crear un `sales_orders`, crea/edita un
+ *   `carts` (con `cart_id` para seguir editando el mismo borrador, o sin
+ *   él para arrancar uno nuevo). Nunca toca `sales_orders`. El único lugar
+ *   que sí crea el pedido real es la Edge Function `create-order`, a
+ *   partir de un `cart_id` -- ese es el momento explícito en que el
+ *   usuario aprieta "Crear pedido" (portal) o "Cobrar" (POS).
+ *
+ * Regla permanente, no solo de esta función: el frontend NUNCA pre-valida
+ * nada (stock, variantes, direcciones) antes de llamar a este endpoint --
+ * se llama, y se muestra el error que devuelva. Ver memoria de sesión
+ * "no frontend validation" -- esto es lo que la originó.
  *
  * Deliberadamente AFUERA de este alcance:
  * - Pagos (sales_order_payments) -- es una transacción financiera con su
@@ -16,18 +30,15 @@
  *   validación robusta a nivel de DB (triggers
  *   guard_sales_order_confirmation / apply_sales_order_confirmed_effects,
  *   20260903180000), que necesita los ítems YA guardados para poder
- *   chequear stock de verdad. Por eso un pedido nuevo SIEMPRE se crea en
- *   'cotizacion' acá, incluso si el agente eligió "Confirmada" en el
- *   formulario -- el frontend hace el flip de estado en un segundo paso
- *   (updateOrderStatus), después de que los ítems ya existen, para que el
- *   trigger de confirmación tenga algo real que validar. Crear directo
- *   como 'confirmada' en el mismo insert saltaba ese chequeo por completo
- *   (el trigger de UPDATE nunca corre en un INSERT, y en ese instante
- *   todavía no hay ítems para chequear igual).
+ *   chequear stock de verdad.
  *
- * El impuesto de cada ítem se resuelve acá contra la tabla products real
- * (nunca confía en lo que el navegador tenga cargado) -- mismo criterio
- * que ya tenía sales-order-items.
+ * El impuesto de cada ítem NUNCA se resuelve acá cuando se opera sobre un
+ * carrito (eso pasa una sola vez, en create-order) -- solo se resuelve
+ * cuando la rama `order_id` edita un pedido ya real, igual que siempre.
+ *
+ * Con `preview: true` no escribe nada: solo devuelve el desglose
+ * (base gravable / impuesto por tarifa / total) de los ítems que se le
+ * manden, para que el POS pueda mostrar qué va a cobrar antes de cobrar.
  *
  * Auth: JWT del propio caller (mismo patrón que whatsapp-send-human) --
  * tenant_id sale de profiles.tenant_id del caller, nunca de lo que mande
@@ -35,6 +46,8 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { persistOrderItems, type ResolvedOrderItem } from "../_shared/orders/persistOrderItems.ts";
+import { computeOrderTotals } from "../_shared/orders/computeOrderTotals.ts";
+import { isTenantTaxEnabled } from "../_shared/invoicing/queueInvoiceGeneration.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 
 interface RawItemInput {
@@ -49,7 +62,17 @@ interface RawItemInput {
 }
 
 interface CalculateOrderBody {
+  /** Solo lectura: devuelve el desglose (base gravable, impuesto por
+   * tarifa, total) de una lista de ítems SIN escribir absolutamente nada
+   * -- ni carrito, ni pedido. Existe para que el POS pueda mostrar el
+   * resumen de lo que va a cobrar antes de cobrarlo sin que el frontend
+   * calcule impuestos por su cuenta (regla del proyecto: cero cálculos de
+   * negocio en el cliente). Usa el mismo computeOrderTotals que
+   * persistOrderItems, así el preview y el pedido real no pueden
+   * discrepar. */
+  preview?: boolean;
   order_id?: string | null;
+  cart_id?: string | null;
   contact_id?: string;
   opportunity_id?: string | null;
   notes?: string | null;
@@ -58,6 +81,9 @@ interface CalculateOrderBody {
   billing_address_id?: string | null;
   shipping?: number;
   items?: RawItemInput[];
+  origin?: "portal" | "pos";
+  pos_point_id?: string | null;
+  label?: string | null;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -108,7 +134,51 @@ Deno.serve(async (req) => {
 
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
-  let orderId = body.order_id ?? null;
+  if (body.preview) {
+    const taxEnabled = await isTenantTaxEnabled(adminClient, tenantId);
+    const productIds = Array.from(new Set(items.map((i) => i.product_id).filter((id): id is string => !!id)));
+    const taxById = new Map<string, { tax_type_code: string | null; tax_rate: number }>();
+    if (taxEnabled && productIds.length > 0) {
+      // Acotado al propio tenant: el impuesto se resuelve contra la tabla
+      // real, nunca contra lo que mande el body (mismo criterio que la
+      // rama con order_id).
+      const { data: products, error: productsError } = await adminClient
+        .from("products")
+        .select("id, tax_type_code, tax_rate")
+        .eq("tenant_id", tenantId)
+        .in("id", productIds);
+      if (productsError) return json({ error: productsError.message }, 500);
+      for (const p of products ?? []) taxById.set(p.id, { tax_type_code: p.tax_type_code, tax_rate: p.tax_rate });
+    }
+    const totals = computeOrderTotals(
+      items.map((item) => {
+        const productTax = item.product_id ? taxById.get(item.product_id) : undefined;
+        return {
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          discount_amount: item.discount_amount ?? 0,
+          tax_type_code: productTax?.tax_type_code ?? null,
+          tax_rate: productTax?.tax_rate ?? 0,
+        };
+      }),
+      body.shipping ?? 0,
+      taxEnabled,
+    );
+    return json({
+      totals: {
+        tax_enabled: taxEnabled,
+        subtotal: totals.subtotal,
+        discount_total: totals.discountTotal,
+        taxable_base: totals.taxableBase,
+        tax_total: totals.taxTotal,
+        shipping: totals.shipping,
+        total: totals.total,
+        tax_lines: totals.taxLines,
+      },
+    });
+  }
+
+  const orderId = body.order_id ?? null;
 
   if (orderId) {
     // RLS de sales_orders ya aísla por tenant -- si el pedido es de otro
@@ -161,12 +231,67 @@ Deno.serve(async (req) => {
       const { error: headerError } = await adminClient.from("sales_orders").update(headerPatch).eq("id", orderId);
       if (headerError) return json({ error: headerError.message }, 500);
     }
+
+    const productIds = Array.from(new Set(items.map((i) => i.product_id).filter((id): id is string => !!id)));
+    const productTaxById = new Map<string, { tax_type_code: string | null; tax_rate: number }>();
+    if (productIds.length > 0) {
+      const { data: products, error: productsError } = await adminClient.from("products").select("id, tax_type_code, tax_rate").in("id", productIds);
+      if (productsError) return json({ error: productsError.message }, 500);
+      for (const p of products ?? []) productTaxById.set(p.id, { tax_type_code: p.tax_type_code, tax_rate: p.tax_rate });
+    }
+
+    const resolvedItems: ResolvedOrderItem[] = items.map((item) => {
+      const productTax = item.product_id ? productTaxById.get(item.product_id) : undefined;
+      return {
+        product_id: item.product_id || null,
+        variant_id: item.variant_id || null,
+        warehouse_id: item.warehouse_id || null,
+        product_name: item.product_name,
+        sku: item.sku || null,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        discount_amount: item.discount_amount ?? 0,
+        tax_type_code: productTax?.tax_type_code ?? null,
+        tax_rate: productTax?.tax_rate ?? 0,
+      };
+    });
+
+    try {
+      await persistOrderItems(adminClient, tenantId, orderId, resolvedItems, body.shipping ?? 0);
+      const { data: updatedOrder, error: reloadError } = await adminClient.from("sales_orders").select("*").eq("id", orderId).single();
+      if (reloadError) return json({ error: reloadError.message }, 500);
+      return json(updatedOrder);
+    } catch (err) {
+      return json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // Sin order_id: esto opera sobre un CARRITO, nunca sobre sales_orders
+  // (ver comentario de cabecera). Sin impuesto resuelto acá -- se calcula
+  // una sola vez, en create-order, al convertir.
+  let cartId = body.cart_id ?? null;
+
+  if (cartId) {
+    const { data: existingCart } = await callerClient.from("carts").select("id, status").eq("id", cartId).maybeSingle();
+    if (!existingCart) return json({ error: "Carrito no encontrado." }, 404);
+    if (existingCart.status !== "open") return json({ error: "Este carrito ya no está abierto." }, 409);
+
+    const cartPatch: Record<string, unknown> = { last_activity_at: new Date().toISOString() };
+    if (body.contact_id !== undefined) cartPatch.contact_id = body.contact_id;
+    if (body.opportunity_id !== undefined) cartPatch.opportunity_id = body.opportunity_id;
+    if (body.notes !== undefined) cartPatch.notes = body.notes;
+    if (body.valid_until !== undefined) cartPatch.valid_until = body.valid_until;
+    if (body.shipping_address_id !== undefined) cartPatch.shipping_address_id = body.shipping_address_id;
+    if (body.billing_address_id !== undefined) cartPatch.billing_address_id = body.billing_address_id;
+    if (body.shipping !== undefined) cartPatch.shipping = body.shipping;
+    if (body.pos_point_id !== undefined) cartPatch.pos_point_id = body.pos_point_id;
+    if (body.label !== undefined) cartPatch.label = body.label;
+    const { error: cartPatchError } = await adminClient.from("carts").update(cartPatch).eq("id", cartId);
+    if (cartPatchError) return json({ error: cartPatchError.message }, 500);
   } else {
-    if (!body.contact_id) return json({ error: "contact_id es requerido para crear un pedido." }, 400);
-    // Siempre nace en 'cotizacion' -- ver comentario de cabecera sobre por
-    // qué el flip a 'confirmada' es un segundo paso, nunca este insert.
-    const { data: newOrder, error: insertError } = await adminClient
-      .from("sales_orders")
+    if (!body.contact_id) return json({ error: "contact_id es requerido para crear un carrito." }, 400);
+    const { data: newCart, error: cartInsertError } = await adminClient
+      .from("carts")
       .insert({
         tenant_id: tenantId,
         contact_id: body.contact_id,
@@ -175,50 +300,39 @@ Deno.serve(async (req) => {
         valid_until: body.valid_until ?? null,
         shipping_address_id: body.shipping_address_id ?? null,
         billing_address_id: body.billing_address_id ?? null,
-        status: "cotizacion",
-        subtotal: 0,
-        discount_total: 0,
-        total: 0,
-        tax_total: 0,
-        shipping: 0,
-        created_by: caller.id,
+        shipping: body.shipping ?? 0,
+        origin: body.origin ?? "portal",
+        pos_point_id: body.pos_point_id ?? null,
+        label: body.label ?? null,
       })
       .select("id")
       .single();
-    if (insertError) return json({ error: insertError.message }, 500);
-    orderId = newOrder.id;
+    if (cartInsertError) return json({ error: cartInsertError.message }, 500);
+    cartId = newCart.id;
   }
 
-  const productIds = Array.from(new Set(items.map((i) => i.product_id).filter((id): id is string => !!id)));
-  const productTaxById = new Map<string, { tax_type_code: string | null; tax_rate: number }>();
-  if (productIds.length > 0) {
-    const { data: products, error: productsError } = await adminClient.from("products").select("id, tax_type_code, tax_rate").in("id", productIds);
-    if (productsError) return json({ error: productsError.message }, 500);
-    for (const p of products ?? []) productTaxById.set(p.id, { tax_type_code: p.tax_type_code, tax_rate: p.tax_rate });
+  // Reemplaza todos los cart_items -- mismo criterio "reemplaza todo, no
+  // hace merge/diff" que ya usa persistOrderItems, sin impuesto.
+  const { error: deleteItemsError } = await adminClient.from("cart_items").delete().eq("cart_id", cartId);
+  if (deleteItemsError) return json({ error: deleteItemsError.message }, 500);
+  if (items.length > 0) {
+    const { error: insertItemsError } = await adminClient.from("cart_items").insert(
+      items.map((item) => ({
+        cart_id: cartId,
+        product_id: item.product_id || null,
+        variant_id: item.variant_id || null,
+        warehouse_id: item.warehouse_id || null,
+        product_name: item.product_name,
+        sku: item.sku || null,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        discount_amount: item.discount_amount ?? 0,
+      })),
+    );
+    if (insertItemsError) return json({ error: insertItemsError.message }, 500);
   }
 
-  const resolvedItems: ResolvedOrderItem[] = items.map((item) => {
-    const productTax = item.product_id ? productTaxById.get(item.product_id) : undefined;
-    return {
-      product_id: item.product_id || null,
-      variant_id: item.variant_id || null,
-      warehouse_id: item.warehouse_id || null,
-      product_name: item.product_name,
-      sku: item.sku || null,
-      quantity: item.quantity,
-      unit_price: item.unit_price,
-      discount_amount: item.discount_amount ?? 0,
-      tax_type_code: productTax?.tax_type_code ?? null,
-      tax_rate: productTax?.tax_rate ?? 0,
-    };
-  });
-
-  try {
-    await persistOrderItems(adminClient, tenantId, orderId as string, resolvedItems, body.shipping ?? 0);
-    const { data: updatedOrder, error: reloadError } = await adminClient.from("sales_orders").select("*").eq("id", orderId as string).single();
-    if (reloadError) return json({ error: reloadError.message }, 500);
-    return json(updatedOrder);
-  } catch (err) {
-    return json({ error: err instanceof Error ? err.message : String(err) }, 500);
-  }
+  const { data: cart, error: reloadCartError } = await adminClient.from("carts").select("*, items:cart_items(*)").eq("id", cartId).single();
+  if (reloadCartError) return json({ error: reloadCartError.message }, 500);
+  return json({ cart });
 });

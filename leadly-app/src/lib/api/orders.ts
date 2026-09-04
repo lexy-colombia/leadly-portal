@@ -48,6 +48,18 @@ export const DELIVERY_STATUS_DOT_CLASS: Record<DeliveryStatus, string> = {
   entregado: 'bg-emerald-500',
 }
 
+/** Etiqueta de "por dónde entró el pedido" (sales_orders.sales_channel).
+ * Lo setean los cuatro caminos que crean un pedido: create-order (portal o
+ * POS según el origen del carrito), pos-checkout, whatsapp-ai-tools y la
+ * tienda pública. `null` solo en filas anteriores al backfill de
+ * 20260904180000. */
+export const SALES_CHANNEL_LABEL_KEY: Record<'pos' | 'whatsapp' | 'storefront' | 'portal', TranslationKey> = {
+  portal: 'orders.channel.portal',
+  pos: 'orders.channel.pos',
+  whatsapp: 'orders.channel.whatsapp',
+  storefront: 'orders.channel.storefront',
+}
+
 export interface OrderItemInput {
   product_id?: string | null
   variant_id?: string | null
@@ -280,6 +292,92 @@ export async function calculateOrder(input: CalculateOrderInput): Promise<SalesO
     throw error
   }
   return data as SalesOrder
+}
+
+/** Desglose de impuestos tal como lo calculó y guardó el servidor -- se usa
+ * para MOSTRAR (resumen de pago, POS), nunca para recalcular nada. */
+export interface OrderTaxLine {
+  tax_type_code: string | null
+  tax_rate: number
+  base: number
+  amount: number
+}
+
+export interface OrderTotalsBreakdown {
+  tax_enabled: boolean
+  subtotal: number
+  discount_total: number
+  taxable_base: number
+  tax_total: number
+  shipping: number
+  total: number
+  tax_lines: OrderTaxLine[]
+}
+
+/** Desglose de lo que se va a cobrar ANTES de que exista el pedido (carrito
+ * del POS en memoria, cuenta abierta). No escribe nada: es `calculate-order`
+ * en modo `preview`, que resuelve el impuesto contra la tabla `products`
+ * real con el mismo computeOrderTotals que después persiste el pedido.
+ * Nunca se calcula acá -- ver la regla del proyecto de cero lógica de
+ * negocio en el frontend. */
+export async function previewOrderTotals(items: OrderItemInput[], shipping = 0): Promise<OrderTotalsBreakdown> {
+  const { data, error } = await supabase.functions.invoke<{ totals: OrderTotalsBreakdown; error?: string }>('calculate-order', {
+    body: { preview: true, items, shipping },
+  })
+  if (error) {
+    const context = (error as { context?: Response }).context
+    if (context && typeof context.json === 'function') {
+      let specificMessage: string | undefined
+      try {
+        const responseBody = await context.json()
+        specificMessage = responseBody?.error
+      } catch {
+        /* fall through to generic error */
+      }
+      if (specificMessage) throw new Error(specificMessage)
+    }
+    throw error
+  }
+  if (data?.error) throw new Error(data.error)
+  return (data as { totals: OrderTotalsBreakdown }).totals
+}
+
+/** Mismo desglose, pero de un pedido que YA existe: sale de los valores que
+ * el servidor guardó en sales_order_items (tax_amount/taxable_base por
+ * línea), agrupados por impuesto y tarifa. Cero aritmética de negocio --
+ * solo se suman columnas ya calculadas para poder mostrarlas discriminadas. */
+export async function getOrderTotalsBreakdown(order: SalesOrder): Promise<OrderTotalsBreakdown> {
+  const { data, error } = await supabase
+    .from('sales_order_items')
+    .select('tax_type_code, tax_rate, tax_amount, taxable_base')
+    .eq('order_id', order.id)
+  if (error) throw error
+
+  const grouped = new Map<string, OrderTaxLine>()
+  let taxableBase = 0
+  for (const row of (data ?? []) as { tax_type_code: string | null; tax_rate: number; tax_amount: number; taxable_base: number }[]) {
+    taxableBase += row.taxable_base
+    if (!row.tax_rate) continue
+    const key = `${row.tax_type_code ?? ''}:${row.tax_rate}`
+    const existing = grouped.get(key)
+    if (existing) {
+      existing.base += row.taxable_base
+      existing.amount += row.tax_amount
+    } else {
+      grouped.set(key, { tax_type_code: row.tax_type_code, tax_rate: row.tax_rate, base: row.taxable_base, amount: row.tax_amount })
+    }
+  }
+
+  return {
+    tax_enabled: order.tax_total > 0,
+    subtotal: order.subtotal,
+    discount_total: order.discount_total,
+    taxable_base: taxableBase,
+    tax_total: order.tax_total,
+    shipping: order.shipping,
+    total: order.total,
+    tax_lines: Array.from(grouped.values()).sort((a, b) => b.tax_rate - a.tax_rate),
+  }
 }
 
 /** Pasar a "confirmada" corre dos triggers de DB (guard_sales_order_confirmation

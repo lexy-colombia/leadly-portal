@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { DownloadIcon, RefreshCwIcon, ScanLineIcon, UploadIcon, XIcon } from 'lucide-react'
+import { FileTextIcon, RefreshCwIcon, ScanLineIcon, UploadIcon, XIcon } from 'lucide-react'
 import {
   calculateOrder,
   deleteOrder,
@@ -15,6 +15,7 @@ import {
   DELIVERY_STATUS_LABEL_KEY,
 } from '../../lib/api/orders'
 import type { OrderDetail as OrderDetailType, OrderItemInput, StockShortfall } from '../../lib/api/orders'
+import { saveCartDraft, createOrderFromCart, deleteCart, getCart } from '../../lib/api/carts'
 import { listClients } from '../../lib/api/clients'
 import type { Client } from '../../types/domain'
 import { listOpportunities } from '../../lib/api/opportunities'
@@ -43,7 +44,7 @@ import { formatClientPhoneDisplay } from '../../lib/phone'
 import { FieldError, InitialsAvatar, PageSpinner } from '@/components/atoms'
 import { ComboboxFilter, CurrencyInput } from '@/components/molecules'
 import { ConfirmDialog } from '@/components/organisms'
-import { ClockIcon, PencilIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
+import { ClockIcon, PencilIcon, PlusIcon, PrinterIcon, TrashIcon } from '@/components/atoms/icons'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -52,6 +53,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { OrderItemsEditor } from './orders/OrderItemsEditor'
 import { PaymentDrawer } from './orders/PaymentDrawer'
+import { usePosReceiptPrinter } from '../../lib/usePosReceiptPrinter'
 import { DispatchDrawer } from './orders/DispatchDrawer'
 import { getDispatchStatusForOrder, type DispatchStatusSummary } from '../../lib/api/dispatches'
 import { getStoreCreditBalance } from '../../lib/api/returns'
@@ -176,7 +178,7 @@ function ThreadColumn({
 
 export function OrderDetail() {
   const { id } = useParams<{ id: string }>()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
   const { profile, enabledModules } = useAuth()
   const { t, language } = useLanguage()
@@ -226,6 +228,17 @@ export function OrderDetail() {
   const [editingBillingAddress, setEditingBillingAddress] = useState(false)
   const [touched, setTouched] = useState(false)
 
+  // ----- carrito (solo modo "nuevo") -- el borrador de un pedido nuevo
+  // vive en un `carts` (calculate-order sin order_id), no en local nada
+  // más: cada cambio autoguarda hacia el backend real, así un refresh a
+  // mitad de camino (con ?cart=<id> en la URL) recupera lo que ya había.
+  // "Crear pedido" (handleCreate) es el único momento en que create-order
+  // convierte ese carrito en la fila real de sales_orders -- ver
+  // comentarios de cabecera de ambas Edge Functions. -----
+  const [cartId, setCartId] = useState<string | null>(() => (isNew ? searchParams.get('cart') : null))
+  const [cartLoaded, setCartLoaded] = useState(!isNew || !cartId)
+  const [cancellingDraft, setCancellingDraft] = useState(false)
+
   // ----- items + shipping: guardado automático centralizado, ver el
   // useEffect de "autosave" más abajo. Nada de esto se calcula en el
   // frontend (ni subtotal, ni impuesto, ni total) -- calculate-order
@@ -257,18 +270,26 @@ export function OrderDetail() {
   const [commentDraft, setCommentDraft] = useState('')
   const [savingComment, setSavingComment] = useState(false)
   const [paymentDrawerOpen, setPaymentDrawerOpen] = useState(false)
+  // Reimprimir el ticket de un pedido de mostrador -- ver showShipping más
+  // abajo, el mismo criterio que decide qué mostrar/ocultar por canal.
+  const receiptPrinter = usePosReceiptPrinter(profile?.tenant_id)
   const [dispatchDrawerOpen, setDispatchDrawerOpen] = useState(false)
   const [dispatchStatus, setDispatchStatus] = useState<DispatchStatusSummary | null>(null)
 
-  // ----- Factura DIAN (módulo 'einvoicing') -- vive DENTRO del pedido, no en
-  // una lista propia (feedback explícito del usuario 2026-09-03: comprador/
-  // vendedor/ítems ya se ven acá arriba, no tiene sentido una pantalla
-  // aparte que los repita solo para mostrar el estado y el botón de envío).
-  // Solo interesa el intento VIGENTE: o la factura fue aceptada por la DIAN
-  // o no lo fue, y en ese caso por qué. El historial de reintentos se sigue
-  // guardando en la base (son registros fiscales) pero no se muestra
-  // -- feedback explícito del usuario 2026-09-03: "¿para qué me sirve
-  // guardar los reintentos? ese dato no es útil".
+  // ----- Factura DIAN -- vive DENTRO del pedido, no en una lista propia
+  // (feedback explícito del usuario 2026-09-03: comprador/vendedor/ítems ya
+  // se ven acá arriba, no tiene sentido una pantalla aparte que los repita
+  // solo para mostrar el estado y el botón de envío). Gateada únicamente por
+  // si el tenant tiene la integración DIAN conectada (2026-09-04, feedback
+  // explícito: no debe existir un módulo togglable aparte -- el backend ya
+  // solo genera una fila de sales_invoices cuando hay una credencial activa
+  // de 'dian_directo', ver queueInvoiceGeneration; acá simplemente se lee lo
+  // que exista, sin un segundo gate redundante). Solo interesa el intento
+  // VIGENTE: o la factura fue aceptada por la DIAN o no lo fue, y en ese
+  // caso por qué. El historial de reintentos se sigue guardando en la base
+  // (son registros fiscales) pero no se muestra -- feedback explícito del
+  // usuario 2026-09-03: "¿para qué me sirve guardar los reintentos? ese dato
+  // no es útil".
   const [latestInvoice, setLatestInvoice] = useState<SalesInvoice | null>(null)
   const [sendingInvoice, setSendingInvoice] = useState(false)
   const [sendInvoiceError, setSendInvoiceError] = useState<string | null>(null)
@@ -276,7 +297,7 @@ export function OrderDetail() {
   const [invoicePdfError, setInvoicePdfError] = useState<string | null>(null)
 
   function reloadInvoices() {
-    if (!order?.id || !enabledModules?.has('einvoicing')) {
+    if (!order?.id) {
       setLatestInvoice(null)
       return
     }
@@ -288,7 +309,7 @@ export function OrderDetail() {
   useEffect(() => {
     reloadInvoices()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [order?.id, enabledModules])
+  }, [order?.id])
 
   /** Envío del intento vigente, o reintento si ese intento ya fracasó. El
    * reintento no reescribe la factura rechazada: el servidor crea un intento
@@ -343,7 +364,7 @@ export function OrderDetail() {
   }
 
   function reloadDispatchStatus() {
-    if (!order || !enabledModules?.has('dispatches')) return
+    if (!order || order.sales_channel === 'pos' || !enabledModules?.has('dispatches')) return
     getDispatchStatusForOrder(order.id)
       .then(setDispatchStatus)
       .catch(() => setDispatchStatus(null))
@@ -599,6 +620,95 @@ export function OrderDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order?.id, itemsLoaded, contactId, opportunityId, validUntil, shippingAddressId, billingAddressId, shippingDraft, items])
 
+  // ----- carrito del modo "nuevo" -- mismo mecanismo de autosave de
+  // arriba, pero apuntando a saveCartDraft (calculate-order sin
+  // order_id) en vez de a un pedido real. Si `cartId` venía en la URL
+  // (retomando un borrador tras un refresh), primero se hidrata el
+  // formulario con lo que ya había guardado antes de empezar a
+  // autoguardar -- si no, el primer autosave pisaría ese estado con los
+  // campos vacíos con los que arrancó React. -----
+  const primedCartRef = useRef(false)
+  const lastSyncedCartSnapshotRef = useRef('')
+
+  async function syncCartDraft(): Promise<string> {
+    const cart = await saveCartDraft({
+      cart_id: cartId,
+      contact_id: contactId,
+      opportunity_id: opportunityId || null,
+      valid_until: validUntil || null,
+      shipping_address_id: shippingAddressId || null,
+      billing_address_id: billingAddressId || null,
+      shipping: Number(shippingDraft) || 0,
+      items,
+      origin: 'portal',
+    })
+    if (cart.id !== cartId) {
+      setCartId(cart.id)
+      const next = new URLSearchParams(searchParams)
+      next.set('cart', cart.id)
+      setSearchParams(next, { replace: true })
+    }
+    return cart.id
+  }
+
+  useEffect(() => {
+    if (!isNew || !cartId || cartLoaded) return
+    getCart(cartId)
+      .then((cart) => {
+        if (cart) {
+          setContactId(cart.contact_id ?? '')
+          setOpportunityId(cart.opportunity_id ?? '')
+          setValidUntil(cart.valid_until ?? '')
+          setShippingAddressId(cart.shipping_address_id ?? '')
+          setBillingAddressId(cart.billing_address_id ?? '')
+          setShippingDraft(String(cart.shipping ?? 0))
+          setItems(
+            cart.items.map((i) => ({
+              product_id: i.product_id,
+              variant_id: i.variant_id,
+              warehouse_id: i.warehouse_id,
+              product_name: i.product_name,
+              sku: i.sku,
+              quantity: i.quantity,
+              unit_price: i.unit_price,
+              discount_amount: i.discount_amount,
+            })),
+          )
+        }
+      })
+      .finally(() => setCartLoaded(true))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNew, cartId, cartLoaded])
+
+  useEffect(() => {
+    if (!isNew || !cartLoaded) return
+    // Prime en el primer render con cartLoaded=true (blanco, o ya
+    // hidratado desde un carrito existente) -- recién a partir de ahí un
+    // cambio de verdad (ej. elegir cliente) cuenta como edición a
+    // guardar. Si se gatea esto detrás de isNotBlank(contactId) como el
+    // resto de los chequeos de abajo, el primer contacto elegido queda
+    // marcado como "estado base" por error y nunca se guarda.
+    if (!primedCartRef.current) {
+      primedCartRef.current = true
+      lastSyncedCartSnapshotRef.current = currentDraftSnapshot()
+      return
+    }
+    if (!isNotBlank(contactId)) return
+    const snapshot = currentDraftSnapshot()
+    if (snapshot === lastSyncedCartSnapshotRef.current) return
+    const timer = setTimeout(() => {
+      setSavingDraft(true)
+      syncCartDraft()
+        .then(() => {
+          lastSyncedCartSnapshotRef.current = snapshot
+        })
+        .catch((err) => setActionError(err instanceof Error ? err.message : t('orders.drawer.errors.save')))
+        .finally(() => setSavingDraft(false))
+    }, 2000)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNew, cartLoaded, contactId, opportunityId, validUntil, shippingAddressId, billingAddressId, shippingDraft, items])
+
   function handleContactSelect(newContactId: string | null) {
     setEditingContact(false)
     if (!newContactId || newContactId === contactId) return
@@ -744,12 +854,16 @@ export function OrderDetail() {
 
     setCreating(true)
     try {
-      // calculate-order siempre crea en 'cotizacion' (ver comentario de
-      // cabecera en el Edge Function) -- si el agente eligió "Confirmada"
-      // en este formulario, el paso a confirmada es una segunda llamada,
-      // ahora que los ítems ya existen de verdad y el trigger de
-      // confirmación tiene algo real contra qué validar stock.
-      const created = await calculateOrder({
+      // Guarda el estado final en el carrito (por si el agente apretó
+      // "Crear pedido" antes de que corriera el autosave de 2s) y recién
+      // ahí lo convierte en el pedido real -- create-order siempre lo
+      // crea en 'cotizacion' (ver comentario de cabecera en esa Edge
+      // Function), si el agente eligió "Confirmada" en este formulario el
+      // paso a confirmada es una segunda llamada, ahora que los ítems ya
+      // existen de verdad y el trigger de confirmación tiene algo real
+      // contra qué validar stock.
+      const cart = await saveCartDraft({
+        cart_id: cartId,
         contact_id: contactId,
         opportunity_id: opportunityId || null,
         valid_until: validUntil || null,
@@ -757,13 +871,36 @@ export function OrderDetail() {
         billing_address_id: billingAddressId || null,
         shipping: Number(shippingDraft) || 0,
         items: validItems,
+        origin: 'portal',
       })
+      setCartId(cart.id)
+      const created = await createOrderFromCart(cart.id)
       if (status === 'confirmada') await updateOrderStatus(created.id, 'confirmada')
       navigate(`/app/sales/${created.id}`, { replace: true })
     } catch (err) {
       setActionError(err instanceof Error ? err.message : t('orders.detail.errors.create'))
     } finally {
       setCreating(false)
+    }
+  }
+
+  /** Cancela el borrador -- nunca llegó a existir un pedido, así que
+   * borra el carrito directo (sin trazabilidad, decisión explícita del
+   * usuario) y vuelve al listado. Sin nada que cancelar si todavía no se
+   * había guardado ningún carrito (el agente entró y se fue sin cargar
+   * nada). */
+  async function handleCancelDraft() {
+    if (!cartId) {
+      navigate('/app/sales')
+      return
+    }
+    setCancellingDraft(true)
+    try {
+      await deleteCart(cartId)
+      navigate('/app/sales')
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : t('orders.detail.errors.cancelDraft'))
+      setCancellingDraft(false)
     }
   }
 
@@ -865,6 +1002,14 @@ export function OrderDetail() {
   // (dispatchStatus !== null, ver reloadDispatchStatus). Sin el módulo, la
   // única vía es el select simple, que sí escribe delivery_status
   // directo. Hay que chequear las dos.
+  /** Un pedido de mostrador (POS) no tiene nada que enviar: ni dirección de
+   * envío, ni estado de entrega, ni despachos, ni costo de envío. En vez de
+   * una segunda pantalla de detalle para el POS, es el mismo componente con
+   * toda esa parte apagada -- el canal del pedido es el parámetro. El
+   * backend ya piensa igual: guard_sales_order_confirmation se saltea el
+   * requisito de direcciones cuando sales_channel = 'pos'. */
+  const showShipping = !order || order.sales_channel !== 'pos'
+
   const dispatchLocksOrder = !!order && (dispatchStatus !== null || order.delivery_status !== 'pendiente')
   const locked = !isNew && !!order && (dianLocksOrder || dispatchLocksOrder || order.status === 'cancelada')
 
@@ -1052,7 +1197,7 @@ export function OrderDetail() {
           cliente en vez de más abajo en la página. */}
       <div className={`grid grid-cols-1 gap-4 ${hasSidePanel ? 'lg:grid-cols-3' : ''}`}>
         <StatCard title={t('orders.detail.sections.clientAndAddresses')} className={hasSidePanel ? 'lg:col-span-2' : ''}>
-          <div className="grid grid-cols-1 gap-y-4 sm:grid-cols-3 sm:gap-x-6">
+          <div className={`grid grid-cols-1 gap-y-4 ${showShipping ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} sm:gap-x-6`}>
             {/* Columna 1: Cliente + Facturación */}
             <div className="space-y-4">
               <div>
@@ -1087,7 +1232,9 @@ export function OrderDetail() {
               {addressField('billing')}
             </div>
 
-            {/* Columna 2: Envío + Estado de envío */}
+            {/* Columna 2: Envío + Estado de envío -- no existe en un pedido
+                de mostrador (ver showShipping). */}
+            {showShipping && (
             <div className="space-y-4 sm:border-l sm:border-brand-100 sm:pl-4">
               {addressField('shipping')}
               {/* Estado de envío -- solo edición + venta confirmada (concepto
@@ -1139,6 +1286,7 @@ export function OrderDetail() {
                 </div>
               )}
             </div>
+            )}
 
             {/* Columna 3: Oportunidad + Estado (solo al crear) + Válida
                 hasta (solo cotización -- no aplica a una venta ya
@@ -1278,10 +1426,12 @@ export function OrderDetail() {
                 <span className="font-medium text-brand-700">{formatCurrencyPrecise(order.tax_total, order.currency)}</span>
               </div>
             )}
-            <div className="flex items-center justify-between gap-3">
-              <Label className="shrink-0 text-xs text-brand-500">{t('orders.drawer.fields.shipping')}</Label>
-              <CurrencyInput value={shippingDraft} onChange={(e) => setShippingDraft(e.target.value)} disabled={locked} className="h-7 w-28 text-right text-xs" />
-            </div>
+            {showShipping && (
+              <div className="flex items-center justify-between gap-3">
+                <Label className="shrink-0 text-xs text-brand-500">{t('orders.drawer.fields.shipping')}</Label>
+                <CurrencyInput value={shippingDraft} onChange={(e) => setShippingDraft(e.target.value)} disabled={locked} className="h-7 w-28 text-right text-xs" />
+              </div>
+            )}
             <div className="flex items-center justify-between border-t border-brand-100 pt-1.5">
               <span className="text-sm font-bold text-brand-800">{t('orders.detail.total')}</span>
               <span className="text-base font-bold text-emerald-600">{formatCurrency(order?.total ?? draftSubtotalEstimate, order?.currency ?? 'COP')}</span>
@@ -1365,8 +1515,8 @@ export function OrderDetail() {
             <p className="mt-1 text-sm text-brand-500">{t('orders.detail.newSubtitle')}</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => navigate('/app/sales')}>
-              {t('common.actions.cancel')}
+            <Button variant="outline" onClick={handleCancelDraft} disabled={cancellingDraft}>
+              {cancellingDraft ? t('common.actions.saving') : t('common.actions.cancel')}
             </Button>
             <Button onClick={handleCreate} disabled={creating}>
               {creating ? t('common.actions.saving') : t('orders.detail.createAction')}
@@ -1396,9 +1546,36 @@ export function OrderDetail() {
                   -- en ese caso el servidor emite una REMISIÓN (mismo
                   diseño, numerada REM-<pedido>) en vez de una factura
                   (pedido explícito del usuario 2026-09-04). */}
-              <Button type="button" variant="outline" size="sm" onClick={handleDownloadInvoicePdf} disabled={downloadingInvoiceId !== null}>
-                <DownloadIcon className="size-3.5" /> {downloadingInvoiceId ? t('einvoicing.detail.downloading') : t('einvoicing.detail.downloadPdf')}
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                onClick={handleDownloadInvoicePdf}
+                disabled={downloadingInvoiceId !== null}
+                aria-label={t('einvoicing.detail.downloadPdf')}
+                title={t('einvoicing.detail.downloadPdf')}
+              >
+                <FileTextIcon className="size-3.5" />
               </Button>
+              {/* Acción del pedido, no de los pagos -- vive acá junto al
+                  resto de acciones del documento (pedido explícito del
+                  usuario), no dentro de la card de Pagos. Solo para
+                  pedidos de mostrador (POS): un pedido del portal/IA/tienda
+                  no tiene ticket térmico, tiene su factura/remisión de
+                  arriba. */}
+              {order.sales_channel === 'pos' && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  onClick={() => receiptPrinter.print(order.id)}
+                  disabled={receiptPrinter.printing}
+                  aria-label={t('pos.receipt.reprint')}
+                  title={t('pos.receipt.reprint')}
+                >
+                  <PrinterIcon width={13} height={13} />
+                </Button>
+              )}
               {order.status === 'cotizacion' && (
                 <>
                   <Button size="sm" onClick={() => handleStatusSelect('confirmada')} disabled={advancingStatus}>
@@ -1436,7 +1613,7 @@ export function OrderDetail() {
           open={paymentDrawerOpen}
           onClose={() => setPaymentDrawerOpen(false)}
           tenantId={profile.tenant_id}
-          orderId={order.id}
+          order={order}
           creditEnabled={contacts.find((c) => c.id === order.contact_id)?.credit_enabled ?? false}
           storeCreditBalance={storeCreditBalance}
           pendingAmount={balance}
@@ -1444,7 +1621,10 @@ export function OrderDetail() {
         />
       )}
 
-      {!isNew && order && profile?.tenant_id && enabledModules?.has('dispatches') && (
+      {receiptPrinter.portal}
+      {receiptPrinter.error && <p className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 shadow-lg">{receiptPrinter.error}</p>}
+
+      {!isNew && order && profile?.tenant_id && showShipping && enabledModules?.has('dispatches') && (
         <DispatchDrawer
           open={dispatchDrawerOpen}
           onClose={() => setDispatchDrawerOpen(false)}

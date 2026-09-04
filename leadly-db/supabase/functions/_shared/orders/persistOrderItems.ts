@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
-import { computeLineTax, isTenantTaxEnabled } from "../invoicing/queueInvoiceGeneration.ts";
+import { isTenantTaxEnabled } from "../invoicing/queueInvoiceGeneration.ts";
+import { computeOrderTotals } from "./computeOrderTotals.ts";
 
 /** ÚNICA implementación de "reemplazar los ítems de un pedido y recalcular
  * sus totales" -- usada por whatsapp-ai-tools (create_quote/add_item_to_quote),
@@ -40,10 +41,6 @@ export interface OrderTotals {
   taxTotal: number;
 }
 
-function round2(value: number): number {
-  return Math.round(value * 100) / 100;
-}
-
 export async function persistOrderItems(
   adminClient: SupabaseClient,
   tenantId: string,
@@ -53,18 +50,14 @@ export async function persistOrderItems(
 ): Promise<OrderTotals> {
   const taxEnabled = await isTenantTaxEnabled(adminClient, tenantId);
 
-  let subtotal = 0;
-  let discountTotal = 0;
-  let taxTotal = 0;
+  // Todo el cálculo (subtotal/descuentos/impuesto extraído del precio) vive
+  // en computeOrderTotals -- el mismo que usa el modo `preview` de
+  // calculate-order para mostrar el desglose antes de cobrar, así lo que se
+  // le muestra al cajero y lo que se guarda nunca pueden discrepar.
+  const totals = computeOrderTotals(items, shipping, taxEnabled);
+
   const rows = items.map((item, index) => {
-    const gross = item.quantity * item.unit_price;
-    const discount = item.discount_amount ?? 0;
-    const lineSubtotal = gross - discount;
-    subtotal += gross;
-    discountTotal += discount;
-    const rate = taxEnabled ? (item.tax_rate ?? 0) : 0;
-    const { taxAmount, taxableBase } = taxEnabled ? computeLineTax(lineSubtotal, rate) : { taxAmount: 0, taxableBase: 0 };
-    taxTotal += taxAmount;
+    const line = totals.lines[index];
     return {
       tenant_id: tenantId,
       order_id: orderId,
@@ -75,12 +68,12 @@ export async function persistOrderItems(
       sku: item.sku || null,
       quantity: item.quantity,
       unit_price: item.unit_price,
-      discount_amount: discount,
-      subtotal: lineSubtotal,
-      tax_type_code: taxEnabled ? (item.tax_type_code ?? null) : null,
-      tax_rate: rate,
-      tax_amount: taxAmount,
-      taxable_base: taxableBase,
+      discount_amount: item.discount_amount ?? 0,
+      subtotal: line.subtotal,
+      tax_type_code: line.tax_type_code,
+      tax_rate: line.tax_rate,
+      tax_amount: line.tax_amount,
+      taxable_base: line.taxable_base,
       display_order: index,
     };
   });
@@ -92,13 +85,11 @@ export async function persistOrderItems(
     if (insertError) throw new Error(insertError.message);
   }
 
-  taxTotal = round2(taxTotal);
-  const total = subtotal - discountTotal + shipping;
   const { error: updateError } = await adminClient
     .from("sales_orders")
-    .update({ subtotal, discount_total: discountTotal, total, shipping, tax_total: taxTotal })
+    .update({ subtotal: totals.subtotal, discount_total: totals.discountTotal, total: totals.total, shipping, tax_total: totals.taxTotal })
     .eq("id", orderId);
   if (updateError) throw new Error(updateError.message);
 
-  return { subtotal, discountTotal, total, taxTotal };
+  return { subtotal: totals.subtotal, discountTotal: totals.discountTotal, total: totals.total, taxTotal: totals.taxTotal };
 }

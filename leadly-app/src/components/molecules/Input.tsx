@@ -82,13 +82,17 @@ export function CurrencyInput({
 }) {
   const [display, setDisplay] = useState(() => toDisplay(value))
 
-  // Keeps the box in sync when the caller resets/loads `value` from
-  // elsewhere (e.g. opening a drawer to edit an existing record) -- typing
-  // itself is handled locally in handleChange, not by round-tripping
-  // through this effect on every keystroke.
+  // Keeps the box in sync with `value` -- tanto cuando el caller lo
+  // resetea/carga de otro lado (abrir un drawer para editar un registro
+  // existente) como cuando *rechaza o recorta* lo tipeado y devuelve el
+  // mismo `value` de antes (ej. el monto de un pago topado al saldo
+  // pendiente): sin esto, el estado del caller decía 38.000 pero la caja
+  // seguía mostrando lo que se había tecleado, porque el efecto no volvía a
+  // correr al no cambiar `value`. Corre en cada render y compara ya
+  // normalizado, así que cuando coinciden no hay ni un render extra.
   useEffect(() => {
-    setDisplay(toDisplay(value))
-  }, [value])
+    setDisplay((current) => (toRaw(current) === String(value ?? '') ? current : toDisplay(value)))
+  })
 
   function handleChange(e: ChangeEvent<HTMLInputElement>) {
     const raw = toRaw(e.target.value)
