@@ -79,9 +79,10 @@ async function resolveStorefront(adminClient: SupabaseClient, slug: string): Pro
 
 async function resolveCart(adminClient: SupabaseClient, sessionToken: string): Promise<{ id: string; tenant_id: string; status: string }> {
   const { data: cart, error } = await adminClient
-    .from("storefront_carts")
+    .from("carts")
     .select("id, tenant_id, status")
     .eq("session_token", sessionToken)
+    .eq("origin", "storefront")
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!cart) throw new StorefrontError("Este carrito no existe.", 404);
@@ -89,7 +90,7 @@ async function resolveCart(adminClient: SupabaseClient, sessionToken: string): P
 }
 
 function assertCartOpen(cart: { status: string }) {
-  if (cart.status !== "active") throw new StorefrontError("Este carrito ya fue completado.", 409);
+  if (cart.status !== "open") throw new StorefrontError("Este carrito ya fue completado.", 409);
 }
 
 async function handleAction(adminClient: SupabaseClient, action: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -335,9 +336,10 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       const [existingCartRow, tenant] = await Promise.all([
         sessionToken
           ? adminClient
-              .from("storefront_carts")
+              .from("carts")
               .select("id, tenant_id, status, session_token")
               .eq("session_token", sessionToken)
+              .eq("origin", "storefront")
               .maybeSingle()
               .then((r) => r.data as { id: string; tenant_id: string; status: string; session_token: string } | null)
           : Promise.resolve(null),
@@ -351,13 +353,13 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       // el producto, así que se le arma un carrito nuevo en silencio en vez
       // de mostrarle "este carrito no existe".
       let cart: { id: string; tenant_id: string; session_token: string };
-      if (existingCartRow && existingCartRow.status === "active") {
+      if (existingCartRow && existingCartRow.status === "open") {
         cart = existingCartRow;
       } else {
         if (!tenant) throw new StorefrontError("slug es requerido para iniciar un carrito nuevo.");
         const { data: created, error } = await adminClient
-          .from("storefront_carts")
-          .insert({ tenant_id: tenant.id })
+          .from("carts")
+          .insert({ tenant_id: tenant.id, origin: "storefront", session_token: cryptoRandomToken() })
           .select("id, tenant_id, status, session_token")
           .single();
         if (error) throw new Error(error.message);
@@ -371,7 +373,7 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       const [productResult, variantResult, existingItemResult] = await Promise.all([
         adminClient
           .from("products")
-          .select("id, has_variants, retail_price")
+          .select("id, name, sku, has_variants, retail_price")
           .eq("id", productId)
           .eq("tenant_id", cart.tenant_id)
           .eq("is_active", true)
@@ -381,16 +383,16 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
         variantIdParam
           ? adminClient
               .from("product_variants")
-              .select("id")
+              .select("id, sku, retail_price")
               .eq("id", variantIdParam)
               .eq("product_id", productId)
               .eq("tenant_id", cart.tenant_id)
               .eq("is_active", true)
               .is("deleted_at", null)
               .maybeSingle()
-          : Promise.resolve({ data: null as { id: string } | null }),
+          : Promise.resolve({ data: null as { id: string; sku: string | null; retail_price: number | null } | null }),
         (() => {
-          let q = adminClient.from("storefront_cart_items").select("id, quantity").eq("cart_id", cart.id).eq("product_id", productId);
+          let q = adminClient.from("cart_items").select("id, quantity").eq("cart_id", cart.id).eq("product_id", productId);
           q = variantIdParam ? q.eq("variant_id", variantIdParam) : q.is("variant_id", null);
           return q.maybeSingle();
         })(),
@@ -400,18 +402,36 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       if (!product) throw new StorefrontError("Producto no encontrado.", 404);
 
       let variantId: string | null = null;
+      // Snapshot del precio/sku actuales -- cart_items (a diferencia de la
+      // vieja storefront_cart_items) sí guarda estas columnas, mismo shape
+      // que ya usan Órdenes/POS. Nunca es la fuente de verdad para cobrar:
+      // loadCartItemsForCheckout vuelve a resolverlas en vivo justo antes de
+      // crear el pedido (ver ese comentario más abajo).
+      let unitPrice = product.retail_price ?? 0;
+      let sku = product.sku;
       if (product.has_variants) {
         if (!variantIdParam) throw new StorefrontError("Este producto tiene variantes -- elegí una primero.");
         if (!variantResult.data) throw new StorefrontError("Variante no encontrada.", 404);
         variantId = variantResult.data.id;
+        unitPrice = variantResult.data.retail_price ?? unitPrice;
+        sku = variantResult.data.sku ?? sku;
       }
 
       const existingItem = existingItemResult.data;
       if (existingItem) {
-        const { error } = await adminClient.from("storefront_cart_items").update({ quantity: existingItem.quantity + quantity }).eq("id", existingItem.id);
+        // Refresca precio/nombre/sku de paso -- ya se acaba de consultar el
+        // producto para validar que existe, así que no cuesta un viaje
+        // extra mantener la línea al día si el precio cambió desde el
+        // último add_to_cart de este mismo producto.
+        const { error } = await adminClient
+          .from("cart_items")
+          .update({ quantity: existingItem.quantity + quantity, product_name: product.name, sku, unit_price: unitPrice })
+          .eq("id", existingItem.id);
         if (error) throw new Error(error.message);
       } else {
-        const { error } = await adminClient.from("storefront_cart_items").insert({ cart_id: cart.id, product_id: product.id, variant_id: variantId, quantity });
+        const { error } = await adminClient
+          .from("cart_items")
+          .insert({ cart_id: cart.id, product_id: product.id, variant_id: variantId, product_name: product.name, sku, quantity, unit_price: unitPrice });
         if (error) throw new Error(error.message);
       }
 
@@ -433,7 +453,7 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       // consulta, en vez de un select aparte solo para confirmar que el ítem
       // existe y es de este carrito -- el `select("id")` de la respuesta ya
       // dice si algo matcheó.
-      const { data: updated, error } = await adminClient.from("storefront_cart_items").update({ quantity }).eq("id", itemId).eq("cart_id", cart.id).select("id");
+      const { data: updated, error } = await adminClient.from("cart_items").update({ quantity }).eq("id", itemId).eq("cart_id", cart.id).select("id");
       if (error) throw new Error(error.message);
       if (!updated || updated.length === 0) throw new StorefrontError("Ítem no encontrado.", 404);
       return { items: await loadCartItems(adminClient, cart.id) };
@@ -448,7 +468,7 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       const cart = await resolveCart(adminClient, sessionToken);
       assertCartOpen(cart);
 
-      const { data: removed, error } = await adminClient.from("storefront_cart_items").delete().eq("id", itemId).eq("cart_id", cart.id).select("id");
+      const { data: removed, error } = await adminClient.from("cart_items").delete().eq("id", itemId).eq("cart_id", cart.id).select("id");
       if (error) throw new Error(error.message);
       if (!removed || removed.length === 0) throw new StorefrontError("Ítem no encontrado.", 404);
       return { items: await loadCartItems(adminClient, cart.id) };
@@ -639,6 +659,7 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
         .from("sales_orders")
         .insert({
           tenant_id: cart.tenant_id,
+          cart_id: cart.id,
           contact_id: clientId,
           billing_address_id: billingAddressRowId,
           shipping_address_id: shippingAddressRowId,
@@ -675,8 +696,8 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       }
 
       await adminClient
-        .from("storefront_carts")
-        .update({ status: "converted", converted_order_id: order.id, converted_at: new Date().toISOString() })
+        .from("carts")
+        .update({ status: "converted", converted_order_id: order.id })
         .eq("id", cart.id);
 
       const orderCode = formatOrderCode(confirmResult.order.number);
@@ -712,7 +733,7 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
     // "Este carrito ya fue completado" -- y aunque no chocara, habría
     // intentado crear un SEGUNDO pedido duplicado con los mismos ítems. Esta
     // acción nunca crea nada: solo resuelve el pago sobre el pedido que ya
-    // existe, ubicado por session_token -> storefront_carts.converted_order_id
+    // existe, ubicado por session_token -> carts.converted_order_id
     // (nunca por un order_id suelto en el body).
     case "select_payment_method": {
       const sessionToken = String(body.session_token ?? "").trim();
@@ -721,7 +742,7 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       if (paymentMethod !== "wompi" && paymentMethod !== "credito") throw new StorefrontError("payment_method inválido.");
 
       const cart = await resolveCart(adminClient, sessionToken);
-      const { data: cartRow } = await adminClient.from("storefront_carts").select("converted_order_id").eq("id", cart.id).maybeSingle();
+      const { data: cartRow } = await adminClient.from("carts").select("converted_order_id").eq("id", cart.id).maybeSingle();
       if (!cartRow?.converted_order_id) throw new StorefrontError("Este carrito todavía no generó ningún pedido.", 404);
 
       const { data: order } = await adminClient
@@ -760,7 +781,7 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       if (!sessionToken) throw new StorefrontError("session_token es requerido.");
 
       const cart = await resolveCart(adminClient, sessionToken);
-      const { data: cartRow } = await adminClient.from("storefront_carts").select("converted_order_id").eq("id", cart.id).maybeSingle();
+      const { data: cartRow } = await adminClient.from("carts").select("converted_order_id").eq("id", cart.id).maybeSingle();
       if (!cartRow?.converted_order_id) throw new StorefrontError("Este carrito todavía no generó ningún pedido.", 404);
 
       const { data: order } = await adminClient
@@ -859,10 +880,15 @@ async function loadVariantsByProduct(
   return result;
 }
 
+// cart_items ya guarda product_name/unit_price/sku como snapshot (ver
+// add_to_cart) -- a diferencia de la vieja storefront_cart_items, no hace
+// falta un join a products/product_variants para el nombre/precio acá.
+// Solo se sigue consultando product_variants para armar variant_label
+// (texto de presentación, "Azul / M"), que cart_items no guarda.
 async function loadCartItems(adminClient: SupabaseClient, cartId: string): Promise<Record<string, unknown>[]> {
   const { data, error } = await adminClient
-    .from("storefront_cart_items")
-    .select("id, product_id, variant_id, quantity, product:products(name, retail_price), variant:product_variants(retail_price, option1_value, option2_value, option3_value)")
+    .from("cart_items")
+    .select("id, product_id, variant_id, product_name, unit_price, quantity, variant:product_variants(option1_value, option2_value, option3_value)")
     .eq("cart_id", cartId);
   if (error) throw new Error(error.message);
 
@@ -871,22 +897,26 @@ async function loadCartItems(adminClient: SupabaseClient, cartId: string): Promi
 
   // deno-lint-ignore no-explicit-any
   return (data ?? []).map((row: any) => {
-    const unitPrice = row.variant?.retail_price ?? row.product?.retail_price ?? 0;
     const variantLabel = row.variant ? [row.variant.option1_value, row.variant.option2_value, row.variant.option3_value].filter(Boolean).join(" / ") : null;
     return {
       id: row.id,
       product_id: row.product_id,
       variant_id: row.variant_id,
-      name: row.product?.name ?? "",
+      name: row.product_name,
       variant_label: variantLabel,
       quantity: row.quantity,
-      unit_price: unitPrice,
-      subtotal: unitPrice * row.quantity,
+      unit_price: row.unit_price,
+      subtotal: row.unit_price * row.quantity,
       image_url: images.get(row.product_id) ?? null,
     };
   });
 }
 
+// A diferencia de loadCartItems (que sirve para MOSTRAR el carrito), acá el
+// precio/impuesto NUNCA sale de cart_items -- se resuelve en vivo contra
+// products/product_variants justo antes de crear el pedido, mismo criterio
+// que ya usa pos-checkout: no se confía en nada guardado para el paso que
+// mueve dinero, ni siquiera el snapshot que el propio add_to_cart guardó.
 async function loadCartItemsForCheckout(
   adminClient: SupabaseClient,
   cartId: string,
@@ -902,25 +932,40 @@ async function loadCartItemsForCheckout(
     tax_rate: number;
   }[]
 > {
-  const { data, error } = await adminClient
-    .from("storefront_cart_items")
-    .select(
-      "product_id, variant_id, quantity, product:products(name, sku, retail_price, tax_type_code, tax_rate), variant:product_variants(sku, retail_price)",
-    )
-    .eq("cart_id", cartId);
+  const { data: items, error } = await adminClient.from("cart_items").select("product_id, variant_id, quantity").eq("cart_id", cartId);
   if (error) throw new Error(error.message);
+  if (!items || items.length === 0) return [];
+
+  const productIds = Array.from(new Set(items.map((i: { product_id: string | null }) => i.product_id).filter((id): id is string => !!id)));
+  const variantIds = Array.from(new Set(items.map((i: { variant_id: string | null }) => i.variant_id).filter((id): id is string => !!id)));
+
+  const [{ data: products }, { data: variants }] = await Promise.all([
+    productIds.length > 0
+      ? adminClient.from("products").select("id, name, sku, retail_price, tax_type_code, tax_rate").in("id", productIds)
+      : Promise.resolve({ data: [] as { id: string; name: string; sku: string | null; retail_price: number | null; tax_type_code: string | null; tax_rate: number }[] }),
+    variantIds.length > 0
+      ? adminClient.from("product_variants").select("id, sku, retail_price").in("id", variantIds)
+      : Promise.resolve({ data: [] as { id: string; sku: string | null; retail_price: number | null }[] }),
+  ]);
+  const productById = new Map((products ?? []).map((p) => [p.id, p]));
+  const variantById = new Map((variants ?? []).map((v) => [v.id, v]));
+
   // deno-lint-ignore no-explicit-any
-  return (data ?? []).map((row: any) => ({
-    product_id: row.product_id,
-    variant_id: row.variant_id,
-    product_name: row.product?.name ?? "",
-    sku: row.variant?.sku ?? row.product?.sku ?? null,
-    quantity: row.quantity,
-    unit_price: row.variant?.retail_price ?? row.product?.retail_price ?? 0,
-    // El impuesto es una clasificación del producto, nunca de la variante.
-    tax_type_code: row.product?.tax_type_code ?? null,
-    tax_rate: row.product?.tax_rate ?? 0,
-  }));
+  return (items as any[]).map((row) => {
+    const product = productById.get(row.product_id);
+    const variant = row.variant_id ? variantById.get(row.variant_id) : undefined;
+    return {
+      product_id: row.product_id,
+      variant_id: row.variant_id,
+      product_name: product?.name ?? "",
+      sku: variant?.sku ?? product?.sku ?? null,
+      quantity: row.quantity,
+      unit_price: variant?.retail_price ?? product?.retail_price ?? 0,
+      // El impuesto es una clasificación del producto, nunca de la variante.
+      tax_type_code: product?.tax_type_code ?? null,
+      tax_rate: product?.tax_rate ?? 0,
+    };
+  });
 }
 
 /** Resuelve la dirección de envío O de facturación de un pedido -- misma
@@ -1130,6 +1175,16 @@ function cryptoRandomInt(min: number, max: number): number {
   const range = max - min + 1;
   const value = crypto.getRandomValues(new Uint32Array(1))[0];
   return min + (value % range);
+}
+
+/** Identidad del carrito de un visitante anónimo (carts.session_token) --
+ * mismos 32 bytes al azar que storefront_carts generaba antes con un
+ * default de columna (gen_random_bytes(32)::hex); acá lo genera la propia
+ * función porque carts.session_token no tiene default (portal/POS nunca lo
+ * necesitan, ver la migración de esta ronda). */
+function cryptoRandomToken(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 function formatOrderCode(number: number): string {
