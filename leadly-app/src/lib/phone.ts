@@ -66,3 +66,11 @@ export function formatPhoneDisplay(phone: string | null | undefined): string {
   if (!localNumber) return phone
   return `+${dialCode} ${groupDigits(localNumber)}`
 }
+
+/** Igual que formatPhoneDisplay, pero para clients.phone_prefix/phone --
+ * desde 20260904000000_clients_phone_prefix_split.sql esas dos columnas
+ * viven separadas (no hay un solo string para partir con splitPhone). */
+export function formatClientPhoneDisplay(dialCode: string | null | undefined, localNumber: string | null | undefined): string {
+  if (!localNumber) return ''
+  return `+${dialCode || DEFAULT_DIAL_CODE} ${groupDigits(localNumber)}`
+}

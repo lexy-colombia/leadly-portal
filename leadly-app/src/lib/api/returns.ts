@@ -2,7 +2,7 @@ import { supabase } from '../supabaseClient'
 import type { Return, ReturnItem, ReturnItemCondition, ReturnReason, ReturnStatusHistoryEntry, SalesOrderItem, StoreCreditGrant } from '../../types/domain'
 
 export interface ReturnWithOrder extends Return {
-  sales_order: { number: number; currency: string; contact: { full_name: string; phone: string } | null } | null
+  sales_order: { number: number; currency: string; contact: { full_name: string; phone_prefix: string; phone: string } | null } | null
   status: { name: string; color: string } | null
   resolution_type: { name: string; effect: string } | null
   // Ítems del ticket con el precio unitario de la línea original -- listReturns
@@ -12,7 +12,7 @@ export interface ReturnWithOrder extends Return {
 }
 
 const RETURN_SELECT =
-  '*, sales_order:sales_orders(number, currency, contact:clients(full_name, phone)), status:return_statuses(name, color), resolution_type:return_resolution_types(name, effect), items:return_items(quantity, sales_order_item:sales_order_items(unit_price))'
+  '*, sales_order:sales_orders(number, currency, contact:clients(full_name, phone_prefix, phone)), status:return_statuses(name, color), resolution_type:return_resolution_types(name, effect), items:return_items(quantity, sales_order_item:sales_order_items(unit_price))'
 
 export async function listReturns(tenantId: string): Promise<ReturnWithOrder[]> {
   const { data, error } = await supabase.from('returns').select(RETURN_SELECT).eq('tenant_id', tenantId).order('created_at', { ascending: false })

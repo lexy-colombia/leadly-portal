@@ -3,7 +3,7 @@ import { createClient, searchClients } from '../../../lib/api/clients'
 import { linkConversationContact } from '../../../lib/api/conversations'
 import type { Client } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { formatPhoneDisplay } from '../../../lib/phone'
+import { formatClientPhoneDisplay, splitPhone } from '../../../lib/phone'
 import { Drawer } from '@/components/organisms'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -76,6 +76,10 @@ export function LinkClientDrawer({
 
     setSubmitting(true)
     try {
+      // contactPhone es whatsapp_conversations.contact_phone (número
+      // completo, tabla no tocada por el split) -- se parte acá para las
+      // dos columnas de clients.
+      const { dialCode, localNumber } = splitPhone(contactPhone)
       const contactId =
         mode === 'existing'
           ? selected!.id
@@ -83,7 +87,8 @@ export function LinkClientDrawer({
               await createClient({
                 tenant_id: tenantId,
                 full_name: newName.trim() || contactPhone,
-                phone: contactPhone,
+                phone_prefix: dialCode,
+                phone: localNumber,
                 tags: [],
               })
             ).id
@@ -126,7 +131,7 @@ export function LinkClientDrawer({
                     {results.map((c) => (
                       <CommandItem key={c.id} value={c.id} onSelect={() => setSelected(c)} className="text-xs">
                         <span className="flex-1 truncate">{c.full_name}</span>
-                        <span className="shrink-0 text-brand-400">{formatPhoneDisplay(c.phone)}</span>
+                        <span className="shrink-0 text-brand-400">{formatClientPhoneDisplay(c.phone_prefix, c.phone)}</span>
                       </CommandItem>
                     ))}
                   </CommandGroup>

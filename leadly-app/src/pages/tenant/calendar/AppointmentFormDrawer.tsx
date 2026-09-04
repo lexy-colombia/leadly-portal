@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { createAppointment, updateAppointment } from '../../../lib/api/appointments'
 import { listClients } from '../../../lib/api/clients'
+import { formatClientPhoneDisplay } from '../../../lib/phone'
 import type { AppointmentWithContact, Client } from '../../../types/domain'
 import { FieldError } from '@/components/atoms'
 import { ComboboxFilter } from '@/components/molecules'
@@ -98,7 +99,7 @@ export function AppointmentFormDrawer({
           <Label>{t('calendar.form.contact')}</Label>
           <div className="mt-1">
             <ComboboxFilter
-              options={contacts.map((c) => ({ id: c.id, label: `${c.full_name} · ${c.phone}` }))}
+              options={contacts.map((c) => ({ id: c.id, label: `${c.full_name} · ${formatClientPhoneDisplay(c.phone_prefix, c.phone)}` }))}
               value={contactId}
               onChange={setContactId}
               placeholder={t('calendar.form.searchPlaceholder')}

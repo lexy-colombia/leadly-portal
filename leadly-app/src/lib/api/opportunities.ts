@@ -32,7 +32,7 @@ export async function listStages(pipelineId: string): Promise<PipelineStage[]> {
 }
 
 export type OpportunityWithRelations = Opportunity & {
-  contact: { full_name: string; phone: string | null; email: string | null } | null
+  contact: { full_name: string; phone_prefix: string | null; phone: string | null; email: string | null } | null
   stage: { name: string; color: string; probability: number; is_won: boolean; is_lost: boolean } | null
   owner: { full_name: string } | null
 }
@@ -43,7 +43,7 @@ export type OpportunityWithRelations = Opportunity & {
 export async function listOpportunities(tenantId: string, pipelineId?: string): Promise<OpportunityWithRelations[]> {
   let query = supabase
     .from('opportunities')
-    .select('*, contact:clients(full_name, phone, email), stage:pipeline_stages(name, color, probability, is_won, is_lost), owner:profiles!owner_id(full_name)')
+    .select('*, contact:clients(full_name, phone_prefix, phone, email), stage:pipeline_stages(name, color, probability, is_won, is_lost), owner:profiles!owner_id(full_name)')
     .eq('tenant_id', tenantId)
     .is('deleted_at', null)
     .order('updated_at', { ascending: false })
@@ -57,7 +57,7 @@ export async function listOpportunities(tenantId: string, pipelineId?: string): 
 export async function listOpportunitiesForContact(contactId: string): Promise<OpportunityWithRelations[]> {
   const { data, error } = await supabase
     .from('opportunities')
-    .select('*, contact:clients(full_name, phone, email), stage:pipeline_stages(name, color, probability, is_won, is_lost), owner:profiles!owner_id(full_name)')
+    .select('*, contact:clients(full_name, phone_prefix, phone, email), stage:pipeline_stages(name, color, probability, is_won, is_lost), owner:profiles!owner_id(full_name)')
     .eq('contact_id', contactId)
     .is('deleted_at', null)
     .order('updated_at', { ascending: false })

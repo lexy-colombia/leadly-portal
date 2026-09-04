@@ -7,6 +7,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { downloadWhatsappMedia, verifyMetaSignature } from "../_shared/whatsapp.ts";
+import { splitPhone } from "../_shared/phone.ts";
 
 const ATTACHMENT_MIME_TO_EXT: Record<string, string> = {
   "image/jpeg": "jpg",
@@ -132,11 +133,17 @@ Deno.serve(async (req: Request) => {
         // and reply to the conversation on their own) until an agent decides
         // from the Inbox that this sender is worth linking to a real client,
         // existing or new.
+        // clients.phone quedó como SOLO el número local desde
+        // 20260904000000_clients_phone_prefix_split.sql -- contactPhone acá
+        // sigue siendo el wa_id completo que manda Meta, hay que partirlo
+        // para matchear contra las dos columnas.
+        const { dialCode: contactDialCode, localNumber: contactLocalNumber } = splitPhone(contactPhone);
         const { data: existingContact } = await adminClient
           .from("clients")
           .select("id")
           .eq("tenant_id", line.tenant_id)
-          .eq("phone", contactPhone)
+          .eq("phone_prefix", contactDialCode)
+          .eq("phone", contactLocalNumber)
           .is("deleted_at", null)
           .maybeSingle();
 

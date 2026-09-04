@@ -9,7 +9,7 @@ import { listClients } from '../../../lib/api/clients'
 import type { Client, WhatsappLine, WhatsappMessageTemplate } from '../../../types/domain'
 import { FieldError } from '@/components/atoms'
 import { PhoneInput } from '@/components/molecules'
-import { formatPhoneDisplay, splitPhone } from '../../../lib/phone'
+import { combinePhone, formatClientPhoneDisplay, formatPhoneDisplay, splitPhone } from '../../../lib/phone'
 import { Drawer } from '@/components/organisms'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -113,7 +113,10 @@ export function CampaignFormDrawer({
         if (initial) {
           setRecipients(
             initial.recipients.map((r) => {
-              const match = all.find((c) => c.phone === r.contact_phone)
+              // campaign_recipients.contact_phone sigue siendo el número
+              // completo (esa tabla no la tocó el split) -- hay que
+              // reconstruir el de cada cliente para poder matchear.
+              const match = all.find((c) => combinePhone(c.phone_prefix, c.phone) === r.contact_phone)
               return { key: match?.id ?? crypto.randomUUID(), contact_phone: r.contact_phone, contact_name: r.contact_name, variables: r.variables }
             }),
           )
@@ -154,7 +157,7 @@ export function CampaignFormDrawer({
     setRecipients((prev) => {
       const idx = prev.findIndex((r) => r.key === client.id)
       if (idx >= 0) return prev.filter((_, i) => i !== idx)
-      return [...prev, { key: client.id, contact_phone: client.phone, contact_name: client.full_name, variables: Array(variableCount).fill('') }]
+      return [...prev, { key: client.id, contact_phone: combinePhone(client.phone_prefix, client.phone), contact_name: client.full_name, variables: Array(variableCount).fill('') }]
     })
   }
 
@@ -340,12 +343,12 @@ export function CampaignFormDrawer({
                             {clients.map((c) => {
                               const checked = recipients.some((r) => r.key === c.id)
                               return (
-                                <CommandItem key={c.id} value={`${c.full_name} ${c.phone}`} onSelect={() => toggleClient(c)} className="text-xs">
+                                <CommandItem key={c.id} value={`${c.full_name} ${c.phone_prefix}${c.phone}`} onSelect={() => toggleClient(c)} className="text-xs">
                                   <span className={cn('flex size-3.5 shrink-0 items-center justify-center rounded-sm border', checked ? 'border-primary bg-primary text-primary-foreground' : 'border-input')}>
                                     {checked && <CheckIcon className="size-2.5" />}
                                   </span>
                                   <span className="flex-1 truncate">{c.full_name}</span>
-                                  <span className="shrink-0 text-brand-400">{formatPhoneDisplay(c.phone)}</span>
+                                  <span className="shrink-0 text-brand-400">{formatClientPhoneDisplay(c.phone_prefix, c.phone)}</span>
                                 </CommandItem>
                               )
                             })}

@@ -6,7 +6,7 @@ import { useLanguage } from "../../contexts/LanguageContext";
 import { useHeaderSearchSlot } from "@/contexts/HeaderSearchSlotContext";
 import type { Language } from "../../i18n/translations";
 import { formatDate } from "../../lib/dates";
-import { formatPhoneDisplay } from "../../lib/phone";
+import { formatClientPhoneDisplay } from "../../lib/phone";
 import { deleteClient, listClients } from "../../lib/api/clients";
 import { listLastContactTimesByTenant } from "../../lib/api/conversations";
 import { listProfilesByTenant } from "../../lib/api/users";
@@ -109,6 +109,7 @@ export function Clients() {
       return (
         c.full_name.toLowerCase().includes(term) ||
         c.phone.includes(term) ||
+        c.phone_prefix.includes(term) ||
         c.company?.toLowerCase().includes(term) ||
         c.tags.some((tag) => tag.toLowerCase().includes(term))
       );
@@ -258,7 +259,7 @@ export function Clients() {
                       </span>
                     </TableCell>
                     <TableCell className="text-xs text-brand-700">
-                      {formatPhoneDisplay(contact.phone)}
+                      {formatClientPhoneDisplay(contact.phone_prefix, contact.phone)}
                     </TableCell>
                     <TableCell className="text-xs text-brand-500">
                       {agents.find((a) => a.id === contact.assigned_to)

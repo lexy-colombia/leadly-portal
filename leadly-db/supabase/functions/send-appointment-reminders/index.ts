@@ -16,6 +16,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { json } from "../_shared/cors.ts";
 import { sendWhatsappText } from "../_shared/whatsapp.ts";
+import { combinePhone } from "../_shared/phone.ts";
 
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") {
@@ -36,7 +37,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: appointments, error } = await adminClient
     .from("appointments")
-    .select("id, contact_id, whatsapp_line_id, scheduled_at, tenant_id, clients(full_name, phone)")
+    .select("id, contact_id, whatsapp_line_id, scheduled_at, tenant_id, clients(full_name, phone_prefix, phone)")
     .eq("status", "activa")
     .is("reminder_sent_at", null)
     .gte("scheduled_at", windowStart)
@@ -81,7 +82,7 @@ Deno.serve(async (req: Request) => {
     });
     const message = `Hola ${contact.full_name || ""}, te recordamos tu cita agendada para el ${time}. ¡Te esperamos!`.trim();
 
-    const result = await sendWhatsappText(line.phone_number_id, accessToken, contact.phone, message);
+    const result = await sendWhatsappText(line.phone_number_id, accessToken, combinePhone(contact.phone_prefix, contact.phone), message);
 
     const { data: conv } = await adminClient
       .from("whatsapp_conversations")

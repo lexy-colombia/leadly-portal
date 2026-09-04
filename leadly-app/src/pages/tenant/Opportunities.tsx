@@ -3,6 +3,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { TranslationKey } from '../../i18n/translations'
 import { formatDate } from '../../lib/dates'
+import { combinePhone } from '../../lib/phone'
 import {
   computePipelineMetrics,
   listOpportunities,
@@ -540,7 +541,7 @@ export function Opportunities() {
                         <div className="flex items-center gap-0.5 text-brand-300">
                           {opp.contact?.phone && (
                             <a
-                              href={`tel:${opp.contact.phone}`}
+                              href={`tel:${combinePhone(opp.contact.phone_prefix ?? '', opp.contact.phone ?? '')}`}
                               onClick={(e) => e.stopPropagation()}
                               aria-label={t('opportunities.card.callAria')}
                               className="rounded-full p-0.5 hover:bg-brand-50 hover:text-accent-600"

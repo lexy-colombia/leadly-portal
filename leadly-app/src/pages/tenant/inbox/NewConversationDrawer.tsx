@@ -13,7 +13,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { isNotBlank, isValidE164Phone } from '../../../lib/validation'
-import { formatPhoneDisplay } from '../../../lib/phone'
+import { combinePhone, formatClientPhoneDisplay, splitPhone } from '../../../lib/phone'
 import { PhoneInput } from '@/components/molecules'
 import { useLanguage } from '../../../contexts/LanguageContext'
 
@@ -96,10 +96,12 @@ export function NewConversationDrawer({
       if (mode === 'existing') {
         contact = contacts.find((c) => c.id === selectedContactId)!
       } else {
+        const { dialCode, localNumber } = splitPhone(newPhone)
         contact = await createClient({
           tenant_id: tenantId,
           full_name: newName.trim(),
-          phone: newPhone.trim(),
+          phone_prefix: dialCode,
+          phone: localNumber,
           tags: [],
         })
         // Reflect the new contact as "existing" so going back to this step
@@ -110,9 +112,14 @@ export function NewConversationDrawer({
         setSelectedContactId(contact.id)
       }
 
-      const { windowOpen } = await getConversationWindowStatus(lineId, contact.phone)
+      // whatsapp_conversations.contact_phone sigue siendo el número
+      // completo (no se tocó esa tabla en el split, ver
+      // 20260904000000_clients_phone_prefix_split.sql) -- se reconstruye
+      // acá antes de usarlo.
+      const fullContactPhone = combinePhone(contact.phone_prefix, contact.phone)
+      const { windowOpen } = await getConversationWindowStatus(lineId, fullContactPhone)
       if (windowOpen) {
-        const conversation = await createConversation(tenantId, lineId, contact.id, contact.phone, contact.full_name)
+        const conversation = await createConversation(tenantId, lineId, contact.id, fullContactPhone, contact.full_name)
         onCreated(conversation.id)
         onClose()
         return
@@ -140,7 +147,7 @@ export function NewConversationDrawer({
         tenant_id: tenantId,
         whatsapp_line_id: lineId,
         contact_id: pendingContact.id,
-        contact_phone: pendingContact.phone,
+        contact_phone: combinePhone(pendingContact.phone_prefix, pendingContact.phone),
         contact_name: pendingContact.full_name,
         template_id: selectedTemplate.id,
         variables,
@@ -256,9 +263,9 @@ export function NewConversationDrawer({
                   <CommandEmpty className="text-xs">{t('common.status.noResults')}</CommandEmpty>
                   <CommandGroup>
                     {contacts.map((c) => (
-                      <CommandItem key={c.id} value={`${c.full_name} ${c.phone}`} onSelect={() => setSelectedContactId(c.id)} className="text-xs">
+                      <CommandItem key={c.id} value={`${c.full_name} ${c.phone_prefix}${c.phone}`} onSelect={() => setSelectedContactId(c.id)} className="text-xs">
                         <span className="flex-1 truncate">{c.full_name}</span>
-                        <span className="shrink-0 text-brand-400">{formatPhoneDisplay(c.phone)}</span>
+                        <span className="shrink-0 text-brand-400">{formatClientPhoneDisplay(c.phone_prefix, c.phone)}</span>
                       </CommandItem>
                     ))}
                   </CommandGroup>
