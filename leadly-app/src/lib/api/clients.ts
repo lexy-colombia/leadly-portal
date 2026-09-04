@@ -4,12 +4,15 @@ import type { Client, Note, TenantDocumentType } from '../../types/domain'
 export interface ClientInput {
   tenant_id: string
   full_name: string
+  phone_prefix: string
   phone: string
   email?: string | null
   company?: string | null
   nit?: string | null
   document_type?: TenantDocumentType | null
   document_number?: string | null
+  dian_document_type_code?: string | null
+  applies_withholding?: boolean
   country?: string | null
   notes?: string | null
   is_active?: boolean
@@ -39,7 +42,10 @@ export async function listClients(tenantId: string): Promise<Client[]> {
 export async function searchClients(tenantId: string, query: string, limit = 8): Promise<Client[]> {
   let request = supabase.from('clients').select('*').eq('tenant_id', tenantId).is('deleted_at', null)
   const term = query.trim()
-  if (term) request = request.or(`full_name.ilike.%${term}%,phone.ilike.%${term}%`)
+  // phone quedó como SOLO el número local (20260904000000_clients_phone_prefix_split.sql)
+  // -- se busca también contra phone_prefix para no perder la posibilidad
+  // de encontrar un cliente tipeando su indicativo.
+  if (term) request = request.or(`full_name.ilike.%${term}%,phone.ilike.%${term}%,phone_prefix.ilike.%${term}%`)
   const { data, error } = await request.order('updated_at', { ascending: false }).limit(limit)
   if (error) throw error
   return data

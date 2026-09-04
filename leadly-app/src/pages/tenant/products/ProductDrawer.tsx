@@ -20,7 +20,10 @@ import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { isNotBlank } from '../../../lib/validation'
+import { listTaxTypes } from '../../../lib/api/tenantDianProfile'
+import type { TaxType } from '../../../types/domain'
 
 // The exact sizing the Products list's filter pills use (CategoryTreeFilter/
 // ComboboxFilter triggers, `size="sm"` on Button) -- every field in this
@@ -239,6 +242,9 @@ export function ProductDrawer({
   const [trackInventory, setTrackInventory] = useState(true)
   const [lowStockThreshold, setLowStockThreshold] = useState('5')
   const [isActive, setIsActive] = useState(true)
+  const [taxTypeCode, setTaxTypeCode] = useState('01')
+  const [taxRate, setTaxRate] = useState('19')
+  const [taxTypes, setTaxTypes] = useState<TaxType[]>([])
   const [touched, setTouched] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -258,6 +264,8 @@ export function ProductDrawer({
     setTrackInventory(product?.track_inventory ?? true)
     setLowStockThreshold(product ? String(product.low_stock_threshold) : '5')
     setIsActive(product?.is_active ?? true)
+    setTaxTypeCode(product?.tax_type_code ?? '01')
+    setTaxRate(product ? String(product.tax_rate) : '19')
     setTouched(false)
     setFormError(null)
   }, [open, product])
@@ -267,6 +275,9 @@ export function ProductDrawer({
     listProductCategories(tenantId).then(setCategories).catch(() => {})
     listSuppliers(tenantId).then(setSuppliers).catch(() => {})
     listBrands(tenantId).then(setBrands).catch(() => {})
+    listTaxTypes()
+      .then((types) => setTaxTypes(types.filter((tx) => tx.category === 'impuesto')))
+      .catch(() => {})
   }, [open, tenantId])
 
   const nameError = touched && !isNotBlank(name) ? t('products.drawer.errors.nameRequired') : undefined
@@ -299,6 +310,8 @@ export function ProductDrawer({
         track_inventory: trackInventory,
         low_stock_threshold: Math.max(0, Math.trunc(Number(lowStockThreshold) || 0)),
         is_active: isActive,
+        tax_type_code: taxTypeCode || null,
+        tax_rate: Number(taxRate) || 0,
       }
       // has_variants is deliberately not touched by this form -- it's
       // managed from ProductDetail's Variantes card instead (more room for
@@ -414,6 +427,31 @@ export function ProductDrawer({
               <CurrencyInput id="product-retail-price" value={retailPrice} onChange={(e) => setRetailPrice(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
             </div>
           </div>
+        </Section>
+
+        <Section title={t('products.drawer.sections.tax')}>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="product-tax-type">{t('products.drawer.fields.taxType')}</Label>
+              <Select value={taxTypeCode} onValueChange={setTaxTypeCode}>
+                <SelectTrigger id="product-tax-type" className={`mt-1 w-full ${FIELD_CLASS}`}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {taxTypes.map((tx) => (
+                    <SelectItem key={tx.code} value={tx.code} className="text-xs">
+                      {tx.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="product-tax-rate">{t('products.drawer.fields.taxRate')}</Label>
+              <Input id="product-tax-rate" type="number" min={0} max={100} step={0.5} value={taxRate} onChange={(e) => setTaxRate(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
+            </div>
+          </div>
+          <p className="text-[11px] text-brand-400">{t('products.drawer.fields.taxHint')}</p>
         </Section>
 
         <Section title={t('products.drawer.sections.inventory')}>

@@ -245,12 +245,19 @@ export interface Client {
   id: string
   tenant_id: string
   full_name: string
+  /** Indicativo de país (ej. "57") -- separado de `phone` desde
+   * 20260904000000_clients_phone_prefix_split.sql. `phone` es SOLO el
+   * número local; usar combinePhone(phone_prefix, phone) (lib/phone.ts)
+   * para reconstruir el número completo cuando haga falta. */
+  phone_prefix: string
   phone: string
   email: string | null
   company: string | null
   nit: string | null
   document_type: TenantDocumentType | null
   document_number: string | null
+  dian_document_type_code: string | null
+  applies_withholding: boolean
   country: string | null
   notes: string | null
   is_active: boolean
@@ -361,6 +368,8 @@ export interface Product {
   low_stock_threshold: number
   is_active: boolean
   has_variants: boolean
+  tax_type_code: string | null
+  tax_rate: number
   deleted_at: string | null
   deleted_by: string | null
   created_at: string
@@ -534,6 +543,10 @@ export interface SalesOrderItem {
   discount_amount: number
   subtotal: number
   display_order: number
+  tax_type_code: string | null
+  tax_rate: number
+  tax_amount: number
+  taxable_base: number
   created_at: string
 }
 
@@ -1054,5 +1067,140 @@ export interface StockMovement {
   reference_id: string | null
   notes: string | null
   created_by: string | null
+  created_at: string
+}
+
+// --- Facturación electrónica DIAN (Fase 1 -- cimientos). Cada tenant es su
+// propio facturador electrónico, no Leadly (ver CLAUDE.md). Ver migraciones
+// 20260903100000..20260903111000.
+
+export type TaxTypeCategory = 'impuesto' | 'retencion'
+export type TaxTypeAppliesAt = 'line' | 'invoice'
+
+/** Catálogo de solo lectura (tax_types) -- códigos de la Tabla 11 del Anexo
+ * Técnico DIAN v1.9. 'impuesto' se suma al precio de línea (IVA/IC/ICA/INC);
+ * 'retencion' se calcula a nivel de factura completa (ReteIVA/ReteFuente/ReteICA). */
+export interface TaxType {
+  code: string
+  name: string
+  category: TaxTypeCategory
+  applies_at: TaxTypeAppliesAt
+  is_active: boolean
+}
+
+/** Catálogo de solo lectura (dian_document_types) -- Tabla 3 del Anexo Técnico. */
+export interface DianDocumentType {
+  code: string
+  name: string
+}
+
+export interface TenantDianProfile {
+  id: string
+  tenant_id: string
+  tax_enabled: boolean
+  fiscal_regime: 'responsable_iva' | 'no_responsable_iva' | null
+  is_self_withholding_agent: boolean
+  city: string | null
+  resolution_number: string | null
+  resolution_prefix: string | null
+  resolution_range_from: number | null
+  resolution_range_to: number | null
+  resolution_valid_from: string | null
+  resolution_valid_until: string | null
+  next_invoice_number: number | null
+  software_id: string | null
+  test_set_id: string | null
+  webservice_url: string | null
+  is_configured: boolean
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+  deleted_by: string | null
+}
+
+/** Tarifas de retención que el propio tenant configura (varían por concepto
+ * de la operación y cambian con la UVT anual -- no se hardcodean en el
+ * catálogo de plataforma, ver comentario en la migración). */
+export interface TenantWithholdingConfig {
+  id: string
+  tenant_id: string
+  tax_type_code: string
+  concept: string
+  rate: number
+  is_active: boolean
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+  deleted_by: string | null
+}
+
+export type SalesInvoiceStatus =
+  | 'pending'
+  | 'blocked_missing_buyer_data'
+  | 'generating'
+  | 'generated'
+  | 'sending'
+  | 'sent'
+  | 'accepted'
+  | 'rejected'
+  | 'error'
+  | 'voided'
+
+export interface SalesInvoice {
+  id: string
+  tenant_id: string
+  order_id: string
+  attempt_number: number
+  status: SalesInvoiceStatus
+  status_detail: string | null
+  invoice_prefix: string | null
+  invoice_number: number | null
+  currency: string
+  issue_date: string | null
+  buyer_snapshot: Record<string, unknown>
+  seller_snapshot: Record<string, unknown>
+  subtotal: number
+  tax_total: number
+  withholding_total: number
+  total: number
+  cufe: string | null
+  xml_storage_path: string | null
+  dian_tracking_id: string | null
+  dian_response: Record<string, unknown> | null
+  sent_at: string | null
+  accepted_at: string | null
+  rejected_at: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface SalesInvoiceItem {
+  id: string
+  tenant_id: string
+  invoice_id: string
+  order_item_id: string | null
+  product_name: string
+  sku: string | null
+  quantity: number
+  unit_price: number
+  subtotal: number
+  tax_type_code: string | null
+  tax_rate: number
+  tax_amount: number
+  taxable_base: number
+  display_order: number
+  created_at: string
+}
+
+export interface SalesInvoiceWithholding {
+  id: string
+  tenant_id: string
+  invoice_id: string
+  tax_type_code: string
+  concept: string | null
+  rate: number
+  base: number
+  amount: number
   created_at: string
 }

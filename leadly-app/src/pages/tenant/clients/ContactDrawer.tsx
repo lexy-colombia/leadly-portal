@@ -13,7 +13,10 @@ import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { COUNTRIES, DOCUMENT_TYPES } from '../../../lib/referenceData'
 import { isNotBlank, isValidE164Phone, isValidEmail } from '../../../lib/validation'
+import { combinePhone, splitPhone } from '../../../lib/phone'
 import { useLanguage } from '../../../contexts/LanguageContext'
+import { listDianDocumentTypes } from '../../../lib/api/tenantDianProfile'
+import type { DianDocumentType } from '../../../types/domain'
 
 // Same compact sizing as ProductDrawer/CategoryDrawer -- every field in this
 // form is pinned to it so it doesn't feel like a visually separate, bigger
@@ -60,6 +63,9 @@ export function ContactDrawer({
   const [notes, setNotes] = useState('')
   const [isActive, setIsActive] = useState(true)
   const [creditEnabled, setCreditEnabled] = useState(false)
+  const [dianDocumentTypeCode, setDianDocumentTypeCode] = useState('')
+  const [appliesWithholding, setAppliesWithholding] = useState(false)
+  const [dianDocumentTypes, setDianDocumentTypes] = useState<DianDocumentType[]>([])
   const [touched, setTouched] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -67,7 +73,13 @@ export function ContactDrawer({
   useEffect(() => {
     if (!open) return
     setFullName(contact?.full_name ?? '')
-    setPhone(contact?.phone ?? '')
+    // clients.phone_prefix/phone quedaron separados en la base
+    // (20260904000000_clients_phone_prefix_split.sql) -- PhoneInput sigue
+    // trabajando con un solo string combinado (mismo contrato de siempre,
+    // no se tocó ese componente), así que se recombinan acá para precargar
+    // el formulario, y se vuelven a separar al armar el payload (ver
+    // handleSubmit).
+    setPhone(contact ? combinePhone(contact.phone_prefix, contact.phone) : '')
     setEmail(contact?.email ?? '')
     setCompany(contact?.company ?? '')
     setTags(contact?.tags ?? [])
@@ -79,6 +91,8 @@ export function ContactDrawer({
     setNotes(contact?.notes ?? '')
     setIsActive(contact?.is_active ?? true)
     setCreditEnabled(contact?.credit_enabled ?? false)
+    setDianDocumentTypeCode(contact?.dian_document_type_code ?? '')
+    setAppliesWithholding(contact?.applies_withholding ?? false)
     setTouched(false)
     setFormError(null)
   }, [open, contact])
@@ -86,6 +100,7 @@ export function ContactDrawer({
   useEffect(() => {
     if (!open) return
     listProfilesByTenant(tenantId).then(setAgents).catch(() => {})
+    listDianDocumentTypes().then(setDianDocumentTypes).catch(() => {})
   }, [open, tenantId])
 
   const nameError = touched && !isNotBlank(fullName) ? t('contacts.drawer.errors.nameRequired') : undefined
@@ -100,10 +115,12 @@ export function ContactDrawer({
 
     setSubmitting(true)
     try {
+      const { dialCode, localNumber } = splitPhone(phone)
       const input = {
         tenant_id: tenantId,
         full_name: fullName.trim(),
-        phone: phone.trim(),
+        phone_prefix: dialCode,
+        phone: localNumber,
         email: email.trim() || null,
         company: company.trim() || null,
         tags,
@@ -115,6 +132,8 @@ export function ContactDrawer({
         notes: notes.trim() || null,
         is_active: isActive,
         credit_enabled: creditEnabled,
+        dian_document_type_code: dianDocumentTypeCode || null,
+        applies_withholding: appliesWithholding,
       }
       const saved = contact ? await updateClient(contact.id, input) : await createClient(input)
       onSaved(saved)
@@ -266,6 +285,34 @@ export function ContactDrawer({
               <p className="mt-0.5 text-[11px] text-brand-400">{t('contacts.drawer.fields.creditEnabledHint')}</p>
             </div>
             <Switch id="contact-credit" checked={creditEnabled} onCheckedChange={setCreditEnabled} />
+          </div>
+        </Section>
+
+        <Section title={t('contacts.drawer.sections.einvoicing')}>
+          <div>
+            <Label htmlFor="contact-dian-document-type">{t('contacts.drawer.fields.dianDocumentType')}</Label>
+            <Select value={dianDocumentTypeCode} onValueChange={setDianDocumentTypeCode}>
+              <SelectTrigger id="contact-dian-document-type" className={`mt-1 w-full ${FIELD_CLASS}`}>
+                <SelectValue placeholder={t('common.form.selectPlaceholder')} />
+              </SelectTrigger>
+              <SelectContent>
+                {dianDocumentTypes.map((d) => (
+                  <SelectItem key={d.code} value={d.code}>
+                    {d.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="mt-1 text-[11px] text-brand-400">{t('contacts.drawer.fields.dianDocumentTypeHint')}</p>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
+            <div>
+              <Label htmlFor="contact-withholding" className="font-normal text-brand-700">
+                {t('contacts.drawer.fields.appliesWithholding')}
+              </Label>
+              <p className="mt-0.5 text-[11px] text-brand-400">{t('contacts.drawer.fields.appliesWithholdingHint')}</p>
+            </div>
+            <Switch id="contact-withholding" checked={appliesWithholding} onCheckedChange={setAppliesWithholding} />
           </div>
         </Section>
 

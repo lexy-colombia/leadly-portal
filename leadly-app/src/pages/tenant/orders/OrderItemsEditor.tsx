@@ -57,6 +57,7 @@ export function OrderItemsEditor({
   stockRows,
   shortfalls = [],
   currency = 'COP',
+  locked = false,
   onChange,
 }: {
   items: OrderItemInput[]
@@ -71,6 +72,12 @@ export function OrderItemsEditor({
    * parent the moment any item changes (stale otherwise). */
   shortfalls?: StockShortfall[]
   currency?: string
+  /** true once the order stopped being 'cotizacion' (confirmada/cancelada)
+   * -- a venta ya cerrada no se compone de nuevo desde acá (ver el mismo
+   * candado real en calculate-order/index.ts, este prop es solo la parte
+   * de UX: deshabilita los controles en vez de dejar que el agente edite y
+   * recién se entere del error al perder el foco). */
+  locked?: boolean
   onChange: (items: OrderItemInput[]) => void
 }) {
   const { t } = useLanguage()
@@ -126,18 +133,29 @@ export function OrderItemsEditor({
         // be wrong for any variant that overrides its own price.
         unit_price: product.has_variants ? 0 : (product.retail_price ?? 0),
         discount_amount: 0,
+        // Informativo nomás -- calculate-order (Edge Function) vuelve a
+        // resolver el impuesto real del lado del servidor contra la tabla
+        // products, nunca confía en este valor.
+        tax_type_code: product.tax_type_code ?? null,
+        tax_rate: product.tax_rate ?? 0,
       },
     ])
   }
 
   function addCustomLine() {
-    onChange([...items, { product_id: null, warehouse_id: null, product_name: '', sku: null, quantity: 1, unit_price: 0, discount_amount: 0 }])
+    onChange([...items, { product_id: null, warehouse_id: null, product_name: '', sku: null, quantity: 1, unit_price: 0, discount_amount: 0, tax_type_code: null, tax_rate: 0 }])
   }
 
   function handleVariantSelect(index: number, product: ProductWithImages, variantId: string) {
     const variant = product.variants.find((v) => v.id === variantId)
     if (!variant) return
-    updateItem(index, { variant_id: variant.id, sku: variant.sku ?? product.sku, unit_price: variant.retail_price ?? product.retail_price ?? 0 })
+    updateItem(index, {
+      variant_id: variant.id,
+      sku: variant.sku ?? product.sku,
+      unit_price: variant.retail_price ?? product.retail_price ?? 0,
+      tax_type_code: product.tax_type_code ?? null,
+      tax_rate: product.tax_rate ?? 0,
+    })
   }
 
   const searchPanel = searchOpen && (
@@ -212,9 +230,11 @@ export function OrderItemsEditor({
         <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-brand-200 py-12 text-center">
           <PackageIcon className="size-8 text-brand-300" />
           <p className="text-sm font-medium text-brand-600">{t('orders.itemsEditor.empty')}</p>
-          <button type="button" onClick={() => setSearchOpen(true)} className="text-xs font-medium text-accent-600 hover:underline">
-            {t('orders.itemsEditor.emptyCta')}
-          </button>
+          {!locked && (
+            <button type="button" onClick={() => setSearchOpen(true)} className="text-xs font-medium text-accent-600 hover:underline">
+              {t('orders.itemsEditor.emptyCta')}
+            </button>
+          )}
         </div>
       </div>
     )
@@ -245,14 +265,19 @@ export function OrderItemsEditor({
                       <p className="truncate text-xs text-brand-400">{item.sku ? `SKU: ${item.sku}` : '—'}</p>
                     </>
                   ) : (
-                    <Input value={item.product_name} onChange={(e) => updateItem(index, { product_name: e.target.value })} placeholder={t('orders.itemsEditor.lineNamePlaceholder')} />
+                    <Input
+                      value={item.product_name}
+                      onChange={(e) => updateItem(index, { product_name: e.target.value })}
+                      placeholder={t('orders.itemsEditor.lineNamePlaceholder')}
+                      disabled={locked}
+                    />
                   )}
                 </div>
 
                 {selectedProduct?.has_variants && (
                   <div className="w-40 shrink-0">
                     <span className="mb-0.5 block text-[11px] font-medium text-brand-400">{t('orders.itemsEditor.variant')}</span>
-                    <Select value={item.variant_id ?? undefined} onValueChange={(v) => handleVariantSelect(index, selectedProduct, v)}>
+                    <Select value={item.variant_id ?? undefined} onValueChange={(v) => handleVariantSelect(index, selectedProduct, v)} disabled={locked}>
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder={t('orders.itemsEditor.selectVariant')} />
                       </SelectTrigger>
@@ -273,7 +298,7 @@ export function OrderItemsEditor({
                   <span className="mb-0.5 block text-[11px] font-medium text-brand-400">{t('orders.itemsEditor.warehouse')}</span>
                   {item.product_id ? (
                     <>
-                      <Select value={item.warehouse_id ?? undefined} onValueChange={(v) => updateItem(index, { warehouse_id: v })}>
+                      <Select value={item.warehouse_id ?? undefined} onValueChange={(v) => updateItem(index, { warehouse_id: v })} disabled={locked}>
                         <SelectTrigger className="w-full">
                           <SelectValue placeholder={t('orders.itemsEditor.selectWarehouse')} />
                         </SelectTrigger>
@@ -314,18 +339,19 @@ export function OrderItemsEditor({
                     value={item.quantity}
                     onChange={(e) => updateItem(index, { quantity: Number(e.target.value) || 0 })}
                     aria-invalid={isShort}
+                    disabled={locked}
                     className={`text-right ${isShort ? 'border-red-400 text-red-700 focus-visible:ring-red-300' : ''}`}
                   />
                 </div>
 
                 <div className="w-28 shrink-0">
                   <span className="mb-0.5 block text-[11px] font-medium text-brand-400">{t('orders.itemsEditor.unitPrice')}</span>
-                  <CurrencyInput value={item.unit_price} onChange={(e) => updateItem(index, { unit_price: Number(e.target.value) || 0 })} className="text-right" />
+                  <CurrencyInput value={item.unit_price} onChange={(e) => updateItem(index, { unit_price: Number(e.target.value) || 0 })} disabled={locked} className="text-right" />
                 </div>
 
                 <div className="w-28 shrink-0">
                   <span className="mb-0.5 block text-[11px] font-medium text-brand-400">{t('orders.itemsEditor.columns.discount')}</span>
-                  <CurrencyInput value={discountAmount} onChange={(e) => updateItem(index, { discount_amount: Number(e.target.value) || 0 })} className="text-right" />
+                  <CurrencyInput value={discountAmount} onChange={(e) => updateItem(index, { discount_amount: Number(e.target.value) || 0 })} disabled={locked} className="text-right" />
                 </div>
 
                 <div className="w-28 shrink-0 text-right">
@@ -333,9 +359,11 @@ export function OrderItemsEditor({
                   <p className="mt-1 text-sm font-semibold text-brand-800">{formatCurrency(lineTotal, currency)}</p>
                 </div>
 
-                <Button type="button" variant="destructive" size="icon-xs" onClick={() => removeItem(index)} aria-label={t('orders.itemsEditor.removeAria')} className="mt-4 shrink-0 rounded-full">
-                  <TrashIcon width={12} height={12} />
-                </Button>
+                {!locked && (
+                  <Button type="button" variant="destructive" size="icon-xs" onClick={() => removeItem(index)} aria-label={t('orders.itemsEditor.removeAria')} className="mt-4 shrink-0 rounded-full">
+                    <TrashIcon width={12} height={12} />
+                  </Button>
+                )}
               </div>
             </div>
           )
@@ -349,17 +377,19 @@ export function OrderItemsEditor({
           mirando. "Línea personalizada" vive al lado de "Agregar producto"
           (antes tenía su propia barra abajo con el subtotal, que ya se ve
           en la card de Resumen -- quitarlo de acá gana espacio). */}
-      <div className={items.length > 0 ? 'mt-3' : ''}>
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" size="sm" onClick={addCustomLine}>
-            {t('orders.itemsEditor.addLine')}
-          </Button>
-          <Button type="button" size="sm" onClick={() => setSearchOpen((v) => !v)}>
-            <PlusIcon className="size-3.5" /> {t('orders.itemsEditor.addProduct')}
-          </Button>
+      {!locked && (
+        <div className={items.length > 0 ? 'mt-3' : ''}>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={addCustomLine}>
+              {t('orders.itemsEditor.addLine')}
+            </Button>
+            <Button type="button" size="sm" onClick={() => setSearchOpen((v) => !v)}>
+              <PlusIcon className="size-3.5" /> {t('orders.itemsEditor.addProduct')}
+            </Button>
+          </div>
+          {searchPanel}
         </div>
-        {searchPanel}
-      </div>
+      )}
     </div>
   )
 }

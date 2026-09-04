@@ -59,14 +59,24 @@ export interface OrderItemInput {
   /** Flat amount subtracted from this line's gross (quantity * unit_price),
    * not a percentage -- explicit product decision, ver CLAUDE.md. */
   discount_amount?: number
+  /** Copiados del producto al agregar la línea (snapshot, no referencia
+   * viva -- mismo criterio que product_name/sku), solo para que
+   * OrderItemsEditor los tenga a mano si hace falta mostrarlos -- el
+   * impuesto real de cada línea (tax_amount/taxable_base) NUNCA se calcula
+   * acá. calculate-order (Edge Function) resuelve el impuesto del lado del
+   * servidor contra la tabla products real -- pedido explícito del
+   * usuario 2026-09-03: cero cálculos de negocio en el frontend, ni
+   * siquiera como preview. */
+  tax_type_code?: string | null
+  tax_rate?: number
 }
 
 /** True if any item points at a variant-enabled product but hasn't picked a
  * specific variant yet -- a line like that would silently save with
  * unit_price 0 (see OrderItemsEditor.handleProductSelect) and no way to
  * know which combination was actually sold, so OrderDetail.tsx (both the
- * create form and the batch item save) blocks on this before calling
- * saveOrderItems. */
+ * create form and the autosave) blocks on this before calling
+ * calculateOrder. */
 export function hasIncompleteVariantSelection(items: OrderItemInput[], products: { id: string; has_variants: boolean }[]): boolean {
   return items.some((item) => {
     if (!item.product_id) return false
@@ -132,7 +142,6 @@ export interface OrderInput {
   delivery_status?: DeliveryStatus
   currency?: string
   shipping?: number
-  tax_total?: number
   notes?: string | null
   valid_until?: string | null
   shipping_address_id?: string | null
@@ -141,7 +150,7 @@ export interface OrderInput {
 }
 
 export type OrderWithRelations = SalesOrder & {
-  contact: { full_name: string; phone: string } | null
+  contact: { full_name: string; phone_prefix: string; phone: string } | null
   opportunity: { title: string } | null
   shipping_address: { label: string | null; line1: string; city: string | null; state_province: string | null } | null
   billing_address: { label: string | null; line1: string; city: string | null } | null
@@ -153,23 +162,7 @@ export type OrderWithRelations = SalesOrder & {
 }
 
 const ORDER_SELECT =
-  '*, contact:clients(full_name, phone), opportunity:opportunities(title), shipping_address:contact_addresses!shipping_address_id(label, line1, city, state_province), billing_address:contact_addresses!billing_address_id(label, line1, city), items:sales_order_items(count)'
-
-/** Pure function: derives subtotal/discount_total/total from a set of line
- * items plus header-level shipping/tax -- the same shape both the drawer's
- * live preview and the actual save call use, so they can never disagree. */
-export function computeOrderTotals(items: OrderItemInput[], shipping: number, taxTotal: number) {
-  let subtotal = 0
-  let discountTotal = 0
-  for (const item of items) {
-    const gross = item.quantity * item.unit_price
-    const discount = item.discount_amount ?? 0
-    subtotal += gross
-    discountTotal += discount
-  }
-  const total = subtotal - discountTotal + taxTotal + shipping
-  return { subtotal, discountTotal, total }
-}
+  '*, contact:clients(full_name, phone_prefix, phone), opportunity:opportunities(title), shipping_address:contact_addresses!shipping_address_id(label, line1, city, state_province), billing_address:contact_addresses!billing_address_id(label, line1, city), items:sales_order_items(count)'
 
 export async function listOrders(tenantId: string): Promise<OrderWithRelations[]> {
   const { data, error } = await supabase
@@ -207,7 +200,7 @@ export async function listOrdersForOpportunity(opportunityId: string): Promise<O
 }
 
 export type OrderDetail = SalesOrder & {
-  contact: { id: string; full_name: string; phone: string } | null
+  contact: { id: string; full_name: string; phone_prefix: string; phone: string } | null
   opportunity: { title: string } | null
   shipping_address: ContactAddress | null
   billing_address: ContactAddress | null
@@ -221,7 +214,7 @@ export async function getOrder(id: string): Promise<OrderDetail | null> {
   const { data, error } = await supabase
     .from('sales_orders')
     .select(
-      '*, contact:clients(id, full_name, phone), opportunity:opportunities(title), shipping_address:contact_addresses!shipping_address_id(*), billing_address:contact_addresses!billing_address_id(*), created_by_profile:profiles!created_by(full_name)',
+      '*, contact:clients(id, full_name, phone_prefix, phone), opportunity:opportunities(title), shipping_address:contact_addresses!shipping_address_id(*), billing_address:contact_addresses!billing_address_id(*), created_by_profile:profiles!created_by(full_name)',
     )
     .eq('id', id)
     .is('deleted_at', null)
@@ -236,95 +229,73 @@ export async function listOrderItems(orderId: string): Promise<SalesOrderItem[]>
   return data
 }
 
-/** Order + items don't have DB-level atomicity here (two round-trips, no
- * transaction) -- acceptable for a single-agent CRM form save, same
- * trade-off already made elsewhere in this codebase (e.g. task + its
- * attachment). Replaces the entire item set rather than diffing it: the
- * drawer always edits the full list at once, so delete-then-reinsert is
- * simpler than reconciling adds/edits/removes line by line. */
-export async function saveOrderItems(tenantId: string, orderId: string, items: OrderItemInput[]): Promise<void> {
-  const { error: deleteError } = await supabase.from('sales_order_items').delete().eq('order_id', orderId)
-  if (deleteError) throw deleteError
-  if (items.length === 0) return
+/** Único punto de escritura para los ítems de un pedido y sus totales
+ * derivados. Llama al Edge Function centralizado (calculate-order), que
+ * corre exactamente el mismo cálculo de impuesto/totales que
+ * whatsapp-ai-tools y storefront (_shared/orders/persistOrderItems.ts) --
+ * el portal nunca lo reimplementa por su cuenta. Pedido explícito del
+ * usuario 2026-09-03: nada de lógica de negocio condicionada a "quién
+ * llama", y un único proceso para todo el estado editable del pedido
+ * (cliente, oportunidad, direcciones, envío, ítems) -- sin `order_id`
+ * crea un pedido nuevo (siempre en 'cotizacion', ver comentario grande en
+ * el Edge Function sobre por qué confirmar es un paso aparte). El
+ * impuesto de cada línea se resuelve del lado del servidor contra la
+ * tabla products real, no confía en lo que el navegador tenga cargado.
+ *
+ * Deliberadamente AFUERA de este alcance: pagos (su propio flujo,
+ * orderPayments.ts) y el status del pedido (updateOrderStatus, ya
+ * validado por los triggers de confirmación -- ver
+ * 20260903180000_sales_order_confirm_triggers.sql).
+ *
+ * Reemplaza TODOS los ítems del pedido (no hace merge/diff) -- el drawer
+ * siempre edita la lista completa a la vez. Devuelve el pedido ya
+ * actualizado (subtotal/discount_total/total/tax_total reales) -- el
+ * frontend nunca calcula estos valores, solo pinta lo que llega acá. */
+export interface CalculateOrderInput {
+  order_id?: string | null
+  contact_id?: string
+  opportunity_id?: string | null
+  notes?: string | null
+  valid_until?: string | null
+  shipping_address_id?: string | null
+  billing_address_id?: string | null
+  shipping: number
+  items: OrderItemInput[]
+}
 
-  const rows = items.map((item, index) => {
-    const gross = item.quantity * item.unit_price
-    const discountAmount = item.discount_amount ?? 0
-    const subtotal = gross - discountAmount
-    return {
-      tenant_id: tenantId,
-      order_id: orderId,
-      product_id: item.product_id || null,
-      variant_id: item.variant_id || null,
-      warehouse_id: item.warehouse_id || null,
-      product_name: item.product_name,
-      sku: item.sku || null,
-      quantity: item.quantity,
-      unit_price: item.unit_price,
-      discount_amount: discountAmount,
-      subtotal,
-      display_order: index,
+export async function calculateOrder(input: CalculateOrderInput): Promise<SalesOrder> {
+  const { data, error } = await supabase.functions.invoke<SalesOrder & { error?: string }>('calculate-order', { body: input })
+  if (error) {
+    const context = (error as { context?: Response }).context
+    if (context && typeof context.json === 'function') {
+      let specificMessage: string | undefined
+      try {
+        const responseBody = await context.json()
+        specificMessage = responseBody?.error
+      } catch {
+        /* fall through to generic error */
+      }
+      if (specificMessage) throw new Error(specificMessage)
     }
-  })
-  const { error: insertError } = await supabase.from('sales_order_items').insert(rows)
-  if (insertError) throw insertError
+    throw error
+  }
+  return data as SalesOrder
 }
 
-export async function createOrder(input: OrderInput, items: OrderItemInput[]): Promise<SalesOrder> {
-  const { subtotal, discountTotal, total } = computeOrderTotals(items, input.shipping ?? 0, input.tax_total ?? 0)
-  const { data, error } = await supabase
-    .from('sales_orders')
-    .insert({ ...input, subtotal, discount_total: discountTotal, total })
-    .select()
-    .single()
-  if (error) throw error
-  await saveOrderItems(input.tenant_id, data.id, items)
-  return data
-}
-
-export async function updateOrder(id: string, tenantId: string, input: Partial<OrderInput>, items: OrderItemInput[]): Promise<SalesOrder> {
-  const { subtotal, discountTotal, total } = computeOrderTotals(items, input.shipping ?? 0, input.tax_total ?? 0)
-  const { data, error } = await supabase
-    .from('sales_orders')
-    .update({ ...input, subtotal, discount_total: discountTotal, total })
-    .eq('id', id)
-    .select()
-    .single()
-  if (error) throw error
-  await saveOrderItems(tenantId, id, items)
-  return data
-}
-
-/** Patches a handful of header fields (contact, opportunity, status, notes,
- * shipping/billing address...) without touching items or recomputing
- * totals -- used by OrderDetail.tsx's per-field autosave, where each
- * section saves itself independently the moment it changes instead of
- * going through one big form submit. */
-export async function updateOrderFields(id: string, patch: Partial<OrderInput>): Promise<SalesOrder> {
-  const { data, error } = await supabase.from('sales_orders').update(patch).eq('id', id).select().single()
-  if (error) throw error
-  return data
-}
-
-/** Same "recompute totals + replace items" logic as updateOrder, but without
- * requiring the rest of OrderInput (contact_id, status, ...) -- OrderDetail.tsx's
- * inline product editor only ever changes items/shipping/tax, never those. */
-export async function updateOrderItemsAndTotals(id: string, tenantId: string, items: OrderItemInput[], shipping: number, taxTotal: number): Promise<SalesOrder> {
-  const { subtotal, discountTotal, total } = computeOrderTotals(items, shipping, taxTotal)
-  const { data, error } = await supabase
-    .from('sales_orders')
-    .update({ subtotal, discount_total: discountTotal, total, shipping, tax_total: taxTotal })
-    .eq('id', id)
-    .select()
-    .single()
-  if (error) throw error
-  await saveOrderItems(tenantId, id, items)
-  return data
-}
-
+/** Pasar a "confirmada" corre dos triggers de DB (guard_sales_order_confirmation
+ * / apply_sales_order_confirmed_effects, 20260903180000_sales_order_confirm_triggers.sql)
+ * que validan stock/dirección y reservan la factura DIAN + mueven la
+ * oportunidad -- aplican sobre este UPDATE igual que sobre el de la IA o
+ * la tienda pública, no hace falta ninguna llamada extra acá. Si el
+ * trigger BEFORE rechaza la transacción, el mensaje viene con un prefijo
+ * tipo "BILLING_ADDRESS_REQUIRED: " -- se saca antes de mostrarlo, el
+ * resto del texto ya es un mensaje claro en español. */
 export async function updateOrderStatus(id: string, status: OrderStatus): Promise<SalesOrder> {
   const { data, error } = await supabase.from('sales_orders').update({ status }).eq('id', id).select().single()
-  if (error) throw error
+  if (error) {
+    const cleaned = error.message.replace(/^[A-Z_]+:\s*/, '')
+    throw new Error(cleaned || error.message)
+  }
   return data
 }
 

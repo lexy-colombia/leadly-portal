@@ -19,6 +19,8 @@ export interface ProductInput {
   low_stock_threshold?: number
   is_active?: boolean
   has_variants?: boolean
+  tax_type_code?: string | null
+  tax_rate?: number
 }
 
 export interface ProductCategoryRef {
