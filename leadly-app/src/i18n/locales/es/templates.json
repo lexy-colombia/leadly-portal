@@ -40,7 +40,7 @@
   "settings.templates.drawer.languagePlaceholder": "Ej: es, es_CO, en_US",
   "settings.templates.drawer.bodyLabel": "Cuerpo del mensaje",
   "settings.templates.drawer.bodyPlaceholder": "Hola {1}, tu cita es el {2}.",
-  "settings.templates.drawer.bodyHint": "Usá {{1}}, {{2}}... para variables, siempre consecutivas empezando en 1.",
+  "settings.templates.drawer.bodyHint": "Usa {{1}}, {{2}}... para variables, siempre consecutivas empezando en 1.",
   "settings.templates.drawer.samplesLabel": "Texto de muestra de las variables",
   "settings.templates.drawer.samplesHint": "Meta exige un ejemplo por cada variable para poder revisar la plantilla -- no se envía a los clientes, solo se usa para la revisión.",
   "settings.templates.drawer.errors.nameRequired": "El nombre es obligatorio.",

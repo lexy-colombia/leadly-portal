@@ -24,7 +24,7 @@
   "returns.reason.otro": "Otro",
 
   "returns.create.title": "Nueva devolución",
-  "returns.create.description": "Elegí la venta y los ítems que el cliente devuelve.",
+  "returns.create.description": "Elige la venta y los ítems que el cliente devuelve.",
   "returns.create.fields.order": "Venta",
   "returns.create.fields.orderPlaceholder": "Buscar venta por número o cliente...",
   "returns.create.fields.reason": "Motivo",
@@ -34,8 +34,8 @@
   "returns.create.noItems": "Esta venta no tiene ítems que se puedan devolver.",
   "returns.create.actions.create": "Crear devolución",
   "returns.create.actions.creating": "Creando...",
-  "returns.create.errors.orderRequired": "Elegí una venta.",
-  "returns.create.errors.itemsRequired": "Seleccioná al menos un ítem.",
+  "returns.create.errors.orderRequired": "Elige una venta.",
+  "returns.create.errors.itemsRequired": "Selecciona al menos un ítem.",
   "returns.create.errors.save": "No se pudo crear la devolución.",
 
   "returns.detail.title": "Devolución",
@@ -77,7 +77,7 @@
   "returns.settings.statuses.errors.statusInUse": "Este estado está en uso por al menos una devolución y no se puede eliminar.",
 
   "returns.settings.resolutionTypes.title": "Tipos de resolución",
-  "returns.settings.resolutionTypes.description": "Cómo resolvés una devolución en plata -- el nombre es tuyo, el efecto real es uno de estos 4.",
+  "returns.settings.resolutionTypes.description": "Cómo se resuelve una devolución en plata -- el nombre se puede elegir libremente, el efecto real es uno de estos 4.",
   "returns.settings.resolutionTypes.name": "Nombre",
   "returns.settings.resolutionTypes.effect": "Efecto",
   "returns.settings.resolutionTypes.active": "Activo",

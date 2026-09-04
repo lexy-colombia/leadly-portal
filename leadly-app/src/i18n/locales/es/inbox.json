@@ -109,7 +109,7 @@
   "inbox.newConv.noActiveLines": "Sin líneas activas",
   "inbox.newConv.submit": "Iniciar conversación",
   "inbox.newConv.windowClosed": "Este contacto no te escribió en las últimas 24h -- elegí una plantilla aprobada para iniciar la conversación.",
-  "inbox.newConv.noApprovedTemplates": "Todavía no tenés plantillas aprobadas. Andá a IA & Agentes → Plantillas para crear una.",
+  "inbox.newConv.noApprovedTemplates": "Todavía no tienes plantillas aprobadas. Ve a IA & Agentes → Plantillas para crear una.",
   "inbox.newConv.templateLabel": "Plantilla",
   "inbox.newConv.templateVariable": "Variable {n}",
   "inbox.newConv.sendTemplate": "Enviar plantilla",

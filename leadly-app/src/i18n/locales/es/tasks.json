@@ -19,7 +19,7 @@
   "tasks.dueDate.overdueSuffix": "{date} (vencida)",
 
   "tasks.empty.noneInStatus": "Ninguna tarea en este estado.",
-  "tasks.empty.noTasks": "Todavía no tenés tareas registradas.",
+  "tasks.empty.noTasks": "Todavía no tienes tareas registradas.",
 
   "tasks.errors.loadFailed": "No se pudieron cargar las tareas.",
   "tasks.errors.updateFailed": "No se pudo actualizar la tarea.",

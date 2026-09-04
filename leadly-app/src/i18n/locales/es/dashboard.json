@@ -4,7 +4,7 @@
   "dashboard.pipeline.title": "Pipeline por etapa",
   "dashboard.pipeline.metric.value": "Valor total",
   "dashboard.pipeline.metric.count": "Cantidad",
-  "dashboard.pipeline.notConfigured": "Todavía no tenés un pipeline configurado.",
+  "dashboard.pipeline.notConfigured": "Todavía no tienes un pipeline configurado.",
   "dashboard.pipeline.conversion": "Conversión general",
   "dashboard.pipeline.opportunityCount": "{count} op.",
   "dashboard.conversations.title": "Conversaciones · últimos {days} días",
@@ -14,7 +14,7 @@
   "dashboard.conversations.total": "Total conversaciones",
   "dashboard.conversations.avgResponseTime": "Tiempo prom. de respuesta",
   "dashboard.upcomingTasks.title": "Tareas próximas",
-  "dashboard.upcomingTasks.empty": "No tenés tareas pendientes. 🎉",
+  "dashboard.upcomingTasks.empty": "No tienes tareas pendientes. 🎉",
   "dashboard.upcomingTasks.generalTask": "Tarea general",
 
   "dashboard.greeting.prefix": "Hola,",

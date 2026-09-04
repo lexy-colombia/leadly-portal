@@ -34,7 +34,7 @@
   "account.invite.phoneOptional": "Teléfono (opcional)",
   "account.invite.role": "Rol",
   "account.invite.tenantRolePlaceholder": "Seleccionar rol",
-  "account.invite.errors.tenantRoleRequired": "Elegí un rol.",
+  "account.invite.errors.tenantRoleRequired": "Elige un rol.",
   "account.invite.submitting": "Invitando…",
   "account.invite.submit": "Enviar invitación",
   "account.invite.errors.failed": "No se pudo invitar al usuario.",

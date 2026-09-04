@@ -30,8 +30,8 @@
   "storefront.catalog.decrease": "Quitar uno",
   "storefront.catalog.increase": "Agregar uno más",
   "storefront.product.notFound": "Producto no encontrado.",
-  "storefront.product.variant": "Elegí una opción",
-  "storefront.product.variantRequired": "Elegí una opción antes de agregar al carrito.",
+  "storefront.product.variant": "Elige una opción",
+  "storefront.product.variantRequired": "Elige una opción antes de agregar al carrito.",
   "storefront.product.quantity": "Cantidad",
   "storefront.product.addToCart": "Agregar al carrito",
   "storefront.product.addError": "No se pudo agregar el producto.",
@@ -42,7 +42,7 @@
   "storefront.cart.documentLabel": "Número de identificación",
   "storefront.cart.documentPlaceholder": "Ej: 1020304050",
   "storefront.cart.phoneLabel": "Tu número de WhatsApp",
-  "storefront.cart.otpExplainer": "Te vamos a mandar un código por WhatsApp para confirmar que sos vos.",
+  "storefront.cart.otpExplainer": "Te vamos a mandar un código por WhatsApp para confirmar tu identidad.",
   "storefront.cart.sendCode": "Mandarme el código",
   "storefront.cart.otpLabel": "Código de 6 dígitos",
   "storefront.cart.verifyCode": "Verificar",
@@ -68,6 +68,6 @@
   "storefront.cart.goToPayment": "Ir a pagar",
   "storefront.cart.chargedToCredit": "Se cargó a tu cuenta de crédito.",
   "storefront.cart.paymentPending": "El pago queda pendiente -- un agente se va a poner en contacto para coordinarlo.",
-  "storefront.cart.choosePayment": "¿Cómo querés pagar?",
+  "storefront.cart.choosePayment": "¿Cómo quieres pagar?",
   "storefront.cart.payWithCredit": "Pagar a crédito"
 }
