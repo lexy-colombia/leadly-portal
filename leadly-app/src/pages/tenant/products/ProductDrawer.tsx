@@ -229,6 +229,7 @@ export function ProductDrawer({
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [sku, setSku] = useState('')
+  const [barcode, setBarcode] = useState('')
   const [slug, setSlug] = useState('')
   const [categoryIds, setCategoryIds] = useState<string[]>([])
   const [supplierId, setSupplierId] = useState('')
@@ -254,6 +255,7 @@ export function ProductDrawer({
     setName(product?.name ?? '')
     setDescription(product?.description ?? '')
     setSku(product?.sku ?? '')
+    setBarcode(product?.barcode ?? '')
     setSlug(product?.slug ?? '')
     setCategoryIds(product?.categories.map((c) => c.id) ?? [])
     setSupplierId(product?.supplier_id ?? '')
@@ -301,6 +303,7 @@ export function ProductDrawer({
         name: name.trim(),
         description: description.trim() || null,
         sku: sku.trim() || null,
+        barcode: barcode.trim() || null,
         slug: slug.trim() || null,
         supplier_id: supplierId || null,
         brand_id: brandId || null,
@@ -354,10 +357,20 @@ export function ProductDrawer({
         </div>
 
         <Section title={t('products.drawer.sections.basics')}>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <div>
               <Label htmlFor="product-sku">{t('products.drawer.fields.sku')}</Label>
               <Input id="product-sku" value={sku} onChange={(e) => setSku(e.target.value)} placeholder={t('products.drawer.fields.skuPlaceholder')} className={`mt-1 ${FIELD_CLASS}`} />
+            </div>
+            <div>
+              <Label htmlFor="product-barcode">{t('products.drawer.fields.barcode')}</Label>
+              <Input
+                id="product-barcode"
+                value={barcode}
+                onChange={(e) => setBarcode(e.target.value)}
+                placeholder={t('products.drawer.fields.barcodePlaceholder')}
+                className={`mt-1 ${FIELD_CLASS}`}
+              />
             </div>
             <div>
               <Label htmlFor="product-slug">{t('products.drawer.fields.slug')}</Label>

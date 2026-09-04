@@ -541,3 +541,23 @@ export function TruckIcon(props: IconProps) {
     </svg>
   )
 }
+
+export function ScanIcon(props: IconProps) {
+  return (
+    <svg {...DEFAULTS} {...props}>
+      <path d="M4 8V6a2 2 0 0 1 2-2h2M20 8V6a2 2 0 0 0-2-2h-2M4 16v2a2 2 0 0 0 2 2h2M20 16v2a2 2 0 0 1-2 2h-2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M7 12h10M9 9v6M12 9v6M15 9v6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function PrinterIcon(props: IconProps) {
+  return (
+    <svg {...DEFAULTS} {...props}>
+      <path d="M6 9V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <rect x="3" y="9" width="18" height="8" rx="2" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M6 14h12v7H6z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M7 12h1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  )
+}

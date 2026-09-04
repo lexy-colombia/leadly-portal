@@ -29,6 +29,20 @@ export interface Tenant {
   logo_url: string | null
   storefront_slug: string | null
   storefront_enabled: boolean
+  /** Interruptor opt-in del módulo POS: apagado (default) = venta rápida
+   * de un solo viaje (pos-checkout, sin cambios); encendido = /app/pos
+   * pasa al modo de cuentas abiertas (carts, ver PosOpenTabs.tsx). */
+  pos_allow_open_tabs: boolean
+  /** Configuración de impresión de tickets del POS -- ver la migración
+   * 20260904190000_tenant_receipt_printing.sql para el razonamiento de por
+   * qué es por tenant y no por punto de venta. */
+  pos_receipt_paper_width: '58mm' | '80mm'
+  /** true = el ticket se manda a imprimir apenas se confirma un cobro del
+   * POS. Es el diálogo de impresión del sistema, no impresión silenciosa
+   * (limitación real de navegador, no del producto). */
+  pos_auto_print: boolean
+  /** Texto libre al pie del ticket. null = se usa un mensaje genérico. */
+  pos_receipt_footer_message: string | null
   created_at: string
   updated_at: string
 }
@@ -265,6 +279,10 @@ export interface Client {
   assigned_to: string | null
   hubspot_contact_id: string | null
   credit_enabled: boolean
+  /** Cliente "Consumidor Final" sembrado por tenant (uno solo, ver
+   * seed_default_walkin_client) -- el que usa el POS cuando la venta de
+   * mostrador no identifica a nadie. */
+  is_walk_in: boolean
   deleted_at: string | null
   deleted_by: string | null
   created_at: string
@@ -357,6 +375,10 @@ export interface Product {
   name: string
   description: string | null
   sku: string | null
+  /** Código de barras escaneable (EAN/UPC/interno) -- único por tenant.
+   * Lo usa el POS para resolver un producto de un escaneo; nullable, un
+   * producto sin código simplemente no se puede escanear. */
+  barcode: string | null
   slug: string | null
   supplier_id: string | null
   brand_id: string | null
@@ -409,6 +431,9 @@ export interface ProductVariant {
   tenant_id: string
   product_id: string
   sku: string | null
+  /** Igual que Product.barcode, pero de la combinación concreta -- una
+   * variante con código propio se escanea directo sin elegir opción. */
+  barcode: string | null
   option1_value: string | null
   option2_value: string | null
   option3_value: string | null
@@ -486,6 +511,20 @@ export interface SalesOrder {
   number: number
   contact_id: string
   opportunity_id: string | null
+  /** Por dónde nació el pedido. 'pos' además cambia el comportamiento del
+   * trigger de confirmación (se salta el requisito de direcciones -- una
+   * venta de mostrador no tiene envío). null = pedidos anteriores a la
+   * columna, sin canal conocido. */
+  sales_channel: 'pos' | 'whatsapp' | 'storefront' | 'portal' | null
+  /** El carrito (borrador) del que nació este pedido -- ver create-order.
+   * null en pedidos anteriores a la columna, sin backfill. */
+  cart_id: string | null
+  /** Punto de venta (mesa/caja) de origen, si el tenant usa el módulo de
+   * puntos del POS -- copiado del carrito al convertir. */
+  pos_point_id: string | null
+  /** Texto libre para identificar el pedido a ojo (ej. "camisa azul") --
+   * copiado del carrito al convertir. */
+  label: string | null
   status: OrderStatus
   delivery_status: DeliveryStatus
   currency: string
@@ -641,6 +680,62 @@ export interface CreditPayment {
  * despacho es puro seguimiento logístico (transportadora, guía) -- si
  * hace falta actualizar sales_orders.delivery_status a mano, ver
  * updateDeliveryStatus en lib/api/orders.ts. */
+/** Catálogo opcional de puntos de venta (mesas/cajas) del POS -- cero
+ * filas es un estado válido, ver pos_points. */
+export interface PosPoint {
+  id: string
+  tenant_id: string
+  name: string
+  kind: 'mesa' | 'caja' | 'punto'
+  display_order: number
+  is_active: boolean
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+  deleted_by: string | null
+}
+
+/** El borrador real de un pedido -- cliente, direcciones, ítems -- antes
+ * de que exista una fila de sales_orders. Lo arma calculate-order, y
+ * create-order es el único que lo convierte en un pedido real (ver
+ * comentarios de cabecera de ambas Edge Functions). */
+export interface Cart {
+  id: string
+  tenant_id: string
+  contact_id: string | null
+  opportunity_id: string | null
+  notes: string | null
+  valid_until: string | null
+  shipping_address_id: string | null
+  billing_address_id: string | null
+  shipping: number
+  origin: 'portal' | 'pos'
+  status: 'open' | 'converted'
+  pos_point_id: string | null
+  label: string | null
+  converted_order_id: string | null
+  last_activity_at: string
+  created_at: string
+  updated_at: string
+}
+
+/** Mismo shape que un ítem de pedido, sin impuesto -- se resuelve una
+ * sola vez, en create-order, al convertir. */
+export interface CartItem {
+  id: string
+  cart_id: string
+  product_id: string | null
+  variant_id: string | null
+  warehouse_id: string | null
+  product_name: string
+  sku: string | null
+  quantity: number
+  unit_price: number
+  discount_amount: number
+  created_at: string
+  updated_at: string
+}
+
 export interface DispatchStatus {
   id: string
   tenant_id: string

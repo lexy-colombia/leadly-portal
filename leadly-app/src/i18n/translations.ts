@@ -17,6 +17,7 @@ import esDispatches from './locales/es/dispatches.json'
 import esReturns from './locales/es/returns.json'
 import esOpportunities from './locales/es/opportunities.json'
 import esOrders from './locales/es/orders.json'
+import esPos from './locales/es/pos.json'
 import esProducts from './locales/es/products.json'
 import esSettings from './locales/es/settings.json'
 import esTasks from './locales/es/tasks.json'
@@ -42,6 +43,7 @@ import enDispatches from './locales/en/dispatches.json'
 import enReturns from './locales/en/returns.json'
 import enOpportunities from './locales/en/opportunities.json'
 import enOrders from './locales/en/orders.json'
+import enPos from './locales/en/pos.json'
 import enProducts from './locales/en/products.json'
 import enSettings from './locales/en/settings.json'
 import enTasks from './locales/en/tasks.json'
@@ -77,6 +79,7 @@ export const translations = {
     ...esDispatches,
     ...esReturns,
     ...esOrders,
+    ...esPos,
     ...esCredit,
     ...esBilling,
     ...esSettings,
@@ -103,6 +106,7 @@ export const translations = {
     ...enDispatches,
     ...enReturns,
     ...enOrders,
+    ...enPos,
     ...enCredit,
     ...enBilling,
     ...enSettings,

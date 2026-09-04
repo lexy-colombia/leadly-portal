@@ -19,6 +19,7 @@ import { Warehouses } from './Warehouses'
 import { DispatchStatusesSection } from './settings/DispatchStatusesSection'
 import { ReturnStatusesSection } from './settings/ReturnStatusesSection'
 import { ReturnResolutionTypesSection } from './settings/ReturnResolutionTypesSection'
+import { PosSettingsSection } from './settings/PosSettingsSection'
 import { useTenantForm } from '../backoffice/useTenantForm'
 import { TenantFormFields } from '../backoffice/TenantFormFields'
 
@@ -128,7 +129,7 @@ export function Settings() {
 }
 
 function CompanySection() {
-  const { profile } = useAuth()
+  const { profile, enabledModules } = useAuth()
   const { t } = useLanguage()
   const [tenant, setTenant] = useState<Tenant | null | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
@@ -255,6 +256,7 @@ function CompanySection() {
       </CardSection>
 
       {tenant && <StorefrontSection tenant={tenant} onSaved={setTenant} />}
+      {tenant && enabledModules?.has('pos') && <PosSettingsSection tenant={tenant} onSaved={setTenant} />}
       {tenant && <CompanyEditDrawer open={editOpen} onClose={() => setEditOpen(false)} tenant={tenant} onSaved={setTenant} />}
     </Card>
   )

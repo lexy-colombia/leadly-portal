@@ -8,6 +8,7 @@ export interface ProductInput {
   name: string
   description?: string | null
   sku?: string | null
+  barcode?: string | null
   slug?: string | null
   supplier_id?: string | null
   brand_id?: string | null
@@ -306,6 +307,7 @@ export async function saveProductOptions(tenantId: string, productId: string, op
 
 export interface ProductVariantInput {
   sku: string | null
+  barcode: string | null
   option1_value: string | null
   option2_value: string | null
   option3_value: string | null

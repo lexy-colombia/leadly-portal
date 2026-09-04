@@ -32,6 +32,7 @@ import { Brands } from './pages/tenant/Brands'
 import { Suppliers } from './pages/tenant/Suppliers'
 import { ProductDetail } from './pages/tenant/ProductDetail'
 import { Orders } from './pages/tenant/Orders'
+import { Pos } from './pages/tenant/Pos'
 import { OrderDetail } from './pages/tenant/OrderDetail'
 import { Credit } from './pages/tenant/Credit'
 import { Returns } from './pages/tenant/Returns'
@@ -119,6 +120,7 @@ export default function App() {
             <Route path="sales" element={<RequireModule moduleKey="sales" action="sales.view"><Orders /></RequireModule>} />
             <Route path="sales/new" element={<RequireModule moduleKey="sales" action="sales.view"><OrderDetail /></RequireModule>} />
             <Route path="sales/:id" element={<RequireModule moduleKey="sales" action="sales.view"><OrderDetail /></RequireModule>} />
+            <Route path="pos" element={<RequireModule moduleKey="pos" action="pos.view"><Pos /></RequireModule>} />
             <Route path="credit" element={<RequireModule moduleKey="credit" action="credit.view"><Credit /></RequireModule>} />
             <Route path="returns" element={<RequireModule moduleKey="returns" action="returns.view"><Returns /></RequireModule>} />
             {/* Tareas se fusionó dentro de Calendario el 2026-08-19 -- ya no

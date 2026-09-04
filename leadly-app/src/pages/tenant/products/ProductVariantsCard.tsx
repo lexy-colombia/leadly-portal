@@ -157,16 +157,18 @@ function VariantRow({
 }) {
   const { t } = useLanguage()
   const [sku, setSku] = useState(variant.sku ?? '')
+  const [barcode, setBarcode] = useState(variant.barcode ?? '')
   const [purchasePrice, setPurchasePrice] = useState(variant.purchase_price != null ? String(variant.purchase_price) : '')
   const [wholesalePrice, setWholesalePrice] = useState(variant.wholesale_price != null ? String(variant.wholesale_price) : '')
   const [retailPrice, setRetailPrice] = useState(variant.retail_price != null ? String(variant.retail_price) : '')
 
   useEffect(() => {
     setSku(variant.sku ?? '')
+    setBarcode(variant.barcode ?? '')
     setPurchasePrice(variant.purchase_price != null ? String(variant.purchase_price) : '')
     setWholesalePrice(variant.wholesale_price != null ? String(variant.wholesale_price) : '')
     setRetailPrice(variant.retail_price != null ? String(variant.retail_price) : '')
-  }, [variant.id, variant.sku, variant.purchase_price, variant.wholesale_price, variant.retail_price])
+  }, [variant.id, variant.sku, variant.barcode, variant.purchase_price, variant.wholesale_price, variant.retail_price])
 
   async function save(patch: Partial<ProductVariantInput>) {
     await updateProductVariant(variant.id, patch)
@@ -190,6 +192,13 @@ function VariantRow({
         onChange={(e) => setSku(e.target.value)}
         onBlur={() => save({ sku: sku.trim() || null })}
         placeholder={t('products.drawer.variants.skuPlaceholder', { sku: product.sku || '—' })}
+        className={`w-28 shrink-0 ${ROW_FIELD_CLASS}`}
+      />
+      <Input
+        value={barcode}
+        onChange={(e) => setBarcode(e.target.value)}
+        onBlur={() => save({ barcode: barcode.trim() || null })}
+        placeholder={t('products.drawer.variants.barcodePlaceholder')}
         className={`w-28 shrink-0 ${ROW_FIELD_CLASS}`}
       />
       <CurrencyInput
@@ -360,6 +369,11 @@ export function ProductVariantsCard({
         await createProductVariant(tenantId, product.id, {
           ...combo,
           sku: product.sku ? `${product.sku}-${suffix}` : suffix || null,
+          // Nunca se genera un barcode -- a diferencia del SKU (que puede
+          // derivarse del combo), un código de barras real solo lo puede
+          // asignar quien tiene el producto físico en mano (o el que ya
+          // traía impreso de fábrica), nunca inventarse.
+          barcode: null,
           purchase_price: product.purchase_price,
           wholesale_price: product.wholesale_price,
           retail_price: product.retail_price,

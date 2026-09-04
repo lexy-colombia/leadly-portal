@@ -67,6 +67,19 @@ export async function updateTenantStorefront(id: string, input: TenantStorefront
   return data
 }
 
+export interface TenantPosSettingsInput {
+  pos_allow_open_tabs?: boolean
+  pos_receipt_paper_width?: '58mm' | '80mm'
+  pos_auto_print?: boolean
+  pos_receipt_footer_message?: string | null
+}
+
+export async function updateTenantPosSettings(id: string, input: TenantPosSettingsInput): Promise<Tenant> {
+  const { data, error } = await supabase.from('tenants').update(input).eq('id', id).select().single()
+  if (error) throw error
+  return data
+}
+
 export function validateTenantLogoFile(file: File): string | null {
   if (!TENANT_LOGO_ALLOWED_TYPES.includes(file.type)) return 'El logo debe ser PNG, JPG, WEBP o SVG.'
   if (file.size > TENANT_LOGO_MAX_BYTES) return 'El logo no puede pesar más de 5MB.'
