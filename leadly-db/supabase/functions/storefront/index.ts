@@ -13,8 +13,10 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { confirmSalesOrder } from "../_shared/orders/confirmSalesOrder.ts";
+import { persistOrderItems, type ResolvedOrderItem } from "../_shared/orders/persistOrderItems.ts";
 import { chargeSalesOrderToCredit, createSalesOrderPaymentLink } from "../_shared/payments/salesOrderPayments.ts";
 import { sendWhatsappTemplate } from "../_shared/whatsapp.ts";
+import { splitPhone } from "../_shared/phone.ts";
 
 const CATALOG_PAGE_SIZE = 20;
 const OTP_TTL_MINUTES = 10;
@@ -630,7 +632,9 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
             is_billing: true,
           });
 
-      const subtotal = cartItems.reduce((sum, item) => sum + item.quantity * item.unit_price, 0);
+      // Placeholder -- persistOrderItems recalcula subtotal/tax_total/total
+      // reales más abajo, única fuente de verdad compartida con
+      // whatsapp-ai-tools y el portal.
       const { data: order, error: orderError } = await adminClient
         .from("sales_orders")
         .insert({
@@ -638,33 +642,36 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
           contact_id: clientId,
           billing_address_id: billingAddressRowId,
           shipping_address_id: shippingAddressRowId,
-          subtotal,
-          total: subtotal,
+          subtotal: 0,
+          tax_total: 0,
+          total: 0,
           notes: "Pedido creado desde la tienda pública.",
         })
         .select("id, number")
         .single();
       if (orderError) throw new Error(orderError.message);
 
-      const itemRows = cartItems.map((item, index) => ({
-        tenant_id: cart.tenant_id,
-        order_id: order.id,
+      const resolvedItems: ResolvedOrderItem[] = cartItems.map((item) => ({
         product_id: item.product_id,
         variant_id: item.variant_id,
         product_name: item.product_name,
         sku: item.sku,
         quantity: item.quantity,
         unit_price: item.unit_price,
-        subtotal: item.quantity * item.unit_price,
-        display_order: index,
+        tax_type_code: item.tax_type_code,
+        tax_rate: item.tax_rate,
       }));
-      const { error: itemsError } = await adminClient.from("sales_order_items").insert(itemRows);
-      if (itemsError) throw new Error(itemsError.message);
+      await persistOrderItems(adminClient, cart.tenant_id, order.id, resolvedItems, 0);
 
       const confirmResult = await confirmSalesOrder(adminClient, cart.tenant_id, clientId, order.id);
-      // No debería bloquearse -- billing/shipping ya vienen seteados arriba
-      // -- pero si algo raro pasa, no dejamos el carrito a medio convertir.
-      if (confirmResult.blocked) throw new StorefrontError("No se pudo confirmar el pedido (dirección faltante).", 422);
+      // Address no debería bloquearse -- billing/shipping ya vienen seteados
+      // arriba -- pero insufficient_stock sí es real acá (el carrito nunca
+      // valida stock hasta este punto, ver comentario de más arriba en este
+      // archivo) -- no dejamos el carrito a medio convertir en ningún caso.
+      if (confirmResult.blocked) {
+        const message = confirmResult.reason === "insufficient_stock" ? confirmResult.detail ?? "No hay stock suficiente para completar el pedido." : "No se pudo confirmar el pedido (dirección faltante).";
+        throw new StorefrontError(message, 422);
+      }
 
       await adminClient
         .from("storefront_carts")
@@ -882,10 +889,23 @@ async function loadCartItems(adminClient: SupabaseClient, cartId: string): Promi
 async function loadCartItemsForCheckout(
   adminClient: SupabaseClient,
   cartId: string,
-): Promise<{ product_id: string; variant_id: string | null; product_name: string; sku: string | null; quantity: number; unit_price: number }[]> {
+): Promise<
+  {
+    product_id: string;
+    variant_id: string | null;
+    product_name: string;
+    sku: string | null;
+    quantity: number;
+    unit_price: number;
+    tax_type_code: string | null;
+    tax_rate: number;
+  }[]
+> {
   const { data, error } = await adminClient
     .from("storefront_cart_items")
-    .select("product_id, variant_id, quantity, product:products(name, sku, retail_price), variant:product_variants(sku, retail_price)")
+    .select(
+      "product_id, variant_id, quantity, product:products(name, sku, retail_price, tax_type_code, tax_rate), variant:product_variants(sku, retail_price)",
+    )
     .eq("cart_id", cartId);
   if (error) throw new Error(error.message);
   // deno-lint-ignore no-explicit-any
@@ -896,6 +916,9 @@ async function loadCartItemsForCheckout(
     sku: row.variant?.sku ?? row.product?.sku ?? null,
     quantity: row.quantity,
     unit_price: row.variant?.retail_price ?? row.product?.retail_price ?? 0,
+    // El impuesto es una clasificación del producto, nunca de la variante.
+    tax_type_code: row.product?.tax_type_code ?? null,
+    tax_rate: row.product?.tax_rate ?? 0,
   }));
 }
 
@@ -968,11 +991,16 @@ async function loadClientIdentity(
   tenantId: string,
   phone: string,
 ): Promise<{ client: { full_name: string; document_type: string | null; document_number: string | null } | null; addresses: Record<string, unknown>[] }> {
+  // clients.phone quedó como SOLO el número local desde
+  // 20260904000000_clients_phone_prefix_split.sql -- `phone` acá sigue
+  // siendo el número completo verificado por OTP, hay que partirlo.
+  const { dialCode, localNumber } = splitPhone(phone);
   const { data: existingClient } = await adminClient
     .from("clients")
     .select("id, full_name, document_type, document_number")
     .eq("tenant_id", tenantId)
-    .eq("phone", phone)
+    .eq("phone_prefix", dialCode)
+    .eq("phone", localNumber)
     .is("deleted_at", null)
     .maybeSingle();
 
@@ -1015,7 +1043,17 @@ async function resolveOrCreateClient(
 ): Promise<string> {
   const documentConflict = "Ese número de documento ya está registrado con otro cliente -- escribinos por WhatsApp si es un error.";
 
-  const { data: existing } = await adminClient.from("clients").select("id, document_number").eq("tenant_id", tenantId).eq("phone", phone).is("deleted_at", null).maybeSingle();
+  // Mismo criterio que loadClientIdentity -- `phone` es el número completo
+  // verificado por OTP, clients.phone/phone_prefix ya viven separados.
+  const { dialCode, localNumber } = splitPhone(phone);
+  const { data: existing } = await adminClient
+    .from("clients")
+    .select("id, document_number")
+    .eq("tenant_id", tenantId)
+    .eq("phone_prefix", dialCode)
+    .eq("phone", localNumber)
+    .is("deleted_at", null)
+    .maybeSingle();
   if (existing) {
     if (documentNumber && !existing.document_number) {
       const { error } = await adminClient.from("clients").update({ document_type: documentType, document_number: documentNumber }).eq("id", existing.id);
@@ -1029,7 +1067,7 @@ async function resolveOrCreateClient(
 
   const { data: created, error } = await adminClient
     .from("clients")
-    .insert({ tenant_id: tenantId, full_name: fullName, phone, document_type: documentType, document_number: documentNumber })
+    .insert({ tenant_id: tenantId, full_name: fullName, phone_prefix: dialCode, phone: localNumber, document_type: documentType, document_number: documentNumber })
     .select("id")
     .single();
   if (error) {

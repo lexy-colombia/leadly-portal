@@ -15,6 +15,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { json } from "../_shared/cors.ts";
 import { requestsHumanHandoff, sendWhatsappText } from "../_shared/whatsapp.ts";
 import { toolsForSkills, type AiToolDefinition } from "../_shared/aiTools.ts";
+import { splitPhone } from "../_shared/phone.ts";
 
 const CONTEXT_MESSAGE_LIMIT = 10;
 const HUMAN_HANDOFF_REPLY = "¡Listo! En un momento te atiende un miembro de nuestro equipo.";

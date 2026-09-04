@@ -11,9 +11,11 @@ import { AI_TOOLS, isToolAllowed } from "../_shared/aiTools.ts";
 import { sendWhatsappImage } from "../_shared/whatsapp.ts";
 import { chargeSalesOrderToCredit, createSalesOrderPaymentLink } from "../_shared/payments/salesOrderPayments.ts";
 import { confirmSalesOrder, getDefaultAddress, getStockTotals, getVariantStock, isPlaceholderAddressText } from "../_shared/orders/confirmSalesOrder.ts";
+import { persistOrderItems, type ResolvedOrderItem } from "../_shared/orders/persistOrderItems.ts";
 import { makeIntegrationSecretGetter, resolveTenantIntegrationCredential } from "../_shared/integrations/credentials.ts";
 import { createDeal, createOrUpdateContact, getDealPipelines } from "../_shared/integrations/hubspot.ts";
 import { resolveShopifyDomain, searchCustomerByPhone, searchOrders, searchProducts } from "../_shared/integrations/shopify.ts";
+import { combinePhone, splitPhone } from "../_shared/phone.ts";
 
 const CATALOG_SEARCH_LIMIT = 15;
 const CATEGORY_LIST_LIMIT = 5;
@@ -666,7 +668,16 @@ async function executeTool(
       const rawItems = Array.isArray(parameters.items) ? parameters.items : [];
       if (rawItems.length === 0) throw new Error("items es requerido y no puede estar vacío.");
 
-      const resolvedItems: { product_id: string; variant_id: string | null; product_name: string; sku: string | null; quantity: number; unit_price: number }[] = [];
+      const resolvedItems: {
+        product_id: string;
+        variant_id: string | null;
+        product_name: string;
+        sku: string | null;
+        quantity: number;
+        unit_price: number;
+        tax_type_code: string | null;
+        tax_rate: number;
+      }[] = [];
       for (const rawItem of rawItems) {
         const productName = String((rawItem as Record<string, unknown>).product_name ?? "").trim();
         const variantLabel = String((rawItem as Record<string, unknown>).variant ?? "").trim();
@@ -717,38 +728,35 @@ async function executeTool(
           sku,
           quantity,
           unit_price: unitPrice,
+          // El impuesto es una clasificación del producto, nunca de la
+          // variante (ver 20260903100500_products_tax_fields.sql) -- una
+          // variante nunca trae su propio tax_type_code/tax_rate.
+          tax_type_code: (product.tax_type_code as string | null) ?? null,
+          tax_rate: (product.tax_rate as number) ?? 0,
         });
       }
 
-      const subtotal = resolvedItems.reduce((sum, item) => sum + item.quantity * item.unit_price, 0);
+      // Estimado solo para resolveOrCreateOpportunityForQuote (antes de
+      // tener un order.id) -- el subtotal/tax_total/total reales los
+      // calcula persistOrderItems más abajo, única fuente de verdad
+      // compartida con add_item_to_quote/storefront/el portal.
+      const roughSubtotal = resolvedItems.reduce((sum, item) => sum + item.quantity * item.unit_price, 0);
       const notes = parameters.notes ? String(parameters.notes).trim() : null;
 
       // Auto-links to the pipeline so a WhatsApp sale shows up there without
       // anyone loading it by hand: reuse the contact's open opportunity if
       // it has one, otherwise create one (see resolveOrCreateOpportunityForQuote).
-      const opportunityId = await resolveOrCreateOpportunityForQuote(adminClient, tenantId, contactId, subtotal);
+      const opportunityId = await resolveOrCreateOpportunityForQuote(adminClient, tenantId, contactId, roughSubtotal);
 
       const { data: order, error: orderError } = await adminClient
         .from("sales_orders")
-        .insert({ tenant_id: tenantId, contact_id: contactId, opportunity_id: opportunityId, notes, subtotal, total: subtotal })
+        .insert({ tenant_id: tenantId, contact_id: contactId, opportunity_id: opportunityId, notes, subtotal: 0, tax_total: 0, total: 0 })
         .select("id, number")
         .single();
       if (orderError) throw new Error(orderError.message);
 
-      const itemRows = resolvedItems.map((item, index) => ({
-        tenant_id: tenantId,
-        order_id: order.id,
-        product_id: item.product_id,
-        variant_id: item.variant_id,
-        product_name: item.product_name,
-        sku: item.sku,
-        quantity: item.quantity,
-        unit_price: item.unit_price,
-        subtotal: item.quantity * item.unit_price,
-        display_order: index,
-      }));
-      const { error: itemsError } = await adminClient.from("sales_order_items").insert(itemRows);
-      if (itemsError) throw new Error(itemsError.message);
+      const totals = await persistOrderItems(adminClient, tenantId, order.id, resolvedItems, 0);
+      const subtotal = totals.subtotal;
 
       // Facturación se pide en esta etapa (no envío -- eso es solo relevante
       // si el cliente confirma que va a comprar, ver confirm_quote). No
@@ -779,19 +787,21 @@ async function executeTool(
       const rawItems = Array.isArray(parameters.items) ? parameters.items : [];
       if (rawItems.length === 0) throw new Error("items es requerido y no puede estar vacío.");
 
+      // persistOrderItems reemplaza TODOS los ítems del pedido -- hay que
+      // traer los que ya existen (tal cual quedaron, sin recalcularlos
+      // contra el precio/impuesto actual del producto, que pudo cambiar
+      // desde que se agregaron) y sumarles los nuevos antes de llamarla.
       const { data: existingItems, error: existingItemsError } = await adminClient
         .from("sales_order_items")
-        .select("display_order")
+        .select("product_id, variant_id, warehouse_id, product_name, sku, quantity, unit_price, discount_amount, tax_type_code, tax_rate")
         .eq("order_id", order.id)
-        .order("display_order", { ascending: false })
-        .limit(1);
+        .order("display_order", { ascending: true });
       if (existingItemsError) throw new Error(existingItemsError.message);
-      let nextDisplayOrder = (existingItems?.[0]?.display_order ?? -1) + 1;
+
+      const items: ResolvedOrderItem[] = [...(existingItems ?? [])];
 
       // Same product/variant resolution as create_quote -- no stock check, a
       // cotización is still just a price estimate at this point.
-      const newItemRows = [];
-      let addedSubtotal = 0;
       for (const rawItem of rawItems) {
         const productName = String((rawItem as Record<string, unknown>).product_name ?? "").trim();
         const variantLabel = String((rawItem as Record<string, unknown>).variant ?? "").trim();
@@ -819,28 +829,21 @@ async function executeTool(
           sku = variant.sku as string;
         }
 
-        const lineSubtotal = quantity * (unitPrice as number);
-        addedSubtotal += lineSubtotal;
-        newItemRows.push({
-          tenant_id: tenantId,
-          order_id: order.id,
-          product_id: product.id,
+        items.push({
+          product_id: product.id as string,
           variant_id: variantId,
-          product_name: product.name,
+          product_name: product.name as string,
           sku,
           quantity,
           unit_price: unitPrice,
-          subtotal: lineSubtotal,
-          display_order: nextDisplayOrder++,
+          tax_type_code: (product.tax_type_code as string | null) ?? null,
+          tax_rate: (product.tax_rate as number) ?? 0,
         });
       }
 
-      const { error: insertError } = await adminClient.from("sales_order_items").insert(newItemRows);
-      if (insertError) throw new Error(insertError.message);
-
-      const newSubtotal = order.total + addedSubtotal; // order.total === subtotal here, no discounts/shipping in this flow yet
-      const { error: updateOrderError } = await adminClient.from("sales_orders").update({ subtotal: newSubtotal, total: newSubtotal }).eq("id", order.id);
-      if (updateOrderError) throw new Error(updateOrderError.message);
+      // Sin envío en este flujo -- ver comentario histórico más arriba, la
+      // IA nunca setea shipping en una cotización.
+      const totals = await persistOrderItems(adminClient, tenantId, order.id, items, 0);
 
       const { data: allItems, error: allItemsError } = await adminClient
         .from("sales_order_items")
@@ -853,7 +856,7 @@ async function executeTool(
         order_number: order.number,
         order_code: formatOrderCode(order.number),
         status_label: statusLabel("cotizacion"),
-        total: formatCurrencyCOP(newSubtotal),
+        total: formatCurrencyCOP(totals.total),
         items: (allItems ?? []).map((item: { product_name: string; quantity: number; unit_price: number; subtotal: number }) => ({
           product: item.product_name,
           quantity: item.quantity,
@@ -915,11 +918,14 @@ async function executeTool(
       const order = await resolveLatestOrder(adminClient, tenantId, contactId, "cotizacion");
       if (!order) throw new Error("Este cliente no tiene ninguna cotización pendiente de confirmar.");
 
-      // Stock check, address gate, status flip, and the opportunity move all
-      // live in confirmSalesOrder (_shared/orders/confirmSalesOrder.ts) now
-      // -- shared with the public cart checkout page, which needs to enforce
-      // exactly the same rules from a completely different entry point,
-      // instead of a second copy quietly drifting from this one.
+      // Stock check, address gate, opportunity move, and invoice queueing
+      // all live in DB triggers now (guard_sales_order_confirmation /
+      // apply_sales_order_confirmed_effects, 20260903180000) -- they apply
+      // to ANY update that sets status='confirmada', not just this path, so
+      // the portal's own manual "Confirmar" button gets the exact same
+      // rules for free. confirmSalesOrder here just does the status flip
+      // and translates a trigger rejection back into a typed `blocked`
+      // result for the conversation.
       const result = await confirmSalesOrder(adminClient, tenantId, contactId, order.id);
       if (result.blocked) {
         return { order_number: order.number, order_code: formatOrderCode(order.number), blocked: true, reason: result.reason };
@@ -1280,10 +1286,10 @@ async function executeTool(
       const email = String(parameters.email ?? "").trim();
       if (!email) throw new Error("email es requerido");
 
-      const { data: contact } = await adminClient.from("clients").select("phone, full_name").eq("id", contactId).maybeSingle();
+      const { data: contact } = await adminClient.from("clients").select("phone_prefix, phone, full_name").eq("id", contactId).maybeSingle();
 
       const properties: Record<string, string> = { email };
-      if (contact?.phone) properties.phone = contact.phone;
+      if (contact?.phone) properties.phone = combinePhone(contact.phone_prefix, contact.phone);
       if (parameters.firstname) properties.firstname = String(parameters.firstname).trim();
       else if (contact?.full_name) properties.firstname = contact.full_name;
       if (parameters.lastname) properties.lastname = String(parameters.lastname).trim();
@@ -1353,16 +1359,16 @@ async function executeTool(
 
     case "shopify_search_customer_by_phone": {
       if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
-      const { data: contact } = await adminClient.from("clients").select("phone").eq("id", contactId).maybeSingle();
+      const { data: contact } = await adminClient.from("clients").select("phone_prefix, phone").eq("id", contactId).maybeSingle();
       if (!contact?.phone) throw new Error("Este contacto no tiene teléfono registrado.");
       const { shop, accessToken } = await resolveShopifyConfig(adminClient, tenantId);
-      const customer = await searchCustomerByPhone(shop, accessToken, contact.phone);
+      const customer = await searchCustomerByPhone(shop, accessToken, combinePhone(contact.phone_prefix, contact.phone));
       return { found: !!customer, customer };
     }
 
     case "shopify_search_orders": {
       if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
-      const { data: contact } = await adminClient.from("clients").select("phone").eq("id", contactId).maybeSingle();
+      const { data: contact } = await adminClient.from("clients").select("phone_prefix, phone").eq("id", contactId).maybeSingle();
       if (!contact?.phone) throw new Error("Este contacto no tiene teléfono registrado.");
       const { shop, accessToken } = await resolveShopifyConfig(adminClient, tenantId);
 
@@ -1371,7 +1377,7 @@ async function executeTool(
       // the AI's free-text query is only ever a refinement on top of that
       // scope, never the sole filter, so this contact can't retrieve another
       // customer's orders no matter what it searches for.
-      const customer = await searchCustomerByPhone(shop, accessToken, contact.phone);
+      const customer = await searchCustomerByPhone(shop, accessToken, combinePhone(contact.phone_prefix, contact.phone));
       if (!customer) return { orders: [], note: "Este contacto no tiene un perfil de cliente en Shopify." };
 
       const refinement = String(parameters.query ?? "").trim();
@@ -1533,11 +1539,17 @@ async function resolveOrCreateContact(
     .maybeSingle();
   if (!conversation?.contact_phone) return contactId;
 
+  // clients.phone quedó como SOLO el número local desde
+  // 20260904000000_clients_phone_prefix_split.sql -- conversation.contact_phone
+  // sigue siendo el wa_id completo, hay que partirlo para matchear/crear
+  // contra las dos columnas.
+  const { dialCode: contactDialCode, localNumber: contactLocalNumber } = splitPhone(conversation.contact_phone);
   const { data: existing } = await adminClient
     .from("clients")
     .select("id")
     .eq("tenant_id", tenantId)
-    .eq("phone", conversation.contact_phone)
+    .eq("phone_prefix", contactDialCode)
+    .eq("phone", contactLocalNumber)
     .is("deleted_at", null)
     .maybeSingle();
 
@@ -1545,7 +1557,7 @@ async function resolveOrCreateContact(
   if (!newContactId) {
     const { data: created, error } = await adminClient
       .from("clients")
-      .insert({ tenant_id: tenantId, full_name: conversation.contact_name || conversation.contact_phone, phone: conversation.contact_phone })
+      .insert({ tenant_id: tenantId, full_name: conversation.contact_name || conversation.contact_phone, phone_prefix: contactDialCode, phone: contactLocalNumber })
       .select("id")
       .single();
     if (error) {
@@ -1722,7 +1734,7 @@ async function resolveOrCreateOpportunityForQuote(
  * fetch it separately via getStockTotals, keyed off the id this returns. */
 // deno-lint-ignore no-explicit-any
 async function findProductByName(adminClient: any, tenantId: string, name: string): Promise<Record<string, unknown> | null> {
-  const columns = "id, name, sku, retail_price, track_inventory, has_variants";
+  const columns = "id, name, sku, retail_price, track_inventory, has_variants, tax_type_code, tax_rate";
 
   const { data: exact } = await adminClient
     .from("products")
