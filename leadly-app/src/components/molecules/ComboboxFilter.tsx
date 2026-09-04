@@ -31,6 +31,7 @@ export function ComboboxFilter({
   emptyLabel,
   className = '',
   triggerClassName = '',
+  disabled = false,
 }: {
   options: ComboboxOption[]
   value: string | null
@@ -46,6 +47,7 @@ export function ComboboxFilter({
    * `w-full`) when this sits in a row next to another control (e.g. the
    * clear button) -- see the `min-w-0` note below for why. */
   triggerClassName?: string
+  disabled?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const selected = value ? (options.find((o) => o.id === value) ?? null) : null
@@ -59,9 +61,9 @@ export function ComboboxFilter({
     // this, that's exactly what happened (Contacto's clear button bled into
     // the Envío column on OrderDetail.tsx's 3-column row).
     <div className={`flex min-w-0 items-center gap-1 ${className}`}>
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover open={open && !disabled} onOpenChange={(next) => setOpen(next && !disabled)}>
         <PopoverTrigger asChild>
-          <Button variant="outline" size="sm" className={cn('min-w-0 justify-between font-normal', triggerClassName)}>
+          <Button variant="outline" size="sm" disabled={disabled} className={cn('min-w-0 justify-between font-normal', triggerClassName)}>
             <span className="flex min-w-0 items-center gap-2">
               {selected && 'image' in selected && <ProductImage src={selected.image} name={selected.label} className="size-5 shrink-0 rounded" iconSize={11} />}
               <span className="truncate">{selected ? selected.label : placeholder}</span>
@@ -98,7 +100,7 @@ export function ComboboxFilter({
           </Command>
         </PopoverContent>
       </Popover>
-      {selected && (
+      {selected && !disabled && (
         <Button variant="ghost" size="icon-sm" onClick={() => onChange(null)} aria-label={placeholder} className="shrink-0">
           <XIcon className="size-3.5" />
         </Button>

@@ -84,47 +84,13 @@ export async function uploadTaskAttachment(tenantId: string, file: File, taskId:
   return data
 }
 
-/** Uploads an agent-attached image and links it to a venta/cotización
- * comment -- same "images only" criterion as before, unlike task
- * attachments which also allow PDF. Both this and uploadTaskAttachment
- * share the same `attachments` table now (task_id/sales_order_comment_id
- * are mutually exclusive columns on the same row shape). */
-export async function uploadOrderCommentAttachment(tenantId: string, file: File, commentId: string): Promise<Attachment> {
-  const validationError = validatePqrAttachmentFile(file)
-  if (validationError) throw new Error(validationError)
-  const uploaded = await uploadAttachmentFile(tenantId, file)
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  const { data, error } = await supabase
-    .from('attachments')
-    .insert({
-      tenant_id: tenantId,
-      sales_order_comment_id: commentId,
-      storage_path: uploaded.storage_path,
-      mime_type: uploaded.mime_type,
-      size_bytes: uploaded.size_bytes,
-      original_filename: file.name || null,
-      created_by: user?.id ?? null,
-    })
-    .select()
-    .single()
-  if (error) throw error
-  return data
-}
-
-export async function listAttachmentsForOrderComments(commentIds: string[]): Promise<Attachment[]> {
-  if (commentIds.length === 0) return []
-  const { data, error } = await supabase
-    .from('attachments')
-    .select('*')
-    .in('sales_order_comment_id', commentIds)
-    .order('created_at', { ascending: true })
-  if (error) throw error
-  return data
-}
+// Los comentarios de un pedido ya NO admiten adjuntos: se quitó el selector
+// de imagen del formulario a pedido explícito del usuario (2026-09-04),
+// porque un comentario es texto que va impreso en la factura. Con él se
+// fueron `uploadOrderCommentAttachment` y `listAttachmentsForOrderComments`,
+// que quedaron sin ningún caller. La columna `attachments.sales_order_comment_id`
+// se deja en el esquema (no había ninguna fila usándola, verificado antes de
+// quitar la UI) por si el flujo vuelve a hacer falta.
 
 export async function listAttachmentsForTask(taskId: string): Promise<Attachment[]> {
   const { data, error } = await supabase.from('attachments').select('*').eq('task_id', taskId).order('created_at', { ascending: true })

@@ -7,7 +7,7 @@ import type { Dispatch, DispatchCarrierType, DispatchStatus, DispatchStatusHisto
 import { useLanguage } from '../../../contexts/LanguageContext'
 import { formatDateTime } from '../../../lib/dates'
 import { FieldError, PageSpinner } from '@/components/atoms'
-import { Drawer } from '@/components/organisms'
+import { Drawer, ConfirmDialog } from '@/components/organisms'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -25,12 +25,18 @@ export function DispatchDrawer({
   onClose,
   tenantId,
   order,
+  balance,
   onOrderChanged,
 }: {
   open: boolean
   onClose: () => void
   tenantId: string
   order: SalesOrder
+  /** Saldo pendiente del pedido (total - pagos) -- pedido explícito del
+   * usuario 2026-09-04: crear el despacho (el momento real en que
+   * delivery_status deja 'pendiente') con saldo pendiente no se bloquea,
+   * pero exige una confirmación explícita primero. Ver DispatchCreateForm. */
+  balance: number
   /** A dispatch status change can sync sales_orders.delivery_status server-side
    * (see apply_dispatch_stock_and_delivery_effect) -- OrderDetail.tsx's own
    * `order` state doesn't know that happened until it re-fetches. */
@@ -81,6 +87,7 @@ export function DispatchDrawer({
             order={order}
             statuses={statuses}
             warehouses={warehouses}
+            balance={balance}
             onCreated={(d) => {
               setDispatch(d)
               onOrderChanged()
@@ -112,12 +119,14 @@ function DispatchCreateForm({
   order,
   statuses,
   warehouses,
+  balance,
   onCreated,
 }: {
   tenantId: string
   order: SalesOrder
   statuses: DispatchStatus[]
   warehouses: Warehouse[]
+  balance: number
   onCreated: (d: Dispatch) => void
 }) {
   const { t } = useLanguage()
@@ -132,15 +141,27 @@ function DispatchCreateForm({
   const [touched, setTouched] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+  // Crear el despacho es el momento real en que delivery_status deja
+  // 'pendiente' -- con saldo pendiente esto no se bloquea, pero pide
+  // confirmación explícita primero (pedido explícito del usuario 2026-09-04).
+  const [confirmingBalance, setConfirmingBalance] = useState(false)
 
   const warehouseError = touched && !warehouseId ? t('dispatches.drawer.errors.warehouseRequired') : undefined
   const trackingError = touched && carrierType === 'tercero' && !trackingNumber.trim() ? t('dispatches.drawer.errors.trackingNumberRequired') : undefined
 
-  async function handleSubmit() {
+  function handleSubmit() {
     setTouched(true)
     setFormError(null)
     if (!warehouseId || (carrierType === 'tercero' && !trackingNumber.trim())) return
+    if (balance > 0) {
+      setConfirmingBalance(true)
+      return
+    }
+    void submitDispatch()
+  }
 
+  async function submitDispatch() {
+    setConfirmingBalance(false)
     setSubmitting(true)
     try {
       const firstStatus = statuses[0]
@@ -256,6 +277,16 @@ function DispatchCreateForm({
           {submitting ? t('dispatches.drawer.actions.creating') : t('dispatches.drawer.actions.create')}
         </Button>
       </div>
+
+      <ConfirmDialog
+        open={confirmingBalance}
+        onClose={() => setConfirmingBalance(false)}
+        onConfirm={() => void submitDispatch()}
+        loading={submitting}
+        title={t('orders.detail.dispatchWithBalanceTitle')}
+        description={t('orders.detail.dispatchWithBalanceBody', { amount: new Intl.NumberFormat('es-CO', { style: 'currency', currency: order.currency, maximumFractionDigits: 0 }).format(balance) })}
+        confirmLabel={t('orders.detail.dispatchWithBalanceConfirm')}
+      />
     </div>
   )
 }

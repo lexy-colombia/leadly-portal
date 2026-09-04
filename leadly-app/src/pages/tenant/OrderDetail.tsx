@@ -1,23 +1,20 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ScanLineIcon, UploadIcon, XIcon } from 'lucide-react'
+import { DownloadIcon, RefreshCwIcon, ScanLineIcon, UploadIcon, XIcon } from 'lucide-react'
 import {
-  createOrder,
+  calculateOrder,
   deleteOrder,
   findStockShortfalls,
   getOrder,
   hasIncompleteVariantSelection,
   listOrderItems,
-  updateOrderFields,
-  updateOrderItemsAndTotals,
   updateOrderStatus,
   updateDeliveryStatus,
-  computeOrderTotals,
   ORDER_STATUS_LABEL_KEY,
   ORDER_STATUS_BADGE_CLASS,
   DELIVERY_STATUS_LABEL_KEY,
 } from '../../lib/api/orders'
-import type { OrderDetail as OrderDetailType, OrderInput, OrderItemInput, StockShortfall } from '../../lib/api/orders'
+import type { OrderDetail as OrderDetailType, OrderItemInput, StockShortfall } from '../../lib/api/orders'
 import { listClients } from '../../lib/api/clients'
 import type { Client } from '../../types/domain'
 import { listOpportunities } from '../../lib/api/opportunities'
@@ -31,19 +28,20 @@ import { listProductCategories } from '../../lib/api/productCategories'
 import { listBrands } from '../../lib/api/brands'
 import { listWarehouses } from '../../lib/api/warehouses'
 import { listPaymentsForOrder, deletePayment, PAYMENT_METHOD_LABEL_KEY } from '../../lib/api/orderPayments'
+import { getLatestSalesInvoiceForOrder, getSalesOrderPdf, sendSalesInvoiceToDian, retrySalesInvoiceToDian } from '../../lib/api/salesInvoices'
+import type { SalesInvoice, SalesInvoiceStatus } from '../../types/domain'
 import { listCommentsForOrder, createComment } from '../../lib/api/orderComments'
 import type { OrderCommentWithAuthor } from '../../lib/api/orderComments'
-import { listAttachmentsForOrderComments, uploadOrderCommentAttachment } from '../../lib/api/attachments'
 import { listTasksForOpportunity } from '../../lib/api/tasks'
 import type { TaskWithRelations } from '../../lib/api/tasks'
-import type { ContactAddress, SalesOrderPayment, Attachment, OrderStatus, DeliveryStatus, ProductCategory, Brand, Warehouse } from '../../types/domain'
+import type { ContactAddress, SalesOrderPayment, OrderStatus, DeliveryStatus, ProductCategory, Brand, Warehouse } from '../../types/domain'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import { isNotBlank } from '../../lib/validation'
 import { formatDate, formatDateTime } from '../../lib/dates'
-import { formatPhoneDisplay } from '../../lib/phone'
+import { formatClientPhoneDisplay } from '../../lib/phone'
 import { FieldError, InitialsAvatar, PageSpinner } from '@/components/atoms'
-import { ComboboxFilter, CurrencyInput, ImageAttachmentPicker, SignedImage } from '@/components/molecules'
+import { ComboboxFilter, CurrencyInput } from '@/components/molecules'
 import { ConfirmDialog } from '@/components/organisms'
 import { ClockIcon, PencilIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
 import { Button } from '@/components/ui/button'
@@ -64,10 +62,6 @@ function addressLabel(a: ContactAddress): string {
   return `${a.label ? `${a.label} — ` : ''}${a.line1}${a.city ? `, ${a.city}` : ''}`
 }
 
-function itemsEqual(a: OrderItemInput[], b: OrderItemInput[]): boolean {
-  return JSON.stringify(a) === JSON.stringify(b)
-}
-
 /** Only relevant at creation -- 'cancelada' isn't offered (a brand new
  * order can't start already voided), and once it exists, edit mode moves
  * status forward through the header buttons instead of a select (see
@@ -77,6 +71,29 @@ const CREATE_STATUS_OPTIONS: OrderStatus[] = ['cotizacion', 'confirmada']
 function formatCurrency(value: number, currency = 'COP'): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 }
+
+/** El impuesto de línea puede quedar con decimales reales (ej. INC 8%
+ * sobre $38.000 = $2.814,81) -- a diferencia del resto de la app, que
+ * redondea al peso entero, acá se muestran los 2 decimales a propósito
+ * (mismo criterio de la DIAN, que trunca a 2 decimales para el CUFE/CUDE,
+ * ver cufe.ts). */
+function formatCurrencyPrecise(value: number, currency = 'COP'): string {
+  return new Intl.NumberFormat('es-CO', { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)
+}
+
+const INVOICE_STATUS_VARIANT: Record<SalesInvoiceStatus, string> = {
+  pending: 'bg-brand-100 text-brand-600',
+  blocked_missing_buyer_data: 'bg-amber-100 text-amber-700',
+  generating: 'bg-blue-100 text-blue-700',
+  generated: 'bg-blue-100 text-blue-700',
+  sending: 'bg-blue-100 text-blue-700',
+  sent: 'bg-blue-100 text-blue-700',
+  accepted: 'bg-emerald-100 text-emerald-700',
+  rejected: 'bg-red-100 text-red-700',
+  error: 'bg-red-100 text-red-700',
+  voided: 'bg-brand-100 text-brand-500',
+}
+
 
 /** Same card shape as ProductDetail.tsx (title + optional header action +
  * content) -- not extracted to a shared component since this is only its
@@ -104,8 +121,12 @@ function AiBadge({ label }: { label: string }) {
  * are the same shape (content + author + date, newest first, like a
  * conversation) since both now live in sales_order_comments split by
  * is_internal (ver types/domain.ts), so this covers both instead of
- * duplicating the list markup. Only what varies (the add-form: Comentarios
- * has an image picker, Notas doesn't) is passed in as `form`. */
+ * duplicating the list markup. Only the add-form is passed in as `form`.
+ *
+ * Ninguno de los dos hilos admite adjuntar archivos -- Comentarios tenía un
+ * selector de imagen que se quitó a pedido explícito del usuario
+ * (2026-09-04); un comentario es texto que va impreso en la factura, no un
+ * repositorio de archivos. */
 function ThreadColumn({
   label,
   entries,
@@ -113,7 +134,6 @@ function ThreadColumn({
   onToggleAdd,
   addAria,
   form,
-  attachmentsByComment,
 }: {
   label: string
   entries: OrderCommentWithAuthor[] | null
@@ -121,7 +141,6 @@ function ThreadColumn({
   onToggleAdd: () => void
   addAria: string
   form: ReactNode
-  attachmentsByComment?: Record<string, Attachment[]>
 }) {
   const { t, language } = useLanguage()
   return (
@@ -142,7 +161,6 @@ function ThreadColumn({
               <InitialsAvatar name={c.created_by_ai ? t('orders.detail.aiBadge') : (c.author?.full_name ?? t('orders.detail.agent'))} size="xs" />
               <div className="min-w-0 flex-1">
                 <p className="whitespace-pre-wrap text-sm text-brand-700">{c.content}</p>
-                {attachmentsByComment?.[c.id]?.map((a) => <SignedImage key={a.id} storagePath={a.storage_path} className="mt-1 h-12 w-12" />)}
                 <p className="mt-0.5 flex items-center gap-1.5 text-xs text-brand-400">
                   {c.created_by_ai ? t('orders.detail.aiAssistant') : (c.author?.full_name ?? t('orders.detail.agent'))} · {formatDateTime(c.created_at, language)}
                   {c.created_by_ai && <AiBadge label={t('orders.detail.aiBadge')} />}
@@ -208,14 +226,17 @@ export function OrderDetail() {
   const [editingBillingAddress, setEditingBillingAddress] = useState(false)
   const [touched, setTouched] = useState(false)
 
-  // ----- items + shipping + tax: the one block with an explicit batch save -----
+  // ----- items + shipping: guardado automático centralizado, ver el
+  // useEffect de "autosave" más abajo. Nada de esto se calcula en el
+  // frontend (ni subtotal, ni impuesto, ni total) -- calculate-order
+  // (Edge Function) es la única fuente de verdad; itemsLoaded existe solo
+  // para saber cuándo ya se cargó el estado real del pedido y recién ahí
+  // empezar a tratar cambios como ediciones del agente (ver comentario
+  // grande en el useEffect de autosave). -----
   const [items, setItems] = useState<OrderItemInput[]>([])
-  const [savedItems, setSavedItems] = useState<OrderItemInput[] | null>(null)
+  const [itemsLoaded, setItemsLoaded] = useState(false)
   const [shippingDraft, setShippingDraft] = useState('0')
-  const [savedShipping, setSavedShipping] = useState<string | null>(null)
-  const [taxDraft, setTaxDraft] = useState('0')
-  const [savedTaxTotal, setSavedTaxTotal] = useState<string | null>(null)
-  const [savingItems, setSavingItems] = useState(false)
+  const [savingDraft, setSavingDraft] = useState(false)
 
   // ----- creation -----
   const [creating, setCreating] = useState(false)
@@ -226,7 +247,6 @@ export function OrderDetail() {
   // splits them, ver types/domain.ts) -- one fetch, filtered client-side into
   // the two columns (see notesList/commentsList below).
   const [comments, setComments] = useState<OrderCommentWithAuthor[] | null>(null)
-  const [attachmentsByComment, setAttachmentsByComment] = useState<Record<string, Attachment[]>>({})
   // Each column's "+" reveals its own form instead of always showing one --
   // explicit user feedback, matches the reference screenshot's collapsed
   // "Comentarios [+]" / "Observaciones [+]" boxes.
@@ -235,11 +255,92 @@ export function OrderDetail() {
   const [savingNote, setSavingNote] = useState(false)
   const [addingComment, setAddingComment] = useState(false)
   const [commentDraft, setCommentDraft] = useState('')
-  const [commentAttachment, setCommentAttachment] = useState<File | null>(null)
   const [savingComment, setSavingComment] = useState(false)
   const [paymentDrawerOpen, setPaymentDrawerOpen] = useState(false)
   const [dispatchDrawerOpen, setDispatchDrawerOpen] = useState(false)
   const [dispatchStatus, setDispatchStatus] = useState<DispatchStatusSummary | null>(null)
+
+  // ----- Factura DIAN (módulo 'einvoicing') -- vive DENTRO del pedido, no en
+  // una lista propia (feedback explícito del usuario 2026-09-03: comprador/
+  // vendedor/ítems ya se ven acá arriba, no tiene sentido una pantalla
+  // aparte que los repita solo para mostrar el estado y el botón de envío).
+  // Solo interesa el intento VIGENTE: o la factura fue aceptada por la DIAN
+  // o no lo fue, y en ese caso por qué. El historial de reintentos se sigue
+  // guardando en la base (son registros fiscales) pero no se muestra
+  // -- feedback explícito del usuario 2026-09-03: "¿para qué me sirve
+  // guardar los reintentos? ese dato no es útil".
+  const [latestInvoice, setLatestInvoice] = useState<SalesInvoice | null>(null)
+  const [sendingInvoice, setSendingInvoice] = useState(false)
+  const [sendInvoiceError, setSendInvoiceError] = useState<string | null>(null)
+  const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null)
+  const [invoicePdfError, setInvoicePdfError] = useState<string | null>(null)
+
+  function reloadInvoices() {
+    if (!order?.id || !enabledModules?.has('einvoicing')) {
+      setLatestInvoice(null)
+      return
+    }
+    getLatestSalesInvoiceForOrder(order.id)
+      .then(setLatestInvoice)
+      .catch(() => setLatestInvoice(null))
+  }
+
+  useEffect(() => {
+    reloadInvoices()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order?.id, enabledModules])
+
+  /** Envío del intento vigente, o reintento si ese intento ya fracasó. El
+   * reintento no reescribe la factura rechazada: el servidor crea un intento
+   * nuevo (attempt_number+1) y envía ése, por eso en ambos casos hace falta
+   * releer el listado -- después de un reintento hay una fila MÁS, no una
+   * modificada. */
+  async function handleSendInvoice(retry = false) {
+    if (!latestInvoice) return
+    setSendingInvoice(true)
+    setSendInvoiceError(null)
+    try {
+      const result = retry ? await retrySalesInvoiceToDian(latestInvoice.id) : await sendSalesInvoiceToDian(latestInvoice.id)
+      if (result.status === 'error') setSendInvoiceError(result.faultReason ?? t('einvoicing.detail.sendError'))
+      reloadInvoices()
+    } catch (err) {
+      setSendInvoiceError(err instanceof Error ? err.message : t('einvoicing.detail.sendError'))
+    } finally {
+      setSendingInvoice(false)
+    }
+  }
+
+  /** Abre la representación gráfica de UN intento puntual en una pestaña
+   * nueva (visor de PDF del navegador) en vez de forzar una descarga
+   * directa -- el usuario pidió poder "verla", no solo bajar un archivo. El
+   * Blob URL queda vivo mientras esa pestaña esté abierta; no hace falta
+   * revocarlo acá.
+   *
+   * La pestaña se abre EN BLANCO acá mismo, antes de cualquier `await` --
+   * un `window.open` después de esperar la respuesta del servidor ya no
+   * cuenta como parte del gesto de click para el bloqueador de pop-ups del
+   * navegador, y se descarta en silencio sin tirar ningún error (bug real
+   * encontrado al probar: el botón terminaba su ciclo de carga normal,
+   * pero nunca aparecía ninguna pestaña nueva). */
+  async function handleDownloadInvoicePdf() {
+    if (!id) return
+    const pendingTab = window.open('', '_blank')
+    setDownloadingInvoiceId(id)
+    setInvoicePdfError(null)
+    try {
+      const { pdfBase64 } = await getSalesOrderPdf(id)
+      const bytes = Uint8Array.from(atob(pdfBase64), (c) => c.charCodeAt(0))
+      const blob = new Blob([bytes], { type: 'application/pdf' })
+      const url = URL.createObjectURL(blob)
+      if (pendingTab) pendingTab.location.href = url
+      else window.open(url, '_blank')
+    } catch (err) {
+      pendingTab?.close()
+      setInvoicePdfError(err instanceof Error ? err.message : t('einvoicing.detail.pdfError'))
+    } finally {
+      setDownloadingInvoiceId(null)
+    }
+  }
 
   function reloadDispatchStatus() {
     if (!order || !enabledModules?.has('dispatches')) return
@@ -270,6 +371,10 @@ export function OrderDetail() {
   const [addressDrawerOpen, setAddressDrawerOpen] = useState(false)
   const [deletePaymentId, setDeletePaymentId] = useState<string | null>(null)
   const [confirmingVoid, setConfirmingVoid] = useState(false)
+  // Estado de envío elegido mientras el pedido tiene saldo pendiente -- ver
+  // handleDeliveryStatusSelect/applyDeliveryStatus. null = sin diálogo
+  // abierto.
+  const [pendingDeliveryStatus, setPendingDeliveryStatus] = useState<DeliveryStatus | null>(null)
   const [voiding, setVoiding] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -301,7 +406,7 @@ export function OrderDetail() {
         discount_amount: i.discount_amount,
       }))
       setItems(mapped)
-      setSavedItems(mapped)
+      setItemsLoaded(true)
     })
   }
 
@@ -316,28 +421,13 @@ export function OrderDetail() {
 
   function reloadComments() {
     if (!id) return
-    listCommentsForOrder(id).then((data) => {
-      setComments(data)
-      const ids = data.map((c) => c.id).filter((cid) => !(cid in attachmentsByComment))
-      if (ids.length === 0) return
-      listAttachmentsForOrderComments(ids)
-        .then((attachments) => {
-          setAttachmentsByComment((prev) => {
-            const next = { ...prev }
-            for (const a of attachments) {
-              if (!a.sales_order_comment_id) continue
-              next[a.sales_order_comment_id] = [...(next[a.sales_order_comment_id] ?? []), a]
-            }
-            return next
-          })
-        })
-        .catch(() => {})
-    })
+    listCommentsForOrder(id).then(setComments)
   }
 
   useEffect(() => {
     if (isNew) return
     setOrder(undefined)
+    setItemsLoaded(false)
     reloadOrder()
     reloadItems()
     reloadPayments()
@@ -345,8 +435,13 @@ export function OrderDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
-  // Atomic fields (Select/Combobox, instant-commit -- no in-progress typed
-  // draft that a reload from an unrelated action could stomp).
+  // Carga el estado inicial del borrador SOLO cuando cambia a un pedido
+  // distinto (order.id), nunca en cada reload de este mismo pedido -- a
+  // diferencia de antes, un reload ahora puede pasar en medio de una
+  // edición en curso (lo dispara el propio autosave, ver más abajo), y
+  // pisar el borrador local con lo último que devolvió el servidor
+  // rompería justo lo que se estaba tipeando si hubo un cambio nuevo
+  // durante el viaje de ida y vuelta. */
   useEffect(() => {
     if (isNew || !order) return
     setContactId(order.contact_id)
@@ -355,19 +450,7 @@ export function OrderDetail() {
     setValidUntil(order.valid_until ?? '')
     setShippingAddressId(order.shipping_address_id ?? '')
     setBillingAddressId(order.billing_address_id ?? '')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [order?.id, order?.contact_id, order?.opportunity_id, order?.status, order?.valid_until, order?.shipping_address_id, order?.billing_address_id])
-
-  // Items+shipping+tax baseline: only on order.id changing (a different
-  // order loaded), or right after this block's own save (handled inline in
-  // handleSaveItemsBlock) -- never in response to a reload triggered by
-  // another block (changing contact, logging a payment, voiding).
-  useEffect(() => {
-    if (isNew || !order) return
     setShippingDraft(String(order.shipping))
-    setSavedShipping(String(order.shipping))
-    setTaxDraft(String(order.tax_total))
-    setSavedTaxTotal(String(order.tax_total))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order?.id])
 
@@ -434,46 +517,105 @@ export function OrderDetail() {
   const commentsList = useMemo(() => (comments ? comments.filter((c) => !c.is_internal) : null), [comments])
   const totalPaid = useMemo(() => (payments ?? []).reduce((sum, p) => sum + p.amount, 0), [payments])
   const totalQuantity = useMemo(() => items.reduce((sum, i) => sum + i.quantity, 0), [items])
-  const previewTotals = useMemo(() => computeOrderTotals(items, Number(shippingDraft) || 0, Number(taxDraft) || 0), [items, shippingDraft, taxDraft])
-
-  const itemsDirty = savedItems !== null && !itemsEqual(items, savedItems)
-  const shippingDirty = savedShipping !== null && shippingDraft !== savedShipping
-  const taxDirty = savedTaxTotal !== null && taxDraft !== savedTaxTotal
-  const blockDirty = itemsDirty || shippingDirty || taxDirty
+  // Solo para el modo "crear", antes de que exista un order_id real que el
+  // servidor pueda calcular -- ver comentario grande en el resumen del
+  // render. No es un cálculo de impuesto/descuento, es la misma suma que ya
+  // se ve línea por línea en OrderItemsEditor.
+  const draftSubtotalEstimate = useMemo(() => items.reduce((sum, i) => sum + i.quantity * i.unit_price - (i.discount_amount ?? 0), 0), [items])
 
   const contactError = isNew && touched && !isNotBlank(contactId) ? t('orders.drawer.errors.contactRequired') : undefined
 
-  function handleContactSelect(newContactId: string | null) {
-    setEditingContact(false)
-    if (isNew) {
-      setContactId(newContactId ?? '')
+  // ----- Autosave centralizado: TODO el estado editable del pedido
+  // (cliente, oportunidad, válida hasta, direcciones, envío, ítems) vive en
+  // el estado local de arriba, y este único efecto es lo único que lo
+  // persiste -- 2s después del último cambio, llama a calculate-order
+  // (Edge Function) con el borrador completo. Nada de subtotal/impuesto/
+  // total se calcula acá: lo que se ve en pantalla siempre sale de `order`,
+  // que se refresca con la respuesta real del servidor después de guardar.
+  // Pedido explícito del usuario 2026-09-03: un solo proceso centralizado,
+  // sin cálculos en el frontend, sin guardado inmediato por campo.
+  //
+  // primedOrderIdRef + lastSyncedSnapshotRef existen para no disparar un
+  // guardado fantasma apenas se termina de cargar el pedido (eso no es una
+  // edición del agente, es el estado que ya está en el servidor) -- recién
+  // "priming" cuando tanto `order` como los ítems (que llegan por una
+  // fetch aparte, ver reloadItems/itemsLoaded) ya cargaron los dos.
+  const primedOrderIdRef = useRef<string | null>(null)
+  const lastSyncedSnapshotRef = useRef<string>('')
+
+  function currentDraftSnapshot(): string {
+    return JSON.stringify({ contactId, opportunityId, validUntil, shippingAddressId, billingAddressId, shippingDraft, items })
+  }
+
+  async function saveDraft(orderId: string, snapshot: string) {
+    if (hasIncompleteVariantSelection(items, products)) {
+      setActionError(t('orders.itemsEditor.variantRequired'))
       return
     }
-    // Contact is required on an existing order -- there's no way to clear
-    // it from the picker (it's shown empty/value=null while editingContact
-    // is true, see the card below), so a null here can only mean the user
-    // reopened the picker and closed it without choosing anyone -- silently
-    // ignored instead of autosaving an invalid null.
-    if (!newContactId || !order || newContactId === order.contact_id) return
     setActionError(null)
-    updateOrderFields(order.id, { contact_id: newContactId, opportunity_id: null, shipping_address_id: null, billing_address_id: null })
-      .then(() => {
-        setContactChangedNotice(true)
-        reloadOrder()
+    setSavingDraft(true)
+    try {
+      await calculateOrder({
+        order_id: orderId,
+        contact_id: contactId,
+        opportunity_id: opportunityId || null,
+        valid_until: validUntil || null,
+        shipping_address_id: shippingAddressId || null,
+        billing_address_id: billingAddressId || null,
+        shipping: Number(shippingDraft) || 0,
+        items,
       })
-      .catch((err) => setActionError(err instanceof Error ? err.message : t('orders.drawer.errors.save')))
+      lastSyncedSnapshotRef.current = snapshot
+      reloadOrder()
+      reloadItems()
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : t('orders.drawer.errors.save'))
+    } finally {
+      setSavingDraft(false)
+    }
+  }
+
+  useEffect(() => {
+    // Ya no es cotización -- venta real, nada de esto se autoguarda más
+    // (mismo candado que calculate-order/index.ts aplica del lado del
+    // servidor; esto es solo para no ni siquiera intentar el viaje de red
+    // si por lo que sea un control quedó habilitado).
+    if (isNew || !order || !itemsLoaded || order.status !== 'cotizacion') return
+    const snapshot = currentDraftSnapshot()
+
+    if (primedOrderIdRef.current !== order.id) {
+      // Recién terminó de cargar este pedido -- es el estado base, no un
+      // cambio del agente. Nada que guardar todavía.
+      primedOrderIdRef.current = order.id
+      lastSyncedSnapshotRef.current = snapshot
+      return
+    }
+    if (snapshot === lastSyncedSnapshotRef.current) return
+
+    const timer = setTimeout(() => {
+      void saveDraft(order.id, snapshot)
+    }, 2000)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order?.id, itemsLoaded, contactId, opportunityId, validUntil, shippingAddressId, billingAddressId, shippingDraft, items])
+
+  function handleContactSelect(newContactId: string | null) {
+    setEditingContact(false)
+    if (!newContactId || newContactId === contactId) return
+    setContactId(newContactId)
+    // Cambiar de cliente invalida oportunidad/direcciones del cliente
+    // anterior -- solo tiene sentido resetearlas en modo edición (al crear
+    // todavía no había nada elegido).
+    if (!isNew) {
+      setOpportunityId('')
+      setShippingAddressId('')
+      setBillingAddressId('')
+      setContactChangedNotice(true)
+    }
   }
 
   function handleOpportunitySelect(newId: string | null) {
-    if (isNew) {
-      setOpportunityId(newId ?? '')
-      return
-    }
-    if (!order) return
-    setActionError(null)
-    updateOrderFields(order.id, { opportunity_id: newId || null })
-      .then(reloadOrder)
-      .catch((err) => setActionError(err instanceof Error ? err.message : t('orders.drawer.errors.save')))
+    setOpportunityId(newId ?? '')
   }
 
   async function handleStatusSelect(newStatus: OrderStatus) {
@@ -513,6 +655,19 @@ export function OrderDetail() {
    * types/domain.ts). */
   function handleDeliveryStatusSelect(newStatus: DeliveryStatus) {
     if (!order) return
+    // Pedido explícito del usuario 2026-09-04: despachar con saldo
+    // pendiente no se bloquea (puede ser una decisión real del negocio),
+    // pero exige una confirmación explícita en vez de aplicarse directo --
+    // ver pendingDeliveryStatus/ConfirmDialog más abajo.
+    if (newStatus !== 'pendiente' && balance > 0) {
+      setPendingDeliveryStatus(newStatus)
+      return
+    }
+    applyDeliveryStatus(newStatus)
+  }
+
+  function applyDeliveryStatus(newStatus: DeliveryStatus) {
+    if (!order) return
     setActionError(null)
     updateDeliveryStatus(order.id, newStatus)
       .then(reloadOrder)
@@ -521,50 +676,27 @@ export function OrderDetail() {
 
   function handleValidUntilChange(value: string) {
     setValidUntil(value)
-    if (isNew || !order) return
-    setActionError(null)
-    updateOrderFields(order.id, { valid_until: value || null })
-      .then(reloadOrder)
-      .catch((err) => setActionError(err instanceof Error ? err.message : t('orders.drawer.errors.save')))
   }
 
   function handleAddressSelect(kind: 'shipping' | 'billing', addressId: string | null) {
-    if (kind === 'shipping') setEditingShippingAddress(false)
-    else setEditingBillingAddress(false)
-    if (isNew) {
-      if (kind === 'shipping') setShippingAddressId(addressId ?? '')
-      else setBillingAddressId(addressId ?? '')
-      return
+    if (kind === 'shipping') {
+      setEditingShippingAddress(false)
+      setShippingAddressId(addressId ?? '')
+    } else {
+      setEditingBillingAddress(false)
+      setBillingAddressId(addressId ?? '')
     }
-    if (!order) return
-    setActionError(null)
-    updateOrderFields(order.id, kind === 'shipping' ? { shipping_address_id: addressId || null } : { billing_address_id: addressId || null })
-      .then(reloadOrder)
-      .catch((err) => setActionError(err instanceof Error ? err.message : t('orders.detail.errors.address')))
   }
 
   /** New address created inline (see the "+" next to each address field) --
    * auto-applies it to whichever role(s) it was flagged for if that role is
    * still unset, so creating a shipping address is normally a single action
-   * instead of create-then-pick. Works the same in both modes; only the
-   * persistence differs. */
+   * instead of create-then-pick. Solo toca estado local -- el autosave
+   * centralizado se encarga de persistirlo. */
   function handleAddressCreated(newAddress: ContactAddress) {
     setAddresses((prev) => [newAddress, ...prev])
-    if (isNew) {
-      if (newAddress.is_shipping && !shippingAddressId) setShippingAddressId(newAddress.id)
-      if (newAddress.is_billing && !billingAddressId) setBillingAddressId(newAddress.id)
-      return
-    }
-    if (!order) return
-    const patch: Partial<OrderInput> = {}
-    if (newAddress.is_shipping && !order.shipping_address_id) patch.shipping_address_id = newAddress.id
-    if (newAddress.is_billing && !order.billing_address_id) patch.billing_address_id = newAddress.id
-    if (Object.keys(patch).length === 0) return
-    updateOrderFields(order.id, patch)
-      .then(reloadOrder)
-      .catch(() => {
-        /* address is saved either way -- worst case the agent picks it manually */
-      })
+    if (newAddress.is_shipping && !shippingAddressId) setShippingAddressId(newAddress.id)
+    if (newAddress.is_billing && !billingAddressId) setBillingAddressId(newAddress.id)
   }
 
   async function handleAddNote(e: FormEvent) {
@@ -580,27 +712,6 @@ export function OrderDetail() {
       setActionError(err instanceof Error ? err.message : t('orders.detail.errors.notes'))
     } finally {
       setSavingNote(false)
-    }
-  }
-
-  async function handleSaveItemsBlock() {
-    if (isNew || !order || !profile?.tenant_id) return
-    if (hasIncompleteVariantSelection(items, products)) {
-      setActionError(t('orders.itemsEditor.variantRequired'))
-      return
-    }
-    setActionError(null)
-    setSavingItems(true)
-    try {
-      await updateOrderItemsAndTotals(order.id, profile.tenant_id, items, Number(shippingDraft) || 0, Number(taxDraft) || 0)
-      setSavedItems(items)
-      setSavedShipping(shippingDraft)
-      setSavedTaxTotal(taxDraft)
-      reloadOrder()
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : t('orders.detail.errors.items'))
-    } finally {
-      setSavingItems(false)
     }
   }
 
@@ -633,18 +744,21 @@ export function OrderDetail() {
 
     setCreating(true)
     try {
-      const input: OrderInput = {
-        tenant_id: profile.tenant_id,
+      // calculate-order siempre crea en 'cotizacion' (ver comentario de
+      // cabecera en el Edge Function) -- si el agente eligió "Confirmada"
+      // en este formulario, el paso a confirmada es una segunda llamada,
+      // ahora que los ítems ya existen de verdad y el trigger de
+      // confirmación tiene algo real contra qué validar stock.
+      const created = await calculateOrder({
         contact_id: contactId,
         opportunity_id: opportunityId || null,
-        status,
-        shipping: Number(shippingDraft) || 0,
-        tax_total: Number(taxDraft) || 0,
         valid_until: validUntil || null,
         shipping_address_id: shippingAddressId || null,
         billing_address_id: billingAddressId || null,
-      }
-      const created = await createOrder(input, validItems)
+        shipping: Number(shippingDraft) || 0,
+        items: validItems,
+      })
+      if (status === 'confirmada') await updateOrderStatus(created.id, 'confirmada')
       navigate(`/app/sales/${created.id}`, { replace: true })
     } catch (err) {
       setActionError(err instanceof Error ? err.message : t('orders.detail.errors.create'))
@@ -658,17 +772,8 @@ export function OrderDetail() {
     if (!commentDraft.trim() || !profile?.tenant_id || !id) return
     setSavingComment(true)
     try {
-      const comment = await createComment(profile.tenant_id, id, commentDraft.trim())
-      if (commentAttachment) {
-        try {
-          const attachment = await uploadOrderCommentAttachment(profile.tenant_id, commentAttachment, comment.id)
-          setAttachmentsByComment((prev) => ({ ...prev, [comment.id]: [attachment] }))
-        } catch (attachmentErr) {
-          console.error('No se pudo subir la imagen del comentario', attachmentErr)
-        }
-      }
+      await createComment(profile.tenant_id, id, commentDraft.trim())
       setCommentDraft('')
-      setCommentAttachment(null)
       setAddingComment(false)
       reloadComments()
     } catch {
@@ -733,6 +838,35 @@ export function OrderDetail() {
 
   const balance = order ? Math.max(0, order.total - totalPaid) : 0
   const selectedContact = contacts.find((c) => c.id === contactId)
+  // Reglas explícitas del usuario 2026-09-04 -- ya no es "apenas se
+  // confirma": una venta confirmada que TODAVÍA no salió (sin despachar) y
+  // cuya factura TODAVÍA no se envió/aceptó por la DIAN sigue siendo
+  // corregible (typo en el precio antes de que el cliente reciba el
+  // pedido). Se bloquea recién cuando pasa alguna de estas dos cosas
+  // reales e irreversibles -- y en esos dos casos también se bloquea
+  // Anular, no solo la composición del pedido:
+  // - la factura electrónica ya fue enviada/aceptada por la DIAN (un
+  //   documento fiscal ya transmitido no se puede pisar por debajo; si la
+  //   DIAN la RECHAZÓ sigue editable a propósito, para poder corregir y
+  //   reintentar);
+  // - el pedido ya tiene algún movimiento de despacho (delivery_status
+  //   distinto de 'pendiente', ya sea vía el select simple o el módulo de
+  //   Despachos, que mantiene este mismo campo sincronizado).
+  // Un pedido anulado también queda bloqueado, pero eso ya es automático:
+  // el botón "Anular" solo existe mientras status === 'confirmada' (ver
+  // más abajo), así que una vez anulado no hay ninguna acción de
+  // composición que mostrar de todos modos.
+  const dianLocksOrder = !!latestInvoice && (latestInvoice.status === 'sent' || latestInvoice.status === 'accepted')
+  // Hallazgo real al probar: con el módulo de Despachos habilitado,
+  // sales_orders.delivery_status NUNCA se sincroniza (confirmado leyendo
+  // log_dispatch_status_change() -- solo escribe dispatch_status_history,
+  // no toca delivery_status) -- la única señal real ahí es que exista una
+  // fila en `dispatches` para este pedido, sin importar en qué estado
+  // (dispatchStatus !== null, ver reloadDispatchStatus). Sin el módulo, la
+  // única vía es el select simple, que sí escribe delivery_status
+  // directo. Hay que chequear las dos.
+  const dispatchLocksOrder = !!order && (dispatchStatus !== null || order.delivery_status !== 'pendiente')
+  const locked = !isNew && !!order && (dianLocksOrder || dispatchLocksOrder || order.status === 'cancelada')
 
   const addressField = (kind: 'shipping' | 'billing') => {
     const value = kind === 'shipping' ? shippingAddressId : billingAddressId
@@ -754,9 +888,11 @@ export function OrderDetail() {
                 <p className="truncate text-xs text-brand-400">{[selected.city, selected.state_province, selected.country].filter(Boolean).join(', ')}</p>
               )}
             </div>
-            <Button type="button" variant="default" size="icon-sm" onClick={() => setEditing(true)} aria-label={t('orders.detail.changeAddressAria')} className="shrink-0">
-              <PencilIcon width={12} height={12} />
-            </Button>
+            {!locked && (
+              <Button type="button" variant="default" size="icon-sm" onClick={() => setEditing(true)} aria-label={t('orders.detail.changeAddressAria')} className="shrink-0">
+                <PencilIcon width={12} height={12} />
+              </Button>
+            )}
           </div>
         ) : (
           <div className="mt-1 flex gap-2">
@@ -767,6 +903,7 @@ export function OrderDetail() {
               placeholder={t('orders.detail.noAddress')}
               searchPlaceholder={t('orders.detail.searchAddress')}
               emptyLabel={t('orders.detail.noAddressResults')}
+              disabled={locked}
               className="min-w-0 flex-1"
               triggerClassName="min-w-0 flex-1 shrink"
             />
@@ -775,7 +912,7 @@ export function OrderDetail() {
               variant="default"
               size="icon"
               onClick={() => setAddressDrawerOpen(true)}
-              disabled={!contactId}
+              disabled={!contactId || locked}
               aria-label={t('orders.detail.newAddressAria')}
               className="shrink-0"
             >
@@ -787,15 +924,74 @@ export function OrderDetail() {
     )
   }
 
-  const itemsSaveAction = !isNew && blockDirty ? (
-    <Button size="sm" onClick={handleSaveItemsBlock} disabled={savingItems}>
-      {savingItems ? t('common.actions.saving') : t('common.actions.saveChanges')}
-    </Button>
-  ) : undefined
+  // Sin botón de "Guardar" -- el autosave (ver useEffect de arriba)
+  // persiste solo, 2s después del último cambio. Este indicador es
+  // puramente informativo.
+  const itemsSaveAction = !isNew && savingDraft ? <span className="text-xs font-medium text-brand-400">{t('common.actions.saving')}</span> : undefined
 
   const showPayments = (isNew ? status : order?.status) !== 'cotizacion'
   const showTasks = !isNew && !!relatedTasks && relatedTasks.length > 0
-  const hasSidePanel = showPayments || showTasks
+  const showInvoiceCard = !isNew && !!latestInvoice
+  const hasSidePanel = showPayments || showTasks || showInvoiceCard
+
+  const isInvoiceAdmin = profile?.role === 'tenant_admin' || profile?.role === 'superadmin'
+  // Pedido explícito del usuario 2026-09-04: no se manda un documento fiscal
+  // real a la DIAN de una venta que todavía no está cobrada del todo -- el
+  // candado real está en dian-submit/index.ts (rechaza aunque alguien llame
+  // la función directo), esto es solo la parte de UX.
+  const isFullyPaid = balance === 0
+  const canSendInvoice = latestInvoice?.status === 'pending' && isInvoiceAdmin && isFullyPaid
+  // Reintentar sólo tiene sentido sobre un intento que ya fracasó: el índice
+  // único parcial de sales_invoices no admite un segundo intento vivo
+  // mientras el anterior no esté en 'rejected'/'error'.
+  const canRetryInvoice = (latestInvoice?.status === 'rejected' || latestInvoice?.status === 'error') && isInvoiceAdmin && isFullyPaid
+  // Para explicarle al agente POR QUÉ no ve el botón cuando la factura ya
+  // está en un estado que normalmente lo mostraría -- distinto de "no sos
+  // admin" (eso no se explica, es autoevidente por el rol).
+  const invoiceBlockedByBalance = !isFullyPaid && isInvoiceAdmin && (latestInvoice?.status === 'pending' || latestInvoice?.status === 'rejected' || latestInvoice?.status === 'error')
+  // Una sola fila: el estado actual de la factura ante la DIAN y la acción
+  // que corresponda (enviarla, o reintentar si falló). Sin listado de
+  // intentos y sin botón de descarga -- la descarga vive una sola vez, en el
+  // encabezado del pedido (feedback explícito del usuario 2026-09-03).
+  const invoiceCard = latestInvoice && (
+    <StatCard title={t('einvoicing.cardTitle')}>
+      <div className="flex items-center justify-between gap-2">
+        <Badge variant="outline" className={`border-transparent ${INVOICE_STATUS_VARIANT[latestInvoice.status]}`}>
+          {t(`einvoicing.status.${latestInvoice.status}`)}
+        </Badge>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {canSendInvoice && (
+            <Button type="button" size="sm" onClick={() => handleSendInvoice()} disabled={sendingInvoice}>
+              {sendingInvoice ? t('einvoicing.detail.sending') : t('einvoicing.detail.send')}
+            </Button>
+          )}
+          {canRetryInvoice && (
+            <Button type="button" size="sm" onClick={() => handleSendInvoice(true)} disabled={sendingInvoice}>
+              <RefreshCwIcon className="size-3.5" />
+              {sendingInvoice ? t('einvoicing.detail.retrying') : t('einvoicing.detail.retry')}
+            </Button>
+          )}
+        </div>
+      </div>
+      {/* El motivo del rechazo es justamente lo que hace falta para poder
+          corregir y reintentar -- es el único dato del fracaso que se
+          conserva a la vista. */}
+      {latestInvoice.status_detail && <p className="mt-1.5 text-xs text-amber-700">{latestInvoice.status_detail}</p>}
+      {invoiceBlockedByBalance && <p className="mt-1.5 text-xs text-amber-700">{t('einvoicing.detail.balancePending', { amount: formatCurrency(balance, order?.currency) })}</p>}
+      {/* El CUFE es un hash que calculamos nosotros mismos antes de enviar
+          -- existe aunque la DIAN haya rechazado el documento (ver
+          sendInvoiceToDian.ts). Mostrarlo igual acá es engañoso: no
+          significa nada hasta que la DIAN lo acepte de verdad. Mismo
+          criterio ya aplicado al QR del PDF (buildInvoicePdf.ts) --
+          feedback explícito del usuario 2026-09-03. */}
+      {(latestInvoice.status === 'sent' || latestInvoice.status === 'accepted') && latestInvoice.cufe && (
+        <p className="mt-1.5 break-all text-[11px] text-brand-400">
+          {t('einvoicing.detail.cufe')}: {latestInvoice.cufe}
+        </p>
+      )}
+      {sendInvoiceError && <FieldError message={sendInvoiceError} />}
+    </StatCard>
+  )
 
   const paymentsCard =
     !isNew && order ? (
@@ -865,11 +1061,13 @@ export function OrderDetail() {
                   <div className="mt-1 flex items-start justify-between gap-2">
                     <div className="min-w-0 text-sm">
                       <p className="truncate text-brand-800">{selectedContact.full_name}</p>
-                      <p className="truncate text-xs text-brand-400">{[selectedContact.nit ? `NIT ${selectedContact.nit}` : null, formatPhoneDisplay(selectedContact.phone)].filter(Boolean).join(' · ')}</p>
+                      <p className="truncate text-xs text-brand-400">{[selectedContact.nit ? `NIT ${selectedContact.nit}` : null, formatClientPhoneDisplay(selectedContact.phone_prefix, selectedContact.phone)].filter(Boolean).join(' · ')}</p>
                     </div>
-                    <Button type="button" variant="default" size="icon-sm" onClick={() => setEditingContact(true)} aria-label={t('orders.detail.changeContactAria')} className="shrink-0">
-                      <PencilIcon width={12} height={12} />
-                    </Button>
+                    {!locked && (
+                      <Button type="button" variant="default" size="icon-sm" onClick={() => setEditingContact(true)} aria-label={t('orders.detail.changeContactAria')} className="shrink-0">
+                        <PencilIcon width={12} height={12} />
+                      </Button>
+                    )}
                   </div>
                 ) : (
                   <ComboboxFilter
@@ -879,6 +1077,7 @@ export function OrderDetail() {
                     placeholder={t('orders.drawer.fields.selectPlaceholder')}
                     searchPlaceholder={t('orders.detail.searchContact')}
                     emptyLabel={t('orders.detail.noContactResults')}
+                    disabled={locked}
                     className="mt-1 w-full"
                     triggerClassName="min-w-0 flex-1 shrink"
                   />
@@ -954,6 +1153,7 @@ export function OrderDetail() {
                   placeholder={t('orders.drawer.fields.noOpportunity')}
                   searchPlaceholder={t('orders.detail.searchOpportunity')}
                   emptyLabel={t('orders.detail.noOpportunityResults')}
+                  disabled={locked}
                   className="mt-1 w-full"
                   triggerClassName="min-w-0 flex-1 shrink"
                 />
@@ -991,6 +1191,7 @@ export function OrderDetail() {
         {hasSidePanel && (
           <div className="space-y-4">
             {showPayments && paymentsCard}
+            {showInvoiceCard && invoiceCard}
             {showTasks && (
               <StatCard title={t('orders.detail.relatedTasks')}>
                 <ul className="space-y-1.5">
@@ -1033,6 +1234,7 @@ export function OrderDetail() {
           stockRows={stockRows}
           shortfalls={stockShortfalls}
           currency={order?.currency ?? 'COP'}
+          locked={locked}
           onChange={(next) => {
             setItems(next)
             // Stale otherwise -- a shortfall found for the old quantities/
@@ -1049,32 +1251,40 @@ export function OrderDetail() {
       </StatCard>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {/* 3. Resumen de la orden -- Impuestos/Envío se editan acá (mismo
-            guardado por lote que Ítems, ver itemsSaveAction), Subtotal/
-            Descuentos/Total son derivados de los ítems. */}
+        {/* 3. Resumen de la orden -- 2026-09-03: nada de esto se calcula acá.
+            Subtotal/Descuentos/Impuesto/Total salen siempre de `order`, la
+            respuesta real de calculate-order (Edge Function) -- el
+            autosave (ver useEffect de arriba) la refresca sola 2s después
+            del último cambio. La única excepción es el modo "crear": como
+            todavía no existe un pedido real que el servidor pueda
+            calcular, se muestra una suma simple de las líneas (ya visible
+            por línea en OrderItemsEditor) solo como referencia hasta que
+            se guarde -- no es el total final, ni calcula impuesto. */}
         <StatCard title={t('orders.detail.orderSummary')} action={itemsSaveAction}>
           <div className="space-y-1.5 text-xs">
             <div className="flex items-center justify-between text-brand-500">
               <span>{t('orders.detail.subtotal')}</span>
-              <span className="font-medium text-brand-700">{formatCurrency(previewTotals.subtotal, order?.currency ?? 'COP')}</span>
+              <span className="font-medium text-brand-700">{formatCurrency(order?.subtotal ?? draftSubtotalEstimate, order?.currency ?? 'COP')}</span>
             </div>
-            {previewTotals.discountTotal > 0 && (
+            {!!order?.discount_total && order.discount_total > 0 && (
               <div className="flex items-center justify-between text-brand-500">
                 <span>{t('orders.detail.discounts')}</span>
-                <span className="font-medium text-emerald-600">-{formatCurrency(previewTotals.discountTotal, order?.currency ?? 'COP')}</span>
+                <span className="font-medium text-emerald-600">-{formatCurrency(order.discount_total, order.currency)}</span>
+              </div>
+            )}
+            {!!order?.tax_total && order.tax_total > 0 && (
+              <div className="flex items-center justify-between gap-3">
+                <span className="shrink-0 text-brand-500">{t('orders.drawer.fields.tax')}</span>
+                <span className="font-medium text-brand-700">{formatCurrencyPrecise(order.tax_total, order.currency)}</span>
               </div>
             )}
             <div className="flex items-center justify-between gap-3">
-              <Label className="shrink-0 text-xs text-brand-500">{t('orders.drawer.fields.tax')}</Label>
-              <CurrencyInput value={taxDraft} onChange={(e) => setTaxDraft(e.target.value)} className="h-7 w-28 text-right text-xs" />
-            </div>
-            <div className="flex items-center justify-between gap-3">
               <Label className="shrink-0 text-xs text-brand-500">{t('orders.drawer.fields.shipping')}</Label>
-              <CurrencyInput value={shippingDraft} onChange={(e) => setShippingDraft(e.target.value)} className="h-7 w-28 text-right text-xs" />
+              <CurrencyInput value={shippingDraft} onChange={(e) => setShippingDraft(e.target.value)} disabled={locked} className="h-7 w-28 text-right text-xs" />
             </div>
             <div className="flex items-center justify-between border-t border-brand-100 pt-1.5">
               <span className="text-sm font-bold text-brand-800">{t('orders.detail.total')}</span>
-              <span className="text-base font-bold text-emerald-600">{formatCurrency(previewTotals.total, order?.currency ?? 'COP')}</span>
+              <span className="text-base font-bold text-emerald-600">{formatCurrency(order?.total ?? draftSubtotalEstimate, order?.currency ?? 'COP')}</span>
             </div>
           </div>
         </StatCard>
@@ -1120,7 +1330,6 @@ export function OrderDetail() {
                   adding={addingComment}
                   onToggleAdd={() => setAddingComment((v) => !v)}
                   addAria={t('orders.detail.addCommentAria')}
-                  attachmentsByComment={attachmentsByComment}
                   form={
                     <form onSubmit={handleAddComment} className="rounded-lg border border-brand-100 bg-brand-50/40 p-2 focus-within:border-accent-300">
                       <Textarea
@@ -1132,7 +1341,6 @@ export function OrderDetail() {
                         className="resize-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
                       />
                       <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
-                        <ImageAttachmentPicker file={commentAttachment} onChange={setCommentAttachment} />
                         <Button type="submit" size="sm" disabled={savingComment || !commentDraft.trim()}>
                           {savingComment ? t('common.actions.saving') : t('common.actions.save')}
                         </Button>
@@ -1183,6 +1391,14 @@ export function OrderDetail() {
                 acá). Solo cubre el estado *comercial* (cotización/venta/
                 anulada) -- el de envío se edita aparte, ver la card 1. */}
             <div className="flex flex-wrap items-center gap-2">
+              {/* Siempre disponible, haya o no facturación DIAN: un tenant
+                  sin configuración DIAN igual necesita imprimir el documento
+                  -- en ese caso el servidor emite una REMISIÓN (mismo
+                  diseño, numerada REM-<pedido>) en vez de una factura
+                  (pedido explícito del usuario 2026-09-04). */}
+              <Button type="button" variant="outline" size="sm" onClick={handleDownloadInvoicePdf} disabled={downloadingInvoiceId !== null}>
+                <DownloadIcon className="size-3.5" /> {downloadingInvoiceId ? t('einvoicing.detail.downloading') : t('einvoicing.detail.downloadPdf')}
+              </Button>
               {order.status === 'cotizacion' && (
                 <>
                   <Button size="sm" onClick={() => handleStatusSelect('confirmada')} disabled={advancingStatus}>
@@ -1193,7 +1409,7 @@ export function OrderDetail() {
                   </Button>
                 </>
               )}
-              {order.status === 'confirmada' && (
+              {order.status === 'confirmada' && !locked && (
                 <Button variant="outline" size="sm" className="text-red-600 hover:bg-red-50" onClick={() => setConfirmingVoid(true)}>
                   {t('orders.detail.voidAction')}
                 </Button>
@@ -1203,6 +1419,10 @@ export function OrderDetail() {
         )
       )}
 
+      {/* El PDF se puede descargar aunque no exista factura DIAN (remisión),
+          así que su error NO puede vivir dentro de la card de Factura DIAN:
+          ahí quedaría invisible justo para los tenants sin DIAN. */}
+      {invoicePdfError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{invoicePdfError}</p>}
       {actionError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{actionError}</p>}
 
       {detailsContent}
@@ -1230,6 +1450,7 @@ export function OrderDetail() {
           onClose={() => setDispatchDrawerOpen(false)}
           tenantId={profile.tenant_id}
           order={order}
+          balance={balance}
           onOrderChanged={() => {
             reloadOrder()
             reloadDispatchStatus()
@@ -1263,6 +1484,18 @@ export function OrderDetail() {
         title={t('orders.detail.deleteTitle')}
         description={t('orders.detail.deleteBody')}
         confirmLabel={t('orders.detail.deleteAction')}
+      />
+
+      <ConfirmDialog
+        open={!!pendingDeliveryStatus}
+        onClose={() => setPendingDeliveryStatus(null)}
+        onConfirm={() => {
+          if (pendingDeliveryStatus) applyDeliveryStatus(pendingDeliveryStatus)
+          setPendingDeliveryStatus(null)
+        }}
+        title={t('orders.detail.dispatchWithBalanceTitle')}
+        description={t('orders.detail.dispatchWithBalanceBody', { amount: formatCurrency(balance, order?.currency) })}
+        confirmLabel={t('orders.detail.dispatchWithBalanceConfirm')}
       />
 
       <StockShortfallDialog shortfalls={stockShortfalls} open={shortfallDialogOpen} onClose={() => setShortfallDialogOpen(false)} />
