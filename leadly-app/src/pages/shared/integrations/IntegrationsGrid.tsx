@@ -9,6 +9,7 @@ import { LaFacturaCredentialDrawer } from './LaFacturaCredentialDrawer'
 import { WompiIntegrationDrawer } from './WompiIntegrationDrawer'
 import { ShopifyCredentialDrawer } from './ShopifyCredentialDrawer'
 import { HubSpotCredentialDrawer } from './HubSpotCredentialDrawer'
+import { DianDirectoCredentialDrawer } from './DianDirectoCredentialDrawer'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import type { TranslationKey } from '../../../i18n/translations'
 
@@ -45,6 +46,13 @@ async function checkConnected(providerKey: string, tenantId: string | null): Pro
   const credential = await getIntegrationCredential(providerKey, tenantId)
   if (!credential) return false
   const secrets = await getIntegrationCredentialConfiguredSecrets(credential.id)
+  if (providerKey === 'dian_directo') {
+    // "Conectado" acá exige el certificado subido (config.storage_path) +
+    // su contraseña -- solo tener un secreto suelto sin el archivo no sirve
+    // para firmar nada.
+    const config = (credential.config ?? {}) as Record<string, unknown>
+    return !!config.storage_path && secrets.includes('certificate_password')
+  }
   return secrets.length > 0
 }
 
@@ -141,6 +149,7 @@ export function IntegrationsGrid({ tenantId, drawerDescription }: { tenantId: st
       {drawerProvider?.key === 'lafactura' && <LaFacturaCredentialDrawer open onClose={closeDrawer} tenantId={tenantId} description={drawerDescription} />}
       {drawerProvider?.key === 'shopify' && <ShopifyCredentialDrawer open onClose={closeDrawer} tenantId={tenantId} description={drawerDescription} />}
       {drawerProvider?.key === 'hubspot' && <HubSpotCredentialDrawer open onClose={closeDrawer} tenantId={tenantId} description={drawerDescription} />}
+      {drawerProvider?.key === 'dian_directo' && <DianDirectoCredentialDrawer open onClose={closeDrawer} tenantId={tenantId} description={drawerDescription} />}
     </div>
   )
 }
