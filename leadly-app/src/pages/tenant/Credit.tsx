@@ -37,17 +37,44 @@ export function Credit() {
   const totalPages = summaries ? Math.max(1, Math.ceil(summaries.length / PAGE_SIZE)) : 1
   const pageItems = useMemo(() => (summaries ? summaries.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE) : null), [summaries, page])
 
+  const totals = useMemo(() => {
+    if (!summaries) return null
+    return summaries.reduce(
+      (acc, { totalCharged, totalPaid, balance }) => ({
+        totalCharged: acc.totalCharged + totalCharged,
+        totalPaid: acc.totalPaid + totalPaid,
+        totalBalance: acc.totalBalance + balance,
+        withBalance: acc.withBalance + (balance > 0 ? 1 : 0),
+      }),
+      { totalCharged: 0, totalPaid: 0, totalBalance: 0, withBalance: 0 },
+    )
+  }, [summaries])
+
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-bold text-brand-800">{t('credit.title')}</h1>
-        <p className="text-sm text-brand-400">{t('credit.description')}</p>
-      </div>
-
-      {summaries && (
-        <span className="text-xs text-brand-400">
-          {summaries.length} {t(summaries.length === 1 ? 'credit.count.singular' : 'credit.count.plural')}
-        </span>
+      {summaries && totals && (
+        <div className="grid grid-cols-2 divide-x divide-y divide-brand-100 overflow-hidden rounded-2xl border border-brand-100 bg-white sm:grid-cols-5 sm:divide-y-0">
+          <div className="px-4 py-3">
+            <p className="text-xs text-brand-400">{t('credit.summary.clients')}</p>
+            <p className="text-lg font-bold text-brand-800">{summaries.length}</p>
+          </div>
+          <div className="px-4 py-3">
+            <p className="text-xs text-brand-400">{t('credit.summary.withBalance')}</p>
+            <p className="text-lg font-bold text-brand-800">{totals.withBalance}</p>
+          </div>
+          <div className="px-4 py-3">
+            <p className="text-xs text-brand-400">{t('credit.table.charged')}</p>
+            <p className="text-lg font-bold text-brand-800">{formatCurrency(totals.totalCharged)}</p>
+          </div>
+          <div className="px-4 py-3">
+            <p className="text-xs text-brand-400">{t('credit.table.paid')}</p>
+            <p className="text-lg font-bold text-emerald-700">{formatCurrency(totals.totalPaid)}</p>
+          </div>
+          <div className="px-4 py-3">
+            <p className="text-xs text-brand-400">{t('credit.table.balance')}</p>
+            <p className={`text-lg font-bold ${totals.totalBalance > 0 ? 'text-red-700' : 'text-emerald-700'}`}>{formatCurrency(totals.totalBalance)}</p>
+          </div>
+        </div>
       )}
 
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}

@@ -1,8 +1,6 @@
 {
-  "credit.title": "Credit",
-  "credit.description": "Clients with credit enabled: how much they owe and how much they've paid.",
-  "credit.count.singular": "client with credit",
-  "credit.count.plural": "clients with credit",
+  "credit.summary.clients": "Clients with credit",
+  "credit.summary.withBalance": "With balance due",
   "credit.empty": "No client has credit enabled yet. Enable it from their profile.",
   "credit.errors.load": "Couldn't load the credit list.",
   "credit.table.client": "Client",

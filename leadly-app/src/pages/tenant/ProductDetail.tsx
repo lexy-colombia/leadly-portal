@@ -355,6 +355,7 @@ export function ProductDetail() {
                 value={product.categories.length > 0 ? formatCategoryHierarchy(product.categories) : '-'}
               />
               <Field className="col-span-2" label={t('products.detail.fields.slug')} value={product.slug ?? '-'} />
+              <Field className="col-span-2" label={t('products.detail.fields.barcode')} value={product.barcode ?? '-'} />
             </div>
           </StatCard>
         </div>

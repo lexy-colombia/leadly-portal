@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { PackageIcon, PlusIcon, SearchIcon, XIcon } from 'lucide-react'
+import { PackageIcon, PlusIcon, XIcon } from 'lucide-react'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import { descendantIds } from '../../../lib/api/productCategories'
 import { Button } from '@/components/ui/button'
@@ -8,11 +8,11 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { CategoryTreeFilter, ComboboxFilter, CurrencyInput, IconInput } from '@/components/molecules'
 import { ProductImage } from '@/components/atoms'
-import { TrashIcon } from '@/components/atoms/icons'
+import { ScanIcon, TrashIcon } from '@/components/atoms/icons'
 import type { OrderItemInput, StockShortfall } from '../../../lib/api/orders'
 import { formatVariantLabel, getProductImageUrl, type ProductWithImages } from '../../../lib/api/products'
 import type { ProductWarehouseStockRow } from '../../../lib/api/stockMovements'
-import type { Brand, ProductCategory, Warehouse } from '../../../types/domain'
+import type { Brand, ProductCategory, ProductVariant, Warehouse } from '../../../types/domain'
 
 function formatCurrency(value: number, currency = 'COP'): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
@@ -38,6 +38,22 @@ function resolveItemImage(product: ProductWithImages | undefined, variantId: str
     || product.images.find((img) => !img.variant_id)
     || product.images[0]
   return image ? getProductImageUrl(image.storage_path) : null
+}
+
+/** Exact-match lookup for a scanned barcode against the already-loaded
+ * catalog -- no round trip needed, unlike PosFastCheckout's lookupPosBarcode,
+ * because `products` here already embeds every variant (barcode included).
+ * Checks variants first: a variant's code is more specific than its parent
+ * product's, same precedence as the POS scanner. */
+function findByBarcode(products: ProductWithImages[], code: string): { product: ProductWithImages; variant: ProductVariant | null } | null {
+  const clean = code.trim()
+  if (!clean) return null
+  for (const product of products) {
+    const variant = product.variants.find((v) => v.barcode === clean)
+    if (variant) return { product, variant }
+  }
+  const product = products.find((p) => p.barcode === clean)
+  return product ? { product, variant: null } : null
 }
 
 /** Line-item editor for an order -- one bordered card per product (image +
@@ -85,6 +101,7 @@ export function OrderItemsEditor({
 
   const [searchOpen, setSearchOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const [scanError, setScanError] = useState<string | null>(null)
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null)
   const [brandFilter, setBrandFilter] = useState<string | null>(null)
   const [stockOnly, setStockOnly] = useState(false)
@@ -103,7 +120,7 @@ export function OrderItemsEditor({
         if (brandFilter && p.brand?.id !== brandFilter) return false
         if (categoryIds && !p.categories.some((c) => categoryIds.has(c.id))) return false
         if (stockOnly && !stockRows.some((r) => r.product_id === p.id && r.quantity > 0)) return false
-        if (q && !p.name.toLowerCase().includes(q) && !(p.sku ?? '').toLowerCase().includes(q)) return false
+        if (q && !p.name.toLowerCase().includes(q) && !(p.sku ?? '').toLowerCase().includes(q) && !(p.barcode ?? '').toLowerCase().includes(q)) return false
         return true
       })
       .slice(0, 30)
@@ -117,21 +134,25 @@ export function OrderItemsEditor({
     onChange(items.filter((_, i) => i !== index))
   }
 
-  function addProductLine(product: ProductWithImages) {
+  /** `variant` is only passed by the barcode scanner (see handleScanSubmit)
+   * -- clicking a search result never knows the variant upfront, that's
+   * still resolved afterwards via the row's own variant Select. */
+  function addProductLine(product: ProductWithImages, variant: ProductVariant | null = null) {
     onChange([
       ...items,
       {
         product_id: product.id,
-        variant_id: null,
+        variant_id: variant?.id ?? null,
         warehouse_id: defaultWarehouseId,
         product_name: product.name,
-        sku: product.sku,
+        sku: variant?.sku ?? product.sku,
         quantity: 1,
         // A variant product's unit_price isn't known until a variant is
-        // chosen below -- see handleVariantSelect -- so this leaves it at 0
-        // rather than defaulting to the parent's retail_price, which would
-        // be wrong for any variant that overrides its own price.
-        unit_price: product.has_variants ? 0 : (product.retail_price ?? 0),
+        // chosen -- see handleVariantSelect -- so this leaves it at 0 rather
+        // than defaulting to the parent's retail_price, which would be
+        // wrong for any variant that overrides its own price. A scanned
+        // variant already carries its own price, so it skips that gap.
+        unit_price: variant ? (variant.retail_price ?? product.retail_price ?? 0) : product.has_variants ? 0 : (product.retail_price ?? 0),
         discount_amount: 0,
         // Informativo nomás -- calculate-order (Edge Function) vuelve a
         // resolver el impuesto real del lado del servidor contra la tabla
@@ -140,6 +161,25 @@ export function OrderItemsEditor({
         tax_rate: product.tax_rate ?? 0,
       },
     ])
+  }
+
+  /** Scanner support: the barcode input is the same free-text search field
+   * above -- a USB/Bluetooth reader just types fast and sends Enter, so
+   * Enter always tries an EXACT match first (a partial/ilike match would be
+   * wrong for a real barcode) before falling back to nothing, same
+   * precedence PosFastCheckout uses. Typing and clicking a result row (the
+   * fuzzy path) is untouched. */
+  function handleScanSubmit() {
+    const code = query.trim()
+    if (!code) return
+    const match = findByBarcode(products, code)
+    if (!match) {
+      setScanError(t('orders.itemsEditor.search.scanNotFound', { code }))
+      return
+    }
+    addProductLine(match.product, match.variant)
+    setQuery('')
+    setScanError(null)
   }
 
   function addCustomLine() {
@@ -195,14 +235,24 @@ export function OrderItemsEditor({
 
       <div className="relative mt-2">
         <IconInput
-          icon={<SearchIcon className="size-3.5" />}
+          icon={<ScanIcon className="size-3.5" />}
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            setQuery(e.target.value)
+            setScanError(null)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              handleScanSubmit()
+            }
+          }}
           placeholder={t('orders.itemsEditor.search.placeholder')}
           autoFocus
           className="!rounded-lg !text-xs"
         />
       </div>
+      {scanError && <p className="mt-1 text-[11px] font-medium text-red-600">{scanError}</p>}
 
       <div className="mt-2 max-h-64 divide-y divide-brand-100 overflow-y-auto rounded-lg border border-brand-100 bg-white">
         {results.length === 0 && <p className="px-3 py-4 text-center text-xs text-brand-400">{t('orders.itemsEditor.noProductResults')}</p>}
@@ -215,7 +265,7 @@ export function OrderItemsEditor({
           >
             <ProductImage src={p.images[0] ? getProductImageUrl(p.images[0].storage_path) : null} name={p.name} className="size-9 shrink-0 rounded-lg" iconSize={16} />
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-brand-800">{p.name}</span>
+              <span className="block truncate text-xs font-medium text-brand-800">{p.name}</span>
               <span className="block truncate text-xs text-brand-400">{p.sku ? `SKU: ${p.sku}` : '—'}</span>
             </span>
           </button>

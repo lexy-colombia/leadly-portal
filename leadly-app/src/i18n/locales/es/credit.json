@@ -1,8 +1,6 @@
 {
-  "credit.title": "Cartera",
-  "credit.description": "Clientes con crédito habilitado: cuánto deben y cuánto han pagado.",
-  "credit.count.singular": "cliente con crédito",
-  "credit.count.plural": "clientes con crédito",
+  "credit.summary.clients": "Clientes con crédito",
+  "credit.summary.withBalance": "Con saldo pendiente",
   "credit.empty": "Ningún cliente tiene crédito habilitado todavía. Actívalo desde su ficha.",
   "credit.errors.load": "No se pudo cargar la cartera.",
   "credit.table.client": "Cliente",

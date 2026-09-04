@@ -53,25 +53,49 @@ export function Returns() {
   const totalPages = returns ? Math.max(1, Math.ceil(returns.length / PAGE_SIZE)) : 1
   const pageItems = useMemo(() => (returns ? returns.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE) : null), [returns, page])
 
+  const totals = useMemo(() => {
+    if (!returns) return null
+    return returns.reduce(
+      (acc, r) => ({
+        totalClaimed: acc.totalClaimed + claimAmount(r),
+        totalResolved: acc.totalResolved + (r.resolution_amount ?? 0),
+        pending: acc.pending + (r.resolution_type ? 0 : 1),
+      }),
+      { totalClaimed: 0, totalResolved: 0, pending: 0 },
+    )
+  }, [returns])
+
   if (!profile?.tenant_id) return <PageSpinner />
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-brand-800">{t('returns.title')}</h1>
-          <p className="text-sm text-brand-400">{t('returns.description')}</p>
-        </div>
-        <Button onClick={() => setCreateOpen(true)}>
+      <div className="flex items-stretch gap-3">
+        {returns && totals ? (
+          <div className="grid flex-1 grid-cols-2 divide-x divide-y divide-brand-100 overflow-hidden rounded-2xl border border-brand-100 bg-white sm:grid-cols-4 sm:divide-y-0">
+            <div className="px-4 py-3">
+              <p className="text-xs text-brand-400">{t('returns.summary.total')}</p>
+              <p className="text-lg font-bold text-brand-800">{returns.length}</p>
+            </div>
+            <div className="px-4 py-3">
+              <p className="text-xs text-brand-400">{t('returns.summary.pending')}</p>
+              <p className="text-lg font-bold text-brand-800">{totals.pending}</p>
+            </div>
+            <div className="px-4 py-3">
+              <p className="text-xs text-brand-400">{t('returns.table.claimAmount')}</p>
+              <p className="text-lg font-bold text-brand-800">{formatCurrency(totals.totalClaimed, 'COP')}</p>
+            </div>
+            <div className="px-4 py-3">
+              <p className="text-xs text-brand-400">{t('returns.summary.resolved')}</p>
+              <p className="text-lg font-bold text-emerald-700">{formatCurrency(totals.totalResolved, 'COP')}</p>
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1" />
+        )}
+        <Button className="shrink-0" onClick={() => setCreateOpen(true)}>
           <PlusIcon width={14} height={14} /> {t('returns.actions.new')}
         </Button>
       </div>
-
-      {returns && (
-        <span className="text-xs text-brand-400">
-          {returns.length} {t(returns.length === 1 ? 'returns.count.singular' : 'returns.count.plural')}
-        </span>
-      )}
 
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       {!returns && !error && <PageSpinner />}

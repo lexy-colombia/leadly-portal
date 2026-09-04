@@ -1,8 +1,7 @@
 {
-  "returns.title": "Returns",
-  "returns.description": "Return and exchange tickets for your sales.",
-  "returns.count.singular": "return",
-  "returns.count.plural": "returns",
+  "returns.summary.total": "Returns",
+  "returns.summary.pending": "Pending resolution",
+  "returns.summary.resolved": "Total resolved",
   "returns.empty": "No returns registered yet.",
   "returns.errors.load": "Couldn't load returns.",
   "returns.table.order": "Sale",

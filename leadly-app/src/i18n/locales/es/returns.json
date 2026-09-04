@@ -1,8 +1,7 @@
 {
-  "returns.title": "Devoluciones",
-  "returns.description": "Tickets de devolución y cambio de tus ventas.",
-  "returns.count.singular": "devolución",
-  "returns.count.plural": "devoluciones",
+  "returns.summary.total": "Devoluciones",
+  "returns.summary.pending": "Pendientes de resolución",
+  "returns.summary.resolved": "Total resuelto",
   "returns.empty": "No hay devoluciones registradas todavía.",
   "returns.errors.load": "No se pudieron cargar las devoluciones.",
   "returns.table.order": "Venta",

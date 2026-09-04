@@ -14,6 +14,8 @@
   "inventory.warehouses.table.status": "Status",
   "inventory.warehouses.table.actions": "Actions",
   "inventory.warehouses.badge.default": "Default",
+  "inventory.warehouses.deleteConfirm.title": "Delete warehouse",
+  "inventory.warehouses.deleteConfirm.description": "Delete \"{name}\"? This can't be undone.",
 
   "inventory.warehouseType.bodega": "Warehouse",
   "inventory.warehouseType.punto_venta": "Point of sale",

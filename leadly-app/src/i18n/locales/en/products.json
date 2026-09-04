@@ -72,6 +72,7 @@
   "products.detail.fields.phone": "Phone",
   "products.detail.fields.email": "Email",
   "products.detail.fields.sku": "SKU",
+  "products.detail.fields.barcode": "Barcode",
   "products.detail.fields.category": "Category",
   "products.detail.fields.slug": "Slug",
   "products.detail.fields.currency": "Currency",

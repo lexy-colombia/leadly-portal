@@ -28,21 +28,28 @@ export function Card({
 
 /** A titled section inside a `padded={false}` Card -- draws the divider that
  * separates it from the next section instead of each section being its own
- * floating Card. Pass `action` for a header-right button (e.g. "Editar"). */
+ * floating Card. Pass `action` for a header-right button (e.g. "Editar"),
+ * and `description` for a one-line subtitle under the title (e.g. the
+ * settings category panels). */
 export function CardSection({
   title,
+  description,
   action,
   children,
 }: {
-  title: string
+  title: ReactNode
+  description?: ReactNode
   action?: ReactNode
   children: ReactNode
 }) {
   return (
     <div className="border-t border-brand-100 p-4 first:border-t-0 sm:p-5">
-      <div className="mb-3.5 flex items-center justify-between gap-3">
-        <h2 className="font-semibold text-brand-700">{title}</h2>
-        {action}
+      <div className="mb-3.5 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="font-semibold text-brand-700">{title}</h2>
+          {description && <p className="mt-0.5 text-xs text-brand-400">{description}</p>}
+        </div>
+        {action && <div className="shrink-0">{action}</div>}
       </div>
       {children}
     </div>

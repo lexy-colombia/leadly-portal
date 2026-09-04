@@ -100,7 +100,12 @@ export function ReturnStatusesSection({ tenantId }: { tenantId: string }) {
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-brand-400">{t('returns.settings.statuses.description')}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-brand-400">{t('returns.settings.statuses.description')}</p>
+        <Button type="button" size="sm" onClick={handleAdd} disabled={adding} className="shrink-0">
+          <PlusIcon width={13} height={13} /> {adding ? t('returns.settings.statuses.adding') : t('returns.settings.statuses.add')}
+        </Button>
+      </div>
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
       {!statuses && !error && <PageSpinner />}
@@ -183,10 +188,6 @@ export function ReturnStatusesSection({ tenantId }: { tenantId: string }) {
           </Table>
         </div>
       )}
-
-      <Button type="button" variant="ghost" size="sm" onClick={handleAdd} disabled={adding}>
-        <PlusIcon width={13} height={13} /> {adding ? t('returns.settings.statuses.adding') : t('returns.settings.statuses.add')}
-      </Button>
 
       <ConfirmDialog
         open={!!statusToDelete}

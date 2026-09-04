@@ -12,6 +12,7 @@ import { useLanguage } from '../../../contexts/LanguageContext'
 import type { TranslationKey } from '../../../i18n/translations'
 import { PageSpinner } from '@/components/atoms'
 import { ConfirmDialog } from '@/components/organisms'
+import { Card, CardSection } from '@/components/molecules'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
@@ -100,8 +101,16 @@ export function DispatchStatusesSection({ tenantId }: { tenantId: string }) {
   }
 
   return (
-    <div className="space-y-3">
-      <p className="text-xs text-brand-400">{t('dispatches.settings.description')}</p>
+    <Card padded={false}>
+      <CardSection
+        title={t('dispatches.settings.title')}
+        description={t('dispatches.settings.description')}
+        action={
+          <Button type="button" size="sm" onClick={handleAdd} disabled={adding}>
+            <PlusIcon width={13} height={13} /> {adding ? t('dispatches.settings.status.adding') : t('dispatches.settings.status.add')}
+          </Button>
+        }
+      >
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
       {!statuses && !error && <PageSpinner />}
@@ -185,10 +194,6 @@ export function DispatchStatusesSection({ tenantId }: { tenantId: string }) {
         </div>
       )}
 
-      <Button type="button" variant="ghost" size="sm" onClick={handleAdd} disabled={adding}>
-        <PlusIcon width={13} height={13} /> {adding ? t('dispatches.settings.status.adding') : t('dispatches.settings.status.add')}
-      </Button>
-
       <ConfirmDialog
         open={!!statusToDelete}
         onClose={() => setStatusToDelete(null)}
@@ -197,6 +202,7 @@ export function DispatchStatusesSection({ tenantId }: { tenantId: string }) {
         description={t('dispatches.settings.deleteStatusConfirm.description', { name: statusToDelete?.name ?? '' })}
         loading={deleting}
       />
-    </div>
+      </CardSection>
+    </Card>
   )
 }
