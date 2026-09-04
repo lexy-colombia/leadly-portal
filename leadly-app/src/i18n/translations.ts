@@ -11,6 +11,7 @@ import esContacts from './locales/es/contacts.json'
 import esDashboard from './locales/es/dashboard.json'
 import esInbox from './locales/es/inbox.json'
 import esIntegrations from './locales/es/integrations.json'
+import esEinvoicing from './locales/es/einvoicing.json'
 import esInventory from './locales/es/inventory.json'
 import esDispatches from './locales/es/dispatches.json'
 import esReturns from './locales/es/returns.json'
@@ -35,6 +36,7 @@ import enContacts from './locales/en/contacts.json'
 import enDashboard from './locales/en/dashboard.json'
 import enInbox from './locales/en/inbox.json'
 import enIntegrations from './locales/en/integrations.json'
+import enEinvoicing from './locales/en/einvoicing.json'
 import enInventory from './locales/en/inventory.json'
 import enDispatches from './locales/en/dispatches.json'
 import enReturns from './locales/en/returns.json'
@@ -64,6 +66,7 @@ export const translations = {
     ...esDashboard,
     ...esInbox,
     ...esIntegrations,
+    ...esEinvoicing,
     ...esContacts,
     ...esOpportunities,
     ...esTasks,
@@ -89,6 +92,7 @@ export const translations = {
     ...enDashboard,
     ...enInbox,
     ...enIntegrations,
+    ...enEinvoicing,
     ...enContacts,
     ...enOpportunities,
     ...enTasks,

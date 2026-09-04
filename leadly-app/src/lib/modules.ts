@@ -1,4 +1,4 @@
-import { AiSparkleIcon, ArchiveIcon, BoxIcon, BuildingIcon, CalendarIcon, ChatBubbleIcon, CheckIcon, CreditCardIcon, DashboardIcon, GlobeIcon, KeyIcon, MegaphoneIcon, ReceiptIcon, RefreshIcon, SettingsIcon, TargetIcon, UsersIcon, WalletIcon } from '@/components/atoms/icons'
+import { AiSparkleIcon, ArchiveIcon, BoxIcon, BuildingIcon, CalendarIcon, ChatBubbleIcon, CheckIcon, CreditCardIcon, DashboardIcon, FileIcon, GlobeIcon, KeyIcon, MegaphoneIcon, ReceiptIcon, RefreshIcon, SettingsIcon, TargetIcon, UsersIcon, WalletIcon } from '@/components/atoms/icons'
 import type { TranslationKey } from '../i18n/translations'
 import type { ComponentType } from 'react'
 
@@ -88,6 +88,17 @@ export const TENANT_MODULES: TenantModuleDefinition[] = [
   { key: 'aiAgents', labelKey: 'common.nav.aiAgents', to: '/app/ai-agents', icon: AiSparkleIcon, viewAction: 'aiAgents.view' },
   { key: 'billing', labelKey: 'common.nav.billing', to: '/app/billing', icon: CreditCardIcon },
   { key: 'integrations', labelKey: 'common.nav.integrations', to: '/app/integrations', icon: GlobeIcon },
+  // "Facturación electrónica" -- distinto de 'billing' (Leadly cobrándole la
+  // suscripción al tenant). El certificado/resolución DIAN se configuran
+  // adentro de Integraciones (proveedor 'dian_directo'); la factura de cada
+  // pedido vive DENTRO de ese pedido (card "Factura DIAN" en OrderDetail.tsx),
+  // no en una lista propia -- feedback explícito del usuario 2026-09-03: no
+  // tiene sentido duplicar comprador/vendedor/ítems en una segunda pantalla
+  // cuando el pedido ya los muestra. Mismo patrón que 'dispatches'/'inventory'
+  // (hideFromNav): el module_key se conserva para que el superadmin lo siga
+  // pudiendo activar/desactivar por tenant desde el backoffice, solo que no
+  // tiene ítem de nav ni ruta propia.
+  { key: 'einvoicing', labelKey: 'common.nav.einvoicing', to: '/app/sales', icon: FileIcon, hideFromNav: true },
   { key: 'users', labelKey: 'common.nav.users', to: '/app/users', icon: UsersIcon, alwaysEnabled: true, adminOnly: true },
   { key: 'roles', labelKey: 'common.nav.roles', to: '/app/roles', icon: KeyIcon, alwaysEnabled: true, adminOnly: true },
   { key: 'settings', labelKey: 'common.nav.settings', to: '/app/settings', icon: SettingsIcon },
