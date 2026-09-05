@@ -1,7 +1,7 @@
 {
   "orders.status.quote": "Cotización",
   "orders.status.confirmed": "Confirmada",
-  "orders.status.cancelled": "Cancelada",
+  "orders.status.cancelled": "Anulada",
   "orders.deliveryStatus.pendiente": "Pendiente",
   "orders.deliveryStatus.enCamino": "En camino",
   "orders.deliveryStatus.entregado": "Entregado",

@@ -68,7 +68,7 @@
   "contacts.detail.sales.empty": "Sin cotizaciones ni ventas todavía.",
   "contacts.order.status.cotizacion": "Cotización",
   "contacts.order.status.confirmada": "Confirmada",
-  "contacts.order.status.cancelada": "Cancelada",
+  "contacts.order.status.cancelada": "Anulada",
   "contacts.detail.conversations.empty": "Todavía no hay conversaciones con este cliente.",
   "contacts.detail.conversations.modeIa": "Modo IA",
   "contacts.detail.conversations.modeHuman": "Modo humano",
