@@ -54,8 +54,12 @@ export function ReceiptPrintPortal({ children, paperWidth, onDone }: { children:
   // el ancho físico del papel) cortan las últimas columnas -- hallazgo real
   // del usuario en 80mm. `box-sizing: border-box` hace que el padding se
   // reste del ancho declarado, no se sume, así que el papel sigue midiendo
-  // exactamente `widthMm`.
-  const sideMarginMm = widthMm === 58 ? 2 : 3
+  // exactamente `widthMm`. Bajado de 3/2mm a 1mm (2026-09-05): con un
+  // "Papel definido por el usuario" configurado en el driver (Epson APD),
+  // ese margen ya puede venir sumado del lado del driver -- este es el
+  // único margen que controlamos con certeza desde acá, así que se achica
+  // al mínimo que sigue evitando el corte de borde reportado antes.
+  const sideMarginMm = 1
   const fontSizePx = widthMm === 58 ? 11 : 12
 
   // Fase 1: medir. Un tick para que el contenido (ya con su ancho y
