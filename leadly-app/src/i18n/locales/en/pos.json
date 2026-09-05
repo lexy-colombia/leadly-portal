@@ -45,6 +45,7 @@
   "pos.tabs.newAccount": "New tab",
   "pos.tabs.empty": "No open tabs.",
   "pos.tabs.itemCount": "{count} items",
+  "pos.tabs.available": "Available",
   "pos.tabs.point": "Point",
   "pos.tabs.noPointOption": "No point",
   "pos.tabs.labelField": "Note (optional)",

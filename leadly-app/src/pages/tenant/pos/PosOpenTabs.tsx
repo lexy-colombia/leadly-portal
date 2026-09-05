@@ -13,6 +13,7 @@ import { getWalkInClient } from '../../../lib/api/pos'
 import type { PosPoint } from '../../../types/domain'
 import { PosTabAccount } from './PosTabAccount'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { PageSpinner } from '@/components/atoms'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ConfirmDialog } from '@/components/organisms'
@@ -205,27 +206,36 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
       {points.length > 0 && (
         <div>
           <h2 className="mb-2 text-sm font-semibold text-brand-800">{t('pos.tabs.pointsTitle')}</h2>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+          {/* Diseño compacto, pedido explícito del usuario: nombre + estado
+              en la misma fila (badge, no una tercera línea de texto), hasta
+              6 columnas en pantallas anchas para ver muchas mesas de un
+              vistazo sin scroll. */}
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {points.map((point) => {
               const account = accountsByPoint.get(point.id)
               if (account) {
+                // Una cuenta abierta sin ítems es una mesa que ya se cobró y
+                // todavía no se cerró (cobrar no cierra la cuenta) -- se
+                // marca para no confundirla con una recién abierta.
+                const isCharged = account.item_count === 0
                 return (
                   <button
                     key={point.id}
                     type="button"
                     onClick={() => setSelectedCartId(account.id)}
-                    className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-left transition-colors hover:bg-amber-100"
+                    className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-left transition-colors hover:bg-amber-100"
                   >
-                    <p className="truncate text-sm font-semibold text-brand-800">{point.name}</p>
+                    <div className="flex items-start justify-between gap-1.5">
+                      <p className="truncate text-sm font-semibold text-brand-800">{point.name}</p>
+                      <Badge variant="outline" className="shrink-0 border-transparent bg-amber-200/60 text-[10px] text-amber-800">
+                        {isCharged ? t('pos.tabs.alreadyCharged') : t('pos.tabs.table.open')}
+                      </Badge>
+                    </div>
                     <p className="truncate text-xs text-brand-500">{account.label || account.contact_name}</p>
-                    <p className="mt-1 text-sm font-bold text-brand-800">{formatCurrency(account.total)}</p>
-                    {/* Una cuenta abierta sin ítems es una mesa que ya se
-                        cobró y todavía no se cerró (cobrar no cierra la
-                        cuenta) -- se marca para no confundirla con una
-                        recién abierta. */}
-                    <p className="text-[11px] text-brand-400">
-                      {account.item_count === 0 ? t('pos.tabs.alreadyCharged') : t('pos.tabs.itemCount', { count: account.item_count })}
-                    </p>
+                    <div className="mt-1.5 flex items-end justify-between gap-1.5">
+                      <span className="text-sm font-bold text-brand-800">{formatCurrency(account.total)}</span>
+                      {account.item_count > 0 && <span className="text-[11px] text-brand-500">{t('pos.tabs.itemCount', { count: account.item_count })}</span>}
+                    </div>
                   </button>
                 )
               }
@@ -235,10 +245,15 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
                   type="button"
                   disabled={creating}
                   onClick={() => handleCreate(point.id)}
-                  className="flex flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-brand-200 p-3 text-center text-brand-400 transition-colors hover:border-accent-400 hover:text-accent-600 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex items-start justify-between gap-1.5 rounded-lg border border-brand-100 bg-white p-2.5 text-left transition-colors hover:border-accent-300 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <span className="text-sm font-medium">{point.name}</span>
-                  <PlusIcon width={16} height={16} />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-brand-800">{point.name}</p>
+                    <p className="text-xs text-brand-400">{t('pos.tabs.available')}</p>
+                  </div>
+                  <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-brand-50 text-brand-400">
+                    <PlusIcon width={13} height={13} />
+                  </span>
                 </button>
               )
             })}
@@ -362,21 +377,32 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
             </Table>
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3">
-            {unassignedAccounts.map((account) => (
-              <button
-                key={account.id}
-                type="button"
-                onClick={() => setSelectedCartId(account.id)}
-                className="rounded-xl border border-brand-100 bg-white p-3 text-left transition-colors hover:border-accent-300"
-              >
-                <p className="truncate text-sm font-semibold text-brand-800">{account.label || account.contact_name}</p>
-                <p className="mt-1 text-sm font-bold text-brand-800">{formatCurrency(account.total)}</p>
-                <p className="text-[11px] text-brand-400">
-                  {account.item_count === 0 ? t('pos.tabs.alreadyCharged') : t('pos.tabs.itemCount', { count: account.item_count })}
-                </p>
-              </button>
-            ))}
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+            {unassignedAccounts.map((account) => {
+              const isCharged = account.item_count === 0
+              return (
+                <button
+                  key={account.id}
+                  type="button"
+                  onClick={() => setSelectedCartId(account.id)}
+                  className="rounded-lg border border-brand-100 bg-white p-2.5 text-left transition-colors hover:border-accent-300"
+                >
+                  <div className="flex items-start justify-between gap-1.5">
+                    <p className="truncate text-sm font-semibold text-brand-800">{account.label || account.contact_name}</p>
+                    <Badge
+                      variant="outline"
+                      className={`shrink-0 border-transparent text-[10px] ${isCharged ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}
+                    >
+                      {isCharged ? t('pos.tabs.alreadyCharged') : t('pos.tabs.table.open')}
+                    </Badge>
+                  </div>
+                  <div className="mt-1.5 flex items-end justify-between gap-1.5">
+                    <span className="text-sm font-bold text-brand-800">{formatCurrency(account.total)}</span>
+                    {account.item_count > 0 && <span className="text-[11px] text-brand-500">{t('pos.tabs.itemCount', { count: account.item_count })}</span>}
+                  </div>
+                </button>
+              )
+            })}
           </div>
         )}
       </div>
