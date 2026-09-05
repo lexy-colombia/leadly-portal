@@ -65,13 +65,20 @@ export function ReceiptPrintPortal({ children, paperWidth, onDone }: { children:
   useEffect(() => {
     const timer = setTimeout(() => {
       const contentPx = contentRef.current?.scrollHeight ?? 0
-      // +10mm de margen de cortina: que la última línea nunca quede al ras
+      // +4mm de margen de cortina: que la última línea nunca quede al ras
       // del corte del rollo, y que un redondeo mínimo entre la medición en
       // pantalla y el layout real de impresión (que sí puede diferir un par
-      // de px por hinting de fuente) nunca deje el cálculo justo corto.
-      // Piso de 30mm para no terminar con una página absurdamente chica si
-      // por lo que sea el contenido midiera ~0.
-      setPageHeightMm(Math.max(30, Math.ceil(contentPx / PX_PER_MM) + 10))
+      // de px por hinting de fuente) nunca deje el cálculo justo corto. No
+      // hace falta más que esto -- el break-inside:avoid de abajo ya es la
+      // protección real contra una segunda página si el cálculo fallara,
+      // este margen es solo estético. Piso de 30mm para no terminar con una
+      // página absurdamente chica si por lo que sea el contenido midiera ~0.
+      // Ojo: el espacio que una Epson TM-T-series deja arriba/abajo del
+      // rollo NO sale de acá -- es el margen no imprimible que el driver
+      // reporta como límite físico del cabezal, `@page { margin: 0 }` ya le
+      // pide al navegador el mínimo posible, pero no puede pedirle menos de
+      // lo que el propio driver dice que el hardware permite.
+      setPageHeightMm(Math.max(30, Math.ceil(contentPx / PX_PER_MM) + 4))
     }, 50)
     return () => clearTimeout(timer)
   }, [])
