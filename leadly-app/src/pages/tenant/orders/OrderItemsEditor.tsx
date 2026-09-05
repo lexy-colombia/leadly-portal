@@ -98,6 +98,11 @@ export function OrderItemsEditor({
 }) {
   const { t } = useLanguage()
   const defaultWarehouseId = warehouses.find((w) => w.is_default)?.id ?? warehouses[0]?.id ?? null
+  // Con una sola bodega (o ninguna) elegir "cuál" es redundante -- todo
+  // producto ya usa defaultWarehouseId de todas formas (ver addProductLine).
+  // Pedido explícito del usuario: sacar el selector de la fila para ganar
+  // espacio, no solo deshabilitarlo con un solo valor fijo.
+  const singleWarehouse = warehouses.length <= 1
 
   const [searchOpen, setSearchOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -303,7 +308,16 @@ export function OrderItemsEditor({
           )
           return (
             <div key={index} className="border-b border-brand-100 py-2 last:border-b-0">
-              <div className="flex flex-wrap items-start gap-2.5">
+              {/* flex-nowrap + scroll horizontal a partir de `sm:` -- pedido
+                  explícito del usuario: esta fila (imagen/producto/variante/
+                  bodega/cantidad/precio/descuento/total/borrar, hasta 9
+                  campos de ancho fijo) nunca debe partirse en una PC, ni
+                  siquiera en una laptop de 13" donde el POS le deja solo 1/3
+                  de pantalla (PosTabAccount.tsx, lg:grid-cols-3) -- antes con
+                  flex-wrap el salto dejaba los inputs de la segunda línea
+                  desalineados respecto a sus etiquetas. Envuelto sólo en
+                  mobile (por debajo de `sm`), donde apilar sí es lo esperado. */}
+              <div className="flex flex-wrap items-start gap-2.5 sm:flex-nowrap sm:overflow-x-auto sm:pb-1">
                 <ProductImage src={resolveItemImage(selectedProduct, item.variant_id)} name={item.product_name || '?'} className="mt-4 size-9 shrink-0 rounded-lg" iconSize={15} fit="contain" />
 
                 <div className="min-w-[160px] flex-1 space-y-1">
@@ -344,41 +358,43 @@ export function OrderItemsEditor({
                   </div>
                 )}
 
-                <div className="w-36 shrink-0">
-                  <span className="mb-0.5 block text-[11px] font-medium text-brand-400">{t('orders.itemsEditor.warehouse')}</span>
-                  {item.product_id ? (
-                    <>
-                      <Select value={item.warehouse_id ?? undefined} onValueChange={(v) => updateItem(index, { warehouse_id: v })} disabled={locked}>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder={t('orders.itemsEditor.selectWarehouse')} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {warehouses.map((w) => {
-                            const wAvailable = availableStock(stockRows, item.product_id, item.variant_id, w.id) ?? 0
-                            return (
-                              <SelectItem
-                                key={w.id}
-                                value={w.id}
-                                meta={
-                                  <span className={`ml-auto shrink-0 text-[11px] ${wAvailable > 0 ? 'text-brand-400' : 'text-red-500'}`}>
-                                    {t('products.table.available', { count: wAvailable })}
-                                  </span>
-                                }
-                              >
-                                {w.name}
-                              </SelectItem>
-                            )
-                          })}
-                        </SelectContent>
-                      </Select>
-                      {available !== null && (
-                        <p className={`mt-1 text-[11px] font-medium ${available <= 0 || isShort ? 'text-red-500' : 'text-brand-400'}`}>{t('products.table.available', { count: available })}</p>
-                      )}
-                    </>
-                  ) : (
-                    <p className="mt-1.5 text-xs text-brand-300">—</p>
-                  )}
-                </div>
+                {!singleWarehouse && (
+                  <div className="w-36 shrink-0">
+                    <span className="mb-0.5 block text-[11px] font-medium text-brand-400">{t('orders.itemsEditor.warehouse')}</span>
+                    {item.product_id ? (
+                      <>
+                        <Select value={item.warehouse_id ?? undefined} onValueChange={(v) => updateItem(index, { warehouse_id: v })} disabled={locked}>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder={t('orders.itemsEditor.selectWarehouse')} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {warehouses.map((w) => {
+                              const wAvailable = availableStock(stockRows, item.product_id, item.variant_id, w.id) ?? 0
+                              return (
+                                <SelectItem
+                                  key={w.id}
+                                  value={w.id}
+                                  meta={
+                                    <span className={`ml-auto shrink-0 text-[11px] ${wAvailable > 0 ? 'text-brand-400' : 'text-red-500'}`}>
+                                      {t('products.table.available', { count: wAvailable })}
+                                    </span>
+                                  }
+                                >
+                                  {w.name}
+                                </SelectItem>
+                              )
+                            })}
+                          </SelectContent>
+                        </Select>
+                        {available !== null && (
+                          <p className={`mt-1 text-[11px] font-medium ${available <= 0 || isShort ? 'text-red-500' : 'text-brand-400'}`}>{t('products.table.available', { count: available })}</p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="mt-1.5 text-xs text-brand-300">—</p>
+                    )}
+                  </div>
+                )}
 
                 <div className="w-20 shrink-0">
                   <span className={`mb-0.5 block text-[11px] font-medium ${isShort ? 'text-red-500' : 'text-brand-400'}`}>{t('orders.itemsEditor.quantity')}</span>
