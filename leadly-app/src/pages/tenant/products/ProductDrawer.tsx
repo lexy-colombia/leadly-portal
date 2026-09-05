@@ -448,7 +448,12 @@ export function ProductDrawer({
               <Label htmlFor="product-tax-type">{t('products.drawer.fields.taxType')}</Label>
               <Select value={taxTypeCode} onValueChange={setTaxTypeCode}>
                 <SelectTrigger id="product-tax-type" className={`mt-1 w-full ${FIELD_CLASS}`}>
-                  <SelectValue />
+                  {/* Radix only learns an item's label once SelectContent has
+                   * mounted (i.e. after the dropdown has been opened once),
+                   * so an empty <SelectValue /> renders blank on first paint
+                   * even though taxTypeCode already has a real value -- pass
+                   * the matched label explicitly instead of relying on that. */}
+                  <SelectValue>{taxTypes.find((tx) => tx.code === taxTypeCode)?.name}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {taxTypes.map((tx) => (
