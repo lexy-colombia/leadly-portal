@@ -500,7 +500,40 @@ export function PosFastCheckout() {
 
         {/* Totales + pago */}
         <div className="rounded-2xl border border-brand-100 bg-white p-3.5">
-          <h3 className="mb-2 text-xs font-semibold tracking-wide text-brand-500 uppercase">{t('pos.totals.title')}</h3>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="text-xs font-semibold tracking-wide text-brand-500 uppercase">{t('pos.totals.title')}</h3>
+            {/* Imprimir lo que ya está cargado, sin necesidad de cobrar
+                primero -- pedido explícito del usuario. Nunca es la misma
+                impresión que la del recibo final: acá no hay pedido ni pago
+                todavía, así que sale como PosPendingReceiptTicket (nunca
+                "factura de venta"). */}
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              onClick={() =>
+                receiptPrinter.printPending(
+                  cart.map((l) => ({ product_name: l.name, sku: l.sku, quantity: l.quantity, subtotal: l.price * l.quantity })),
+                  totals ?? {
+                    tax_enabled: false,
+                    subtotal: total,
+                    discount_total: 0,
+                    taxable_base: total,
+                    tax_total: 0,
+                    shipping: 0,
+                    total,
+                    tax_lines: [],
+                  },
+                  { customerName: customer?.full_name ?? walkIn?.full_name ?? null },
+                )
+              }
+              disabled={cart.length === 0 || receiptPrinter.printing}
+              aria-label={t('pos.receipt.printPending')}
+              title={t('pos.receipt.printPending')}
+            >
+              <PrinterIcon width={13} height={13} />
+            </Button>
+          </div>
           {cart.length === 0 ? (
             <p className="mb-3 rounded-xl border border-dashed border-brand-200 px-3 py-4 text-center text-xs text-brand-400">{t('pos.totals.empty')}</p>
           ) : (
@@ -560,6 +593,9 @@ export function PosFastCheckout() {
           </Button>
         </div>
       </div>
+
+      {receiptPrinter.portal}
+      {receiptPrinter.error && <p className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 shadow-lg">{receiptPrinter.error}</p>}
     </div>
   )
 }

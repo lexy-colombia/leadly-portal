@@ -1,16 +1,19 @@
 import type { PosReceiptData } from '../../lib/api/posReceipt'
 import { PAYMENT_METHOD_LABEL_KEY } from '../../lib/api/orderPayments'
 import { formatDate, formatDateTime } from '../../lib/dates'
+import { formatClientPhoneDisplay } from '../../lib/phone'
 import { useLanguage } from '../../contexts/LanguageContext'
 
-function formatMoney(value: number, currency: string): string {
+export function formatMoney(value: number, currency: string): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 }
 
 /** Fila etiqueta:valor del encabezado -- mismo criterio en toda la app
  * (StatusDotLine, etc.), acá reducido a texto plano porque en papel
- * térmico no hay color, solo blanco y negro. */
-function MetaRow({ label, value }: { label: string; value: string }) {
+ * térmico no hay color, solo blanco y negro. Exportado: lo reusa
+ * PosPendingReceiptTicket (ticket de "lo que tengo cargado", antes de
+ * cobrar) para no duplicar el mismo layout de fila. */
+export function MetaRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between gap-2">
       <span>{label}</span>
@@ -41,6 +44,7 @@ export function PosReceiptTicket({ data }: { data: PosReceiptData }) {
       <div className="pos-receipt-header">
         {tenant.logo_url && <img src={tenant.logo_url} alt="" className="pos-receipt-logo" />}
         <p className="pos-receipt-business-name">{tenant.name}</p>
+        {tenant.legal_name && tenant.legal_name !== tenant.name && <p className="pos-receipt-legal-name">{tenant.legal_name}</p>}
         {tenant.document_number && (
           <p>
             {tenant.document_type ?? 'NIT'} {tenant.document_number}
@@ -89,8 +93,35 @@ export function PosReceiptTicket({ data }: { data: PosReceiptData }) {
         {posPointName && <MetaRow label={t('pos.receipt.point')} value={posPointName} />}
         <MetaRow label={t('pos.receipt.date')} value={formatDateTime(order.created_at, language)} />
         {order.created_by_profile && <MetaRow label={t('pos.receipt.cashier')} value={order.created_by_profile.full_name} />}
-        {order.contact && <MetaRow label={t('pos.receipt.client')} value={order.contact.full_name} />}
       </div>
+
+      {/* Datos del cliente -- mismo criterio que el bloque CLIENTE del PDF
+          (sales-invoice-pdf/buildInvoicePdf.ts: nombre, documento,
+          teléfono, dirección), pedido explícito del usuario: el ticket
+          debe llevar la misma información del cliente que ya lleva el PDF,
+          no solo el nombre. */}
+      {order.contact && (
+        <>
+          <div className="pos-receipt-rule" />
+          <div className="pos-receipt-meta">
+            <MetaRow label={t('pos.receipt.client')} value={order.contact.full_name} />
+            {order.contact.document_number && <MetaRow label={t('pos.receipt.document')} value={order.contact.document_number} />}
+            {order.contact.phone && <MetaRow label={t('pos.receipt.phone')} value={formatClientPhoneDisplay(order.contact.phone_prefix, order.contact.phone)} />}
+            {(order.billing_address ?? order.shipping_address) && (
+              <MetaRow
+                label={t('pos.receipt.address')}
+                value={[
+                  (order.billing_address ?? order.shipping_address)!.line1,
+                  (order.billing_address ?? order.shipping_address)!.city,
+                  (order.billing_address ?? order.shipping_address)!.country,
+                ]
+                  .filter(Boolean)
+                  .join(', ')}
+              />
+            )}
+          </div>
+        </>
+      )}
 
       <div className="pos-receipt-rule" />
 

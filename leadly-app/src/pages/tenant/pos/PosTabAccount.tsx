@@ -474,7 +474,40 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
           )}
 
           <div className="rounded-2xl border border-brand-100 bg-white p-3.5">
-            <h3 className="mb-2 text-xs font-semibold tracking-wide text-brand-500 uppercase">{t('pos.totals.title')}</h3>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h3 className="text-xs font-semibold tracking-wide text-brand-500 uppercase">{t('pos.totals.title')}</h3>
+              {/* Imprimir lo que ya está cargado en la mesa, sin necesidad de
+                  cobrar primero -- pedido explícito del usuario. Nunca es el
+                  mismo ticket que el del cobro final: acá no hay pedido ni
+                  pago todavía (PosPendingReceiptTicket, nunca "factura de
+                  venta"). */}
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                onClick={() =>
+                  receiptPrinter.printPending(
+                    items.map((i) => ({ product_name: i.product_name, sku: i.sku ?? null, quantity: i.quantity, subtotal: i.quantity * i.unit_price - (i.discount_amount ?? 0) })),
+                    totals ?? {
+                      tax_enabled: false,
+                      subtotal: items.reduce((sum, i) => sum + i.quantity * i.unit_price - (i.discount_amount ?? 0), 0),
+                      discount_total: 0,
+                      taxable_base: items.reduce((sum, i) => sum + i.quantity * i.unit_price - (i.discount_amount ?? 0), 0),
+                      tax_total: 0,
+                      shipping: 0,
+                      total: items.reduce((sum, i) => sum + i.quantity * i.unit_price - (i.discount_amount ?? 0), 0),
+                      tax_lines: [],
+                    },
+                    { posPointName, customerName: customer?.full_name ?? null },
+                  )
+                }
+                disabled={items.length === 0 || receiptPrinter.printing}
+                aria-label={t('pos.receipt.printPending')}
+                title={t('pos.receipt.printPending')}
+              >
+                <PrinterIcon width={13} height={13} />
+              </Button>
+            </div>
             {items.length === 0 ? (
               <p className="rounded-xl border border-dashed border-brand-200 px-3 py-4 text-center text-xs text-brand-400">{t('pos.totals.empty')}</p>
             ) : (

@@ -93,11 +93,22 @@ Deno.serve(async (req) => {
     adminClient.from("sales_invoices").select("status, status_detail, invoice_prefix, invoice_number, issue_date, cufe, withholding_total").eq("order_id", order.id).order("attempt_number", { ascending: false }).limit(1).maybeSingle(),
   ]);
 
-  // Remisión: el tenant no tiene facturación electrónica DIAN, así que este
-  // pedido nunca generó una fila de sales_invoices (queueInvoiceGeneration
-  // sale temprano sin credencial activa). Mismo diseño, sin resolución, sin
-  // CUFE y sin QR, y numerado REM-<pedido>.
-  const isRemision = !invoice;
+  // CORREGIDO 2026-09-05 -- error grave reportado por el usuario: antes
+  // alcanzaba con que existiera CUALQUIER fila de sales_invoices (sin
+  // importar su estado) para mostrar el título "Factura Electrónica de
+  // Venta" + la resolución DIAN + un número de documento. Una factura en
+  // 'pending'/'generating'/'sending'/'rejected'/'error' salía con pinta de
+  // documento fiscal real (resolución + numeración autorizada) pero sin
+  // CUFE ni QR -- aparentar un comprobante que legalmente no existe.
+  // `isRemision` ahora exige la prueba concreta de que la DIAN aceptó ESTE
+  // envío puntual: `sent`/`accepted` Y CUFE real Y `invoice_number` real
+  // (los tres solo se escriben juntos, y solo al confirmar la DIAN la
+  // recepción, ver sendInvoiceToDian.ts). Cualquier otro estado -- incluido
+  // "el tenant factura electrónico pero este pedido todavía no se envió o
+  // fue rechazado" -- es remisión sin excepción: sin resolución, sin CUFE,
+  // sin QR, numerada con el pedido (REM-<pedido>).
+  const isValidated = invoice?.status === "sent" || invoice?.status === "accepted";
+  const isRemision = !(invoice && isValidated && invoice.cufe && invoice.invoice_number != null);
 
   const buyer: InvoicePdfBuyer = {
     full_name: client?.full_name ?? null,
@@ -158,9 +169,10 @@ Deno.serve(async (req) => {
     }
   }
 
-  // "REM" en una remisión; en una factura, el prefijo de la resolución (el
-  // guardado en la factura si ya se numeró, si no el vigente del perfil).
-  const displayPrefix = isRemision ? "REM" : (invoice?.invoice_prefix ?? seller.resolution?.prefix ?? null);
+  // "REM" en una remisión; en una factura real (isRemision ya exige que
+  // invoice_prefix/invoice_number se hayan escrito juntos al validarse, ver
+  // arriba), siempre el prefijo real que asignó sendInvoiceToDian.ts.
+  const displayPrefix = isRemision ? "REM" : invoice?.invoice_prefix ?? null;
 
   try {
     const pdfBytes = await buildInvoicePdf({

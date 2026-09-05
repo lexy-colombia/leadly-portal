@@ -329,7 +329,7 @@ export async function listOrdersForOpportunity(opportunityId: string): Promise<O
 }
 
 export type OrderDetail = SalesOrder & {
-  contact: { id: string; full_name: string; phone_prefix: string; phone: string } | null
+  contact: { id: string; full_name: string; phone_prefix: string; phone: string; document_number: string | null } | null
   opportunity: { title: string } | null
   shipping_address: ContactAddress | null
   billing_address: ContactAddress | null
@@ -348,7 +348,7 @@ export async function getOrder(id: string): Promise<OrderDetail | null> {
   const { data, error } = await supabase
     .from('sales_orders')
     .select(
-      '*, contact:clients(id, full_name, phone_prefix, phone), opportunity:opportunities(title), shipping_address:contact_addresses!shipping_address_id(*), billing_address:contact_addresses!billing_address_id(*), created_by_profile:profiles!created_by(full_name), pos_point:pos_points(name)',
+      '*, contact:clients(id, full_name, phone_prefix, phone, document_number), opportunity:opportunities(title), shipping_address:contact_addresses!shipping_address_id(*), billing_address:contact_addresses!billing_address_id(*), created_by_profile:profiles!created_by(full_name), pos_point:pos_points(name)',
     )
     .eq('id', id)
     .is('deleted_at', null)

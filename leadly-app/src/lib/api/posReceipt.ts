@@ -8,12 +8,18 @@ import { getIntegrationCredential } from './integrations'
 import type { SalesInvoiceStatus, SalesOrderItem, SalesOrderPayment, Tenant } from '../../types/domain'
 
 /** Mismo criterio que sales-invoice-pdf/index.ts (la Edge Function que arma
- * el PDF descargable), con un candado extra que el PDF no necesita (ver
- * `hasFiscalSetup` más abajo):
- * - `isRemision`: true salvo que el tenant tenga la fila de sales_invoices
- *   (el trigger de confirmación la crea si dian_directo está activo) Y
- *   además ya haya cargado su resolución real (tenant_dian_profile.is_configured).
- *   Sin las dos cosas es un TICKET nomás -- sin resolución, sin CUFE, sin QR.
+ * el PDF descargable) -- las dos calculan `isRemision` de la misma forma
+ * exacta, ver loadFiscalData más abajo:
+ * - `isRemision`: false ÚNICAMENTE cuando esta factura puntual ya fue
+ *   aceptada/enviada por la DIAN (`status` sent|accepted) Y tiene CUFE real
+ *   Y tiene `invoice_number` real -- los tres se escriben juntos, y solo al
+ *   confirmar la DIAN la recepción (ver sendInvoiceToDian.ts). Cualquier
+ *   otro estado (sin fila de sales_invoices, pending, generating, sending,
+ *   rejected, error, blocked_missing_buyer_data) es remisión sin excepción:
+ *   sin resolución, sin número de factura, sin CUFE, sin QR. No alcanza con
+ *   que el tenant tenga la integración activa y la resolución cargada --
+ *   eso solo dice que PODRÍA facturar, no que esta venta puntual ya está
+ *   facturada.
  * - `isValidated = status sent|accepted`: recién ahí el CUFE es un dato real
  *   que la DIAN aceptó -- antes de eso existe (se calcula ANTES de enviar)
  *   pero mostrarlo sería aparentar un documento verificable que no lo es.
@@ -66,18 +72,29 @@ async function loadFiscalData(tenantId: string, orderNumber: number, orderId: st
     getIntegrationCredential('dian_directo', tenantId),
   ])
 
-  // No alcanza con que exista una fila de sales_invoices -- el trigger que
-  // la crea (apply_sales_order_confirmed_effects) solo mira si la
-  // credencial dian_directo está activa, sin exigir que el tenant ya haya
-  // cargado su resolución real. Un tenant que activó la integración pero
-  // todavía no completó el formulario (ver DianDirectoCredentialDrawer,
-  // is_configured = resolución completa) no tiene ningún dato fiscal real
-  // que mostrar -- imprimir "Factura electrónica de venta" ahí sería
-  // aparentar un documento que no existe. Hallazgo real del usuario
-  // 2026-09-04 contra TecnoNova Colombia (DIAN activada, resolución vacía).
-  const hasFiscalSetup = !!(invoice && dianProfile?.is_configured)
-  const isRemision = !hasFiscalSetup
+  // CORREGIDO 2026-09-05 -- error grave reportado por el usuario: antes
+  // alcanzaba con que existiera una fila de sales_invoices Y el tenant
+  // tuviera su resolución cargada (`dianProfile?.is_configured`) para
+  // mostrar el título "Factura electrónica de venta" + la resolución DIAN +
+  // un número de documento -- sin exigir que la DIAN hubiera aceptado nada
+  // todavía. Una factura en 'pending'/'generating'/'sending'/'rejected'/
+  // 'error' salía con pinta de documento fiscal real (resolución + número)
+  // pero sin CUFE ni QR -- eso es aparentar un comprobante que legalmente
+  // no existe. Peor aún: sin CUFE/invoice_number reales, el número
+  // mostrado caía al número interno del pedido (`?? orderNumber`), que NO
+  // es el consecutivo de la resolución DIAN -- una numeración inventada
+  // bajo el rótulo de "factura electrónica".
+  //
+  // Ahora `isRemision` exige la prueba concreta de que ESTA factura
+  // puntual ya fue validada: `sent`/`accepted` Y tiene CUFE real Y tiene un
+  // `invoice_number` real (asignado únicamente por sendInvoiceToDian.ts
+  // cuando la DIAN confirma la recepción, nunca antes). Cualquier otro
+  // estado -- incluido "el tenant tiene DIAN activada pero este pedido
+  // todavía no se envió o se envió y fue rechazado" -- es remisión sin
+  // excepción: sin resolución, sin CUFE, sin QR, numerada con el pedido
+  // (REM-<pedido>), igual que un tenant sin facturación electrónica.
   const isValidated = invoice?.status === 'sent' || invoice?.status === 'accepted'
+  const isRemision = !(invoice && isValidated && !!invoice.cufe && invoice.invoice_number != null)
   const resolution =
     isRemision || !dianProfile
       ? null
@@ -90,11 +107,14 @@ async function loadFiscalData(tenantId: string, orderNumber: number, orderId: st
           valid_until: dianProfile.resolution_valid_until,
         }
 
-  const displayPrefix = isRemision ? 'REM' : (invoice?.invoice_prefix ?? resolution?.prefix ?? null)
-  const displayNumber = isRemision ? orderNumber : (invoice?.invoice_number ?? orderNumber)
+  // Con isRemision ya corregido, el lado `else` de estos dos ternarios solo
+  // se alcanza cuando invoice/cufe/invoice_number son, por construcción,
+  // reales -- nunca inventa un número a partir del pedido.
+  const displayPrefix = isRemision ? 'REM' : (invoice?.invoice_prefix ?? null)
+  const displayNumber = isRemision ? orderNumber : (invoice?.invoice_number ?? null)
   const documentLabel = displayPrefix ? `${displayPrefix}-${displayNumber}` : String(displayNumber)
 
-  const cufe = !isRemision && isValidated ? (invoice?.cufe ?? null) : null
+  const cufe = isRemision ? null : (invoice?.cufe ?? null)
   let qrVerificationUrl: string | null = null
   let qrDataUrl: string | null = null
   if (cufe) {
