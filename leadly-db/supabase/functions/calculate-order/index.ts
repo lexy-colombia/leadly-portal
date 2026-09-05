@@ -134,6 +134,26 @@ Deno.serve(async (req) => {
 
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
+  // Ningún id que mande el body se escribe a ciegas -- se confirma que sea
+  // del mismo tenant del caller ANTES de usarlo en cualquier insert/update
+  // (headerPatch de un pedido, o el carrito nuevo/existente más abajo).
+  // Mismo criterio que resolveOrderAddress en el storefront y el chequeo de
+  // tenant_role_id en admin-create-tenant-user: nunca confiar en un id
+  // ajeno sin comprobar dueño primero. Sin esto, un tenant_agent podía
+  // enlazar su propio pedido/carrito al contacto o la dirección de OTRO
+  // tenant con solo conocer/adivinar el UUID.
+  const ownershipChecks: { field: string; table: string; id: string | null | undefined }[] = [
+    { field: "contact_id", table: "clients", id: body.contact_id },
+    { field: "opportunity_id", table: "opportunities", id: body.opportunity_id },
+    { field: "shipping_address_id", table: "contact_addresses", id: body.shipping_address_id },
+    { field: "billing_address_id", table: "contact_addresses", id: body.billing_address_id },
+  ];
+  for (const check of ownershipChecks) {
+    if (!check.id) continue;
+    const { data: owned } = await adminClient.from(check.table).select("id").eq("id", check.id).eq("tenant_id", tenantId).maybeSingle();
+    if (!owned) return json({ error: `${check.field} no pertenece a este tenant.` }, 403);
+  }
+
   if (body.preview) {
     const taxEnabled = await isTenantTaxEnabled(adminClient, tenantId);
     const productIds = Array.from(new Set(items.map((i) => i.product_id).filter((id): id is string => !!id)));
@@ -235,7 +255,10 @@ Deno.serve(async (req) => {
     const productIds = Array.from(new Set(items.map((i) => i.product_id).filter((id): id is string => !!id)));
     const productTaxById = new Map<string, { tax_type_code: string | null; tax_rate: number }>();
     if (productIds.length > 0) {
-      const { data: products, error: productsError } = await adminClient.from("products").select("id, tax_type_code, tax_rate").in("id", productIds);
+      // Filtro de tenant explícito -- el admin client no tiene RLS, así que
+      // sin esto un product_id de OTRO tenant igual resolvería su
+      // tax_type_code/tax_rate real.
+      const { data: products, error: productsError } = await adminClient.from("products").select("id, tax_type_code, tax_rate").eq("tenant_id", tenantId).in("id", productIds);
       if (productsError) return json({ error: productsError.message }, 500);
       for (const p of products ?? []) productTaxById.set(p.id, { tax_type_code: p.tax_type_code, tax_rate: p.tax_rate });
     }

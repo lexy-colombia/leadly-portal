@@ -58,11 +58,11 @@ Deno.serve(async (req) => {
 async function handleSendTestInvoice(req: Request, body: { tenant_id?: string; action?: string }): Promise<Response> {
   const authHeader = req.headers.get("Authorization") ?? "";
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-  // DIAN_SUBMIT_TEST_TOKEN: bypass temporal solo para probar manualmente
-  // por curl mientras se desarrollaba esto -- TODO sacarlo en cuanto exista
-  // un caller real (cron/RPC) que sí tenga el service role key.
-  const testToken = Deno.env.get("DIAN_SUBMIT_TEST_TOKEN") ?? "";
-  const authorized = authHeader === `Bearer ${serviceRoleKey}` || (testToken && authHeader === `Bearer ${testToken}`);
+  // Bypass de DIAN_SUBMIT_TEST_TOKEN retirado (auditoría de seguridad
+  // 2026-09-04) -- era un secreto sin caducidad, sin caller real que lo
+  // necesitara. Probar manualmente por curl ahora se hace con el service
+  // role key real, igual que cualquier otro endpoint interno del proyecto.
+  const authorized = authHeader === `Bearer ${serviceRoleKey}`;
   if (!authorized) return jsonResponse({ error: "unauthorized" }, 401);
 
   if (body.action !== "send_test_invoice" || !body.tenant_id) {

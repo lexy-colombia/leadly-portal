@@ -1078,6 +1078,7 @@ export function OrderDetail() {
   const showTasks = !isNew && !!relatedTasks && relatedTasks.length > 0
   const showInvoiceCard = !isNew && !!latestInvoice
   const hasSidePanel = showPayments || showTasks || showInvoiceCard
+  const posPointName = order?.pos_point?.name ?? null
 
   const isInvoiceAdmin = profile?.role === 'tenant_admin' || profile?.role === 'superadmin'
   // Pedido explícito del usuario 2026-09-04: no se manda un documento fiscal
@@ -1358,7 +1359,19 @@ export function OrderDetail() {
         )}
       </div>
 
-      {/* 2. Ítems de la orden */}
+      {/* 2. Punto de venta -- relación real a pos_points (mesa/caja del POS
+          en vivo), no el viejo texto libre de la migración de Fudo (nunca
+          se llegó a poblar, se borró 2026-09-05 junto con las columnas). */}
+      {posPointName && (
+        <StatCard title={t('orders.detail.sections.posDetail')}>
+          <div>
+            <Label>{t('orders.detail.pos.table')}</Label>
+            <p className="mt-1 text-sm text-brand-700">{posPointName}</p>
+          </div>
+        </StatCard>
+      )}
+
+      {/* 3. Ítems de la orden */}
       <StatCard
         title={t('orders.detail.sections.items')}
         action={

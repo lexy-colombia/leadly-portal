@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { MoreHorizontalIcon } from 'lucide-react'
@@ -9,17 +9,17 @@ import { formatDate, formatTime } from '../../lib/dates'
 import { formatClientPhoneDisplay } from '../../lib/phone'
 import {
   deleteOrder,
-  listOrders,
+  listOrdersPage,
   updateOrderStatus,
   ORDER_STATUS_LABEL_KEY,
   ORDER_STATUS_DOT_CLASS,
   DELIVERY_STATUS_LABEL_KEY,
   DELIVERY_STATUS_DOT_CLASS,
 } from '../../lib/api/orders'
-import type { OrderWithRelations } from '../../lib/api/orders'
+import type { OrderWithRelations, OrdersSummary } from '../../lib/api/orders'
 import { listClients } from '../../lib/api/clients'
-import { listPaymentsForTenant, PAYMENT_METHOD_LABEL_KEY } from '../../lib/api/orderPayments'
-import type { Client, OrderStatus, OrderPaymentMethod, SalesOrder, SalesOrderPayment } from '../../types/domain'
+import { PAYMENT_METHOD_LABEL_KEY } from '../../lib/api/orderPayments'
+import type { Client, OrderStatus, OrderPaymentMethod, SalesOrder } from '../../types/domain'
 import { PageSpinner } from '@/components/atoms'
 import { Card, ComboboxFilter, EmptyState, FilterField, IconInput, Pagination } from '@/components/molecules'
 import { ConfirmDialog } from '@/components/organisms'
@@ -64,16 +64,21 @@ function defaultOrderFilters(): OrderFilters {
   return { status: null, channel: null, contact: null, dateFrom: todayIso(), dateTo: todayIso() }
 }
 
-/** [start, end) del rango Desde/Hasta -- end es exclusivo para poder
- * expresar "hasta" como "el inicio del día siguiente" sin mezclar >= y >. */
-function resolveDateRange(dateFrom: string, dateTo: string): { start: Date | null; end: Date | null } {
-  const start = dateFrom ? new Date(`${dateFrom}T00:00:00`) : null
-  const end = dateTo ? new Date(new Date(`${dateTo}T00:00:00`).getTime() + 24 * 60 * 60 * 1000) : null
-  return { start, end }
-}
-
 function formatCurrency(value: number, currency: string): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
+}
+
+/** Colapsa los pagos crudos embebidos de una orden (puede haber más de un
+ * pago con el mismo método) en un total por método, de mayor a menor --
+ * mismo shape/orden que el viejo paymentsByOrder, pero por fila en vez de
+ * un mapa armado sobre TODOS los pagos del tenant. */
+function aggregatePaymentMethods(payments: { method: OrderPaymentMethod; amount: number }[] | undefined): { method: OrderPaymentMethod; amount: number }[] | undefined {
+  if (!payments || payments.length === 0) return undefined
+  const byMethod = new Map<OrderPaymentMethod, number>()
+  for (const p of payments) byMethod.set(p.method, (byMethod.get(p.method) ?? 0) + p.amount)
+  return Array.from(byMethod.entries())
+    .map(([method, amount]) => ({ method, amount }))
+    .sort((a, b) => b.amount - a.amount)
 }
 
 /** Tarjeta de resumen (Órdenes/Total vendido/Pagado/Pendiente/Ticket
@@ -113,9 +118,13 @@ export function Orders() {
   const { slot: headerSearchSlot } = useHeaderSearchSlot()
 
   const [orders, setOrders] = useState<OrderWithRelations[] | null>(null)
+  const [totalCount, setTotalCount] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
+  const [summary, setSummary] = useState<OrdersSummary | null>(null)
   const [contacts, setContacts] = useState<Client[]>([])
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   // Los filtros se editan en un borrador y no afectan la tabla hasta tocar
   // "Aplicar" (pedido explícito del usuario: nada de refiltrar en cada
   // click). Mismo criterio que el drawer de filtros de la tienda pública.
@@ -140,107 +149,61 @@ export function Orders() {
   const [confirmOrder, setConfirmOrder] = useState<OrderWithRelations | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [confirmError, setConfirmError] = useState<string | null>(null)
-  const [payments, setPayments] = useState<SalesOrderPayment[] | null>(null)
+  const [loading, setLoading] = useState(true)
   const [summaryOpen, setSummaryOpen] = useState(true)
+  const [topTablesOpen, setTopTablesOpen] = useState(false)
 
+  // Debounced so escribir en el buscador no dispara una llamada al servidor
+  // por cada tecla -- mismo criterio que Products.tsx.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 350)
+    return () => clearTimeout(timer)
+  }, [search])
+
+  // Paginación real server-side (Edge Function list-sales-orders, .range()
+  // en la DB) -- reemplaza el viejo listOrders(tenantId) sin límite, que
+  // traía TODO el historial del tenant (un tenant real ya tiene 23.051
+  // pedidos) para filtrar/paginar recién en el navegador. El resumen
+  // (total vendido/pagado/pendiente/por método/ranking de mesas) viene
+  // calculado server-side en la misma respuesta, por la misma razón.
   function reload() {
     if (!profile?.tenant_id) return
-    listOrders(profile.tenant_id)
-      .then(setOrders)
+    setLoading(true)
+    setError(null)
+    listOrdersPage({
+      page,
+      pageSize: PAGE_SIZE,
+      status: filters.status,
+      channel: filters.channel,
+      contactId: filters.contact,
+      dateFrom: filters.dateFrom,
+      dateTo: filters.dateTo,
+      search: debouncedSearch,
+    })
+      .then(({ data, count, totalPages: pages, summary: nextSummary }) => {
+        setOrders(data)
+        setTotalCount(count)
+        setTotalPages(pages)
+        setSummary(nextSummary)
+      })
       .catch((err) => setError(err.message ?? t('orders.errors.load')))
+      .finally(() => setLoading(false))
   }
 
-  useEffect(reload, [profile?.tenant_id])
+  useEffect(reload, [profile?.tenant_id, page, filters, debouncedSearch])
 
   useEffect(() => {
     if (!profile?.tenant_id) return
     listClients(profile.tenant_id).then(setContacts).catch(() => {})
-    // Resumen de ventas (ver salesSummary más abajo) -- todos los pagos del
-    // tenant de una sola vez, igual que `orders` mismo, filtrado del lado
-    // del cliente junto con `filtered` en vez de refetch por cada cambio de
-    // filtro.
-    listPaymentsForTenant(profile.tenant_id).then(setPayments).catch(() => setPayments([]))
   }, [profile?.tenant_id])
-
-  const { start: periodStart, end: periodEnd } = useMemo(() => resolveDateRange(filters.dateFrom, filters.dateTo), [filters.dateFrom, filters.dateTo])
-
-  const filtered = useMemo(() => {
-    if (!orders) return null
-    const term = search.trim().toLowerCase()
-    return orders.filter((o) => {
-      if (filters.status && o.status !== filters.status) return false
-      if (filters.channel && o.sales_channel !== filters.channel) return false
-      if (filters.contact && o.contact_id !== filters.contact) return false
-      const createdAt = new Date(o.created_at)
-      if (periodStart && createdAt < periodStart) return false
-      if (periodEnd && createdAt >= periodEnd) return false
-      if (!term) return true
-      return `ord-${o.number}`.includes(term) || (o.contact?.full_name ?? '').toLowerCase().includes(term)
-    })
-  }, [orders, filters, periodStart, periodEnd, search])
-
-  // Ventas del período filtrado -- pedido explícito del usuario (referencia:
-  // un POS de restaurante). Solo cuenta 'confirmada' (ventas reales, no
-  // cotizaciones ni anuladas) sin importar qué status haya en el filtro de
-  // arriba -- el resumen siempre es "de lo que de verdad se vendió". La
-  // moneda se toma de la primera orden confirmada porque hoy todo el
-  // dashboard asume una sola moneda por tenant (igual que el resto de la
-  // pantalla, ver formatCurrency en las filas de la tabla).
-  const salesSummary = useMemo(() => {
-    if (!filtered || !payments) return null
-    const confirmed = filtered.filter((o) => o.status === 'confirmada')
-    const orderIds = new Set(confirmed.map((o) => o.id))
-    const currency = confirmed[0]?.currency ?? 'COP'
-
-    const paidByOrder = new Map<string, number>()
-    const byMethod: Record<OrderPaymentMethod, number> = { efectivo: 0, transferencia: 0, tarjeta: 0, credito: 0, saldo_favor: 0, wompi: 0 }
-    for (const p of payments) {
-      if (!orderIds.has(p.order_id)) continue
-      byMethod[p.method] += p.amount
-      paidByOrder.set(p.order_id, (paidByOrder.get(p.order_id) ?? 0) + p.amount)
-    }
-
-    const total = confirmed.reduce((sum, o) => sum + o.total, 0)
-    const pending = confirmed.reduce((sum, o) => sum + Math.max(0, o.total - (paidByOrder.get(o.id) ?? 0)), 0)
-    const paid = total - pending
-
-    return {
-      count: confirmed.length,
-      total,
-      average: confirmed.length > 0 ? total / confirmed.length : 0,
-      paid,
-      pending,
-      byMethod,
-      currency,
-    }
-  }, [filtered, payments])
-
-  // Desglose de métodos de pago por orden (columna "Métodos de pago" de la
-  // tabla) -- se construye una sola vez a partir de `payments` (ya cargado
-  // completo para todo el tenant, ver arriba) en vez de una consulta por
-  // fila. Ordenado de mayor a menor monto para que el método principal de
-  // cada orden aparezca primero.
-  const paymentsByOrder = useMemo(() => {
-    const map = new Map<string, { method: OrderPaymentMethod; amount: number }[]>()
-    if (!payments) return map
-    for (const p of payments) {
-      const list = map.get(p.order_id) ?? []
-      const existing = list.find((m) => m.method === p.method)
-      if (existing) existing.amount += p.amount
-      else list.push({ method: p.method, amount: p.amount })
-      map.set(p.order_id, list)
-    }
-    for (const list of map.values()) list.sort((a, b) => b.amount - a.amount)
-    return map
-  }, [payments])
 
   useEffect(() => {
     setPage(1)
     setSelectedIds(new Set())
-  }, [filters, search])
+  }, [filters, debouncedSearch])
 
-  const totalPages = filtered ? Math.max(1, Math.ceil(filtered.length / PAGE_SIZE)) : 1
-  const pageItems = filtered ? filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE) : null
+  const pageItems = orders
+  const salesSummary = summary
 
   const allPageSelected = !!pageItems && pageItems.length > 0 && pageItems.every((o) => selectedIds.has(o.id))
   const somePageSelected = !!pageItems && pageItems.some((o) => selectedIds.has(o.id))
@@ -403,7 +366,7 @@ export function Orders() {
         </div>
 
         <span className="shrink-0 pb-1.5 text-xs text-brand-400">
-          {filtered?.length ?? 0} {t((filtered?.length ?? 0) === 1 ? 'orders.count.singular' : 'orders.count.plural')}
+          {totalCount} {t(totalCount === 1 ? 'orders.count.singular' : 'orders.count.plural')}
         </span>
 
         <Button onClick={() => navigate('/app/sales/new')} size="sm" className="ml-auto self-center">
@@ -438,17 +401,17 @@ export function Orders() {
                     pedido explícito del usuario, no tiene sentido mostrar
                     "Otro: $0" si ninguna orden lo usó. */}
                 {(Object.keys(PAYMENT_METHOD_LABEL_KEY) as OrderPaymentMethod[])
-                  .filter((m) => m !== 'saldo_favor' && salesSummary.byMethod[m] > 0)
+                  .filter((m) => m !== 'saldo_favor' && (salesSummary.byMethod[m] ?? 0) > 0)
                   .map((m) => (
-                    <PaymentMethodRow key={m} label={t(PAYMENT_METHOD_LABEL_KEY[m])} amount={salesSummary.byMethod[m]} total={salesSummary.total} currency={salesSummary.currency} />
+                    <PaymentMethodRow key={m} label={t(PAYMENT_METHOD_LABEL_KEY[m])} amount={salesSummary.byMethod[m] ?? 0} total={salesSummary.total} currency={salesSummary.currency} />
                   ))}
                 {salesSummary.pending > 0 && (
                   <PaymentMethodRow label={t('orders.summary.pending')} amount={salesSummary.pending} total={salesSummary.total} currency={salesSummary.currency} />
                 )}
-                {salesSummary.byMethod.saldo_favor > 0 && (
+                {(salesSummary.byMethod.saldo_favor ?? 0) > 0 && (
                   <PaymentMethodRow
                     label={t('orders.summary.storeCreditApplied')}
-                    amount={salesSummary.byMethod.saldo_favor}
+                    amount={salesSummary.byMethod.saldo_favor ?? 0}
                     total={salesSummary.total}
                     currency={salesSummary.currency}
                   />
@@ -456,15 +419,35 @@ export function Orders() {
               </div>
             )}
           </div>
+
+          {salesSummary.topTables.length > 0 && (
+            <div className="overflow-hidden rounded-2xl border border-brand-100 bg-white">
+              <button type="button" onClick={() => setTopTablesOpen((v) => !v)} className="flex w-full items-center justify-between bg-brand-50/40 px-4 py-2.5 text-left">
+                <span className="text-xs font-semibold tracking-wide text-brand-700 uppercase">{t('orders.summary.topTables')}</span>
+                <ChevronLeftIcon width={11} height={11} className={`text-brand-400 transition-transform ${topTablesOpen ? 'rotate-90' : '-rotate-90'}`} />
+              </button>
+              {topTablesOpen && (
+                <div className="space-y-1.5 border-t border-brand-100 px-4 py-3">
+                  {salesSummary.topTables.map((row) => (
+                    <div key={row.table} className="flex items-center justify-between text-xs">
+                      <span className="text-brand-600">{t('orders.summary.tableLabel', { table: row.table })}</span>
+                      <span className="text-brand-400">{t(row.count === 1 ? 'orders.summary.tableSaleCount.singular' : 'orders.summary.tableSaleCount.plural', { count: row.count })}</span>
+                      <span className="font-medium text-brand-700">{formatCurrency(row.total, salesSummary?.currency ?? 'COP')}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-      {!orders && !error && <PageSpinner />}
+      {loading && !orders && <PageSpinner />}
 
-      {filtered && filtered.length === 0 && (
+      {orders && orders.length === 0 && (
         <Card>
-          <EmptyState>{orders && orders.length > 0 ? t('orders.empty.noMatch') : t('orders.empty.none')}</EmptyState>
+          <EmptyState>{filtersActive || debouncedSearch ? t('orders.empty.noMatch') : t('orders.empty.none')}</EmptyState>
         </Card>
       )}
 
@@ -549,7 +532,7 @@ export function Orders() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <OrderPaymentMethodCell methods={paymentsByOrder.get(order.id)} />
+                      <OrderPaymentMethodCell methods={aggregatePaymentMethods(order.payments)} />
                     </TableCell>
                     <TableCell className="text-xs text-brand-700">
                       <p>{formatCurrency(order.total, order.currency)}</p>

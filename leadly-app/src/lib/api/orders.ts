@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient'
-import type { ContactAddress, SalesOrder, SalesOrderItem, OrderStatus, DeliveryStatus } from '../../types/domain'
+import type { ContactAddress, SalesOrder, SalesOrderItem, OrderStatus, OrderPaymentMethod, DeliveryStatus } from '../../types/domain'
 import type { TranslationKey } from '../../i18n/translations'
 
 // Shared between Orders.tsx and OrderDetail.tsx so the status wording
@@ -171,20 +171,137 @@ export type OrderWithRelations = SalesOrder & {
   // Orders.tsx to show "N items" under the total without a second query
   // per order.
   items: { count: number }[]
+  // Solo presente en las filas que devuelve listOrdersPage (list-sales-orders)
+  // -- embebido ahí para que la columna "Método de pago" no necesite un
+  // fetch de sales_order_payments aparte, ver OrderTableCells.tsx.
+  payments?: { method: OrderPaymentMethod; amount: number }[]
 }
 
 const ORDER_SELECT =
   '*, contact:clients(full_name, phone_prefix, phone), opportunity:opportunities(title), shipping_address:contact_addresses!shipping_address_id(label, line1, city, state_province), billing_address:contact_addresses!billing_address_id(label, line1, city), items:sales_order_items(count)'
 
+// PostgREST corta cualquier select en 1000 filas por request (db.max_rows) --
+// un tenant con más de 1000 pedidos dejaba de ver el resto en Orders.tsx sin
+// ningún error visible. Se pagina en batches de a 1000 hasta agotar el
+// resultado, en vez de un solo .select() sin límite.
+const ORDER_FETCH_CHUNK_SIZE = 1000
+
 export async function listOrders(tenantId: string): Promise<OrderWithRelations[]> {
-  const { data, error } = await supabase
-    .from('sales_orders')
-    .select(ORDER_SELECT)
-    .eq('tenant_id', tenantId)
-    .is('deleted_at', null)
-    .order('created_at', { ascending: false })
-  if (error) throw error
-  return data as unknown as OrderWithRelations[]
+  const all: OrderWithRelations[] = []
+  let from = 0
+  for (;;) {
+    const { data, error } = await supabase
+      .from('sales_orders')
+      .select(ORDER_SELECT)
+      .eq('tenant_id', tenantId)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+      .range(from, from + ORDER_FETCH_CHUNK_SIZE - 1)
+    if (error) throw error
+    const rows = data as unknown as OrderWithRelations[]
+    all.push(...rows)
+    if (rows.length < ORDER_FETCH_CHUNK_SIZE) break
+    from += ORDER_FETCH_CHUNK_SIZE
+  }
+  return all
+}
+
+export interface OrdersSummary {
+  count: number
+  total: number
+  currency: string
+  paid: number
+  pending: number
+  average: number
+  byMethod: Partial<Record<OrderPaymentMethod, number>>
+  topTables: { table: string; count: number; total: number }[]
+}
+
+export interface ListOrdersPageParams {
+  page: number
+  pageSize: number
+  status?: OrderStatus | null
+  channel?: SalesOrder['sales_channel']
+  contactId?: string | null
+  /** YYYY-MM-DD, ambos inclusive -- resueltos server-side. */
+  dateFrom?: string | null
+  dateTo?: string | null
+  search?: string
+}
+
+export interface ListOrdersPageResult {
+  data: OrderWithRelations[]
+  count: number
+  totalPages: number
+  summary: OrdersSummary
+}
+
+/** Pantalla "Órdenes" (Orders.tsx) -- reemplaza el viejo listOrders(tenantId)
+ * sin límite, que traía TODO el historial del tenant a la vez (un tenant
+ * real ya tiene 23.051 pedidos). Paginación real con offset en la DB
+ * (Edge Function list-sales-orders, que usa .range()) en vez de traer todo
+ * y cortar en el navegador -- el resumen (total vendido/pagado/pendiente/
+ * por método/ranking de mesas) también se calcula server-side ahí mismo,
+ * por la misma razón: sumarlo en el cliente exigiría tener todas las filas
+ * en algún momento. */
+export async function listOrdersPage(params: ListOrdersPageParams): Promise<ListOrdersPageResult> {
+  const { data, error } = await supabase.functions.invoke<{
+    data: OrderWithRelations[]
+    count: number
+    total_pages: number
+    summary: {
+      count: number
+      total: number
+      currency: string
+      paid: number
+      pending: number
+      average: number
+      by_method: Record<string, number>
+      top_tables: { table: string; count: number; total: number }[]
+    }
+    error?: string
+  }>('list-sales-orders', {
+    body: {
+      page: params.page,
+      page_size: params.pageSize,
+      status: params.status ?? null,
+      channel: params.channel ?? null,
+      contact_id: params.contactId ?? null,
+      date_from: params.dateFrom ?? null,
+      date_to: params.dateTo ?? null,
+      search: params.search ?? '',
+    },
+  })
+  if (error) {
+    const context = (error as { context?: Response }).context
+    if (context && typeof context.json === 'function') {
+      let specificMessage: string | undefined
+      try {
+        const responseBody = await context.json()
+        specificMessage = responseBody?.error
+      } catch {
+        /* fall through to generic error */
+      }
+      if (specificMessage) throw new Error(specificMessage)
+    }
+    throw error
+  }
+  if (!data || data.error) throw new Error(data?.error ?? 'No se pudieron cargar las órdenes.')
+  return {
+    data: data.data,
+    count: data.count,
+    totalPages: data.total_pages,
+    summary: {
+      count: data.summary.count,
+      total: data.summary.total,
+      currency: data.summary.currency,
+      paid: data.summary.paid,
+      pending: data.summary.pending,
+      average: data.summary.average,
+      byMethod: data.summary.by_method as Partial<Record<OrderPaymentMethod, number>>,
+      topTables: data.summary.top_tables,
+    },
+  }
 }
 
 /** "Orders" tab on ClientDetail.tsx. */
@@ -217,6 +334,11 @@ export type OrderDetail = SalesOrder & {
   shipping_address: ContactAddress | null
   billing_address: ContactAddress | null
   created_by_profile: { full_name: string } | null
+  // Reemplaza al viejo bloque de texto libre "Detalle del punto de venta"
+  // (pos_table/pos_room/etc, migración de Fudo -- nunca se llegó a poblar,
+  // se borró 2026-09-05) -- ahora es la relación real que ya usa el POS en
+  // vivo (PosTabAccount.tsx), null si el pedido no vino de un punto de venta.
+  pos_point: { name: string } | null
 }
 
 /** OrderDetail.tsx -- unlike ORDER_SELECT (used by list views, which only
@@ -226,7 +348,7 @@ export async function getOrder(id: string): Promise<OrderDetail | null> {
   const { data, error } = await supabase
     .from('sales_orders')
     .select(
-      '*, contact:clients(id, full_name, phone_prefix, phone), opportunity:opportunities(title), shipping_address:contact_addresses!shipping_address_id(*), billing_address:contact_addresses!billing_address_id(*), created_by_profile:profiles!created_by(full_name)',
+      '*, contact:clients(id, full_name, phone_prefix, phone), opportunity:opportunities(title), shipping_address:contact_addresses!shipping_address_id(*), billing_address:contact_addresses!billing_address_id(*), created_by_profile:profiles!created_by(full_name), pos_point:pos_points(name)',
     )
     .eq('id', id)
     .is('deleted_at', null)

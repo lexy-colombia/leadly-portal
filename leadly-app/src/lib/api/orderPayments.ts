@@ -34,16 +34,6 @@ export async function listPaymentsForOrder(orderId: string): Promise<SalesOrderP
   return data
 }
 
-/** Whole-tenant fetch (not scoped to one order) -- feeds the sales summary
- * on Orders.tsx (ventas del mes, ingresos por método de pago), which needs
- * every payment across whatever set of orders the current filters leave
- * visible, not just one order at a time like listPaymentsForOrder. */
-export async function listPaymentsForTenant(tenantId: string): Promise<SalesOrderPayment[]> {
-  const { data, error } = await supabase.from('sales_order_payments').select('*').eq('tenant_id', tenantId).is('deleted_at', null)
-  if (error) throw error
-  return data
-}
-
 export async function createPayment(input: OrderPaymentInput): Promise<SalesOrderPayment> {
   const {
     data: { user },

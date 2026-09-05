@@ -144,7 +144,10 @@ Deno.serve(async (req) => {
   const productIds = Array.from(new Set(selections.map((s) => s.cartItem.product_id).filter((id): id is string => !!id)));
   const productTaxById = new Map<string, { tax_type_code: string | null; tax_rate: number }>();
   if (productIds.length > 0) {
-    const { data: products, error: productsError } = await adminClient.from("products").select("id, tax_type_code, tax_rate").in("id", productIds);
+    // Filtro de tenant explícito -- el admin client no tiene RLS, así que
+    // sin esto un product_id de OTRO tenant (adivinado o filtrado) igual
+    // resolvería su tax_type_code/tax_rate real.
+    const { data: products, error: productsError } = await adminClient.from("products").select("id, tax_type_code, tax_rate").eq("tenant_id", tenantId).in("id", productIds);
     if (productsError) return json({ error: productsError.message }, 500);
     for (const p of products ?? []) productTaxById.set(p.id, { tax_type_code: p.tax_type_code, tax_rate: p.tax_rate });
   }
