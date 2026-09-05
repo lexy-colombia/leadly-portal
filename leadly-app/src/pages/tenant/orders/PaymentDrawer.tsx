@@ -298,7 +298,7 @@ export function PaymentDrawer({
               invalid={!!amountError}
               onChange={(e) => handleAmountChange(e.target.value)}
               aria-label={t('orders.paymentDrawer.fields.amountLabel')}
-              className="h-10 w-40 bg-white text-right text-lg font-bold tabular-nums"
+              className="h-10 w-40 bg-white text-right text-xs font-bold tabular-nums"
             />
           }
         />
@@ -346,14 +346,14 @@ export function PaymentDrawer({
         {showCashFields && (
           <div className="rounded-xl border border-brand-100 bg-brand-50/40 px-3 py-2.5 text-xs">
             <div className="flex items-center justify-between gap-3">
-              <Label htmlFor="payment-tendered" className="text-sm font-semibold text-brand-800">
+              <Label htmlFor="payment-tendered" className="text-xs font-semibold text-brand-800">
                 {t('orders.paymentDrawer.cash.tendered')}
               </Label>
               <CurrencyInput
                 id="payment-tendered"
                 value={tendered}
                 onChange={(e) => setTendered(e.target.value)}
-                className="h-10 w-40 bg-white text-right text-lg font-bold tabular-nums"
+                className="h-10 w-40 bg-white text-right text-xs font-bold tabular-nums"
               />
             </div>
             {changeDue !== null &&
@@ -361,8 +361,8 @@ export function PaymentDrawer({
                 <p className="mt-2 border-t border-brand-100 pt-2 text-xs font-medium text-red-600">{t('orders.paymentDrawer.cash.insufficient')}</p>
               ) : (
                 <div className="mt-2 flex items-baseline justify-between gap-3 border-t border-brand-100 pt-2">
-                  <span className="text-sm font-semibold text-brand-800">{t('orders.paymentDrawer.cash.change')}</span>
-                  <span className="text-lg font-bold tabular-nums text-emerald-600">{formatCurrency(changeDue, currencyCode)}</span>
+                  <span className="text-xs font-semibold text-brand-800">{t('orders.paymentDrawer.cash.change')}</span>
+                  <span className="text-xs font-bold tabular-nums text-emerald-600">{formatCurrency(changeDue, currencyCode)}</span>
                 </div>
               ))}
           </div>
@@ -373,7 +373,7 @@ export function PaymentDrawer({
           <Textarea id="payment-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} className="mt-1" />
         </div>
 
-        {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
+        {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
 
         <div className="flex gap-2 border-t border-brand-100 pt-5">
           <Button type="submit" disabled={submitting}>

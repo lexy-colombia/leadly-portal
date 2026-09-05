@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { CheckIcon, PackageIcon, SearchIcon, XIcon } from 'lucide-react'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { getWalkInClient, lookupPosBarcode, posCheckout, searchPosProducts, type PosCheckoutResult, type PosPaymentMethod, type PosProduct, type PosVariantOption } from '../../../lib/api/pos'
+import { getWalkInClient, lookupPosBarcode, posCheckout, searchPosClients, searchPosProducts, type PosCheckoutResult, type PosPaymentMethod, type PosProduct, type PosVariantOption } from '../../../lib/api/pos'
 import { PAYMENT_METHOD_LABEL_KEY } from '../../../lib/api/orderPayments'
 import type { OrderItemInput, OrderTotalsBreakdown } from '../../../lib/api/orders'
 import { useOrderTotalsPreview } from '../../../lib/useOrderTotalsPreview'
@@ -11,15 +11,15 @@ import { usePosReceiptPrinter } from '../../../lib/usePosReceiptPrinter'
 import { getClientCreditSummary } from '../../../lib/api/credit'
 import { getStoreCreditBalance } from '../../../lib/api/returns'
 import type { Client, OrderPaymentMethod } from '../../../types/domain'
-import { PageSpinner, ProductImage } from '@/components/atoms'
-import { CurrencyInput, OrderTotalsSummary } from '@/components/molecules'
+import { PageSpinner } from '@/components/atoms'
+import { CurrencyInput, OrderTotalsSummary, ProductSearchResultRow } from '@/components/molecules'
 import { PrinterIcon } from '@/components/atoms/icons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ScanIcon, TrashIcon } from '@/components/atoms/icons'
-import { PosCustomerCard } from './PosCustomerCard'
+import { ClientPickerCard } from '../clients/ClientPickerCard'
 
 function formatCurrency(value: number, currency = 'COP'): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
@@ -299,9 +299,9 @@ export function PosFastCheckout() {
         <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
           <CheckIcon width={26} height={26} />
         </div>
-        <h1 className="text-xl font-bold text-brand-800">{t('pos.success.title')}</h1>
-        <p className="text-sm text-brand-500">{t('pos.success.order', { number: String(result.order.number) })}</p>
-        <p className="text-2xl font-bold text-brand-800">{formatCurrency(result.order.total, result.order.currency)}</p>
+        <h1 className="text-xs font-bold text-brand-800">{t('pos.success.title')}</h1>
+        <p className="text-xs text-brand-500">{t('pos.success.order', { number: String(result.order.number) })}</p>
+        <p className="text-xs font-bold text-brand-800">{formatCurrency(result.order.total, result.order.currency)}</p>
         {/* Desglose real de la venta ya registrada: los mismos números que
             el servidor guardó en el pedido (persistOrderItems), con cada
             impuesto discriminado por tarifa. `resultTotals` reusa el
@@ -311,7 +311,7 @@ export function PosFastCheckout() {
         {resultTotals && (
           <OrderTotalsSummary totals={resultTotals} currency={result.order.currency} className="mx-auto max-w-[260px] text-left" />
         )}
-        {change > 0 && <p className="text-sm text-brand-600">{t('pos.success.change', { amount: formatCurrency(change, result.order.currency) })}</p>}
+        {change > 0 && <p className="text-xs text-brand-600">{t('pos.success.change', { amount: formatCurrency(change, result.order.currency) })}</p>}
         {result.invoice?.status === 'pending' && <p className="text-xs text-amber-600">{t('pos.success.invoicePending')}</p>}
         <div className="flex justify-center gap-2 pt-2">
           <Button variant="outline" onClick={() => navigate(`/app/sales/${result.order.id}`)}>
@@ -359,7 +359,7 @@ export function PosFastCheckout() {
               }}
               placeholder={t('pos.scan.placeholder')}
               autoFocus
-              className="h-11 pl-9 text-sm"
+              className="h-11 pl-9 text-xs"
             />
           </div>
           <p className="mt-1.5 text-[11px] text-brand-400">{t('pos.scan.hint')}</p>
@@ -375,27 +375,24 @@ export function PosFastCheckout() {
               {!searching && results.length === 0 && <p className="px-3 py-4 text-center text-xs text-brand-400">{t('pos.search.empty', { term: query })}</p>}
               {!searching &&
                 results.map((p) => (
-                  <button
+                  <ProductSearchResultRow
                     key={p.id}
-                    type="button"
-                    onClick={() => handlePick(p)}
+                    imageUrl={p.image_url}
+                    name={p.name}
+                    sku={p.sku}
                     disabled={p.track_inventory && !p.has_variants && (p.available ?? 0) <= 0}
-                    className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-accent-50 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <ProductImage src={p.image_url} name={p.name} className="size-9 shrink-0 rounded-lg" iconSize={16} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-brand-800">{p.name}</span>
-                      <span className="block truncate text-xs text-brand-400">{p.sku ? `SKU: ${p.sku}` : '—'}</span>
-                    </span>
-                    <span className="shrink-0 text-right">
-                      <span className="block text-sm font-semibold text-brand-800">{formatCurrency(p.price)}</span>
-                      {p.track_inventory && !p.has_variants && (
-                        <span className={`block text-[11px] ${(p.available ?? 0) <= 0 ? 'text-red-500' : 'text-brand-400'}`}>
-                          {(p.available ?? 0) <= 0 ? t('pos.stock.out') : t('pos.stock.available', { count: p.available ?? 0 })}
-                        </span>
-                      )}
-                    </span>
-                  </button>
+                    onClick={() => handlePick(p)}
+                    right={
+                      <>
+                        <span className="block text-xs font-semibold text-brand-800">{formatCurrency(p.price)}</span>
+                        {p.track_inventory && !p.has_variants && (
+                          <span className={`block text-[10px] ${(p.available ?? 0) <= 0 ? 'text-red-500' : 'text-brand-400'}`}>
+                            {(p.available ?? 0) <= 0 ? t('pos.stock.out') : t('pos.stock.available', { count: p.available ?? 0 })}
+                          </span>
+                        )}
+                      </>
+                    }
+                  />
                 ))}
             </div>
           )}
@@ -404,7 +401,7 @@ export function PosFastCheckout() {
         {/* Carrito */}
         <div className="rounded-2xl border border-brand-100 bg-white p-3.5">
           <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-brand-800">{t('pos.cart.title')}</h2>
+            <h2 className="text-xs font-semibold text-brand-800">{t('pos.cart.title')}</h2>
             {cart.length > 0 && (
               <button type="button" onClick={() => setCart([])} className="text-xs font-medium text-brand-400 hover:text-red-600">
                 {t('pos.cart.clear')}
@@ -414,7 +411,7 @@ export function PosFastCheckout() {
           {cart.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-brand-200 py-10 text-center">
               <PackageIcon className="size-7 text-brand-300" />
-              <p className="text-sm text-brand-400">{t('pos.cart.empty')}</p>
+              <p className="text-xs text-brand-400">{t('pos.cart.empty')}</p>
             </div>
           ) : (
             <div>
@@ -424,7 +421,7 @@ export function PosFastCheckout() {
                 return (
                   <div key={key} className="flex items-center gap-2.5 border-b border-brand-100 py-2 last:border-b-0">
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-brand-800">{l.name}</p>
+                      <p className="truncate text-xs font-medium text-brand-800">{l.name}</p>
                       <p className="truncate text-xs text-brand-400">{[l.variantLabel, l.sku ? `SKU: ${l.sku}` : null].filter(Boolean).join(' · ') || '—'}</p>
                       {short && <p className="text-[11px] font-medium text-red-500">{t('pos.stock.available', { count: l.available ?? 0 })}</p>}
                     </div>
@@ -436,7 +433,7 @@ export function PosFastCheckout() {
                       aria-label={t('pos.cart.quantity')}
                       className={`h-8 w-16 text-right ${short ? 'border-red-400 text-red-700' : ''}`}
                     />
-                    <p className="w-24 shrink-0 text-right text-sm font-semibold text-brand-800">{formatCurrency(l.price * l.quantity)}</p>
+                    <p className="w-24 shrink-0 text-right text-xs font-semibold text-brand-800">{formatCurrency(l.price * l.quantity)}</p>
                     <Button type="button" variant="destructive" size="icon-xs" onClick={() => removeLine(key)} aria-label={t('pos.cart.remove')} className="shrink-0 rounded-full">
                       <TrashIcon width={12} height={12} />
                     </Button>
@@ -453,7 +450,7 @@ export function PosFastCheckout() {
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setVariantPickerFor(null)}>
             <div className="w-full max-w-sm rounded-2xl bg-white p-4" onClick={(e) => e.stopPropagation()}>
               <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-brand-800">{variantPickerFor.name}</h3>
+                <h3 className="text-xs font-semibold text-brand-800">{variantPickerFor.name}</h3>
                 <button type="button" onClick={() => setVariantPickerFor(null)} aria-label={t('common.actions.close')}>
                   <XIcon className="size-4 text-brand-400" />
                 </button>
@@ -469,7 +466,7 @@ export function PosFastCheckout() {
                       addToCart(variantPickerFor, v)
                       setVariantPickerFor(null)
                     }}
-                    className="flex w-full items-center justify-between rounded-lg border border-brand-100 px-3 py-2 text-left text-sm hover:bg-accent-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="flex w-full items-center justify-between rounded-lg border border-brand-100 px-3 py-2 text-left text-xs hover:bg-accent-50 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <span>{v.label}</span>
                     <span className="flex items-center gap-2">
@@ -489,13 +486,32 @@ export function PosFastCheckout() {
       </div>
 
       <div className="space-y-4">
-        <PosCustomerCard
+        <ClientPickerCard
           tenantId={tenantId}
-          walkInName={walkIn?.full_name}
-          customer={customer}
+          client={customer}
           onSelect={setCustomer}
-          creditBalance={creditBalance}
-          storeCreditBalance={storeCreditBalance}
+          onSearch={(q) => searchPosClients(tenantId, q)}
+          emptyLabel={walkIn?.full_name ?? t('pos.customer.walkIn')}
+          allowClear
+          clearActionLabel={t('pos.customer.useWalkIn')}
+          extra={
+            customer && (
+              <div className="mt-1.5 space-y-0.5 text-xs text-brand-400">
+                {customer.credit_enabled && (
+                  <p className="flex items-center justify-between gap-2">
+                    <span>{t('credit.table.balance')}</span>
+                    <span className="font-medium text-brand-600">{formatCurrency(creditBalance)}</span>
+                  </p>
+                )}
+                {storeCreditBalance > 0 && (
+                  <p className="flex items-center justify-between gap-2">
+                    <span>{t('orders.paymentMethod.storeCredit')}</span>
+                    <span className="font-medium text-emerald-600">{formatCurrency(storeCreditBalance)}</span>
+                  </p>
+                )}
+              </div>
+            )
+          }
         />
 
         {/* Totales + pago */}
@@ -569,10 +585,10 @@ export function PosFastCheckout() {
           {method === 'efectivo' && (
             <div className="mb-3 space-y-1.5">
               <label className="block text-xs font-medium text-brand-500">{t('pos.payment.tendered')}</label>
-              <CurrencyInput value={tendered} onChange={(e) => setTendered(e.target.value)} className="h-9 text-right text-sm" />
+              <CurrencyInput value={tendered} onChange={(e) => setTendered(e.target.value)} className="h-9 text-right text-xs" />
               {insufficientCash && <p className="text-xs font-medium text-red-600">{t('pos.payment.insufficient')}</p>}
               {!insufficientCash && change > 0 && (
-                <div className="flex items-center justify-between text-sm">
+                <div className="flex items-center justify-between text-xs">
                   <span className="text-brand-500">{t('pos.payment.change')}</span>
                   <span className="font-semibold text-emerald-600">{formatCurrency(change)}</span>
                 </div>

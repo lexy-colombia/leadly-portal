@@ -63,6 +63,7 @@
   "orders.detail.opportunity": "Opportunity",
   "orders.detail.shipping": "Shipping",
   "orders.detail.billing": "Billing",
+  "orders.detail.addressTaxId": "Billing tax ID",
   "orders.detail.noAddress": "No address",
   "orders.detail.newAddressAria": "New address",
   "orders.detail.payments": "Payments",

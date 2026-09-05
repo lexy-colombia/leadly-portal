@@ -6,7 +6,7 @@ import { descendantIds } from '../../../lib/api/productCategories'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { CategoryTreeFilter, ComboboxFilter, CurrencyInput, IconInput } from '@/components/molecules'
+import { CategoryTreeFilter, ComboboxFilter, CurrencyInput, IconInput, ProductSearchResultRow } from '@/components/molecules'
 import { ProductImage } from '@/components/atoms'
 import { ScanIcon, TrashIcon } from '@/components/atoms/icons'
 import type { OrderItemInput, StockShortfall } from '../../../lib/api/orders'
@@ -262,18 +262,13 @@ export function OrderItemsEditor({
       <div className="mt-2 max-h-64 divide-y divide-brand-100 overflow-y-auto rounded-lg border border-brand-100 bg-white">
         {results.length === 0 && <p className="px-3 py-4 text-center text-xs text-brand-400">{t('orders.itemsEditor.noProductResults')}</p>}
         {results.map((p) => (
-          <button
+          <ProductSearchResultRow
             key={p.id}
-            type="button"
+            imageUrl={p.images[0] ? getProductImageUrl(p.images[0].storage_path) : null}
+            name={p.name}
+            sku={p.sku}
             onClick={() => addProductLine(p)}
-            className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-accent-50"
-          >
-            <ProductImage src={p.images[0] ? getProductImageUrl(p.images[0].storage_path) : null} name={p.name} className="size-9 shrink-0 rounded-lg" iconSize={16} />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-xs font-medium text-brand-800">{p.name}</span>
-              <span className="block truncate text-xs text-brand-400">{p.sku ? `SKU: ${p.sku}` : '—'}</span>
-            </span>
-          </button>
+          />
         ))}
       </div>
     </div>
@@ -284,7 +279,7 @@ export function OrderItemsEditor({
       <div>
         <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-brand-200 py-12 text-center">
           <PackageIcon className="size-8 text-brand-300" />
-          <p className="text-sm font-medium text-brand-600">{t('orders.itemsEditor.empty')}</p>
+          <p className="text-xs font-medium text-brand-600">{t('orders.itemsEditor.empty')}</p>
           {!locked && (
             <button type="button" onClick={() => setSearchOpen(true)} className="text-xs font-medium text-accent-600 hover:underline">
               {t('orders.itemsEditor.emptyCta')}
@@ -323,7 +318,7 @@ export function OrderItemsEditor({
                 <div className="min-w-[160px] flex-1 space-y-1">
                   {item.product_id ? (
                     <>
-                      <Link to={`/app/products/${item.product_id}`} className="block truncate text-sm font-medium text-brand-800 hover:underline">
+                      <Link to={`/app/products/${item.product_id}`} className="block truncate text-xs font-medium text-brand-800 hover:underline">
                         {item.product_name}
                       </Link>
                       <p className="truncate text-xs text-brand-400">{item.sku ? `SKU: ${item.sku}` : '—'}</p>
@@ -422,7 +417,7 @@ export function OrderItemsEditor({
 
                 <div className="w-28 shrink-0 text-right">
                   <span className="mb-0.5 block text-[11px] font-medium text-brand-400">{t('orders.itemsEditor.columns.total')}</span>
-                  <p className="mt-1 text-sm font-semibold text-brand-800">{formatCurrency(lineTotal, currency)}</p>
+                  <p className="mt-1 text-xs font-semibold text-brand-800">{formatCurrency(lineTotal, currency)}</p>
                 </div>
 
                 {!locked && (

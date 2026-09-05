@@ -63,6 +63,7 @@
   "orders.detail.opportunity": "Oportunidad",
   "orders.detail.shipping": "Envío",
   "orders.detail.billing": "Facturación",
+  "orders.detail.addressTaxId": "NIT/CC facturación",
   "orders.detail.noAddress": "Sin dirección",
   "orders.detail.newAddressAria": "Nueva dirección",
   "orders.detail.payments": "Pagos",

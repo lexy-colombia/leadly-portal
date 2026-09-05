@@ -201,11 +201,11 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
 
   return (
     <div className="space-y-4">
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
 
       {points.length > 0 && (
         <div>
-          <h2 className="mb-2 text-sm font-semibold text-brand-800">{t('pos.tabs.pointsTitle')}</h2>
+          <h2 className="mb-2 text-xs font-semibold text-brand-800">{t('pos.tabs.pointsTitle')}</h2>
           {/* Diseño compacto, pedido explícito del usuario: nombre + estado
               en la misma fila (badge, no una tercera línea de texto), hasta
               6 columnas en pantallas anchas para ver muchas mesas de un
@@ -226,14 +226,14 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
                     className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-left transition-colors hover:bg-amber-100"
                   >
                     <div className="flex items-start justify-between gap-1.5">
-                      <p className="truncate text-sm font-semibold text-brand-800">{point.name}</p>
+                      <p className="truncate text-xs font-semibold text-brand-800">{point.name}</p>
                       <Badge variant="outline" className="shrink-0 border-transparent bg-amber-200/60 text-[10px] text-amber-800">
                         {isCharged ? t('pos.tabs.alreadyCharged') : t('pos.tabs.table.open')}
                       </Badge>
                     </div>
                     <p className="truncate text-xs text-brand-500">{account.label || account.contact_name}</p>
                     <div className="mt-1.5 flex items-end justify-between gap-1.5">
-                      <span className="text-sm font-bold text-brand-800">{formatCurrency(account.total)}</span>
+                      <span className="text-xs font-bold text-brand-800">{formatCurrency(account.total)}</span>
                       {account.item_count > 0 && <span className="text-[11px] text-brand-500">{t('pos.tabs.itemCount', { count: account.item_count })}</span>}
                     </div>
                   </button>
@@ -248,7 +248,7 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
                   className="flex items-start justify-between gap-1.5 rounded-lg border border-brand-100 bg-white p-2.5 text-left transition-colors hover:border-accent-300 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-brand-800">{point.name}</p>
+                    <p className="truncate text-xs font-semibold text-brand-800">{point.name}</p>
                     <p className="text-xs text-brand-400">{t('pos.tabs.available')}</p>
                   </div>
                   <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-brand-50 text-brand-400">
@@ -266,13 +266,13 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
           {/* Con puntos configurados, esta segunda sección son las cuentas
               que no están sentadas en ninguno; sin puntos, es la lista
               entera y no hace falta llamarla "Sin punto". */}
-          <h2 className="text-sm font-semibold text-brand-800">{points.length > 0 ? t('pos.tabs.unassignedTitle') : t('pos.tabs.openTitle')}</h2>
+          <h2 className="text-xs font-semibold text-brand-800">{points.length > 0 ? t('pos.tabs.unassignedTitle') : t('pos.tabs.openTitle')}</h2>
           <Button type="button" size="sm" disabled={creating} onClick={() => handleCreate(null)}>
             <PlusIcon width={13} height={13} /> {t('pos.tabs.newAccount')}
           </Button>
         </div>
         {unassignedAccounts.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-brand-200 py-8 text-center text-sm text-brand-400">{t('pos.tabs.empty')}</p>
+          <p className="rounded-xl border border-dashed border-brand-200 py-8 text-center text-xs text-brand-400">{t('pos.tabs.empty')}</p>
         ) : points.length === 0 ? (
           /* Misma tabla que Ventas (Orders.tsx) -- mismas celdas, mismo
              orden de columnas -- menos las dos de envío (dirección y estado
@@ -388,7 +388,7 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
                   className="rounded-lg border border-brand-100 bg-white p-2.5 text-left transition-colors hover:border-accent-300"
                 >
                   <div className="flex items-start justify-between gap-1.5">
-                    <p className="truncate text-sm font-semibold text-brand-800">{account.label || account.contact_name}</p>
+                    <p className="truncate text-xs font-semibold text-brand-800">{account.label || account.contact_name}</p>
                     <Badge
                       variant="outline"
                       className={`shrink-0 border-transparent text-[10px] ${isCharged ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}
@@ -397,7 +397,7 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
                     </Badge>
                   </div>
                   <div className="mt-1.5 flex items-end justify-between gap-1.5">
-                    <span className="text-sm font-bold text-brand-800">{formatCurrency(account.total)}</span>
+                    <span className="text-xs font-bold text-brand-800">{formatCurrency(account.total)}</span>
                     {account.item_count > 0 && <span className="text-[11px] text-brand-500">{t('pos.tabs.itemCount', { count: account.item_count })}</span>}
                   </div>
                 </button>

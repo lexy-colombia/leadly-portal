@@ -19,6 +19,15 @@ function formatCurrency(value: number, currency: string): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 }
 
+/** El impuesto de línea puede quedar con decimales reales (ej. INC 8% sobre
+ * $38.000 = $2.814,81) -- a diferencia del resto del desglose, que redondea
+ * al peso entero, el monto de cada impuesto se muestra con 2 decimales a
+ * propósito (mismo criterio que exige la DIAN, que trunca a 2 decimales
+ * para el CUFE/CUDE, ver cufe.ts). */
+function formatCurrencyPrecise(value: number, currency: string): string {
+  return new Intl.NumberFormat('es-CO', { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)
+}
+
 function Row({ label, value, muted = false, accent }: { label: ReactNode; value: ReactNode; muted?: boolean; accent?: 'positive' | 'negative' }) {
   const valueClass = accent === 'positive' ? 'text-emerald-600' : accent === 'negative' ? 'text-red-600' : 'text-brand-700'
   return (
@@ -43,6 +52,7 @@ export function OrderTotalsSummary({
   loading = false,
   emphasis = 'total',
   pendingSlot,
+  shippingSlot,
   className = '',
 }: {
   totals: OrderTotalsBreakdown | null
@@ -57,6 +67,11 @@ export function OrderTotalsSummary({
    * para que el saldo a cobrar sea un campo editable en vez de un número
    * fijo (se puede cobrar parcial). */
   pendingSlot?: ReactNode
+  /** Reemplaza el valor de la fila de envío por un campo editable -- lo usa
+   * OrderDetail.tsx (el envío se puede cargar/editar a mano ahí, a
+   * diferencia del POS). Si se pasa, la fila de envío se muestra siempre
+   * (aunque el monto actual sea 0), para poder cargarlo desde cero. */
+  shippingSlot?: ReactNode
   className?: string
 }) {
   const { t, language } = useLanguage()
@@ -95,7 +110,7 @@ export function OrderTotalsSummary({
               name: TAX_TYPE_SHORT_NAME[line.tax_type_code ?? ''] ?? t('orders.totals.genericTax'),
               rate: new Intl.NumberFormat(language === 'en' ? 'en-US' : 'es-CO', { maximumFractionDigits: 2 }).format(line.tax_rate),
             })}
-            value={formatCurrency(line.amount, currency)}
+            value={formatCurrencyPrecise(line.amount, currency)}
           />
         ))}
 
@@ -105,14 +120,18 @@ export function OrderTotalsSummary({
             línea genérica en vez de dejar un total que no cuadra con lo de
             arriba. */}
         {totals.tax_lines.length === 0 && totals.tax_total > 0 && (
-          <Row label={t('orders.totals.genericTax')} value={formatCurrency(totals.tax_total, currency)} />
+          <Row label={t('orders.totals.genericTax')} value={formatCurrencyPrecise(totals.tax_total, currency)} />
         )}
 
-        {totals.shipping > 0 && <Row label={t('orders.totals.shipping')} value={formatCurrency(totals.shipping, currency)} />}
+        {shippingSlot ? (
+          <Row label={t('orders.totals.shipping')} value={shippingSlot} />
+        ) : (
+          totals.shipping > 0 && <Row label={t('orders.totals.shipping')} value={formatCurrency(totals.shipping, currency)} />
+        )}
 
         <div className="!mt-2 flex items-center justify-between gap-3 border-t border-brand-100 pt-2">
-          <span className="text-sm font-semibold text-brand-800">{highlightLabel}</span>
-          {pendingSlot ?? <span className="text-lg font-bold tabular-nums text-brand-800">{formatCurrency(highlightValue, currency)}</span>}
+          <span className="text-xs font-semibold text-brand-800">{highlightLabel}</span>
+          {pendingSlot ?? <span className="text-xs font-bold tabular-nums text-brand-800">{formatCurrency(highlightValue, currency)}</span>}
         </div>
 
         {/* Ya pagado / total del pedido solo aparecen cuando hay algo que

@@ -6,6 +6,7 @@ import {
   deleteOrder,
   findStockShortfalls,
   getOrder,
+  getOrderTotalsBreakdown,
   hasIncompleteVariantSelection,
   listOrderItems,
   updateOrderStatus,
@@ -14,8 +15,9 @@ import {
   ORDER_STATUS_BADGE_CLASS,
   DELIVERY_STATUS_LABEL_KEY,
 } from '../../lib/api/orders'
-import type { OrderDetail as OrderDetailType, OrderItemInput, StockShortfall } from '../../lib/api/orders'
+import type { OrderDetail as OrderDetailType, OrderItemInput, OrderTotalsBreakdown, StockShortfall } from '../../lib/api/orders'
 import { saveCartDraft, createOrderFromCart, deleteCart, getCart } from '../../lib/api/carts'
+import { useOrderTotalsPreview } from '../../lib/useOrderTotalsPreview'
 import { listClients } from '../../lib/api/clients'
 import type { Client } from '../../types/domain'
 import { listOpportunities } from '../../lib/api/opportunities'
@@ -40,9 +42,9 @@ import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import { isNotBlank } from '../../lib/validation'
 import { formatDate, formatDateTime } from '../../lib/dates'
-import { formatClientPhoneDisplay } from '../../lib/phone'
+import { formatPhoneDisplay } from '../../lib/phone'
 import { FieldError, InitialsAvatar, PageSpinner } from '@/components/atoms'
-import { ComboboxFilter, CurrencyInput } from '@/components/molecules'
+import { ComboboxFilter, CurrencyInput, OrderTotalsSummary } from '@/components/molecules'
 import { ConfirmDialog } from '@/components/organisms'
 import { ClockIcon, PencilIcon, PlusIcon, PrinterIcon, TrashIcon } from '@/components/atoms/icons'
 import { Button } from '@/components/ui/button'
@@ -59,6 +61,7 @@ import { getDispatchStatusForOrder, type DispatchStatusSummary } from '../../lib
 import { getStoreCreditBalance } from '../../lib/api/returns'
 import { StockShortfallDialog } from './orders/StockShortfallDialog'
 import { AddressDrawer } from './clients/AddressDrawer'
+import { ClientPickerCard } from './clients/ClientPickerCard'
 
 function addressLabel(a: ContactAddress): string {
   return `${a.label ? `${a.label} — ` : ''}${a.line1}${a.city ? `, ${a.city}` : ''}`
@@ -72,15 +75,6 @@ const CREATE_STATUS_OPTIONS: OrderStatus[] = ['cotizacion', 'confirmada']
 
 function formatCurrency(value: number, currency = 'COP'): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
-}
-
-/** El impuesto de línea puede quedar con decimales reales (ej. INC 8%
- * sobre $38.000 = $2.814,81) -- a diferencia del resto de la app, que
- * redondea al peso entero, acá se muestran los 2 decimales a propósito
- * (mismo criterio de la DIAN, que trunca a 2 decimales para el CUFE/CUDE,
- * ver cufe.ts). */
-function formatCurrencyPrecise(value: number, currency = 'COP'): string {
-  return new Intl.NumberFormat('es-CO', { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)
 }
 
 const INVOICE_STATUS_VARIANT: Record<SalesInvoiceStatus, string> = {
@@ -105,7 +99,7 @@ function StatCard({ title, action, children, className = '' }: { title: string; 
   return (
     <div className={`rounded-xl border border-brand-100 p-4 ${className}`}>
       <div className="mb-3 flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-brand-800">{title}</h3>
+        <h3 className="text-xs font-semibold text-brand-800">{title}</h3>
         {action}
       </div>
       {children}
@@ -162,7 +156,7 @@ function ThreadColumn({
             <li key={c.id} className="flex items-start gap-2">
               <InitialsAvatar name={c.created_by_ai ? t('orders.detail.aiBadge') : (c.author?.full_name ?? t('orders.detail.agent'))} size="xs" />
               <div className="min-w-0 flex-1">
-                <p className="whitespace-pre-wrap text-sm text-brand-700">{c.content}</p>
+                <p className="whitespace-pre-wrap text-xs text-brand-700">{c.content}</p>
                 <p className="mt-0.5 flex items-center gap-1.5 text-xs text-brand-400">
                   {c.created_by_ai ? t('orders.detail.aiAssistant') : (c.author?.full_name ?? t('orders.detail.agent'))} · {formatDateTime(c.created_at, language)}
                   {c.created_by_ai && <AiBadge label={t('orders.detail.aiBadge')} />}
@@ -212,18 +206,15 @@ export function OrderDetail() {
   const [shippingAddressId, setShippingAddressId] = useState('')
   const [billingAddressId, setBillingAddressId] = useState('')
   const [contactChangedNotice, setContactChangedNotice] = useState(false)
-  // Contacto shows either the search combobox or (once picked) a compact
-  // read-only card with its info -- the "x" on the card switches back to
-  // the combobox instead of clearing contact_id outright (required field,
-  // see handleContactSelect's guard against nulling it on an existing
-  // order); the combobox itself is rendered with value=null while in this
-  // mode so it doesn't show its own redundant "x" on top of the old pick.
-  const [editingContact, setEditingContact] = useState(false)
-  // Same toggle idea as editingContact, one per address role -- picking a
-  // different saved address (or clearing to search) shouldn't require the
-  // field to look like a dropdown all the time (explicit user feedback,
-  // reference screenshot: address shows as plain text, edit is a separate
-  // small action).
+  // Contacto ahora lo maneja ClientPickerCard entero (su propio estado de
+  // "buscando" interno) -- este componente solo le pasa el id resuelto a
+  // handleContactSelect, ver handleClientPicked.
+  //
+  // Direcciones: un toggle por rol -- elegir una dirección guardada (o
+  // limpiar para buscar) no debería obligar al campo a verse como un
+  // dropdown todo el tiempo (feedback explícito del usuario, referencia de
+  // captura: la dirección se ve como texto plano, editar es una acción
+  // aparte).
   const [editingShippingAddress, setEditingShippingAddress] = useState(false)
   const [editingBillingAddress, setEditingBillingAddress] = useState(false)
   const [touched, setTouched] = useState(false)
@@ -538,11 +529,31 @@ export function OrderDetail() {
   const commentsList = useMemo(() => (comments ? comments.filter((c) => !c.is_internal) : null), [comments])
   const totalPaid = useMemo(() => (payments ?? []).reduce((sum, p) => sum + p.amount, 0), [payments])
   const totalQuantity = useMemo(() => items.reduce((sum, i) => sum + i.quantity, 0), [items])
-  // Solo para el modo "crear", antes de que exista un order_id real que el
-  // servidor pueda calcular -- ver comentario grande en el resumen del
-  // render. No es un cálculo de impuesto/descuento, es la misma suma que ya
-  // se ve línea por línea en OrderItemsEditor.
-  const draftSubtotalEstimate = useMemo(() => items.reduce((sum, i) => sum + i.quantity * i.unit_price - (i.discount_amount ?? 0), 0), [items])
+
+  // Desglose real (base gravable + cada impuesto por tarifa, según lo que
+  // cada producto tenga configurado) para el resumen -- pedido explícito
+  // del usuario: "por qué no se calculan impuestos como en el POS". Dos
+  // fuentes, según si ya existe un pedido real o no:
+  // - Pedido ya guardado: getOrderTotalsBreakdown lee las columnas ya
+  //   persistidas en sales_order_items -- el mismo dato exacto que ya
+  //   factura/imprime el ticket del POS, nunca una recalculación en vivo
+  //   contra el catálogo actual (si la tarifa de un producto cambia
+  //   después, un pedido viejo no debe mostrar un impuesto distinto al que
+  //   de verdad se cobró).
+  // - Modo "crear" (sin order_id todavía): useOrderTotalsPreview, el mismo
+  //   hook que ya usa el POS para el carrito antes de cobrar -- ahí sí
+  //   corresponde una vista previa en vivo, no hay nada persistido todavía.
+  const [orderTotals, setOrderTotals] = useState<OrderTotalsBreakdown | null>(null)
+  useEffect(() => {
+    if (!order) {
+      setOrderTotals(null)
+      return
+    }
+    getOrderTotalsBreakdown(order)
+      .then(setOrderTotals)
+      .catch(() => setOrderTotals(null))
+  }, [order])
+  const { totals: draftTotalsPreview } = useOrderTotalsPreview(isNew ? items : [], Number(shippingDraft) || 0)
 
   const contactError = isNew && touched && !isNotBlank(contactId) ? t('orders.drawer.errors.contactRequired') : undefined
 
@@ -710,7 +721,6 @@ export function OrderDetail() {
   }, [isNew, cartLoaded, contactId, opportunityId, validUntil, shippingAddressId, billingAddressId, shippingDraft, items])
 
   function handleContactSelect(newContactId: string | null) {
-    setEditingContact(false)
     if (!newContactId || newContactId === contactId) return
     setContactId(newContactId)
     // Cambiar de cliente invalida oportunidad/direcciones del cliente
@@ -722,6 +732,35 @@ export function OrderDetail() {
       setBillingAddressId('')
       setContactChangedNotice(true)
     }
+  }
+
+  /** ClientPickerCard entrega el Client completo (elegido, recién creado, o
+   * recién editado) -- se sincroniza en `contacts` (agrega si es nuevo,
+   * reemplaza si ya existía) para que el resto de la pantalla (el resumen
+   * de arriba, direcciones, etc.) vea los datos al día sin recargar la
+   * página, y recién ahí se delega a handleContactSelect (que solo conoce
+   * ids). */
+  function handleClientPicked(client: Client | null) {
+    if (client) {
+      setContacts((prev) => {
+        const idx = prev.findIndex((c) => c.id === client.id)
+        if (idx === -1) return [...prev, client]
+        const next = [...prev]
+        next[idx] = client
+        return next
+      })
+    }
+    handleContactSelect(client?.id ?? null)
+  }
+
+  /** Filtra la lista de contactos que ya está en memoria (cargada entera al
+   * abrir el pedido, ver listClients más arriba) -- a diferencia del POS
+   * (searchPosClients, catálogo potencialmente enorme), acá no hace falta
+   * ningún viaje de red para buscar. */
+  async function searchOrderContacts(query: string): Promise<Client[]> {
+    const q = query.trim().toLowerCase()
+    if (!q) return []
+    return contacts.filter((c) => c.full_name.toLowerCase().includes(q) || (c.document_number ?? '').toLowerCase().includes(q) || c.phone.includes(q)).slice(0, 8)
   }
 
   function handleOpportunitySelect(newId: string | null) {
@@ -959,13 +998,13 @@ export function OrderDetail() {
   }
 
   if (!isNew) {
-    if (loadError) return <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{loadError}</p>
+    if (loadError) return <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{loadError}</p>
     if (order === undefined) return <PageSpinner />
     if (order === null) {
       return (
         <div className="space-y-4">
           <p className="text-brand-500">{t('orders.detail.notFound')}</p>
-          <Link to="/app/sales" className="text-sm font-medium text-accent-600 hover:text-accent-700">
+          <Link to="/app/sales" className="text-xs font-medium text-accent-600 hover:text-accent-700">
             {t('orders.detail.backToList')}
           </Link>
         </div>
@@ -1024,7 +1063,8 @@ export function OrderDetail() {
         <Label>{t(kind === 'shipping' ? 'orders.detail.shipping' : 'orders.detail.billing')}</Label>
         {selected && !editing ? (
           <div className="mt-1 flex items-start justify-between gap-2">
-            <div className="min-w-0 text-sm">
+            <div className="min-w-0 text-xs">
+              {selected.recipient_name && <p className="truncate font-medium text-brand-800">{selected.recipient_name}</p>}
               <p className="truncate text-brand-800">
                 {selected.line1}
                 {selected.line2 ? `, ${selected.line2}` : ''}
@@ -1032,6 +1072,8 @@ export function OrderDetail() {
               {(selected.city || selected.state_province || selected.country) && (
                 <p className="truncate text-xs text-brand-400">{[selected.city, selected.state_province, selected.country].filter(Boolean).join(', ')}</p>
               )}
+              {selected.phone && <p className="truncate text-xs text-brand-400">{formatPhoneDisplay(selected.phone)}</p>}
+              {selected.tax_id && <p className="truncate text-xs text-brand-400">{t('orders.detail.addressTaxId')}: {selected.tax_id}</p>}
             </div>
             {!locked && (
               <Button type="button" variant="default" size="icon-sm" onClick={() => setEditing(true)} aria-label={t('orders.detail.changeAddressAria')} className="shrink-0">
@@ -1202,32 +1244,15 @@ export function OrderDetail() {
             {/* Columna 1: Cliente + Facturación */}
             <div className="space-y-4">
               <div>
-                <Label>{t('orders.drawer.fields.contact')}</Label>
-                {contactId && !editingContact && selectedContact ? (
-                  <div className="mt-1 flex items-start justify-between gap-2">
-                    <div className="min-w-0 text-sm">
-                      <p className="truncate text-brand-800">{selectedContact.full_name}</p>
-                      <p className="truncate text-xs text-brand-400">{[selectedContact.nit ? `NIT ${selectedContact.nit}` : null, formatClientPhoneDisplay(selectedContact.phone_prefix, selectedContact.phone)].filter(Boolean).join(' · ')}</p>
-                    </div>
-                    {!locked && (
-                      <Button type="button" variant="default" size="icon-sm" onClick={() => setEditingContact(true)} aria-label={t('orders.detail.changeContactAria')} className="shrink-0">
-                        <PencilIcon width={12} height={12} />
-                      </Button>
-                    )}
-                  </div>
-                ) : (
-                  <ComboboxFilter
-                    options={contacts.map((c) => ({ id: c.id, label: c.full_name }))}
-                    value={null}
-                    onChange={handleContactSelect}
-                    placeholder={t('orders.drawer.fields.selectPlaceholder')}
-                    searchPlaceholder={t('orders.detail.searchContact')}
-                    emptyLabel={t('orders.detail.noContactResults')}
-                    disabled={locked}
-                    className="mt-1 w-full"
-                    triggerClassName="min-w-0 flex-1 shrink"
-                  />
-                )}
+                <ClientPickerCard
+                  tenantId={profile?.tenant_id ?? ''}
+                  client={selectedContact ?? null}
+                  onSelect={handleClientPicked}
+                  onSearch={searchOrderContacts}
+                  emptyLabel={t('orders.drawer.fields.selectPlaceholder')}
+                  disabled={locked}
+                  bare
+                />
                 <FieldError message={contactError} />
               </div>
               {addressField('billing')}
@@ -1307,6 +1332,14 @@ export function OrderDetail() {
                   triggerClassName="min-w-0 flex-1 shrink"
                 />
               </div>
+              {/* Punto de venta -- informativo nomás (de dónde vino el
+                  pedido si se cobró desde el POS), no hace falta una
+                  StatCard propia para esto -- pedido explícito del usuario. */}
+              {posPointName && (
+                <p className="text-xs text-brand-400">
+                  {t('orders.detail.pos.table')}: {posPointName}
+                </p>
+              )}
               {isNew && (
                 <div>
                   <Label>{t('orders.drawer.fields.status')}</Label>
@@ -1345,7 +1378,7 @@ export function OrderDetail() {
               <StatCard title={t('orders.detail.relatedTasks')}>
                 <ul className="space-y-1.5">
                   {relatedTasks!.map((task) => (
-                    <li key={task.id} className="flex items-center justify-between gap-2 text-sm">
+                    <li key={task.id} className="flex items-center justify-between gap-2 text-xs">
                       <span className="min-w-0 truncate text-brand-600">{task.title}</span>
                       <Badge className={task.status === 'completada' ? 'border-transparent bg-emerald-100 text-emerald-700' : 'border-transparent bg-amber-100 text-amber-700'}>
                         {task.status === 'completada' ? t('orders.detail.taskDone') : t('orders.detail.taskPending')}
@@ -1359,19 +1392,7 @@ export function OrderDetail() {
         )}
       </div>
 
-      {/* 2. Punto de venta -- relación real a pos_points (mesa/caja del POS
-          en vivo), no el viejo texto libre de la migración de Fudo (nunca
-          se llegó a poblar, se borró 2026-09-05 junto con las columnas). */}
-      {posPointName && (
-        <StatCard title={t('orders.detail.sections.posDetail')}>
-          <div>
-            <Label>{t('orders.detail.pos.table')}</Label>
-            <p className="mt-1 text-sm text-brand-700">{posPointName}</p>
-          </div>
-        </StatCard>
-      )}
-
-      {/* 3. Ítems de la orden */}
+      {/* 2. Ítems de la orden */}
       <StatCard
         title={t('orders.detail.sections.items')}
         action={
@@ -1412,44 +1433,21 @@ export function OrderDetail() {
       </StatCard>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {/* 3. Resumen de la orden -- 2026-09-03: nada de esto se calcula acá.
-            Subtotal/Descuentos/Impuesto/Total salen siempre de `order`, la
-            respuesta real de calculate-order (Edge Function) -- el
-            autosave (ver useEffect de arriba) la refresca sola 2s después
-            del último cambio. La única excepción es el modo "crear": como
-            todavía no existe un pedido real que el servidor pueda
-            calcular, se muestra una suma simple de las líneas (ya visible
-            por línea en OrderItemsEditor) solo como referencia hasta que
-            se guarde -- no es el total final, ni calcula impuesto. */}
+        {/* 3. Resumen de la orden -- pedido explícito del usuario: mismo
+            componente y misma lógica de impuestos que el POS, no un
+            "Impuesto" genérico sin discriminar. Ver el comentario grande
+            junto a `orderTotals`/`draftTotalsPreview` para de dónde sale
+            cada fuente según isNew. */}
         <StatCard title={t('orders.detail.orderSummary')} action={itemsSaveAction}>
-          <div className="space-y-1.5 text-xs">
-            <div className="flex items-center justify-between text-brand-500">
-              <span>{t('orders.detail.subtotal')}</span>
-              <span className="font-medium text-brand-700">{formatCurrency(order?.subtotal ?? draftSubtotalEstimate, order?.currency ?? 'COP')}</span>
-            </div>
-            {!!order?.discount_total && order.discount_total > 0 && (
-              <div className="flex items-center justify-between text-brand-500">
-                <span>{t('orders.detail.discounts')}</span>
-                <span className="font-medium text-emerald-600">-{formatCurrency(order.discount_total, order.currency)}</span>
-              </div>
-            )}
-            {!!order?.tax_total && order.tax_total > 0 && (
-              <div className="flex items-center justify-between gap-3">
-                <span className="shrink-0 text-brand-500">{t('orders.drawer.fields.tax')}</span>
-                <span className="font-medium text-brand-700">{formatCurrencyPrecise(order.tax_total, order.currency)}</span>
-              </div>
-            )}
-            {showShipping && (
-              <div className="flex items-center justify-between gap-3">
-                <Label className="shrink-0 text-xs text-brand-500">{t('orders.drawer.fields.shipping')}</Label>
+          <OrderTotalsSummary
+            totals={isNew ? draftTotalsPreview : orderTotals}
+            currency={order?.currency}
+            shippingSlot={
+              showShipping ? (
                 <CurrencyInput value={shippingDraft} onChange={(e) => setShippingDraft(e.target.value)} disabled={locked} className="h-7 w-28 text-right text-xs" />
-              </div>
-            )}
-            <div className="flex items-center justify-between border-t border-brand-100 pt-1.5">
-              <span className="text-sm font-bold text-brand-800">{t('orders.detail.total')}</span>
-              <span className="text-base font-bold text-emerald-600">{formatCurrency(order?.total ?? draftSubtotalEstimate, order?.currency ?? 'COP')}</span>
-            </div>
-          </div>
+              ) : undefined
+            }
+          />
         </StatCard>
 
         {/* 4. Notas y comentarios -- una sola card, dividida en 2 columnas
@@ -1524,8 +1522,8 @@ export function OrderDetail() {
       {isNew ? (
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-xl font-bold text-brand-800">{t(status === 'cotizacion' ? 'orders.drawer.newTitle' : 'orders.detail.newSaleTitle')}</h1>
-            <p className="mt-1 text-sm text-brand-500">{t('orders.detail.newSubtitle')}</p>
+            <h1 className="text-xs font-bold text-brand-800">{t(status === 'cotizacion' ? 'orders.drawer.newTitle' : 'orders.detail.newSaleTitle')}</h1>
+            <p className="mt-1 text-xs text-brand-500">{t('orders.detail.newSubtitle')}</p>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={handleCancelDraft} disabled={cancellingDraft}>
@@ -1539,13 +1537,18 @@ export function OrderDetail() {
       ) : (
         order && (
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-xl font-bold text-brand-800">ORD-{order.number}</h1>
-              <Badge className={ORDER_STATUS_BADGE_CLASS[order.status]}>{t(ORDER_STATUS_LABEL_KEY[order.status])}</Badge>
-              <p className="flex items-center gap-1 text-sm font-medium text-brand-600">
-                <ClockIcon width={13} height={13} /> {t('orders.detail.createdAtLabel')}: {formatDateTime(order.created_at, language)}
-              </p>
-              {order.created_by_profile && <span className="text-xs text-brand-400">· {order.created_by_profile.full_name}</span>}
+            <div className="flex flex-wrap items-start gap-3">
+              {/* Fecha de creación debajo del número de orden, no en la
+                  misma fila que el badge/agente -- pedido explícito del
+                  usuario. */}
+              <div>
+                <h1 className="text-xs font-bold text-brand-800">ORD-{order.number}</h1>
+                <p className="mt-0.5 flex items-center gap-1 text-xs font-medium text-brand-600">
+                  <ClockIcon width={13} height={13} /> {t('orders.detail.createdAtLabel')}: {formatDateTime(order.created_at, language)}
+                </p>
+              </div>
+              <Badge className={`mt-0.5 ${ORDER_STATUS_BADGE_CLASS[order.status]}`}>{t(ORDER_STATUS_LABEL_KEY[order.status])}</Badge>
+              {order.created_by_profile && <span className="mt-0.5 text-xs text-brand-400">· {order.created_by_profile.full_name}</span>}
             </div>
             {/* Botones condicionados al estado actual -- reemplaza el menú
                 "···" y el Select de Estado de más abajo (pedido explícito
@@ -1612,8 +1615,8 @@ export function OrderDetail() {
       {/* El PDF se puede descargar aunque no exista factura DIAN (remisión),
           así que su error NO puede vivir dentro de la card de Factura DIAN:
           ahí quedaría invisible justo para los tenants sin DIAN. */}
-      {invoicePdfError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{invoicePdfError}</p>}
-      {actionError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{actionError}</p>}
+      {invoicePdfError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{invoicePdfError}</p>}
+      {actionError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{actionError}</p>}
 
       {detailsContent}
 

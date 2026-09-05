@@ -4,6 +4,7 @@ import { usePermission } from '../../../contexts/AuthContext'
 import { saveCartDraft, listChargesFromCart, createOrderFromCart, closeCart, deleteCart, getCart } from '../../../lib/api/carts'
 import type { CartCharge } from '../../../lib/api/carts'
 import { getClient } from '../../../lib/api/clients'
+import { searchPosClients } from '../../../lib/api/pos'
 import { getClientCreditSummary } from '../../../lib/api/credit'
 import { getStoreCreditBalance } from '../../../lib/api/returns'
 import { previewOrderTotals } from '../../../lib/api/orders'
@@ -19,7 +20,7 @@ import type { ProductWarehouseStockRow } from '../../../lib/api/stockMovements'
 import type { Brand, CartItem, Client, PosPoint, ProductCategory, Warehouse } from '../../../types/domain'
 import { OrderItemsEditor } from '../orders/OrderItemsEditor'
 import { PaymentDrawer } from '../orders/PaymentDrawer'
-import { PosCustomerCard } from './PosCustomerCard'
+import { ClientPickerCard } from '../clients/ClientPickerCard'
 import { ConfirmDialog } from '@/components/organisms'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -377,7 +378,7 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
 
   return (
     <div className="space-y-4">
-      <button type="button" onClick={onBack} className="flex items-center gap-1 text-sm font-medium text-brand-500 hover:text-brand-700">
+      <button type="button" onClick={onBack} className="flex items-center gap-1 text-xs font-medium text-brand-500 hover:text-brand-700">
         <ChevronLeftIcon width={14} height={14} /> {t('pos.tabs.backToList')}
       </button>
 
@@ -394,8 +395,8 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
           {charges.length > 0 && (
             <div className="rounded-2xl border border-brand-100 bg-white p-3.5">
               <div className="mb-2 flex items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold text-brand-800">{t('pos.tabs.charges.title')}</h3>
-                <span className="text-sm font-bold text-brand-800">{formatCurrency(charges.reduce((sum, c) => sum + c.total, 0), charges[0]?.currency)}</span>
+                <h3 className="text-xs font-semibold text-brand-800">{t('pos.tabs.charges.title')}</h3>
+                <span className="text-xs font-bold text-brand-800">{formatCurrency(charges.reduce((sum, c) => sum + c.total, 0), charges[0]?.currency)}</span>
               </div>
               <div className="divide-y divide-brand-100">
                 {charges.map((charge) => {
@@ -428,7 +429,7 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
                           >
                             {pending > 0 ? t('pos.tabs.charges.pending', { amount: formatCurrency(pending, charge.currency) }) : t('pos.tabs.charges.paid')}
                           </Badge>
-                          <span className="text-sm font-semibold text-brand-800">{formatCurrency(charge.total, charge.currency)}</span>
+                          <span className="text-xs font-semibold text-brand-800">{formatCurrency(charge.total, charge.currency)}</span>
                         </span>
                       </div>
                       <ul className="mt-1 space-y-0.5">
@@ -450,7 +451,33 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
         </div>
 
         <div className="space-y-4">
-          <PosCustomerCard tenantId={tenantId} walkInName={customer?.full_name} customer={customer} onSelect={(c) => setContactId(c?.id ?? '')} creditBalance={creditBalance} storeCreditBalance={storeCreditBalance} />
+          <ClientPickerCard
+            tenantId={tenantId}
+            client={customer}
+            onSelect={(c) => setContactId(c?.id ?? '')}
+            onSearch={(q) => searchPosClients(tenantId, q)}
+            emptyLabel={t('pos.customer.walkIn')}
+            allowClear
+            clearActionLabel={t('pos.customer.useWalkIn')}
+            extra={
+              customer && (
+                <div className="mt-1.5 space-y-0.5 text-xs text-brand-400">
+                  {customer.credit_enabled && (
+                    <p className="flex items-center justify-between gap-2">
+                      <span>{t('credit.table.balance')}</span>
+                      <span className="font-medium text-brand-600">{formatCurrency(creditBalance)}</span>
+                    </p>
+                  )}
+                  {storeCreditBalance > 0 && (
+                    <p className="flex items-center justify-between gap-2">
+                      <span>{t('orders.paymentMethod.storeCredit')}</span>
+                      <span className="font-medium text-emerald-600">{formatCurrency(storeCreditBalance)}</span>
+                    </p>
+                  )}
+                </div>
+              )
+            }
+          />
 
           {points.length > 0 && (
             <div className="rounded-2xl border border-brand-100 bg-white p-3.5">
@@ -522,7 +549,7 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
             )}
           </div>
 
-          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
 
           <div className="flex gap-2">
             <Button type="button" variant="outline" className="flex-1" onClick={onBack} disabled={saving}>
@@ -609,7 +636,7 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setSplitItems(null)}>
           <div className="max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-4" onClick={(e) => e.stopPropagation()}>
             <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-brand-800">{t('pos.tabs.splitBillTitle')}</h3>
+              <h3 className="text-xs font-semibold text-brand-800">{t('pos.tabs.splitBillTitle')}</h3>
               <button type="button" onClick={() => setSplitItems(null)} aria-label={t('common.actions.close')}>
                 <XIcon className="size-4 text-brand-400" />
               </button>
@@ -641,18 +668,18 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
                       </div>
                     )}
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm text-brand-800">{item.product_name}</span>
+                      <span className="block truncate text-xs text-brand-800">{item.product_name}</span>
                       <span className="block text-xs text-brand-400">
                         {item.quantity > 1 ? `${qty}/${item.quantity} · ` : ''}
                         {formatCurrency(item.unit_price)} c/u
                       </span>
                     </span>
-                    <span className="shrink-0 text-sm font-semibold text-brand-800">{formatCurrency(lineTotal)}</span>
+                    <span className="shrink-0 text-xs font-semibold text-brand-800">{formatCurrency(lineTotal)}</span>
                   </div>
                 )
               })}
             </div>
-            <div className="mt-3 flex items-center justify-between border-t border-brand-100 pt-3 text-sm">
+            <div className="mt-3 flex items-center justify-between border-t border-brand-100 pt-3 text-xs">
               <span className="text-brand-500">{t('pos.tabs.splitSelectedTotal')}</span>
               <span className="font-bold text-brand-800">{formatCurrency(splitSelectedTotal)}</span>
             </div>
