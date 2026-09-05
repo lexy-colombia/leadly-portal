@@ -140,20 +140,33 @@ export function PosReceiptTicket({ data }: { data: PosReceiptData }) {
 
       <div className="pos-receipt-rule" />
 
+      {/* Mismo criterio EXACTO que OrderTotalsSummary.tsx (el único otro
+          lugar que pinta este desglose, POS y drawer de pago): con
+          impuesto discriminado, la primera fila es la base gravable
+          (`taxable_base`), no el subtotal -- son números distintos cuando
+          hay impuesto (`subtotal` es el bruto, `taxable_base` es la base
+          sin impuesto). Mostrar acá "Subtotal" con el valor de `subtotal`
+          en ese caso era un bug real (2026-09-05, reportado por el
+          usuario): el ticket mostraba un monto distinto al que el cliente
+          ya había visto en pantalla para el mismo concepto. */}
       <div className="pos-receipt-totals">
-        <MetaRow label={t('orders.totals.subtotal')} value={formatMoney(totals.subtotal, currency)} />
-        {totals.discount_total > 0 && <MetaRow label={t('orders.totals.discounts')} value={`-${formatMoney(totals.discount_total, currency)}`} />}
         {totals.tax_lines.length > 0 ? (
-          totals.tax_lines.map((line) => (
-            <MetaRow
-              key={`${line.tax_type_code ?? ''}:${line.tax_rate}`}
-              label={t('orders.totals.taxLine', { name: t('pos.receipt.tax'), rate: String(line.tax_rate) })}
-              value={formatMoney(line.amount, currency)}
-            />
-          ))
+          <MetaRow label={t('orders.totals.taxableBase')} value={formatMoney(totals.taxable_base, currency)} />
         ) : (
-          <MetaRow label={t('pos.receipt.exempt')} value={formatMoney(totals.taxable_base, currency)} />
+          <MetaRow label={t('orders.totals.subtotal')} value={formatMoney(totals.subtotal, currency)} />
         )}
+        {totals.discount_total > 0 && <MetaRow label={t('orders.totals.discounts')} value={`-${formatMoney(totals.discount_total, currency)}`} />}
+        {totals.tax_lines.map((line) => (
+          <MetaRow
+            key={`${line.tax_type_code ?? ''}:${line.tax_rate}`}
+            label={t('orders.totals.taxLine', { name: t('pos.receipt.tax'), rate: String(line.tax_rate) })}
+            value={formatMoney(line.amount, currency)}
+          />
+        ))}
+        {/* Pedidos viejos con tax_total en la cabecera pero sin líneas
+            discriminadas (previos al fix del 2026-09-03) -- mismo fallback
+            que OrderTotalsSummary, para no dejar un total que no cuadra. */}
+        {totals.tax_lines.length === 0 && totals.tax_total > 0 && <MetaRow label={t('orders.totals.genericTax')} value={formatMoney(totals.tax_total, currency)} />}
         {totals.shipping > 0 && <MetaRow label={t('orders.totals.shipping')} value={formatMoney(totals.shipping, currency)} />}
       </div>
 

@@ -98,7 +98,6 @@
   "pos.receipt.document": "Documento",
   "pos.receipt.address": "Dirección",
   "pos.receipt.tax": "Impuesto",
-  "pos.receipt.exempt": "Sin impuesto",
   "pos.receipt.defaultFooter": "¡Gracias por su compra!",
   "pos.receipt.disclaimer": "Este documento es un borrador y no es válido como factura de venta.",
   "pos.receipt.errors.load": "No se pudo cargar el ticket para imprimir.",

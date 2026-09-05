@@ -65,10 +65,13 @@ export function ReceiptPrintPortal({ children, paperWidth, onDone }: { children:
   useEffect(() => {
     const timer = setTimeout(() => {
       const contentPx = contentRef.current?.scrollHeight ?? 0
-      // +6mm de margen de cortina: que la última línea nunca quede al ras
-      // del corte del rollo. Piso de 30mm para no terminar con una página
-      // absurdamente chica si por lo que sea el contenido midiera ~0.
-      setPageHeightMm(Math.max(30, contentPx / PX_PER_MM + 6))
+      // +10mm de margen de cortina: que la última línea nunca quede al ras
+      // del corte del rollo, y que un redondeo mínimo entre la medición en
+      // pantalla y el layout real de impresión (que sí puede diferir un par
+      // de px por hinting de fuente) nunca deje el cálculo justo corto.
+      // Piso de 30mm para no terminar con una página absurdamente chica si
+      // por lo que sea el contenido midiera ~0.
+      setPageHeightMm(Math.max(30, Math.ceil(contentPx / PX_PER_MM) + 10))
     }, 50)
     return () => clearTimeout(timer)
   }, [])
@@ -114,13 +117,29 @@ export function ReceiptPrintPortal({ children, paperWidth, onDone }: { children:
           color: #000;
           -webkit-print-color-adjust: exact;
           print-color-adjust: exact;
+          /* Nunca partir el ticket en una segunda página -- si el alto
+             calculado (arriba) quedara apenas corto por cualquier motivo,
+             sin esto el resto se iba a una página nueva, y como la regla
+             de @page declara el mismo alto para las dos, esa segunda hoja
+             salía casi vacía (una línea + todo el resto en blanco) --
+             exactamente el "papel perdido" reportado por el usuario. */
+          break-inside: avoid;
+          page-break-inside: avoid;
         }
         .pos-receipt-print-portal * { box-sizing: border-box; }
         .pos-receipt-print-portal p { margin: 0; }
         .pos-receipt-header { text-align: center; margin-bottom: 5px; }
         .pos-receipt-business-name { font-weight: 800; font-size: 1.2em; text-transform: uppercase; letter-spacing: 0.2px; }
         .pos-receipt-legal-name { font-size: 0.9em; }
-        .pos-receipt-logo { max-width: 85%; max-height: 70px; width: auto; height: auto; object-fit: contain; margin: 0 auto 6px; display: block; }
+        /* Alto FIJO (no max-height) -- pedido explícito del usuario: el
+           logo debe verse más grande que el nombre del negocio. Con
+           max-height nomás, un logo de baja resolución se imprimía a su
+           tamaño natural (a veces más chico que el propio texto del
+           nombre) en vez de ocupar el espacio disponible -- un alto fijo
+           fuerza que SIEMPRE ocupe ~90px, escalando hacia arriba si hace
+           falta. width:auto + max-width mantienen la proporción y evitan
+           que un logo muy apaisado se salga del ticket. */
+        .pos-receipt-logo { height: 90px; width: auto; max-width: 85%; object-fit: contain; margin: 0 auto 6px; display: block; }
         .pos-receipt-rule { border-top: 1px dashed #000; margin: 5px 0; }
         .pos-receipt-doc { text-align: center; }
         .pos-receipt-doc-title { font-weight: 800; text-transform: uppercase; }

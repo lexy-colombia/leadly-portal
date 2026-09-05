@@ -77,20 +77,25 @@ export function PosPendingReceiptTicket({ data }: { data: PosPendingReceiptData 
 
       <div className="pos-receipt-rule" />
 
+      {/* Mismo criterio EXACTO que OrderTotalsSummary.tsx y PosReceiptTicket
+          -- con impuesto discriminado, la primera fila es la base gravable
+          (`taxable_base`), no el subtotal bruto. Ver el comentario grande
+          en PosReceiptTicket.tsx para el bug real que esto corrige. */}
       <div className="pos-receipt-totals">
-        <MetaRow label={t('orders.totals.subtotal')} value={formatMoney(totals.subtotal, currency)} />
-        {totals.discount_total > 0 && <MetaRow label={t('orders.totals.discounts')} value={`-${formatMoney(totals.discount_total, currency)}`} />}
         {totals.tax_lines.length > 0 ? (
-          totals.tax_lines.map((line) => (
-            <MetaRow
-              key={`${line.tax_type_code ?? ''}:${line.tax_rate}`}
-              label={t('orders.totals.taxLine', { name: t('pos.receipt.tax'), rate: String(line.tax_rate) })}
-              value={formatMoney(line.amount, currency)}
-            />
-          ))
+          <MetaRow label={t('orders.totals.taxableBase')} value={formatMoney(totals.taxable_base, currency)} />
         ) : (
-          <MetaRow label={t('pos.receipt.exempt')} value={formatMoney(totals.taxable_base, currency)} />
+          <MetaRow label={t('orders.totals.subtotal')} value={formatMoney(totals.subtotal, currency)} />
         )}
+        {totals.discount_total > 0 && <MetaRow label={t('orders.totals.discounts')} value={`-${formatMoney(totals.discount_total, currency)}`} />}
+        {totals.tax_lines.map((line) => (
+          <MetaRow
+            key={`${line.tax_type_code ?? ''}:${line.tax_rate}`}
+            label={t('orders.totals.taxLine', { name: t('pos.receipt.tax'), rate: String(line.tax_rate) })}
+            value={formatMoney(line.amount, currency)}
+          />
+        ))}
+        {totals.tax_lines.length === 0 && totals.tax_total > 0 && <MetaRow label={t('orders.totals.genericTax')} value={formatMoney(totals.tax_total, currency)} />}
         {totals.shipping > 0 && <MetaRow label={t('orders.totals.shipping')} value={formatMoney(totals.shipping, currency)} />}
       </div>
 
