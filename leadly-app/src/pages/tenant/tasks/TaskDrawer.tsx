@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { createTask, TASK_PRIORITY_KEY, updateTask } from '../../../lib/api/tasks'
 import type { TaskWithRelations } from '../../../lib/api/tasks'
 import { listClients } from '../../../lib/api/clients'
+import { listOpportunities, type OpportunityWithRelations } from '../../../lib/api/opportunities'
 import { listProfilesByTenant } from '../../../lib/api/users'
 import { getAttachmentSignedUrl, listAttachmentsForTask, uploadTaskAttachment, validateTaskAttachmentFile } from '../../../lib/api/attachments'
 import type { Attachment, Client, Profile, TaskPriority } from '../../../types/domain'
@@ -143,8 +144,10 @@ export function TaskDrawer({
   const [dueDate, setDueDate] = useState('')
   const [contactId, setContactId] = useState<string | null>(null)
   const [assignedTo, setAssignedTo] = useState<string | null>(null)
+  const [opportunityId, setOpportunityId] = useState<string | null>(null)
   const [contacts, setContacts] = useState<Client[]>([])
   const [agents, setAgents] = useState<Profile[]>([])
+  const [opportunities, setOpportunities] = useState<OpportunityWithRelations[]>([])
   const [touched, setTouched] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -157,6 +160,7 @@ export function TaskDrawer({
     setDueDate(task?.due_date ? task.due_date.slice(0, 16) : prefillDueDate ?? defaultDueDate())
     setContactId(task?.contact_id ?? null)
     setAssignedTo(task?.assigned_to ?? null)
+    setOpportunityId(task?.opportunity_id ?? defaultOpportunityId ?? null)
     setTouched(false)
     setFormError(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -166,6 +170,7 @@ export function TaskDrawer({
     if (!open) return
     listClients(tenantId).then(setContacts).catch(() => {})
     listProfilesByTenant(tenantId).then(setAgents).catch(() => {})
+    listOpportunities(tenantId).then(setOpportunities).catch(() => {})
   }, [open, tenantId])
 
   const titleError = touched && !isNotBlank(title) ? t('tasks.field.titleRequired') : undefined
@@ -187,7 +192,7 @@ export function TaskDrawer({
         due_date: new Date(dueDate).toISOString(),
         contact_id: contactId,
         assigned_to: assignedTo,
-        ...(task ? {} : { opportunity_id: defaultOpportunityId ?? null }),
+        opportunity_id: opportunityId,
       }
       if (task) await updateTask(task.id, input)
       else await createTask(input)
@@ -263,6 +268,22 @@ export function TaskDrawer({
               placeholder={t('tasks.field.unassigned')}
               searchPlaceholder={t('contacts.filters.agent.search')}
               emptyLabel={t('contacts.filters.agent.noResults')}
+              className="w-full"
+              triggerClassName={COMBOBOX_TRIGGER_CLASS}
+            />
+          </div>
+        </div>
+
+        <div>
+          <Label>{t('tasks.field.opportunity')}</Label>
+          <div className="mt-1">
+            <ComboboxFilter
+              options={opportunities.map((o) => ({ id: o.id, label: o.title }))}
+              value={opportunityId}
+              onChange={setOpportunityId}
+              placeholder={t('tasks.field.noOpportunity')}
+              searchPlaceholder={t('contacts.search.placeholder')}
+              emptyLabel={t('tasks.filter.noResults')}
               className="w-full"
               triggerClassName={COMBOBOX_TRIGGER_CLASS}
             />

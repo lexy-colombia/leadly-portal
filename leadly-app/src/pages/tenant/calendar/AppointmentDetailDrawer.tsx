@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import type { TranslationKey } from '../../../i18n/translations'
 import { formatDateTime } from '../../../lib/dates'
+import { useOpportunityStageGate } from '../../../lib/useOpportunityStageGate'
 
 const STATUS_KEY: Record<AppointmentStatus, TranslationKey> = {
   activa: 'calendar.status.activa',
@@ -37,22 +38,34 @@ export function AppointmentDetailDrawer({
   const { t, language } = useLanguage()
   const [updating, setUpdating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const { requestStageDecision, dialog: stageGateDialog } = useOpportunityStageGate()
 
   if (!appointment) return null
 
-  async function handleStatus(status: AppointmentStatus) {
+  async function doSetStatus(status: AppointmentStatus) {
     if (!appointment) return
     setUpdating(true)
     setError(null)
     try {
       const updated = await updateAppointmentStatus(appointment.id, status)
-      onChanged({ ...updated, contact_full_name: appointment.contact_full_name, assignee_full_name: appointment.assignee_full_name })
+      onChanged({ ...updated, contact_full_name: appointment.contact_full_name, assignee_full_name: appointment.assignee_full_name, opportunity_title: appointment.opportunity_title })
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : t('calendar.errors.updateFailed'))
     } finally {
       setUpdating(false)
     }
+  }
+
+  // Completar una cita con oportunidad vinculada exige decidir antes qué pasa
+  // con esa oportunidad (pedido explícito del usuario, 2026-09-06) --
+  // cancelar no pasa por el gate, solo "completada".
+  function handleStatus(status: AppointmentStatus) {
+    if (status === 'completada' && appointment?.opportunity_id) {
+      requestStageDecision(appointment.opportunity_id, appointment.contact_full_name ?? t('calendar.detail.contactFallback'), () => doSetStatus(status))
+      return
+    }
+    doSetStatus(status)
   }
 
   return (
@@ -67,7 +80,21 @@ export function AppointmentDetailDrawer({
           </Badge>
         </div>
 
-        <p className="text-xs text-brand-700">{formatDateTime(appointment.scheduled_at, language)}</p>
+        <p className="text-xs text-brand-700">
+          {formatDateTime(appointment.scheduled_at, language)} – {new Date(appointment.ends_at).toLocaleTimeString(language === 'en' ? 'en-US' : 'es-CO', { hour: 'numeric', minute: '2-digit' })}
+        </p>
+
+        {appointment.assignee_full_name && (
+          <p className="text-xs text-brand-500">
+            {t('calendar.filters.owner.label')}: <span className="font-medium text-brand-700">{appointment.assignee_full_name}</span>
+          </p>
+        )}
+
+        {appointment.opportunity_id && (
+          <Link to={`/app/opportunities?opportunity=${appointment.opportunity_id}`} className="block text-xs font-semibold text-accent-600 hover:underline">
+            {t('calendar.detail.opportunity')}: {appointment.opportunity_title ?? t('calendar.detail.opportunity')}
+          </Link>
+        )}
 
         {appointment.notes && <p className="rounded-lg bg-brand-50 px-3 py-2 text-xs text-brand-600">{appointment.notes}</p>}
 
@@ -87,6 +114,7 @@ export function AppointmentDetailDrawer({
           </div>
         )}
       </div>
+      {stageGateDialog}
     </Drawer>
   )
 }

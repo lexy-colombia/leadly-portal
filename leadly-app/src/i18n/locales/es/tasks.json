@@ -52,6 +52,8 @@
   "tasks.field.noContact": "Sin contacto",
   "tasks.field.assignedTo": "Asignada a (opcional)",
   "tasks.field.unassigned": "Sin asignar",
+  "tasks.field.opportunity": "Oportunidad (opcional)",
+  "tasks.field.noOpportunity": "Sin oportunidad vinculada",
 
   "tasks.attachments.label": "Archivos adjuntos",
   "tasks.attachments.empty": "Sin archivos todavía -- ej. una propuesta enviada.",

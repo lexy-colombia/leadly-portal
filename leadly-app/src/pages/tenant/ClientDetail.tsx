@@ -17,6 +17,7 @@ import { listTasksForAccount, type TaskWithRelations } from '../../lib/api/tasks
 import { listPipelinesByTenant } from '../../lib/api/pipelines'
 import { listCreditCharges, listCreditPayments, deleteCreditPayment, CREDIT_PAYMENT_METHOD_LABEL_KEY } from '../../lib/api/credit'
 import { COUNTRIES } from '../../lib/referenceData'
+import { useOpportunityStageGate } from '../../lib/useOpportunityStageGate'
 import type {
   Appointment,
   Client,
@@ -179,6 +180,7 @@ function ClientDetailContent({
   const [page, setPage] = useState(1)
   const [notes, setNotes] = useState<Note[] | null>(null)
   const [appointments, setAppointments] = useState<Appointment[] | null>(null)
+  const { requestStageDecision, dialog: stageGateDialog } = useOpportunityStageGate()
   const [conversations, setConversations] = useState<ConversationWithLine[] | null>(null)
   const [agents, setAgents] = useState<Profile[]>([])
   const [opportunities, setOpportunities] = useState<OpportunityWithRelations[] | null>(null)
@@ -285,13 +287,25 @@ function ClientDetailContent({
     }
   }
 
-  async function handleAppointmentStatus(id: string, status: AppointmentStatus) {
+  async function doSetAppointmentStatus(id: string, status: AppointmentStatus) {
     setAppointments((prev) => (prev ? prev.map((a) => (a.id === id ? { ...a, status } : a)) : prev))
     try {
       await updateAppointmentStatus(id, status)
     } catch {
       reloadAppointments()
     }
+  }
+
+  // Completar una cita con oportunidad vinculada exige decidir antes qué pasa
+  // con esa oportunidad (pedido explícito del usuario, 2026-09-06) --
+  // cancelar no pasa por el gate, solo "completada".
+  function handleAppointmentStatus(id: string, status: AppointmentStatus) {
+    const opportunityId = status === 'completada' ? appointments?.find((a) => a.id === id)?.opportunity_id : null
+    if (opportunityId) {
+      requestStageDecision(opportunityId, contact.full_name, () => doSetAppointmentStatus(id, status))
+      return
+    }
+    doSetAppointmentStatus(id, status)
   }
 
   async function handleDeleteAddress() {
@@ -455,9 +469,6 @@ function ClientDetailContent({
                   {t('contacts.detail.nextAppointment.title', { date: formatDateTime(nextAppointment.scheduled_at, language) })}
                 </p>
                 {nextAppointment.notes && <p className="text-xs text-brand-500">{nextAppointment.notes}</p>}
-                <p className="text-xs text-accent-700">
-                  {nextAppointment.reminder_sent_at ? t('contacts.detail.nextAppointment.reminderSent') : t('contacts.detail.nextAppointment.reminderPending')}
-                </p>
               </div>
             </div>
             <div className="flex gap-2">
@@ -870,6 +881,8 @@ function ClientDetailContent({
         loading={deleting}
         error={deleteError}
       />
+
+      {stageGateDialog}
     </div>
   )
 }

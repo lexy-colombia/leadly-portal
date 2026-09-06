@@ -1,0 +1,17 @@
+-- Pedido explícito del usuario (2026-09-06): sacar el recordatorio
+-- automático de citas por WhatsApp -- `send-appointment-reminders` manda un
+-- mensaje de texto libre (`sendWhatsappText`, ver _shared/whatsapp.ts), que
+-- solo puede entregarse dentro de la ventana de 24h de servicio al cliente
+-- de Meta. Un recordatorio "1 hora antes" de una cita agendada con días de
+-- anticipación casi nunca cae dentro de esa ventana -- para que esto
+-- funcionara de verdad haría falta una plantilla HSM aprobada (mismo
+-- requisito que ya se resolvió para el OTP de checkout de la tienda
+-- pública), que nunca se construyó para este flujo. En vez de dejar una
+-- promesa rota corriendo en silencio cada 5 minutos, se desactiva el cron.
+--
+-- Deliberadamente NO se borra la Edge Function `send-appointment-reminders`
+-- ni la función `trigger_appointment_reminders()` -- quedan como código
+-- muerto pero inofensivo, reutilizable el día que se arme la plantilla HSM
+-- correspondiente y se quiera reactivar esto con una sola migración que
+-- vuelva a hacer `cron.schedule(...)`.
+select cron.unschedule('send-appointment-reminders');

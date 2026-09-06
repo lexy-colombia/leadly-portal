@@ -56,12 +56,30 @@ export function entryId(entry: CalendarEntry): string {
   return entry.kind === 'appointment' ? entry.appointment.id : entry.task.id
 }
 
+/** Una tarea no tiene rango real (solo vence en un instante) -- se le da un
+ * bloque visual corto fijo en la grilla horaria, solo para que se vea; una
+ * cita en cambio sí tiene `ends_at` real. */
+const TASK_VISUAL_DURATION_MS = 30 * 60 * 1000
+
+export function entryEndMs(entry: CalendarEntry): number {
+  return entry.kind === 'appointment' ? new Date(entry.appointment.ends_at).getTime() : entry.time + TASK_VISUAL_DURATION_MS
+}
+
 export function entryAssignedTo(entry: CalendarEntry): string | null {
   return entry.kind === 'appointment' ? entry.appointment.assigned_to : entry.task.assigned_to
 }
 
 export function entryAssigneeName(entry: CalendarEntry): string | null {
   return entry.kind === 'appointment' ? entry.appointment.assignee_full_name : (entry.task.assignee?.full_name ?? null)
+}
+
+/** La oportunidad vinculada (id + título), si tiene una -- tanto una cita
+ * como una tarea pueden ser seguimiento de una oportunidad concreta. */
+export function entryOpportunity(entry: CalendarEntry): { id: string; title: string } | null {
+  if (entry.kind === 'appointment') {
+    return entry.appointment.opportunity_id ? { id: entry.appointment.opportunity_id, title: entry.appointment.opportunity_title ?? '' } : null
+  }
+  return entry.task.opportunity_id ? { id: entry.task.opportunity_id, title: entry.task.opportunity?.title ?? '' } : null
 }
 
 /** El nombre a mostrar como título de la entrada -- el contacto para una
@@ -129,4 +147,14 @@ export function toDatetimeLocalValue(iso: string): string {
   const d = new Date(iso)
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+/** "30 min" / "1 h" / "1 h 30 min" -- usado por el select de duración del
+ * formulario de cita (no hay hora de fin en el input, se arma a partir de
+ * hora de inicio + esta duración). */
+export function formatDuration(minutes: number, t: (key: TranslationKey, params?: Record<string, string | number>) => string): string {
+  if (minutes < 60) return t('calendar.form.duration.min', { count: minutes })
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  return rest === 0 ? t('calendar.form.duration.hour', { hours }) : t('calendar.form.duration.hourMin', { hours, minutes: rest })
 }

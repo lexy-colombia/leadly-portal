@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { useAuth } from '../../../contexts/AuthContext'
 import { createAppointment } from '../../../lib/api/appointments'
 import type { Appointment } from '../../../types/domain'
 import { FieldError } from '@/components/atoms'
@@ -32,6 +33,7 @@ export function AppointmentDrawer({
   contactId: string
   onCreated: (appointment: Appointment) => void
 }) {
+  const { profile } = useAuth()
   const { t } = useLanguage()
   const [dateTime, setDateTime] = useState(defaultDateTime())
   const [notes, setNotes] = useState('')
@@ -48,7 +50,6 @@ export function AppointmentDrawer({
   }, [open])
 
   const dateError = touched && !dateTime ? t('contacts.appointmentDrawer.errors.dateRequired') : undefined
-  const isPast = dateTime && new Date(dateTime).getTime() < Date.now()
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -58,7 +59,9 @@ export function AppointmentDrawer({
 
     setSubmitting(true)
     try {
-      const appointment = await createAppointment(tenantId, contactId, new Date(dateTime).toISOString(), notes.trim())
+      const scheduledAt = new Date(dateTime)
+      const endsAt = new Date(scheduledAt.getTime() + 30 * 60000)
+      const appointment = await createAppointment(tenantId, contactId, scheduledAt.toISOString(), endsAt.toISOString(), notes.trim(), profile?.id ?? null, null)
       onCreated(appointment)
       onClose()
     } catch (err) {
@@ -75,7 +78,6 @@ export function AppointmentDrawer({
           <Label htmlFor="appt-datetime">{t('contacts.appointmentDrawer.fields.dateTime')}</Label>
           <Input id="appt-datetime" type="datetime-local" value={dateTime} aria-invalid={!!dateError} onChange={(e) => setDateTime(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
           <FieldError message={dateError} />
-          {!dateError && isPast && <p className="mt-1 text-xs text-amber-600">{t('contacts.appointmentDrawer.pastWarning')}</p>}
         </div>
 
         <div>

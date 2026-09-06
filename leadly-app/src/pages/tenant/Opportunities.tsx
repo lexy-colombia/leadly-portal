@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { TranslationKey } from '../../i18n/translations'
@@ -6,6 +7,7 @@ import { formatDate } from '../../lib/dates'
 import { combinePhone } from '../../lib/phone'
 import {
   computePipelineMetrics,
+  getOpportunity,
   listOpportunities,
   listStageHistoryForOpportunities,
   listStages,
@@ -78,6 +80,7 @@ function MetricTile({ label, value, tone = 'neutral' }: { label: string; value: 
 export function Opportunities() {
   const { profile } = useAuth()
   const { t } = useLanguage()
+  const [searchParams] = useSearchParams()
   const isAdmin = profile?.role === 'tenant_admin'
   const [pipelines, setPipelines] = useState<Pipeline[] | undefined>(undefined)
   const [selectedPipelineId, setSelectedPipelineId] = useState<string | null>(null)
@@ -129,6 +132,25 @@ export function Opportunities() {
   }
 
   useEffect(reloadPipelines, [profile?.tenant_id])
+
+  // Deep-link desde fuera de esta pantalla (ej. el detalle de una cita/tarea
+  // en el Calendario, "?opportunity=<id>") -- se resuelve por id (no por la
+  // lista ya filtrada por pipeline) porque la oportunidad puede vivir en un
+  // pipeline distinto al que está seleccionado por defecto; una vez resuelta
+  // se cambia el pipeline seleccionado y se abre el panel. One-shot, mismo
+  // criterio que el `?tab=` de ClientDetail.tsx.
+  useEffect(() => {
+    const id = searchParams.get('opportunity')
+    if (!id) return
+    getOpportunity(id)
+      .then((opp) => {
+        setSelectedPipelineId(opp.pipeline_id)
+        setPanelOpportunity(opp)
+        setPanelInitialTab('resumen')
+      })
+      .catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     if (!profile?.tenant_id) return

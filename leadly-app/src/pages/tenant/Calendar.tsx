@@ -6,6 +6,7 @@ import { listAppointmentsForTenantRange, updateAppointmentStatus } from '../../l
 import { listTasksForTenantRange, updateTask } from '../../lib/api/tasks'
 import type { TaskWithRelations } from '../../lib/api/tasks'
 import { listProfilesByTenant } from '../../lib/api/users'
+import { useOpportunityStageGate } from '../../lib/useOpportunityStageGate'
 import type { AppointmentStatus, AppointmentWithContact, Profile } from '../../types/domain'
 import { PageSpinner } from '@/components/atoms'
 import { Card, IconInput } from '@/components/molecules'
@@ -65,6 +66,7 @@ export function Calendar() {
   const tenantId = profile?.tenant_id ?? null
   const locale = language === 'en' ? 'en-US' : 'es-CO'
   const tasksEnabled = enabledModules?.has('tasks') ?? false
+  const { requestStageDecision, dialog: stageGateDialog } = useOpportunityStageGate()
 
   const [viewMode, setViewMode] = useState<ViewMode>('month')
   const [typeFilter, setTypeFilter] = useState<'all' | EntryType>('all')
@@ -204,11 +206,11 @@ export function Calendar() {
     })
   }
 
-  async function quickSetAppointmentStatus(appt: AppointmentWithContact, status: AppointmentStatus) {
+  async function doSetAppointmentStatus(appt: AppointmentWithContact, status: AppointmentStatus) {
     setQuickUpdating(appt.id)
     try {
       const updated = await updateAppointmentStatus(appt.id, status)
-      upsertAppointment({ ...updated, contact_full_name: appt.contact_full_name, assignee_full_name: appt.assignee_full_name })
+      upsertAppointment({ ...updated, contact_full_name: appt.contact_full_name, assignee_full_name: appt.assignee_full_name, opportunity_title: appt.opportunity_title })
     } catch (err) {
       setError(err instanceof Error ? err.message : t('calendar.errors.updateFailed'))
     } finally {
@@ -216,7 +218,19 @@ export function Calendar() {
     }
   }
 
-  async function quickToggleTask(task: TaskWithRelations) {
+  // Completar una cita/tarea con oportunidad vinculada exige decidir antes
+  // qué pasa con esa oportunidad (pedido explícito del usuario, 2026-09-06) --
+  // cancelar o des-completar no pasan por el gate, solo el camino hacia
+  // 'completada'.
+  function quickSetAppointmentStatus(appt: AppointmentWithContact, status: AppointmentStatus) {
+    if (status === 'completada' && appt.opportunity_id) {
+      requestStageDecision(appt.opportunity_id, appt.contact_full_name ?? t('calendar.detail.contactFallback'), () => doSetAppointmentStatus(appt, status))
+      return
+    }
+    doSetAppointmentStatus(appt, status)
+  }
+
+  async function doToggleTask(task: TaskWithRelations) {
     setQuickUpdating(task.id)
     try {
       const updated = await updateTask(task.id, { due_date: task.due_date, status: task.status === 'completada' ? 'pendiente' : 'completada' })
@@ -228,6 +242,14 @@ export function Calendar() {
     }
   }
 
+  function quickToggleTask(task: TaskWithRelations) {
+    if (task.status !== 'completada' && task.opportunity_id) {
+      requestStageDecision(task.opportunity_id, task.title, () => doToggleTask(task))
+      return
+    }
+    doToggleTask(task)
+  }
+
   function openEntry(entry: CalendarEntry) {
     if (entry.kind === 'appointment') setDetailDrawer({ open: true, appointment: entry.appointment })
     else setTaskDrawer({ open: true, task: entry.task })
@@ -237,7 +259,16 @@ export function Calendar() {
     setDetailDrawer({ open: false, appointment: null })
     setFormDrawer({
       open: true,
-      editing: { id: appt.id, contactId: appt.contact_id, dateTime: toDatetimeLocalValue(appt.scheduled_at), notes: appt.notes ?? '', assigneeFullName: appt.assignee_full_name },
+      editing: {
+        id: appt.id,
+        contactId: appt.contact_id,
+        scheduledAt: appt.scheduled_at,
+        endsAt: appt.ends_at,
+        notes: appt.notes ?? '',
+        assignedTo: appt.assigned_to,
+        opportunityId: appt.opportunity_id,
+        assigneeFullName: appt.assignee_full_name,
+      },
     })
   }
 
@@ -623,6 +654,8 @@ export function Calendar() {
           onSaved={reload}
         />
       )}
+
+      {stageGateDialog}
     </div>
   )
 }

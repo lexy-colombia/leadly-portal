@@ -889,23 +889,28 @@ export interface Appointment {
   contact_id: string
   whatsapp_line_id: string | null
   scheduled_at: string
+  /** Mismo día que scheduled_at siempre (no hay citas multi-día) -- NOT NULL
+   * en la base, un trigger (`appointments_default_ends_at`) la completa con
+   * +30min cuando el caller (ej. la IA por WhatsApp) no la manda. */
+  ends_at: string
   notes: string | null
   status: AppointmentStatus
   created_by: string | null
   assigned_to: string | null
+  /** Opcional -- una cita puede ser seguimiento de una oportunidad concreta,
+   * igual que `Task.opportunity_id`. */
+  opportunity_id: string | null
   reminder_sent_at: string | null
   created_at: string
   updated_at: string
 }
 
-/** Appointment + the contact's display name, for tenant-wide views (the
- * calendar) that aren't already scoped to one contact. `assignee_full_name`
- * mirrors the join tasks.ts already had (`assignee:profiles!assigned_to`) --
- * needed so the calendar's list view can show a real "Responsable" for citas,
- * not just tareas. */
+/** Appointment + los nombres para mostrar en vistas del tenant que no están
+ * ya acotadas a un contacto/oportunidad puntual (el calendario). */
 export interface AppointmentWithContact extends Appointment {
   contact_full_name: string | null
   assignee_full_name: string | null
+  opportunity_title: string | null
 }
 
 export interface WhatsappMessage {

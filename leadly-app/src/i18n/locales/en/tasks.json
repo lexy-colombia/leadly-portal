@@ -52,6 +52,8 @@
   "tasks.field.noContact": "No contact",
   "tasks.field.assignedTo": "Assigned to (optional)",
   "tasks.field.unassigned": "Unassigned",
+  "tasks.field.opportunity": "Opportunity (optional)",
+  "tasks.field.noOpportunity": "No linked opportunity",
 
   "tasks.attachments.label": "Attachments",
   "tasks.attachments.empty": "No files yet -- e.g. a proposal that was sent.",

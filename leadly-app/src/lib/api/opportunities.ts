@@ -53,6 +53,20 @@ export async function listOpportunities(tenantId: string, pipelineId?: string): 
   return data as unknown as OpportunityWithRelations[]
 }
 
+/** Una sola oportunidad por id -- usada para el deep-link `?opportunity=<id>`
+ * de Opportunities.tsx (ej. desde el detalle de una cita/tarea vinculada en
+ * el Calendario), donde hace falta saber su `pipeline_id` antes de poder
+ * abrir el panel en el pipeline correcto. */
+export async function getOpportunity(id: string): Promise<OpportunityWithRelations> {
+  const { data, error } = await supabase
+    .from('opportunities')
+    .select('*, contact:clients(full_name, phone_prefix, phone, email), stage:pipeline_stages(name, color, probability, is_won, is_lost), owner:profiles!owner_id(full_name)')
+    .eq('id', id)
+    .single()
+  if (error) throw error
+  return data as unknown as OpportunityWithRelations
+}
+
 /** "Opportunities" tab on ClientDetail.tsx. */
 export async function listOpportunitiesForContact(contactId: string): Promise<OpportunityWithRelations[]> {
   const { data, error } = await supabase

@@ -130,5 +130,12 @@
   "opportunities.settings.deleteStageConfirm.title": "Delete stage",
   "opportunities.settings.deleteStageConfirm.description": "Delete the \"{name}\" stage? If it already has opportunities or history, it can't be deleted.",
   "opportunities.settings.deletePipelineConfirm.title": "Delete pipeline",
-  "opportunities.settings.deletePipelineConfirm.description": "Delete the \"{name}\" pipeline? If it already has opportunities, it can't be deleted."
+  "opportunities.settings.deletePipelineConfirm.description": "Delete the \"{name}\" pipeline? If it already has opportunities, it can't be deleted.",
+
+  "opportunities.stageGate.title": "Update the opportunity's stage",
+  "opportunities.stageGate.description": "Before completing it, decide what happens with \"{title}\".",
+  "opportunities.stageGate.stageLabel": "Stage",
+  "opportunities.stageGate.confirm": "Confirm",
+  "opportunities.stageGate.cancel": "Cancel",
+  "opportunities.stageGate.loadError": "Couldn't load the opportunity. Try again."
 }

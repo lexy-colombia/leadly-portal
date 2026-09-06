@@ -7,16 +7,17 @@ import type { AppointmentStatus, AppointmentWithContact, Appointment } from '../
 export async function listAppointmentsForTenantRange(tenantId: string, rangeStart: string, rangeEnd: string): Promise<AppointmentWithContact[]> {
   const { data, error } = await supabase
     .from('appointments')
-    .select('*, clients(full_name), assignee:profiles!assigned_to(full_name)')
+    .select('*, clients(full_name), assignee:profiles!assigned_to(full_name), opportunities(title)')
     .eq('tenant_id', tenantId)
     .gte('scheduled_at', rangeStart)
     .lt('scheduled_at', rangeEnd)
     .order('scheduled_at', { ascending: true })
   if (error) throw error
-  return data.map(({ clients, assignee, ...appointment }) => ({
+  return data.map(({ clients, assignee, opportunities, ...appointment }) => ({
     ...appointment,
     contact_full_name: (clients as { full_name: string } | null)?.full_name ?? null,
     assignee_full_name: (assignee as { full_name: string } | null)?.full_name ?? null,
+    opportunity_title: (opportunities as { title: string } | null)?.title ?? null,
   }))
 }
 
@@ -38,7 +39,10 @@ export async function createAppointment(
   tenantId: string,
   contactId: string,
   scheduledAt: string,
+  endsAt: string,
   notes: string,
+  assignedTo: string | null,
+  opportunityId: string | null,
 ): Promise<Appointment> {
   const {
     data: { user },
@@ -59,8 +63,11 @@ export async function createAppointment(
       contact_id: contactId,
       whatsapp_line_id: conv?.whatsapp_line_id ?? null,
       scheduled_at: scheduledAt,
+      ends_at: endsAt,
       notes: notes || null,
       created_by: user?.id ?? null,
+      assigned_to: assignedTo,
+      opportunity_id: opportunityId,
     })
     .select()
     .single()
@@ -68,13 +75,14 @@ export async function createAppointment(
   return data
 }
 
-/** Reschedules an appointment (date/contact/notes) -- re-resolves
- * whatsapp_line_id the same way createAppointment does, in case the contact
- * changed, and clears reminder_sent_at so the reminder cron re-evaluates it
- * for the new time instead of thinking it already reminded the old one. */
+/** Reschedules an appointment (fecha/hora/duración/contacto/responsable/
+ * oportunidad/observaciones) -- re-resolves whatsapp_line_id the same way
+ * createAppointment does, in case the contact changed, and clears
+ * reminder_sent_at so the reminder cron re-evaluates it for the new time
+ * instead of thinking it already reminded the old one. */
 export async function updateAppointment(
   id: string,
-  input: { contactId: string; scheduledAt: string; notes: string },
+  input: { contactId: string; scheduledAt: string; endsAt: string; notes: string; assignedTo: string | null; opportunityId: string | null },
 ): Promise<Appointment> {
   const { data: conv } = await supabase
     .from('whatsapp_conversations')
@@ -90,7 +98,10 @@ export async function updateAppointment(
       contact_id: input.contactId,
       whatsapp_line_id: conv?.whatsapp_line_id ?? null,
       scheduled_at: input.scheduledAt,
+      ends_at: input.endsAt,
       notes: input.notes || null,
+      assigned_to: input.assignedTo,
+      opportunity_id: input.opportunityId,
       reminder_sent_at: null,
     })
     .eq('id', id)

@@ -130,5 +130,12 @@
   "opportunities.settings.deleteStageConfirm.title": "Eliminar etapa",
   "opportunities.settings.deleteStageConfirm.description": "¿Eliminar la etapa \"{name}\"? Si ya tiene oportunidades o historial, no se podrá eliminar.",
   "opportunities.settings.deletePipelineConfirm.title": "Eliminar pipeline",
-  "opportunities.settings.deletePipelineConfirm.description": "¿Eliminar el pipeline \"{name}\"? Si ya tiene oportunidades, no se podrá eliminar."
+  "opportunities.settings.deletePipelineConfirm.description": "¿Eliminar el pipeline \"{name}\"? Si ya tiene oportunidades, no se podrá eliminar.",
+
+  "opportunities.stageGate.title": "Actualizá la etapa de la oportunidad",
+  "opportunities.stageGate.description": "Antes de completarlo, decidí qué pasa con \"{title}\".",
+  "opportunities.stageGate.stageLabel": "Etapa",
+  "opportunities.stageGate.confirm": "Confirmar",
+  "opportunities.stageGate.cancel": "Cancelar",
+  "opportunities.stageGate.loadError": "No se pudo cargar la oportunidad. Intenta de nuevo."
 }

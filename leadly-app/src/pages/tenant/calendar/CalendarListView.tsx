@@ -1,4 +1,5 @@
 import { Fragment } from 'react'
+import { Link } from 'react-router-dom'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import type { TranslationKey } from '../../../i18n/translations'
 import { EmptyState } from '@/components/molecules'
@@ -14,6 +15,7 @@ import {
   entryClientName,
   entryId,
   entryLabel,
+  entryOpportunity,
   entryStatus,
   entryStatusBadgeClass,
   isEntryOverdue,
@@ -110,6 +112,7 @@ export function CalendarListView({
                 <TableHead>{t('calendar.list.columns.type')}</TableHead>
                 <TableHead>{t('calendar.list.columns.client')}</TableHead>
                 <TableHead>{t('calendar.list.columns.assignee')}</TableHead>
+                <TableHead>{t('calendar.list.columns.opportunity')}</TableHead>
                 <TableHead>{t('calendar.list.columns.status')}</TableHead>
               </TableRow>
             </TableHeader>
@@ -117,7 +120,7 @@ export function CalendarListView({
               {groups.map((group) => (
                 <Fragment key={group.key}>
                   <TableRow className="bg-brand-50/70 hover:bg-brand-50/70">
-                    <TableCell colSpan={6} className="text-xs font-semibold text-brand-700">
+                    <TableCell colSpan={7} className="text-xs font-semibold text-brand-700">
                       {group.key === todayKey ? `${t('calendar.list.today')} · ` : ''}
                       {capitalizeFirst(group.date.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }))}
                     </TableCell>
@@ -126,11 +129,13 @@ export function CalendarListView({
                     const overdue = isEntryOverdue(entry, nowMs)
                     const status = entryStatus(entry)
                     const statusLabel = overdue ? t('calendar.overdue') : t(statusLabelKey(entry))
+                    const opportunity = entryOpportunity(entry)
+                    const startLabel = new Date(entry.time).toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' })
+                    const endLabel =
+                      entry.kind === 'appointment' ? new Date(entry.appointment.ends_at).toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' }) : null
                     return (
                       <TableRow key={entryId(entry)} className="cursor-pointer" onClick={() => onOpenEntry(entry)}>
-                        <TableCell className="text-xs font-medium text-brand-800">
-                          {new Date(entry.time).toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' })}
-                        </TableCell>
+                        <TableCell className="text-xs font-medium text-brand-800">{endLabel ? `${startLabel} – ${endLabel}` : startLabel}</TableCell>
                         <TableCell className="text-xs text-brand-700">{entryLabel(entry)}</TableCell>
                         <TableCell>
                           <Badge variant="outline" className={entry.kind === 'task' ? 'border-transparent bg-violet-50 text-violet-600' : 'border-transparent bg-sky-50 text-sky-600'}>
@@ -139,6 +144,15 @@ export function CalendarListView({
                         </TableCell>
                         <TableCell className="text-xs text-brand-500">{entryClientName(entry) ?? '—'}</TableCell>
                         <TableCell className="text-xs text-brand-500">{entryAssigneeName(entry) ?? t('calendar.list.unassigned')}</TableCell>
+                        <TableCell className="text-xs" onClick={(e) => opportunity && e.stopPropagation()}>
+                          {opportunity ? (
+                            <Link to={`/app/opportunities?opportunity=${opportunity.id}`} className="font-medium text-accent-600 hover:underline">
+                              {opportunity.title}
+                            </Link>
+                          ) : (
+                            <span className="text-brand-400">—</span>
+                          )}
+                        </TableCell>
                         <TableCell>
                           <Badge variant="outline" className={entryStatusBadgeClass(entry.kind, status, overdue)}>
                             {statusLabel}

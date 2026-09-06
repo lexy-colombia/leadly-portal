@@ -1,16 +1,15 @@
 import { useEffect, useRef, type MouseEvent } from 'react'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import { CalendarIcon, CheckIcon } from '@/components/atoms/icons'
-import { type CalendarEntry, dateKey, entryLabel, entryVisual, isEntryOverdue } from './agendaShared'
+import { type CalendarEntry, dateKey, entryEndMs, entryLabel, entryVisual, isEntryOverdue } from './agendaShared'
 
 const START_HOUR = 6
 const END_HOUR = 22
 const HOUR_HEIGHT = 56
-/** No hay hora de fin en el schema (appointments/tasks solo tienen un
- * instante) -- se usa una duración visual fija solo para poder dibujar un
- * bloque con alto, no representa un dato real de duración. */
-const VISUAL_DURATION_MS = 45 * 60 * 1000
 const GRID_HEIGHT = (END_HOUR - START_HOUR) * HOUR_HEIGHT
+/** Piso de alto de un bloque para que uno muy corto (una tarea, o una cita
+ * de 15 min) siga siendo legible/clickeable. */
+const MIN_BLOCK_HEIGHT = 22
 
 interface LaidOutEntry {
   entry: CalendarEntry
@@ -24,7 +23,7 @@ interface LaidOutEntry {
  * para la cantidad de citas/tareas por día que maneja este producto. */
 function layoutDayEntries(entries: CalendarEntry[]): LaidOutEntry[] {
   const sorted = [...entries].sort((a, b) => a.time - b.time)
-  const withEnd = sorted.map((entry) => ({ entry, start: entry.time, end: entry.time + VISUAL_DURATION_MS }))
+  const withEnd = sorted.map((entry) => ({ entry, start: entry.time, end: entryEndMs(entry) }))
   const result: LaidOutEntry[] = []
   let cluster: typeof withEnd = []
   let clusterMaxEnd = -Infinity
@@ -73,8 +72,9 @@ function EventBlock({ laid, locale, onOpen }: { laid: LaidOutEntry; locale: stri
   const status = entry.kind === 'appointment' ? entry.appointment.status : entry.task.status
   const { chip } = entryVisual(entry.kind, status, overdue)
   const start = new Date(entry.time)
+  const durationMs = entryEndMs(entry) - entry.time
   const top = (hourOffset(start) - START_HOUR) * HOUR_HEIGHT
-  const height = Math.max((VISUAL_DURATION_MS / 3_600_000) * HOUR_HEIGHT, 22)
+  const height = Math.max((durationMs / 3_600_000) * HOUR_HEIGHT, MIN_BLOCK_HEIGHT)
   const width = 100 / cols
   const left = col * width
   const time = start.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' })

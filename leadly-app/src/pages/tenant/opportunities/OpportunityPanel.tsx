@@ -4,6 +4,7 @@ import { deleteOpportunity, type OpportunityWithRelations } from '../../../lib/a
 import { listConversationsForContact, type ConversationWithLine } from '../../../lib/api/conversations'
 import { listTasksForOpportunity, updateTask, type TaskWithRelations } from '../../../lib/api/tasks'
 import { listOrdersForOpportunity, type OrderWithRelations } from '../../../lib/api/orders'
+import { useOpportunityStageGate } from '../../../lib/useOpportunityStageGate'
 import type { OpportunityPriority, OrderStatus } from '../../../types/domain'
 import { PageSpinner } from '@/components/atoms'
 import { Card, EmptyState } from '@/components/molecules'
@@ -91,6 +92,7 @@ export function OpportunityPanel({
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const { requestStageDecision, dialog: stageGateDialog } = useOpportunityStageGate()
 
   useEffect(() => {
     if (!open) return
@@ -122,13 +124,24 @@ export function OpportunityPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, tab, opportunity])
 
-  async function handleToggleTask(task: TaskWithRelations) {
+  async function doToggleTask(task: TaskWithRelations) {
     setTasks((prev) => (prev ? prev.map((t) => (t.id === task.id ? { ...t, status: task.status === 'completada' ? 'pendiente' : 'completada' } : t)) : prev))
     try {
       await updateTask(task.id, { status: task.status === 'completada' ? 'pendiente' : 'completada' })
     } catch {
       reloadTasks()
     }
+  }
+
+  // Toda tarea de esta tab ya pertenece a `opportunity` -- completarla exige
+  // decidir antes qué pasa con esa oportunidad (pedido explícito del usuario,
+  // 2026-09-06). Des-completar no pasa por el gate.
+  function handleToggleTask(task: TaskWithRelations) {
+    if (task.status !== 'completada' && opportunity) {
+      requestStageDecision(opportunity.id, task.title, () => doToggleTask(task), () => onChanged())
+      return
+    }
+    doToggleTask(task)
   }
 
   async function handleDelete() {
@@ -364,6 +377,8 @@ export function OpportunityPanel({
           onSaved={reloadTasks}
         />
       )}
+
+      {stageGateDialog}
     </>
   )
 }
