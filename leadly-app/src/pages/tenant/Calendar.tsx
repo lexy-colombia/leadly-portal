@@ -272,7 +272,7 @@ export function Calendar() {
   return (
     <div className="animate-fade-in space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-bold text-brand-800 sm:text-2xl">{headerLabel}</h1>
+        <h1 className="text-xs font-bold text-brand-800 sm:text-xs">{headerLabel}</h1>
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center rounded-lg border border-brand-100 bg-white p-0.5">
             {(['month', 'week', 'day'] as const).map((v) => (
@@ -350,7 +350,7 @@ export function Calendar() {
         </div>
       )}
 
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
 
       {!loaded && <PageSpinner />}
 
@@ -470,7 +470,7 @@ export function Calendar() {
 
       {loaded && viewMode === 'day' && (
         <Card className="space-y-2">
-          {(entriesByDay.get(dateKey(day)) ?? []).length === 0 && <p className="py-6 text-center text-sm text-brand-400">{t('calendar.day.empty')}</p>}
+          {(entriesByDay.get(dateKey(day)) ?? []).length === 0 && <p className="py-6 text-center text-xs text-brand-400">{t('calendar.day.empty')}</p>}
           {(entriesByDay.get(dateKey(day)) ?? []).map((entry) => (
             <CalendarEntryRow
               key={entry.kind === 'appointment' ? entry.appointment.id : entry.task.id}

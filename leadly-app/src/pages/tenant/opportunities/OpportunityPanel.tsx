@@ -52,7 +52,7 @@ function Field({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <dt className="text-xs text-brand-400">{label}</dt>
-      <dd className="text-sm text-brand-700">{value}</dd>
+      <dd className="text-xs text-brand-700">{value}</dd>
     </div>
   )
 }
@@ -179,7 +179,7 @@ export function OpportunityPanel({
         }
       >
         <div className="space-y-4">
-          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
 
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className={outcomeBadgeClass}>
@@ -223,21 +223,21 @@ export function OpportunityPanel({
                 {opportunity.description && (
                   <div>
                     <p className="mb-1 text-xs text-brand-400">{t('opportunities.panel.fields.description')}</p>
-                    <p className="whitespace-pre-wrap text-sm text-brand-700">{opportunity.description}</p>
+                    <p className="whitespace-pre-wrap text-xs text-brand-700">{opportunity.description}</p>
                   </div>
                 )}
 
                 <div className="border-t border-brand-100 pt-4">
                   <p className="mb-2 text-xs text-brand-400">{t('opportunities.panel.orders.label')}</p>
                   {orders === null && <PageSpinner />}
-                  {orders && orders.length === 0 && <p className="text-sm text-brand-400">{t('opportunities.panel.orders.empty')}</p>}
+                  {orders && orders.length === 0 && <p className="text-xs text-brand-400">{t('opportunities.panel.orders.empty')}</p>}
                   {orders && orders.length > 0 && (
                     <ul className="space-y-1.5">
                       {orders.map((o) => (
                         <li key={o.id}>
                           <button
                             onClick={() => navigate(`/app/sales/${o.id}`)}
-                            className="flex w-full items-center justify-between gap-2 rounded-lg border border-brand-100 px-3 py-2 text-left text-sm transition-colors hover:bg-brand-50"
+                            className="flex w-full items-center justify-between gap-2 rounded-lg border border-brand-100 px-3 py-2 text-left text-xs transition-colors hover:bg-brand-50"
                           >
                             <span className="font-mono text-xs font-semibold text-brand-400">ORD-{o.number}</span>
                             <Badge variant="outline" className={ORDER_STATUS_BADGE_CLASS[o.status]}>
@@ -272,7 +272,7 @@ export function OpportunityPanel({
                           <span className="min-w-0">
                             <span className="flex items-center gap-1.5">
                               <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${conv.mode === 'ia' ? 'bg-accent-500' : 'bg-amber-500'}`} />
-                              <span className="text-sm font-medium text-brand-800">
+                              <span className="text-xs font-medium text-brand-800">
                                 {conv.mode === 'ia' ? t('opportunities.panel.conversations.modeIa') : t('opportunities.panel.conversations.modeHuman')}
                               </span>
                               {conv.status === 'closed' && (
@@ -295,7 +295,7 @@ export function OpportunityPanel({
             <TabsContent value="tareas">
               <Card>
                 <div className="mb-3 flex items-center justify-between">
-                  <p className="text-sm text-brand-400">
+                  <p className="text-xs text-brand-400">
                     {tasks && tasks.length > 0
                       ? t('opportunities.panel.tasks.countLabel', {
                           done: tasks.filter((task) => task.status === 'completada').length,
@@ -332,7 +332,7 @@ export function OpportunityPanel({
                           <CheckIcon width={11} height={11} />
                         </button>
                         <button type="button" onClick={() => setTaskDrawer({ open: true, task })} className="min-w-0 flex-1 text-left">
-                          <p className={`text-sm ${task.status === 'completada' ? 'text-brand-400 line-through' : 'text-brand-800'}`}>{task.title}</p>
+                          <p className={`text-xs ${task.status === 'completada' ? 'text-brand-400 line-through' : 'text-brand-800'}`}>{task.title}</p>
                           {task.due_date && <p className="text-xs text-brand-400">{formatDateTime(task.due_date, language)}</p>}
                         </button>
                       </li>

@@ -1,37 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useOutletContext } from 'react-router-dom'
-import { Loader2Icon, MinusIcon, PlusIcon, SearchIcon, SlidersHorizontalIcon } from 'lucide-react'
+import { Loader2Icon, SlidersHorizontalIcon, XIcon } from 'lucide-react'
 import { useLanguage } from '../../contexts/LanguageContext'
-import {
-  addToStorefrontCart,
-  getStorefrontCart,
-  listStorefrontBrands,
-  listStorefrontCategories,
-  listStorefrontProducts,
-  removeStorefrontCartItem,
-  updateStorefrontCartItem,
-  type StorefrontCartItem,
-  type StorefrontProductSummary,
-  type StorefrontProductVariant,
-} from '../../lib/api/storefront'
+import { listStorefrontBrands, listStorefrontCategories, listStorefrontProducts, type StorefrontProductSummary } from '../../lib/api/storefront'
 import { descendantIds } from '../../lib/api/productCategories'
-import { getStorefrontCartToken, setStorefrontCartToken } from '../../lib/storefrontCart'
-import { useDebouncedQuantity } from '../../lib/useDebouncedQuantity'
+import { useStorefrontCart } from '../../lib/useStorefrontCart'
 import type { StorefrontOutletContext } from '../../layouts/StorefrontLayout'
 import type { Brand, ProductCategory } from '../../types/domain'
-import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from '@/components/ui/sheet'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { CategoryTreeFilter } from '@/components/molecules'
-import { StorefrontImage } from '@/components/storefront/StorefrontImage'
+import { StorefrontCategorySidebar } from '@/components/storefront/StorefrontCategorySidebar'
+import { StorefrontOrderPanel } from '@/components/storefront/StorefrontOrderPanel'
+import { ProductCard } from '@/components/storefront/ProductCard'
 
 const ALL = '__all__'
 type SortOption = 'name_asc' | 'price_asc' | 'price_desc' | 'newest'
-const LOW_STOCK_THRESHOLD = 5
 // Scroll infinito -- pedido explícito del usuario: la carga inicial completa
 // del catálogo (hasta 120 productos con imagen, marca, stock y variantes de
 // cada uno) se sentía pesada. De a PAGE_SIZE en vez de todo de una.
@@ -41,17 +28,21 @@ function formatCurrency(value: number): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(value)
 }
 
-/** Grilla de catálogo, estilo shadcn -- buscador siempre en vivo + un drawer
- * de filtros "profesional" a la derecha (marca, árbol de categorías, orden),
- * que solo se aplica al tocar "Aplicar" (o se limpia con "Borrar"), en vez de
- * refiltrar en cada click. Los filtros activos solo se ven como el badge
- * numérico sobre el botón "Filtros" -- pedido explícito: nada de chips
- * sueltos en el home, esa vista vive adentro del drawer. */
+/** Grilla de catálogo de 3 columnas (categorías | productos | pedido),
+ * pedido explícito del usuario a partir de un mockup de referencia --
+ * reemplaza el layout anterior (buscador propio + drawer de filtros con
+ * categoría adentro, sin ningún carrito visible salvo el ícono del header).
+ * La categoría vive ahora en un árbol siempre visible en la barra
+ * izquierda (aplica al instante, sin "Aplicar"); el drawer de "Filtros"
+ * quedó solo para marca y rango de precio. El carrito completo (con
+ * cantidades editables) vive en la barra derecha en desktop -- el checkout
+ * en sí sigue siendo la página aparte /carrito, son varios pasos de
+ * formulario que no entran en una barra lateral. */
 export function StorefrontCatalog() {
-  const { slug, refreshCartCount, showError } = useOutletContext<StorefrontOutletContext>()
+  const { slug, refreshCartCount, showError, search, searching, setSearching } = useOutletContext<StorefrontOutletContext>()
   const { t } = useLanguage()
   const [products, setProducts] = useState<StorefrontProductSummary[] | null>(null)
-  const [searching, setSearching] = useState(false)
+  const [total, setTotal] = useState<number | undefined>(undefined)
   const [hasMore, setHasMore] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   // Cuántos productos ya se cargaron para esta combinación de filtros --
@@ -61,81 +52,42 @@ export function StorefrontCatalog() {
   const offsetRef = useRef(0)
   const sentinelRef = useRef<HTMLDivElement | null>(null)
   const [categories, setCategories] = useState<ProductCategory[]>([])
+  const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({})
   const [brands, setBrands] = useState<Brand[]>([])
-  const [search, setSearch] = useState('')
 
   const [appliedCategoryId, setAppliedCategoryId] = useState<string | null>(null)
   const [appliedBrandId, setAppliedBrandId] = useState<string | null>(null)
   const [appliedSort, setAppliedSort] = useState<SortOption>('name_asc')
+  const [appliedMinPrice, setAppliedMinPrice] = useState<number | undefined>(undefined)
+  const [appliedMaxPrice, setAppliedMaxPrice] = useState<number | undefined>(undefined)
 
   const [sheetOpen, setSheetOpen] = useState(false)
-  const [draftCategoryId, setDraftCategoryId] = useState<string | null>(null)
   const [draftBrandId, setDraftBrandId] = useState<string | null>(null)
-  const [draftSort, setDraftSort] = useState<SortOption>('name_asc')
+  const [draftMinPrice, setDraftMinPrice] = useState('')
+  const [draftMaxPrice, setDraftMaxPrice] = useState('')
 
-  // product_id (simples) o variant_id (con variantes) -> ítem real del
-  // carrito -- pedido explícito: "no se cual ya agregué, no es claro eso" +
-  // "si algo ya está agregado, quita el botón de agregar y poné ahí el
-  // indicador de cantidades para poder modificarlas". Guarda el itemId (no
-  // solo la cantidad) porque modificar/quitar necesita ese id, no el
-  // product_id/variant_id.
-  const [cartItems, setCartItems] = useState<Map<string, { itemId: string; quantity: number }>>(new Map())
-  // Espejo síncrono de `cartItems` -- `commitCartQuantity` lo necesita para
-  // leer/actualizar el mapa sin quedar atado al closure (posiblemente viejo)
-  // de cuándo se disparó el commit. Ver el comentario de esa función: dos
-  // productos distintos agregándose en paralelo (bug real reportado) sino
-  // cada respuesta que llega tarde pisaba TODO el mapa con su propia foto
-  // parcial, borrando lo que la otra request ya había agregado.
-  const cartItemsRef = useRef<Map<string, { itemId: string; quantity: number }>>(new Map())
-  // Cuando todavía no existe ningún carrito (primera visita, sin token en
-  // localStorage), el PRIMER add_to_cart que sale es el que efectivamente lo
-  // crea -- si dos productos distintos se agregan casi al mismo tiempo antes
-  // de que ese primer request vuelva con un session_token, los dos mandan
-  // session_token=null en paralelo y el backend, sin forma de saber que es
-  // el mismo visitante, crea DOS carritos separados (uno por producto). El
-  // segundo queda huérfano en cuanto el primero graba su token en
-  // localStorage -- bug real reportado como "se pierden productos al
-  // refrescar" (el que sobrevive en localStorage es el de un solo
-  // producto). Este ref es la promesa del primer add en vuelo: cualquier
-  // otro commit que también encuentre el token vacío espera ESTE resultado
-  // en vez de disparar su propio carrito nuevo.
-  const pendingCartTokenRef = useRef<Promise<string> | null>(null)
-
-  const applyCartItems = useCallback((items: StorefrontCartItem[]) => {
-    const map = new Map<string, { itemId: string; quantity: number }>()
-    for (const item of items) {
-      const key = item.variant_id ?? item.product_id
-      const existing = map.get(key)
-      map.set(key, { itemId: item.id, quantity: (existing?.quantity ?? 0) + item.quantity })
-    }
-    cartItemsRef.current = map
-    setCartItems(map)
-  }, [])
-
-  // Solo al montar/cambiar de tienda -- después de cada mutación (agregar/
-  // quitar) el propio `items` que devuelve esa llamada alcanza para
-  // actualizar el estado local, sin otro round-trip a get_cart (ver
-  // commitCartQuantity). Antes se llamaba a esto también después
-  // de cada click, duplicando la latencia percibida de "agregar al carrito".
-  useEffect(() => {
-    const token = getStorefrontCartToken(slug)
-    if (!token) {
-      cartItemsRef.current = new Map()
-      setCartItems(new Map())
-      return
-    }
-    getStorefrontCart(token)
-      .then((res) => applyCartItems(res.items))
-      .catch(() => {
-        cartItemsRef.current = new Map()
-        setCartItems(new Map())
-      })
-  }, [slug, applyCartItems])
+  // Carrito completo (no solo cantidades) -- a diferencia del layout
+  // anterior, la barra de "Tu pedido" necesita nombre/imagen/precio de cada
+  // línea, no solo saber cuánto hay de cada producto para el indicador de
+  // la card. Extraído a useStorefrontCart para compartirlo tal cual con
+  // StorefrontProductDetail.tsx (mismo panel + misma protección contra
+  // condiciones de carrera, ver ese hook).
+  const { items, itemsByKey, totals, commitCartQuantity, commitPanelQuantity, handleCartCleared } = useStorefrontCart(slug, refreshCartCount, (err) =>
+    showError(err instanceof Error ? err.message : t('storefront.catalog.updateError')),
+  )
 
   useEffect(() => {
     listStorefrontCategories(slug)
-      .then((res) => setCategories(res.categories))
-      .catch(() => setCategories([]))
+      .then((res) => {
+        setCategories(res.categories)
+        // `?? {}` cubre además el backend viejo (sin este campo todavía) --
+        // nunca debería crashear el árbol solo porque el conteo no llegó.
+        setCategoryCounts(res.counts ?? {})
+      })
+      .catch(() => {
+        setCategories([])
+        setCategoryCounts({})
+      })
     listStorefrontBrands(slug)
       .then((res) => setBrands(res.brands))
       .catch(() => setBrands([]))
@@ -154,6 +106,8 @@ export function StorefrontCatalog() {
         search: search || undefined,
         category_ids: categoryIds,
         brand_id: appliedBrandId || undefined,
+        min_price: appliedMinPrice,
+        max_price: appliedMaxPrice,
         sort: appliedSort,
         offset: 0,
         limit: PAGE_SIZE,
@@ -162,6 +116,7 @@ export function StorefrontCatalog() {
           if (cancelled) return
           setProducts(res.products)
           setHasMore(res.has_more)
+          setTotal(res.total)
           offsetRef.current = res.products.length
         })
         .catch((err) => {
@@ -180,7 +135,7 @@ export function StorefrontCatalog() {
       clearTimeout(timeout)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slug, search, appliedCategoryId, appliedBrandId, appliedSort, categories])
+  }, [slug, search, appliedCategoryId, appliedBrandId, appliedMinPrice, appliedMaxPrice, appliedSort, categories])
 
   const loadMore = useCallback(() => {
     if (loadingMore || searching || !hasMore) return
@@ -190,6 +145,8 @@ export function StorefrontCatalog() {
       search: search || undefined,
       category_ids: categoryIds,
       brand_id: appliedBrandId || undefined,
+      min_price: appliedMinPrice,
+      max_price: appliedMaxPrice,
       sort: appliedSort,
       offset: offsetRef.current,
       limit: PAGE_SIZE,
@@ -202,7 +159,7 @@ export function StorefrontCatalog() {
       .catch((err) => showError(err instanceof Error ? err.message : t('storefront.catalog.loadError')))
       .finally(() => setLoadingMore(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slug, search, appliedCategoryId, appliedBrandId, appliedSort, categories, hasMore, loadingMore, searching])
+  }, [slug, search, appliedCategoryId, appliedBrandId, appliedMinPrice, appliedMaxPrice, appliedSort, categories, hasMore, loadingMore, searching])
 
   // Dispara loadMore cuando el centinela del final de la grilla entra en
   // viewport -- rootMargin adelanta el pedido ~400px antes de tocar el
@@ -222,207 +179,136 @@ export function StorefrontCatalog() {
   }, [loadMore])
 
   function openFilters() {
-    setDraftCategoryId(appliedCategoryId)
     setDraftBrandId(appliedBrandId)
-    setDraftSort(appliedSort)
+    setDraftMinPrice(appliedMinPrice != null ? String(appliedMinPrice) : '')
+    setDraftMaxPrice(appliedMaxPrice != null ? String(appliedMaxPrice) : '')
     setSheetOpen(true)
   }
 
   function applyFilters() {
-    setAppliedCategoryId(draftCategoryId)
     setAppliedBrandId(draftBrandId)
-    setAppliedSort(draftSort)
+    setAppliedMinPrice(draftMinPrice ? Number(draftMinPrice) : undefined)
+    setAppliedMaxPrice(draftMaxPrice ? Number(draftMaxPrice) : undefined)
     setSheetOpen(false)
   }
 
   function clearFilters() {
-    setDraftCategoryId(null)
     setDraftBrandId(null)
-    setDraftSort('name_asc')
-    setAppliedCategoryId(null)
+    setDraftMinPrice('')
+    setDraftMaxPrice('')
     setAppliedBrandId(null)
-    setAppliedSort('name_asc')
+    setAppliedMinPrice(undefined)
+    setAppliedMaxPrice(undefined)
     setSheetOpen(false)
   }
 
-  const activeFilterCount = (appliedCategoryId ? 1 : 0) + (appliedBrandId ? 1 : 0) + (appliedSort !== 'name_asc' ? 1 : 0)
-
-  // Único punto de guardado real para la cantidad de un producto/variante en
-  // el carrito -- lo llaman ProductCardAction/VariantRow ya debounced (ver
-  // useDebouncedQuantity), con el valor absoluto final que el usuario dejó
-  // después de parar de clickear/tipear, nunca uno por click. Decide
-  // add_to_cart (todavía no había ítem) vs update/remove_cart_item (ya
-  // había uno, con su propio itemId) mirando `cartItems` en el momento en
-  // que el debounce efectivamente dispara, no en el momento del primer
-  // click.
-  async function commitCartQuantity(key: string, product: StorefrontProductSummary, variantId: string | undefined, quantity: number) {
-    const entry = cartItemsRef.current.get(key)
-    try {
-      let freshItems: StorefrontCartItem[]
-      if (entry) {
-        const token = getStorefrontCartToken(slug)
-        if (!token) return
-        const res = quantity <= 0 ? await removeStorefrontCartItem(token, entry.itemId) : await updateStorefrontCartItem(token, entry.itemId, quantity)
-        freshItems = res.items
-      } else if (quantity > 0) {
-        let sessionToken = getStorefrontCartToken(slug)
-        // Si no hay token todavía pero YA hay un primer add en vuelo
-        // creando el carrito, esperar ese resultado en vez de mandar
-        // session_token=null también -- ver el comentario de
-        // pendingCartTokenRef arriba.
-        if (!sessionToken && pendingCartTokenRef.current) {
-          sessionToken = await pendingCartTokenRef.current
-        }
-        const addPromise = addToStorefrontCart({ slug, session_token: sessionToken, product_id: product.id, variant_id: variantId, quantity }).then((result) => {
-          setStorefrontCartToken(slug, result.session_token)
-          return result
-        })
-        if (!sessionToken) {
-          const tokenPromise = addPromise.then((result) => result.session_token)
-          pendingCartTokenRef.current = tokenPromise
-          tokenPromise.finally(() => {
-            if (pendingCartTokenRef.current === tokenPromise) pendingCartTokenRef.current = null
-          })
-        }
-        const result = await addPromise
-        freshItems = result.items
-      } else {
-        return
-      }
-
-      // Actualiza SOLO la entrada de `key` sobre el mapa más reciente (el
-      // ref, no el `cartItems` capturado cuando arrancó este commit) --
-      // nunca reemplaza el mapa entero con `freshItems`, que es apenas la
-      // foto del carrito según ESTA respuesta puntual. Bug real reportado:
-      // agregar 2 productos distintos rápido disparaba 2 add_to_cart en
-      // paralelo, y cualquiera de las dos respuestas que llegara última
-      // pisaba por completo el estado local -- incluida la entrada del OTRO
-      // producto, que a veces ni siquiera aparecía todavía en esa respuesta
-      // puntual aunque ya estuviera guardado en la base. Tocar una sola
-      // clave por commit hace que el orden de llegada de las respuestas ya
-      // no importe.
-      const match = freshItems.find((item) => (item.variant_id ?? item.product_id) === key)
-      const next = new Map(cartItemsRef.current)
-      if (match) next.set(key, { itemId: match.id, quantity: match.quantity })
-      else next.delete(key)
-      cartItemsRef.current = next
-      setCartItems(next)
-      refreshCartCount(Array.from(next.values()).reduce((sum, v) => sum + v.quantity, 0))
-    } catch (err) {
-      showError(err instanceof Error ? err.message : t('storefront.catalog.updateError'))
-    }
-  }
+  const hasPriceFilter = appliedMinPrice != null || appliedMaxPrice != null
+  const hasActiveFilters = !!appliedBrandId || hasPriceFilter
+  const selectedCategory = appliedCategoryId ? categories.find((c) => c.id === appliedCategoryId) : undefined
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-2">
-        <InputGroup className="h-9">
-          <InputGroupAddon>{searching ? <Loader2Icon className="animate-spin" /> : <SearchIcon />}</InputGroupAddon>
-          <InputGroupInput placeholder={t('storefront.catalog.searchPlaceholder')} value={search} onChange={(e) => setSearch(e.target.value)} />
-        </InputGroup>
-        <Button variant="outline" size="lg" className="relative h-9 shrink-0" onClick={openFilters}>
-          <SlidersHorizontalIcon />
-          {t('storefront.filters.title')}
-          {activeFilterCount > 0 && (
-            <Badge variant="destructive" className="ml-0.5 h-4.5 min-w-4.5 justify-center rounded-full px-1 text-[10px]">
-              {activeFilterCount}
-            </Badge>
+      <nav className="text-xs text-muted-foreground">
+        <Link to={`/tienda/${slug}`} className="hover:text-foreground hover:underline">
+          {t('storefront.breadcrumb.home')}
+        </Link>
+        <span> / </span>
+        <span className="text-foreground">{selectedCategory?.name ?? t('storefront.catalog.title')}</span>
+      </nav>
+
+      <div className="grid gap-6 lg:grid-cols-[200px_1fr_300px] xl:grid-cols-[220px_1fr_320px]">
+        <aside className="hidden lg:block">
+          <StorefrontCategorySidebar
+            categories={categories}
+            counts={categoryCounts}
+            selectedId={appliedCategoryId}
+            onSelect={setAppliedCategoryId}
+            title={t('storefront.categories.title')}
+            allLabel={t('storefront.categories.viewAll')}
+          />
+        </aside>
+
+        <div className="min-w-0 space-y-4">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h1 className="text-xl font-bold text-foreground sm:text-2xl">{selectedCategory?.name ?? t('storefront.catalog.title')}</h1>
+              {total != null && <p className="text-xs text-muted-foreground">{t('storefront.catalog.productCount', { count: total })}</p>}
+            </div>
+            <div className="flex items-center gap-2">
+              <Select value={appliedSort} onValueChange={(v) => setAppliedSort(v as SortOption)}>
+                <SelectTrigger className="h-9 w-44 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="name_asc">{t('storefront.filters.sortNameAsc')}</SelectItem>
+                  <SelectItem value="price_asc">{t('storefront.filters.sortPriceAsc')}</SelectItem>
+                  <SelectItem value="price_desc">{t('storefront.filters.sortPriceDesc')}</SelectItem>
+                  <SelectItem value="newest">{t('storefront.filters.sortNewest')}</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button variant="outline" size="lg" className="h-9 shrink-0" onClick={openFilters}>
+                <SlidersHorizontalIcon />
+                {t('storefront.filters.title')}
+              </Button>
+            </div>
+          </div>
+
+          {hasActiveFilters && (
+            <div className="flex flex-wrap items-center gap-2">
+              {appliedBrandId && (
+                <FilterChip label={t('storefront.filters.chipBrand', { name: brands.find((b) => b.id === appliedBrandId)?.name ?? '' })} onRemove={() => setAppliedBrandId(null)} />
+              )}
+              {hasPriceFilter && (
+                <FilterChip
+                  label={t('storefront.filters.chipPrice', {
+                    min: formatCurrency(appliedMinPrice ?? 0),
+                    max: appliedMaxPrice != null ? formatCurrency(appliedMaxPrice) : '∞',
+                  })}
+                  onRemove={() => {
+                    setAppliedMinPrice(undefined)
+                    setAppliedMaxPrice(undefined)
+                  }}
+                />
+              )}
+              <button type="button" onClick={clearFilters} className="text-xs font-medium text-primary hover:underline">
+                {t('storefront.filters.clearAll')}
+              </button>
+            </div>
           )}
-        </Button>
+
+          {products === null ? (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Skeleton key={i} className="aspect-[3/4] w-full" />
+              ))}
+            </div>
+          ) : products.length === 0 ? (
+            <p className="py-16 text-center text-xs text-muted-foreground">{t('storefront.catalog.empty')}</p>
+          ) : (
+            <div className={`grid grid-cols-2 gap-3 transition-opacity duration-200 sm:grid-cols-3 ${searching ? 'opacity-50' : 'opacity-100'}`}>
+              {products.map((product) => (
+                <ProductCard
+                  key={product.id}
+                  slug={slug}
+                  product={product}
+                  getCartQuantity={(key) => itemsByKey.get(key)?.quantity ?? 0}
+                  onCommit={(key, variantId, quantity) => commitCartQuantity(key, product.id, variantId, quantity)}
+                />
+              ))}
+            </div>
+          )}
+
+          {products !== null && products.length > 0 && (hasMore || loadingMore) && (
+            <div ref={sentinelRef} className="flex justify-center py-4">
+              <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
+            </div>
+          )}
+        </div>
+
+        <aside className="hidden lg:block">
+          <StorefrontOrderPanel slug={slug} items={items} totals={totals} onCommit={commitPanelQuantity} onClear={handleCartCleared} onError={showError} />
+        </aside>
       </div>
-
-      {products === null ? (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <Skeleton key={i} className="aspect-[3/4] w-full" />
-          ))}
-        </div>
-      ) : products.length === 0 ? (
-        <p className="py-16 text-center text-sm text-muted-foreground">{t('storefront.catalog.empty')}</p>
-      ) : (
-        <div className={`grid grid-cols-2 gap-3 transition-opacity duration-200 sm:grid-cols-3 md:grid-cols-4 ${searching ? 'opacity-50' : 'opacity-100'}`}>
-          {products.map((product) => {
-            const outOfStock = product.available !== null && product.available <= 0
-            const lowStock = product.available !== null && product.available > 0 && product.available <= LOW_STOCK_THRESHOLD
-            const cartEntry = cartItems.get(product.id)
-            const inCartQty = product.has_variants
-              ? (product.variants ?? []).reduce((sum, v) => sum + (cartItems.get(v.id)?.quantity ?? 0), 0)
-              : (cartEntry?.quantity ?? 0)
-
-            return (
-              <div key={product.id} className="group animate-in fade-in-0 overflow-hidden rounded-xl border border-border bg-card transition-shadow duration-300 hover:shadow-md">
-                <Link to={`/tienda/${slug}/producto/${product.id}`} className="block">
-                  <div className="relative aspect-square w-full overflow-hidden bg-muted">
-                    <StorefrontImage src={product.image_url} alt={product.name} className="h-full w-full transition-transform group-hover:scale-105" />
-                    {outOfStock && (
-                      <Badge variant="destructive" className="absolute top-2 left-2">
-                        {t('storefront.catalog.outOfStock')}
-                      </Badge>
-                    )}
-                    {!outOfStock && lowStock && (
-                      <Badge variant="outline" className="absolute top-2 left-2 bg-background">
-                        {t('storefront.catalog.lowStock', { count: product.available ?? 0 })}
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="p-3 pb-0">
-                    <p className="truncate text-sm font-medium text-foreground">{product.name}</p>
-                    {product.brand_name && <p className="truncate text-xs text-muted-foreground">{product.brand_name}</p>}
-                    <p className="mt-0.5 text-sm font-semibold text-primary">{formatCurrency(product.price)}</p>
-                    {product.sku && <p className="mt-0.5 truncate text-[11px] text-muted-foreground">SKU: {product.sku}</p>}
-                  </div>
-                </Link>
-                <div className="p-3 pt-2">
-                  {product.has_variants ? (
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button size="sm" className="w-full justify-between" disabled={outOfStock}>
-                          <span className="flex items-center gap-1.5">
-                            <PlusIcon />
-                            {outOfStock ? t('storefront.catalog.outOfStock') : t('storefront.catalog.chooseOption')}
-                          </span>
-                          {inCartQty > 0 && (
-                            <Badge variant="secondary" className="h-4.5 min-w-4.5 justify-center rounded-full px-1 text-[10px]">
-                              {inCartQty}
-                            </Badge>
-                          )}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-56 p-1.5" align="start">
-                        {(product.variants ?? []).map((variant) => (
-                          <VariantRow
-                            key={variant.id}
-                            variant={variant}
-                            cartQuantity={cartItems.get(variant.id)?.quantity ?? 0}
-                            outOfStockLabel={t('storefront.catalog.outOfStock')}
-                            onCommit={(quantity) => commitCartQuantity(variant.id, product, variant.id, quantity)}
-                          />
-                        ))}
-                      </PopoverContent>
-                    </Popover>
-                  ) : (
-                    <ProductCardAction
-                      cartQuantity={cartEntry?.quantity ?? 0}
-                      outOfStock={outOfStock}
-                      addLabel={t('storefront.product.addToCart')}
-                      outOfStockLabel={t('storefront.catalog.outOfStock')}
-                      decreaseLabel={t('storefront.catalog.decrease')}
-                      increaseLabel={t('storefront.catalog.increase')}
-                      onCommit={(quantity) => commitCartQuantity(product.id, product, undefined, quantity)}
-                    />
-                  )}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      {products !== null && products.length > 0 && (hasMore || loadingMore) && (
-        <div ref={sentinelRef} className="flex justify-center py-4">
-          <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
-        </div>
-      )}
 
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
         <SheetContent className="flex flex-col">
@@ -431,9 +317,9 @@ export function StorefrontCatalog() {
           </SheetHeader>
           <div className="flex-1 space-y-5 overflow-y-auto px-4">
             <div className="space-y-1.5">
-              <p className="text-sm font-medium text-foreground">{t('storefront.filters.brand')}</p>
+              <p className="text-xs font-medium text-foreground">{t('storefront.filters.brand')}</p>
               <Select value={draftBrandId ?? ALL} onValueChange={(v) => setDraftBrandId(v === ALL ? null : v)}>
-                <SelectTrigger className="h-9 w-full text-sm">
+                <SelectTrigger className="h-9 w-full text-xs">
                   <SelectValue placeholder={t('storefront.filters.allBrands')} />
                 </SelectTrigger>
                 <SelectContent>
@@ -448,32 +334,12 @@ export function StorefrontCatalog() {
             </div>
 
             <div className="space-y-1.5">
-              <p className="text-sm font-medium text-foreground">{t('storefront.filters.category')}</p>
-              <CategoryTreeFilter
-                categories={categories}
-                value={draftCategoryId}
-                onChange={setDraftCategoryId}
-                placeholder={t('storefront.filters.categoryPlaceholder')}
-                searchPlaceholder={t('storefront.filters.categorySearchPlaceholder')}
-                emptyLabel={t('storefront.filters.categoryEmpty')}
-                rootLabel={t('storefront.filters.categoryRoot')}
-                triggerClassName="w-full h-9 text-sm"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <p className="text-sm font-medium text-foreground">{t('storefront.filters.sort')}</p>
-              <Select value={draftSort} onValueChange={(v) => setDraftSort(v as SortOption)}>
-                <SelectTrigger className="h-9 w-full text-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="name_asc">{t('storefront.filters.sortNameAsc')}</SelectItem>
-                  <SelectItem value="price_asc">{t('storefront.filters.sortPriceAsc')}</SelectItem>
-                  <SelectItem value="price_desc">{t('storefront.filters.sortPriceDesc')}</SelectItem>
-                  <SelectItem value="newest">{t('storefront.filters.sortNewest')}</SelectItem>
-                </SelectContent>
-              </Select>
+              <p className="text-xs font-medium text-foreground">{t('storefront.filters.price')}</p>
+              <div className="flex items-center gap-2">
+                <Input type="number" inputMode="numeric" min={0} placeholder={t('storefront.filters.priceMin')} value={draftMinPrice} onChange={(e) => setDraftMinPrice(e.target.value)} className="h-9 text-xs" />
+                <span className="text-xs text-muted-foreground">–</span>
+                <Input type="number" inputMode="numeric" min={0} placeholder={t('storefront.filters.priceMax')} value={draftMaxPrice} onChange={(e) => setDraftMaxPrice(e.target.value)} className="h-9 text-xs" />
+              </div>
             </div>
           </div>
           <SheetFooter className="flex-row">
@@ -490,129 +356,14 @@ export function StorefrontCatalog() {
   )
 }
 
-/** Botón "Agregar" (o "Elegir opción" que en realidad es el trigger del
- * Popover, este componente es solo el caso sin variantes) que se convierte
- * en un stepper -/input/+ -- dueño de su propio useDebouncedQuantity, así
- * que el cambio de "Agregar" a stepper es instantáneo (según el valor LOCAL,
- * no hace falta esperar la confirmación del servidor) apenas se toca +. El
- * número se puede tipear directo, no solo +/-, y el borde + el ícono girando
- * en la esquina avisan que hay un cambio guardándose, sin deshabilitar los
- * botones mientras tanto (a diferencia de antes, que bloqueaba el próximo
- * click hasta que el anterior terminara de viajar). */
-function ProductCardAction({
-  cartQuantity,
-  outOfStock,
-  addLabel,
-  outOfStockLabel,
-  decreaseLabel,
-  increaseLabel,
-  onCommit,
-}: {
-  cartQuantity: number
-  outOfStock: boolean
-  addLabel: string
-  outOfStockLabel: string
-  decreaseLabel: string
-  increaseLabel: string
-  onCommit: (quantity: number) => Promise<void>
-}) {
-  const { value, saving, setValue, nudge } = useDebouncedQuantity(cartQuantity, onCommit)
-
-  if (value <= 0) {
-    return (
-      <Button size="sm" className="w-full" disabled={outOfStock} onClick={() => nudge(1)}>
-        <PlusIcon />
-        {outOfStock ? outOfStockLabel : addLabel}
-      </Button>
-    )
-  }
-
+function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
   return (
-    <div className={`relative flex h-7 items-center justify-between rounded-lg border transition-colors ${saving ? 'border-primary/60' : 'border-border'}`}>
-      <button type="button" onClick={() => nudge(-1)} className="flex h-full flex-1 items-center justify-center text-foreground hover:bg-muted" aria-label={decreaseLabel}>
-        <MinusIcon className="size-3.5" />
+    <Badge variant="secondary" className="animate-in zoom-in-95 gap-1 rounded-full py-1 pr-1 pl-2.5 text-xs font-normal">
+      {label}
+      <button type="button" onClick={onRemove} className="rounded-full p-0.5 hover:bg-background/60" aria-label={label}>
+        <XIcon className="size-3" />
       </button>
-      <input
-        type="number"
-        inputMode="numeric"
-        min={0}
-        value={value}
-        onChange={(e) => setValue(Number(e.target.value))}
-        className="w-8 border-0 bg-transparent text-center text-sm font-medium text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-      />
-      <button
-        type="button"
-        disabled={outOfStock}
-        onClick={() => nudge(1)}
-        className="flex h-full flex-1 items-center justify-center text-foreground hover:bg-muted disabled:opacity-40"
-        aria-label={increaseLabel}
-      >
-        <PlusIcon className="size-3.5" />
-      </button>
-      {saving && (
-        <span className="absolute -top-1.5 -right-1.5 flex size-3.5 items-center justify-center rounded-full bg-background">
-          <Loader2Icon className="size-3 animate-spin text-primary" />
-        </span>
-      )}
-    </div>
+    </Badge>
   )
 }
 
-/** Misma idea que ProductCardAction pero para una fila de variante dentro
- * del popover -- más compacta, y "Agotado" reemplaza el botón de agregar en
- * vez de deshabilitarlo cuando esa variante puntual no tiene stock. */
-function VariantRow({
-  variant,
-  cartQuantity,
-  outOfStockLabel,
-  onCommit,
-}: {
-  variant: StorefrontProductVariant
-  cartQuantity: number
-  outOfStockLabel: string
-  onCommit: (quantity: number) => Promise<void>
-}) {
-  const variantOut = (variant.available ?? 0) <= 0
-  const { value, saving, nudge } = useDebouncedQuantity(cartQuantity, onCommit)
-
-  return (
-    <div className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-sm">
-      <span className="truncate">{variant.label}</span>
-      {value > 0 ? (
-        <div className="relative flex shrink-0 items-center gap-1">
-          <button
-            type="button"
-            onClick={() => nudge(-1)}
-            className={`flex size-6 items-center justify-center rounded-md border text-foreground hover:bg-muted ${saving ? 'border-primary/60' : 'border-border'}`}
-          >
-            <MinusIcon className="size-3" />
-          </button>
-          <span className="w-4 text-center text-xs">{value}</span>
-          <button
-            type="button"
-            disabled={variantOut}
-            onClick={() => nudge(1)}
-            className={`flex size-6 items-center justify-center rounded-md border text-foreground hover:bg-muted disabled:opacity-40 ${saving ? 'border-primary/60' : 'border-border'}`}
-          >
-            <PlusIcon className="size-3" />
-          </button>
-          {saving && (
-            <span className="absolute -top-1 -right-1 flex size-3 items-center justify-center rounded-full bg-background">
-              <Loader2Icon className="size-2.5 animate-spin text-primary" />
-            </span>
-          )}
-        </div>
-      ) : variantOut ? (
-        <span className="shrink-0 text-xs text-muted-foreground">{outOfStockLabel}</span>
-      ) : (
-        <button
-          type="button"
-          onClick={() => nudge(1)}
-          className="flex size-6 shrink-0 items-center justify-center rounded-md border border-border text-foreground hover:bg-muted"
-        >
-          <PlusIcon className="size-3" />
-        </button>
-      )}
-    </div>
-  )
-}

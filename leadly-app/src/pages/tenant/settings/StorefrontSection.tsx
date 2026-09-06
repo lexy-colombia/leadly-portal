@@ -97,7 +97,7 @@ export function StorefrontSection({ tenant, onSaved }: { tenant: Tenant; onSaved
                   value={slugInput}
                   onChange={(e) => setSlugInput(e.target.value)}
                   placeholder={t('settings.storefront.slugPlaceholder')}
-                  className="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm text-brand-800 outline-none"
+                  className="min-w-0 flex-1 border-0 bg-transparent p-0 text-xs text-brand-800 outline-none"
                 />
               </div>
             </div>
@@ -107,11 +107,11 @@ export function StorefrontSection({ tenant, onSaved }: { tenant: Tenant; onSaved
           </form>
           <p className="-mt-2 text-[11px] text-brand-300">{t('settings.storefront.slugHint')}</p>
 
-          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
 
           <div className="flex items-center justify-between gap-3 border-t border-brand-100 pt-4">
             <div className="min-w-0">
-              <p className="text-sm font-medium text-brand-700">{t('settings.storefront.enabledLabel')}</p>
+              <p className="text-xs font-medium text-brand-700">{t('settings.storefront.enabledLabel')}</p>
               <p className="text-xs text-brand-400">{t('settings.storefront.enabledDescription')}</p>
             </div>
             <Switch checked={tenant.storefront_enabled} disabled={togglingEnabled || !tenant.storefront_slug} onChange={handleToggleEnabled} />

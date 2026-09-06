@@ -16,7 +16,7 @@ function Field({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="min-w-0">
       <dt className="text-xs text-brand-400">{label}</dt>
-      <dd className="truncate text-sm text-brand-700">{value ?? '-'}</dd>
+      <dd className="truncate text-xs text-brand-700">{value ?? '-'}</dd>
     </div>
   )
 }
@@ -153,12 +153,12 @@ export function CompanyProfileSection({ tenant, onSaved }: { tenant: Tenant; onS
               />
             </div>
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-brand-800">{tenant.name}</p>
+              <p className="truncate text-xs font-semibold text-brand-800">{tenant.name}</p>
               <p className="text-xs text-brand-400">{logoUploading ? t('settings.logo.uploading') : t('settings.logo.hint')}</p>
             </div>
           </div>
           {previewOpen && tenant.logo_url && <LogoPreviewModal src={tenant.logo_url} alt={tenant.name} onClose={() => setPreviewOpen(false)} />}
-          {logoError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{logoError}</p>}
+          {logoError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{logoError}</p>}
 
           {editing ? (
             <CompanyProfileEditForm tenant={tenant} onCancel={() => setEditing(false)} onSaved={(updated) => { onSaved(updated); setEditing(false) }} />
@@ -207,7 +207,7 @@ function CompanyProfileEditForm({ tenant, onCancel, onSaved }: { tenant: Tenant;
     <form onSubmit={handleSubmit} noValidate className="space-y-4 border-t border-brand-100 pt-4">
       <TenantFormFields form={form} hideNotes compact />
 
-      {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
+      {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
 
       {/* Bottom bar, not a standalone Guardar button in the middle of the
           content -- pedido explícito del usuario. */}

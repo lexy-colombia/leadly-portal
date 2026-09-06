@@ -224,7 +224,7 @@ function PipelineStageTiles({
             <p className="truncate text-[10px] font-medium" style={{ color: stage.color }}>
               {stage.name}
             </p>
-            <p className="truncate text-sm font-bold text-brand-800">{metric === 'value' ? formatCompactCurrency(data.value) : String(data.count)}</p>
+            <p className="truncate text-xs font-bold text-brand-800">{metric === 'value' ? formatCompactCurrency(data.value) : String(data.count)}</p>
             <p className="truncate text-[10px] text-brand-400">{t('dashboard.pipeline.opportunityCount', { count: data.count })}</p>
           </div>
         )
@@ -289,7 +289,7 @@ function KpiCard({
         </div>
         <div className="min-w-0 flex-1">
           <p className="truncate text-[11px] text-brand-400">{title}</p>
-          <p className="truncate text-base font-bold leading-tight text-brand-800">{value}</p>
+          <p className="truncate text-xs font-bold leading-tight text-brand-800">{value}</p>
         </div>
       </div>
       <div className="mt-1.5 flex items-center justify-between gap-2">
@@ -494,10 +494,10 @@ export function Dashboard() {
     <div className="space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-brand-800">
+          <h1 className="text-xs font-bold text-brand-800">
             {t('dashboard.greeting.prefix')} <span className="text-accent-600">{firstName}</span>
           </h1>
-          <p className="mt-0.5 text-sm text-brand-400">{t('dashboard.greeting.subtitle')}</p>
+          <p className="mt-0.5 text-xs text-brand-400">{t('dashboard.greeting.subtitle')}</p>
         </div>
         <div className="flex items-center gap-1.5 rounded-lg border border-brand-100 bg-white px-2.5 py-1">
           <CalendarIcon width={14} height={14} className="shrink-0 text-brand-400" />
@@ -509,7 +509,7 @@ export function Dashboard() {
         </div>
       </div>
 
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard
@@ -560,7 +560,7 @@ export function Dashboard() {
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <Card className="!p-3.5">
           <div className="mb-2.5 flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold text-brand-800">{t('dashboard.pipeline.title')}</h2>
+            <h2 className="text-xs font-semibold text-brand-800">{t('dashboard.pipeline.title')}</h2>
             <Select value={pipelineMetric} onChange={(e) => setPipelineMetric(e.target.value as 'value' | 'count')} className="!w-auto !py-1 text-xs">
               <option value="value">{t('dashboard.pipeline.metric.value')}</option>
               <option value="count">{t('dashboard.pipeline.metric.count')}</option>
@@ -586,7 +586,7 @@ export function Dashboard() {
 
         <Card className="!p-3.5">
           <div className="mb-2.5 flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold text-brand-800">{t('dashboard.conversations.title', { days: rangeDays })}</h2>
+            <h2 className="text-xs font-semibold text-brand-800">{t('dashboard.conversations.title', { days: rangeDays })}</h2>
             <Select value={rangeDays} onChange={(e) => setRangeDays(Number(e.target.value) as RangeDays)} className="!w-auto !py-1 text-xs">
               <option value={7}>{t('dashboard.conversations.range.7')}</option>
               <option value={14}>{t('dashboard.conversations.range.14')}</option>
@@ -600,12 +600,12 @@ export function Dashboard() {
               <div className="mt-3 grid grid-cols-2 gap-3 border-t border-brand-100 pt-3">
                 <div className="min-w-0">
                   <p className="text-[11px] text-brand-400">{t('dashboard.conversations.total')}</p>
-                  <p className="text-lg font-bold text-brand-800">{totalCurrent}</p>
+                  <p className="text-xs font-bold text-brand-800">{totalCurrent}</p>
                   {totalDeltaPct !== null && <Delta pct={totalDeltaPct} />}
                 </div>
                 <div className="min-w-0">
                   <p className="text-[11px] text-brand-400">{t('dashboard.conversations.avgResponseTime')}</p>
-                  <p className="text-lg font-bold text-brand-800">{avgResponseCurrent !== null ? formatMinutes(avgResponseCurrent) : '—'}</p>
+                  <p className="text-xs font-bold text-brand-800">{avgResponseCurrent !== null ? formatMinutes(avgResponseCurrent) : '—'}</p>
                   {avgResponseDeltaPct !== null && <Delta pct={avgResponseDeltaPct} invert />}
                 </div>
               </div>
@@ -617,7 +617,7 @@ export function Dashboard() {
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <Card className="!p-3.5">
           <div className="mb-2.5 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-brand-800">{t('dashboard.upcomingTasks.title')}</h2>
+            <h2 className="text-xs font-semibold text-brand-800">{t('dashboard.upcomingTasks.title')}</h2>
             <Link to="/app/calendar" className="text-xs font-medium text-accent-600 hover:text-accent-700">
               {t('common.actions.viewAll')}
             </Link>
@@ -648,7 +648,7 @@ export function Dashboard() {
 
         <Card className="!p-3.5">
           <div className="mb-2.5 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-brand-800">{t('dashboard.recentActivity.title')}</h2>
+            <h2 className="text-xs font-semibold text-brand-800">{t('dashboard.recentActivity.title')}</h2>
             <Link to="/app/sales" className="text-xs font-medium text-accent-600 hover:text-accent-700">
               {t('common.actions.viewAll')}
             </Link>
@@ -707,7 +707,7 @@ export function Dashboard() {
       {profile?.role === 'tenant_admin' && (
         <Card className="!p-3.5">
           <div className="mb-2.5 flex items-center gap-1.5">
-            <h2 className="text-sm font-semibold text-brand-800">{t('dashboard.agentActivity.title')}</h2>
+            <h2 className="text-xs font-semibold text-brand-800">{t('dashboard.agentActivity.title')}</h2>
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="text-brand-300 hover:text-brand-500">

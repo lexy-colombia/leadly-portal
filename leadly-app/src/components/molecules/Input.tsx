@@ -106,7 +106,7 @@ export function CurrencyInput({
 
   return (
     <div className="relative">
-      <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2.5 text-sm text-muted-foreground">{currency}</span>
+      <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2.5 text-xs text-muted-foreground">{currency}</span>
       <ShadcnInput type="text" inputMode="decimal" value={display} onChange={handleChange} aria-invalid={invalid} className={cn('pl-6', className)} {...props} />
     </div>
   )

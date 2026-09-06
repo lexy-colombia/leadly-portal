@@ -40,7 +40,7 @@ export function LanguageSwitcher() {
                 setLanguage(lang)
                 setOpen(false)
               }}
-              className={`flex w-full items-center px-3.5 py-2 text-left text-sm transition-colors ${
+              className={`flex w-full items-center px-3.5 py-2 text-left text-xs transition-colors ${
                 lang === language ? 'font-semibold text-accent-700' : 'text-brand-600 hover:bg-brand-50'
               }`}
             >

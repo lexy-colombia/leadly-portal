@@ -56,12 +56,12 @@ function PlansSection() {
     <>
       <Card>
         <div className="mb-3 flex items-center justify-between">
-          <p className="text-sm text-brand-400">{t('backoffice.facturacion.plansSubtitle')}</p>
+          <p className="text-xs text-brand-400">{t('backoffice.facturacion.plansSubtitle')}</p>
           <Button size="sm" onClick={() => setDrawer({ open: true, plan: null })}>
             <PlusIcon width={14} height={14} /> {t('backoffice.facturacion.newPlan')}
           </Button>
         </div>
-        {error && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+        {error && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
         {!plans && !error && <PageSpinner />}
         {plans && plans.length === 0 && <EmptyState>{t('backoffice.facturacion.plansEmpty')}</EmptyState>}
         {pageItems && pageItems.length > 0 && (

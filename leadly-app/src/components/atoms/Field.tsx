@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 
 export function Label({ children, htmlFor }: { children: ReactNode; htmlFor?: string }) {
   return (
-    <label htmlFor={htmlFor} className="mb-1 block text-sm font-medium text-brand-700">
+    <label htmlFor={htmlFor} className="mb-1 block text-xs font-medium text-brand-700">
       {children}
     </label>
   )

@@ -77,7 +77,7 @@ export function DispatchDrawer({
   return (
     <Drawer open={open} onClose={onClose} title={t('dispatches.drawer.title')} description={t('dispatches.drawer.description')}>
       <div className="space-y-5">
-        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
 
         {(dispatch === undefined || !statuses || !warehouses) && !error && <PageSpinner />}
 
@@ -188,7 +188,7 @@ function DispatchCreateForm({
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-brand-500">{t('dispatches.drawer.noDispatch.title')}</p>
+      <p className="text-xs text-brand-500">{t('dispatches.drawer.noDispatch.title')}</p>
 
       <div>
         <Label htmlFor="dispatch-warehouse">{t('dispatches.drawer.fields.warehouse')}</Label>
@@ -270,7 +270,7 @@ function DispatchCreateForm({
         <Textarea id="dispatch-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} className="mt-1 !rounded-lg !text-xs" />
       </div>
 
-      {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
+      {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
 
       <div className="border-t border-brand-100 pt-4">
         <Button type="button" onClick={handleSubmit} disabled={submitting}>
@@ -329,7 +329,7 @@ function DispatchDetail({
 
   return (
     <div className="space-y-5">
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
 
       <div>
         <Label htmlFor="dispatch-status">{t('dispatches.drawer.fields.status')}</Label>
@@ -382,7 +382,7 @@ function DispatchDetail({
       )}
 
       <div className="border-t border-brand-100 pt-4">
-        <p className="mb-3 text-sm font-semibold text-brand-800">{t('dispatches.drawer.timeline.title')}</p>
+        <p className="mb-3 text-xs font-semibold text-brand-800">{t('dispatches.drawer.timeline.title')}</p>
         {!history && <PageSpinner />}
         {history && (
           <ol className="space-y-3">
@@ -395,7 +395,7 @@ function DispatchDetail({
                     {index < history.length - 1 && <span className="mt-0.5 w-px flex-1 bg-brand-100" />}
                   </div>
                   <div className="pb-3">
-                    <p className="text-sm font-medium text-brand-800">{status?.name ?? '—'}</p>
+                    <p className="text-xs font-medium text-brand-800">{status?.name ?? '—'}</p>
                     <p className="text-xs text-brand-400">{formatDateTime(entry.created_at, language)}</p>
                   </div>
                 </li>

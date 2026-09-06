@@ -14,7 +14,7 @@ function formatMoney(amountCents: number, currency: string): string {
 
 function Row({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="flex justify-between gap-4 py-1.5 text-sm">
+    <div className="flex justify-between gap-4 py-1.5 text-xs">
       <span className="text-brand-400">{label}</span>
       <span className="text-right text-brand-700">{value}</span>
     </div>
@@ -64,7 +64,7 @@ export function InvoiceDetailDrawer({ open, onClose, invoice }: { open: boolean;
         <section>
           <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-brand-400">{t('backoffice.invoiceDetail.items')}</h3>
           {items === null && <PageSpinner />}
-          {items && items.length === 0 && <p className="text-sm text-brand-400">{t('backoffice.invoiceDetail.items.empty')}</p>}
+          {items && items.length === 0 && <p className="text-xs text-brand-400">{t('backoffice.invoiceDetail.items.empty')}</p>}
           {items && items.length > 0 && (
             <div className="overflow-hidden rounded-2xl border border-brand-100 bg-white">
               <Table>
@@ -106,13 +106,13 @@ export function InvoiceDetailDrawer({ open, onClose, invoice }: { open: boolean;
         <section>
           <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-brand-400">{t('backoffice.invoiceDetail.payments')}</h3>
           {attempts === null && <PageSpinner />}
-          {attempts && attempts.length === 0 && <p className="text-sm text-brand-400">{t('backoffice.invoiceDetail.payments.empty')}</p>}
+          {attempts && attempts.length === 0 && <p className="text-xs text-brand-400">{t('backoffice.invoiceDetail.payments.empty')}</p>}
           {attempts && attempts.length > 0 && (
             <ul className="space-y-2">
               {attempts.map((a) => (
                 <li key={a.id} className="rounded-lg border border-brand-100 px-3 py-2">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-medium text-brand-800">
+                    <span className="text-xs font-medium text-brand-800">
                       {a.provider_key === 'manual' ? t('backoffice.invoiceDetail.payments.manual') : a.provider_key}
                     </span>
                     <Badge

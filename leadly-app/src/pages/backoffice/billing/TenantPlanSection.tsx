@@ -144,7 +144,7 @@ export function TenantPlanSection({ tenantId, onPlanChange }: { tenantId: string
       {subscription && !showAssignForm && (
         <div className="space-y-1.5">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-brand-800">{plan?.name ?? t('backoffice.tenantBilling.plan')}</span>
+            <span className="text-xs font-medium text-brand-800">{plan?.name ?? t('backoffice.tenantBilling.plan')}</span>
             <Badge
               variant="outline"
               className={

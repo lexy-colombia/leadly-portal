@@ -149,16 +149,16 @@ export function WarehouseDrawer({
         </div>
 
         <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
-          <span className="text-sm text-brand-700">{t('inventory.warehouseDrawer.field.isDefault')}</span>
+          <span className="text-xs text-brand-700">{t('inventory.warehouseDrawer.field.isDefault')}</span>
           <Switch checked={isDefault} onCheckedChange={setIsDefault} />
         </div>
 
         <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
-          <span className="text-sm text-brand-700">{t('inventory.warehouseDrawer.field.isActive')}</span>
+          <span className="text-xs text-brand-700">{t('inventory.warehouseDrawer.field.isActive')}</span>
           <Switch checked={isActive} onCheckedChange={setIsActive} />
         </div>
 
-        {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
+        {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
 
         <div className="flex gap-2 border-t border-brand-100 pt-5">
           <Button type="submit" variant="secondary" disabled={submitting}>

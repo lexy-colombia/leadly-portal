@@ -210,7 +210,7 @@ export function WhatsappLineDrawer({
             </div>
           )}
 
-          {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
+          {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
         </form>
 
         {isEdit && (
@@ -241,8 +241,8 @@ export function WhatsappLineDrawer({
               </Button>
             </div>
             <FieldError message={tokenTouched && !isNotBlank(tokenValue) ? t('backoffice.whatsappLineDrawer.rotateToken.required') : undefined} />
-            {tokenError && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{tokenError}</p>}
-            {tokenSaved && <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{t('backoffice.whatsappLineDrawer.rotateToken.saved')}</p>}
+            {tokenError && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{tokenError}</p>}
+            {tokenSaved && <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{t('backoffice.whatsappLineDrawer.rotateToken.saved')}</p>}
           </div>
         )}
       </div>

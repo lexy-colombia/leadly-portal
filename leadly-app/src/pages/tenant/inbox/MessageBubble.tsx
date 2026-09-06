@@ -48,7 +48,7 @@ export function MessageBubble({ message }: { message: WhatsappMessage }) {
           <SignedImage storagePath={message.media_storage_path} alt={t('inbox.image.sentByContact')} className="mb-1.5 max-h-64 w-full" />
         )}
         {!(message.media_storage_path && message.content === IMAGE_PLACEHOLDER_CONTENT) && (
-          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.content}</p>
+          <p className="whitespace-pre-wrap break-words text-xs leading-relaxed">{message.content}</p>
         )}
         <span className={`mt-1 block text-right text-[10px] ${isOutbound && !isIa ? 'text-brand-300' : 'text-brand-400'}`}>
           {formatTime(message.created_at, language)}

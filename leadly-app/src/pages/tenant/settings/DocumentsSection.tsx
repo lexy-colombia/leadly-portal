@@ -58,7 +58,7 @@ export function DocumentsSection({ tenant, onSaved }: { tenant: Tenant; onSaved:
       <CardSection title={t('settings.documents.title')} description={t('settings.documents.description')}>
         <div className="space-y-3.5">
           <div className="flex items-center justify-between gap-3">
-            <Label className="text-sm font-normal text-brand-700">{t('settings.pos.printing.paperWidth')}</Label>
+            <Label className="text-xs font-normal text-brand-700">{t('settings.pos.printing.paperWidth')}</Label>
             <Select
               value={tenant.pos_receipt_paper_width}
               onValueChange={(v) => save({ pos_receipt_paper_width: v as '58mm' | '80mm' }, 'width')}
@@ -76,7 +76,7 @@ export function DocumentsSection({ tenant, onSaved }: { tenant: Tenant; onSaved:
 
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-sm font-medium text-brand-700">{t('settings.pos.printing.autoPrintLabel')}</p>
+              <p className="text-xs font-medium text-brand-700">{t('settings.pos.printing.autoPrintLabel')}</p>
               <p className="text-xs text-brand-400">{t('settings.pos.printing.autoPrintDescription')}</p>
             </div>
             <Switch checked={tenant.pos_auto_print} disabled={savingToggle === 'autoPrint'} onChange={(v) => save({ pos_auto_print: v }, 'autoPrint')} />
@@ -99,7 +99,7 @@ export function DocumentsSection({ tenant, onSaved }: { tenant: Tenant; onSaved:
             )}
           </div>
 
-          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
         </div>
       </CardSection>
     </Card>

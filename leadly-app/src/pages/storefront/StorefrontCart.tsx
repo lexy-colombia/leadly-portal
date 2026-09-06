@@ -20,6 +20,9 @@ import {
   type StorefrontSavedAddress,
   type VerifyOtpResult,
 } from '../../lib/api/storefront'
+import type { OrderTotalsBreakdown } from '../../lib/api/orders'
+import { OrderTotalsSummary } from '@/components/molecules/OrderTotalsSummary'
+import { ClearCartButton } from '@/components/storefront/ClearCartButton'
 import {
   getStorefrontCartToken,
   clearStorefrontCartToken,
@@ -134,6 +137,7 @@ export function StorefrontCart() {
   }, [paymentReturn, token])
 
   const [items, setItems] = useState<StorefrontCartItem[] | null>(null)
+  const [totals, setTotals] = useState<OrderTotalsBreakdown | null>(null)
   const [step, setStep] = useState<Step>('cart')
   const [phone, setPhone] = useState('')
   const [documentType, setDocumentType] = useState('CC')
@@ -169,16 +173,19 @@ export function StorefrontCart() {
     if (!token) {
       itemsRef.current = []
       setItems([])
+      setTotals(null)
       return
     }
     getStorefrontCart(token)
       .then((res) => {
         itemsRef.current = res.items
         setItems(res.items)
+        setTotals(res.totals ?? null)
       })
       .catch(() => {
         itemsRef.current = []
         setItems([])
+        setTotals(null)
       })
   }, [token])
 
@@ -204,10 +211,18 @@ export function StorefrontCart() {
         : current.filter((item) => item.id !== itemId)
       itemsRef.current = next
       setItems(next)
+      setTotals(res.totals)
       refreshCartCount(next.reduce((sum, item) => sum + item.quantity, 0))
     } catch (err) {
       showError(err instanceof Error ? err.message : t('storefront.cart.checkoutError'))
     }
+  }
+
+  function handleCartCleared(res: { items: StorefrontCartItem[]; totals: OrderTotalsBreakdown }) {
+    itemsRef.current = res.items
+    setItems(res.items)
+    setTotals(res.totals)
+    refreshCartCount(res.items)
   }
 
   async function handleRequestOtp() {
@@ -440,7 +455,7 @@ export function StorefrontCart() {
   if (step === 'choose_payment' && result) {
     return (
       <div className="mx-auto max-w-md space-y-3 rounded-xl border border-border bg-card p-6">
-        <h1 className="text-lg font-bold text-foreground">{t('storefront.cart.choosePayment')}</h1>
+        <h1 className="text-xs font-bold text-foreground">{t('storefront.cart.choosePayment')}</h1>
         {result.payment_options?.includes('wompi') && (
           <Button className="w-full" disabled={busy} onClick={() => handleSelectPaymentMethod('wompi')}>
             {t('storefront.cart.payWithWompi')}
@@ -458,8 +473,8 @@ export function StorefrontCart() {
   if (items.length === 0) {
     return (
       <div className="py-16 text-center">
-        <p className="text-sm text-muted-foreground">{t('storefront.cart.empty')}</p>
-        <Link to={`/tienda/${slug}`} className="mt-2 inline-block text-sm font-medium text-primary hover:underline">
+        <p className="text-xs text-muted-foreground">{t('storefront.cart.empty')}</p>
+        <Link to={`/tienda/${slug}`} className="mt-2 inline-block text-xs font-medium text-primary hover:underline">
           {t('storefront.cart.backToCatalog')}
         </Link>
       </div>
@@ -472,11 +487,12 @@ export function StorefrontCart() {
         {items.map((item) => (
           <CartLineItem key={item.id} item={item} onCommit={commitItemQuantity} />
         ))}
-        <div className="flex items-center justify-between border-t border-border pt-3">
-          <span className="text-sm font-medium text-muted-foreground">{t('storefront.cart.total')}</span>
-          <span className="text-lg font-bold text-foreground">{formatCurrency(total)}</span>
+        <div className="flex justify-end border-t border-border pt-3">
+          <ClearCartButton sessionToken={token} onCleared={handleCartCleared} onError={showError} />
         </div>
       </div>
+
+      <OrderTotalsSummary totals={totals} />
 
       {step === 'cart' && (
         <Button size="lg" className="w-full" onClick={() => setStep('identify')}>
@@ -490,7 +506,7 @@ export function StorefrontCart() {
             <Label>{t('storefront.cart.documentLabel')}</Label>
             <div className="flex gap-2">
               <Select value={documentType} onValueChange={setDocumentType}>
-                <SelectTrigger className="h-9 w-28 shrink-0 text-sm">
+                <SelectTrigger className="h-9 w-28 shrink-0 text-xs">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -572,7 +588,7 @@ export function StorefrontCart() {
           </div>
 
           <div className="space-y-2 border-t border-border pt-3">
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex items-center gap-2 text-xs">
               <Checkbox checked={billingSameAsShipping} onCheckedChange={(checked) => setBillingSameAsShipping(checked === true)} />
               {t('storefront.cart.billingSameAsShipping')}
             </label>
@@ -643,7 +659,7 @@ function AddressPicker({
               key={addr.id}
               type="button"
               onClick={() => onSelectId(addr.id)}
-              className={`flex w-full items-start gap-2.5 rounded-lg border p-3 text-left text-sm transition-colors ${
+              className={`flex w-full items-start gap-2.5 rounded-lg border p-3 text-left text-xs transition-colors ${
                 selectedId === addr.id ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted'
               }`}
             >
@@ -661,7 +677,7 @@ function AddressPicker({
           <button
             type="button"
             onClick={() => onSelectId(null)}
-            className={`flex w-full items-center gap-2.5 rounded-lg border p-3 text-left text-sm transition-colors ${
+            className={`flex w-full items-center gap-2.5 rounded-lg border p-3 text-left text-xs transition-colors ${
               usingNew ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted'
             }`}
           >
@@ -708,12 +724,12 @@ function OrderSuccessSummary({ result, summary }: { result: CheckoutResult; summ
         <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-primary/10">
           <CheckIcon className="size-6 text-primary" />
         </div>
-        <h1 className="text-lg font-bold text-foreground">{t('storefront.cart.successTitle', { code: result.order_code })}</h1>
-        <p className="text-sm text-muted-foreground">{t('storefront.cart.successSubtitle')}</p>
+        <h1 className="text-xs font-bold text-foreground">{t('storefront.cart.successTitle', { code: result.order_code })}</h1>
+        <p className="text-xs text-muted-foreground">{t('storefront.cart.successSubtitle')}</p>
       </div>
 
       <div className="space-y-3 rounded-xl border border-border bg-card p-4">
-        <p className="text-sm font-semibold text-foreground">{t('storefront.cart.orderSummary')}</p>
+        <p className="text-xs font-semibold text-foreground">{t('storefront.cart.orderSummary')}</p>
         <div className="space-y-2.5">
           {summary.items.map((item) => (
             <div key={item.id} className="flex items-center gap-3">
@@ -721,21 +737,21 @@ function OrderSuccessSummary({ result, summary }: { result: CheckoutResult; summ
                 <StorefrontImage src={item.image_url} alt={item.name} className="h-full w-full" iconClassName="size-3" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm text-foreground">{item.name}</p>
+                <p className="truncate text-xs text-foreground">{item.name}</p>
                 {item.variant_label && <p className="text-xs text-muted-foreground">{item.variant_label}</p>}
               </div>
               <p className="shrink-0 text-xs text-muted-foreground">x{item.quantity}</p>
-              <p className="shrink-0 text-sm font-medium text-foreground">{formatCurrency(item.subtotal)}</p>
+              <p className="shrink-0 text-xs font-medium text-foreground">{formatCurrency(item.subtotal)}</p>
             </div>
           ))}
         </div>
         <div className="flex items-center justify-between border-t border-border pt-2.5">
-          <span className="text-sm font-medium text-muted-foreground">{t('storefront.cart.total')}</span>
-          <span className="text-base font-bold text-foreground">{formatCurrency(summary.total)}</span>
+          <span className="text-xs font-medium text-muted-foreground">{t('storefront.cart.total')}</span>
+          <span className="text-xs font-bold text-foreground">{formatCurrency(summary.total)}</span>
         </div>
       </div>
 
-      <div className="space-y-1 rounded-xl border border-border bg-card p-4 text-sm">
+      <div className="space-y-1 rounded-xl border border-border bg-card p-4 text-xs">
         <p className="font-semibold text-foreground">{t('storefront.cart.shippingAddress')}</p>
         <p className="text-muted-foreground">
           {summary.fullName} · {summary.phone}
@@ -744,7 +760,7 @@ function OrderSuccessSummary({ result, summary }: { result: CheckoutResult; summ
         <p className="text-muted-foreground">{[summary.shippingAddress.city, summary.shippingAddress.state_province].filter(Boolean).join(', ')}</p>
       </div>
 
-      <div className="space-y-1 rounded-xl border border-border bg-card p-4 text-sm">
+      <div className="space-y-1 rounded-xl border border-border bg-card p-4 text-xs">
         <p className="font-semibold text-foreground">{t('storefront.cart.billingAddress')}</p>
         {summary.billingSameAsShipping ? (
           <p className="text-muted-foreground">{t('storefront.cart.sameAsShippingNote')}</p>
@@ -760,14 +776,14 @@ function OrderSuccessSummary({ result, summary }: { result: CheckoutResult; summ
         <div className="rounded-xl border border-border bg-card p-4 text-center">
           {result.payment_method === 'wompi' && result.checkout_url && (
             <>
-              <p className="text-sm text-muted-foreground">{t('storefront.cart.payWithWompi')}</p>
+              <p className="text-xs text-muted-foreground">{t('storefront.cart.payWithWompi')}</p>
               <Button className="mt-2 w-full" onClick={() => window.location.assign(result.checkout_url!)}>
                 {t('storefront.cart.goToPayment')}
               </Button>
             </>
           )}
-          {result.payment_method === 'credito' && <p className="text-sm text-muted-foreground">{t('storefront.cart.chargedToCredit')}</p>}
-          {result.payment_pending && <p className="text-sm text-muted-foreground">{t('storefront.cart.paymentPending')}</p>}
+          {result.payment_method === 'credito' && <p className="text-xs text-muted-foreground">{t('storefront.cart.chargedToCredit')}</p>}
+          {result.payment_pending && <p className="text-xs text-muted-foreground">{t('storefront.cart.paymentPending')}</p>}
         </div>
       )}
     </div>
@@ -786,7 +802,7 @@ function PaymentReturnScreen({ state, slug }: { state: OrderStatusResult | 'chec
     return (
       <div className="mx-auto max-w-md space-y-3 rounded-xl border border-border bg-card p-6 text-center">
         <Loader2Icon className="mx-auto size-8 animate-spin text-primary" />
-        <p className="text-sm text-muted-foreground">{t('storefront.cart.paymentReturnChecking')}</p>
+        <p className="text-xs text-muted-foreground">{t('storefront.cart.paymentReturnChecking')}</p>
       </div>
     )
   }
@@ -794,8 +810,8 @@ function PaymentReturnScreen({ state, slug }: { state: OrderStatusResult | 'chec
   if (state === 'timeout') {
     return (
       <div className="mx-auto max-w-md space-y-3 rounded-xl border border-border bg-card p-6 text-center">
-        <p className="text-sm text-muted-foreground">{t('storefront.cart.paymentReturnTimeout')}</p>
-        <Link to={`/tienda/${slug}`} className="inline-block text-sm font-medium text-primary hover:underline">
+        <p className="text-xs text-muted-foreground">{t('storefront.cart.paymentReturnTimeout')}</p>
+        <Link to={`/tienda/${slug}`} className="inline-block text-xs font-medium text-primary hover:underline">
           {t('storefront.cart.backToCatalog')}
         </Link>
       </div>
@@ -808,10 +824,10 @@ function PaymentReturnScreen({ state, slug }: { state: OrderStatusResult | 'chec
         <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-primary/10">
           <CheckIcon className="size-6 text-primary" />
         </div>
-        <h1 className="text-lg font-bold text-foreground">{t('storefront.cart.paymentReturnConfirmed', { code: state.order_code })}</h1>
-        <p className="text-sm text-muted-foreground">{formatCurrency(state.total)}</p>
+        <h1 className="text-xs font-bold text-foreground">{t('storefront.cart.paymentReturnConfirmed', { code: state.order_code })}</h1>
+        <p className="text-xs text-muted-foreground">{formatCurrency(state.total)}</p>
       </div>
-      <Link to={`/tienda/${slug}`} className="block text-center text-sm font-medium text-primary hover:underline">
+      <Link to={`/tienda/${slug}`} className="block text-center text-xs font-medium text-primary hover:underline">
         {t('storefront.cart.backToCatalog')}
       </Link>
     </div>
@@ -836,9 +852,9 @@ function CartLineItem({ item, onCommit }: { item: StorefrontCartItem; onCommit: 
         <StorefrontImage src={item.image_url} alt={item.name} className="h-full w-full" iconClassName="size-4" />
       </div>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-foreground">{item.name}</p>
+        <p className="truncate text-xs font-medium text-foreground">{item.name}</p>
         {item.variant_label && <p className="text-xs text-muted-foreground">{item.variant_label}</p>}
-        <p className="text-sm text-primary">{formatCurrency(item.unit_price)}</p>
+        <p className="text-xs text-primary">{formatCurrency(item.unit_price)}</p>
       </div>
       <div className={`relative flex items-center rounded-lg border transition-colors ${saving ? 'border-primary/60' : 'border-border'}`}>
         <button type="button" onClick={() => nudge(-1)} className="px-2.5 py-1 text-foreground">
@@ -850,7 +866,7 @@ function CartLineItem({ item, onCommit }: { item: StorefrontCartItem; onCommit: 
           min={0}
           value={value}
           onChange={(e) => setValue(Number(e.target.value))}
-          className="w-9 border-0 bg-transparent text-center text-sm text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          className="w-9 border-0 bg-transparent text-center text-xs text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         />
         <button type="button" onClick={() => nudge(1)} className="px-2.5 py-1 text-foreground">
           +

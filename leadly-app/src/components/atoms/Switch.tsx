@@ -25,7 +25,7 @@ export function Switch({
           }`}
         />
       </button>
-      {label && <span className="text-sm font-medium text-brand-700">{label}</span>}
+      {label && <span className="text-xs font-medium text-brand-700">{label}</span>}
     </label>
   )
 }

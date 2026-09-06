@@ -14,7 +14,9 @@ import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { confirmSalesOrder } from "../_shared/orders/confirmSalesOrder.ts";
 import { persistOrderItems, type ResolvedOrderItem } from "../_shared/orders/persistOrderItems.ts";
+import { computeOrderTotals } from "../_shared/orders/computeOrderTotals.ts";
 import { chargeSalesOrderToCredit, createSalesOrderPaymentLink } from "../_shared/payments/salesOrderPayments.ts";
+import { isTenantTaxEnabled } from "../_shared/invoicing/queueInvoiceGeneration.ts";
 import { sendWhatsappTemplate } from "../_shared/whatsapp.ts";
 import { splitPhone } from "../_shared/phone.ts";
 
@@ -118,7 +120,7 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
         .is("deleted_at", null)
         .order("name", { ascending: true });
       if (error) throw new Error(error.message);
-      return { categories: data ?? [] };
+      return { categories: data ?? [], counts: await countProductsByCategory(adminClient, tenant.id) };
     }
 
     case "list_brands": {
@@ -148,6 +150,8 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       // del tenant) para no reimplementar la lógica de árbol dos veces.
       const categoryIds = Array.isArray(body.category_ids) ? (body.category_ids as unknown[]).map((id) => String(id)) : [];
       const sort = String(body.sort ?? "name_asc");
+      const minPrice = body.min_price !== undefined && body.min_price !== null && body.min_price !== "" ? Number(body.min_price) : null;
+      const maxPrice = body.max_price !== undefined && body.max_price !== null && body.max_price !== "" ? Number(body.max_price) : null;
       // Scroll infinito: de a CATALOG_PAGE_SIZE, no toda la lista de una --
       // pedido explícito del usuario, la carga inicial del catálogo completo
       // (hasta 120 productos) se sentía pesada. `offset` lo maneja el
@@ -165,7 +169,7 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       }
 
       const columns =
-        "id, name, sku, retail_price, has_variants, track_inventory, created_at, brand:brands(name), categories:product_category_links(category:product_categories(name))";
+        "id, name, sku, slug, retail_price, has_variants, track_inventory, created_at, brand:brands(name), categories:product_category_links(category:product_categories(name))";
       function applySort<T>(q: T): T {
         // deno-lint-ignore no-explicit-any
         const query = q as any;
@@ -177,38 +181,47 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
 
       // Se pide `limit + 1` (via range) y se recorta la fila de más abajo --
       // barato para saber si hay una página siguiente sin una consulta de
-      // count aparte.
+      // count aparte. El conteo exacto (`total`, para el encabezado "N
+      // productos") solo se pide en la página 0 de cada combinación de
+      // filtros -- pedirlo en cada scroll de loadMore repetiría el mismo
+      // COUNT(*) de más, justo lo que el offset/limit ya evita para los datos.
+      const wantsTotal = offset === 0;
       let query = adminClient
         .from("products")
-        .select(columns)
+        .select(columns, wantsTotal ? { count: "exact" } : undefined)
         .eq("tenant_id", tenant.id)
         .eq("is_active", true)
         .eq("is_visible_in_catalog", true)
         .is("deleted_at", null)
         .range(offset, offset + limit);
+      if (minPrice != null) query = query.gte("retail_price", minPrice);
+      if (maxPrice != null) query = query.lte("retail_price", maxPrice);
       query = applySort(query);
       if (categoryProductIds) query = query.in("id", categoryProductIds);
       if (brandId) query = query.eq("brand_id", brandId);
       if (search) query = query.textSearch("name", search, { type: "plain", config: "spanish" });
 
-      let { data, error } = await query;
+      let { data, error, count } = await query;
       if (error) throw new Error(error.message);
       if (search && (!data || data.length === 0)) {
         let fallbackQuery = adminClient
           .from("products")
-          .select(columns)
+          .select(columns, wantsTotal ? { count: "exact" } : undefined)
           .eq("tenant_id", tenant.id)
           .eq("is_active", true)
           .eq("is_visible_in_catalog", true)
           .is("deleted_at", null)
           .ilike("name", `%${search}%`)
           .range(offset, offset + limit);
+        if (minPrice != null) fallbackQuery = fallbackQuery.gte("retail_price", minPrice);
+        if (maxPrice != null) fallbackQuery = fallbackQuery.lte("retail_price", maxPrice);
         fallbackQuery = applySort(fallbackQuery);
         if (categoryProductIds) fallbackQuery = fallbackQuery.in("id", categoryProductIds);
         if (brandId) fallbackQuery = fallbackQuery.eq("brand_id", brandId);
         const fallback = await fallbackQuery;
         if (fallback.error) throw new Error(fallback.error.message);
         data = fallback.data;
+        count = fallback.count;
       }
 
       const hasMore = (data ?? []).length > limit;
@@ -235,6 +248,7 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
           id: p.id,
           name: p.name,
           sku: p.sku,
+          slug: p.slug,
           brand_name: p.brand?.name ?? null,
           price: p.retail_price,
           has_variants: p.has_variants,
@@ -245,27 +259,36 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
           categories: (p.categories ?? []).map((c: any) => c.category?.name).filter(Boolean),
         };
       });
-      return { products, has_more: hasMore };
+      return { products, has_more: hasMore, total: wantsTotal ? (count ?? products.length) : undefined };
     }
 
     case "get_product": {
       const slug = String(body.slug ?? "").trim();
-      const productId = String(body.product_id ?? "").trim();
+      // Acepta tanto el id real del producto (links viejos, o el carrito/
+      // add_to_cart que siempre trabaja con el id) como su slug (la URL
+      // nueva del catálogo, ver StorefrontCatalog.tsx) -- un UUID no puede
+      // ser a la vez un slug válido, así que el formato alcanza para
+      // distinguir cuál de los dos mandó el caller sin ambigüedad.
+      const productRef = String(body.product_id ?? "").trim();
       if (!slug) throw new StorefrontError("slug es requerido.");
-      if (!productId) throw new StorefrontError("product_id es requerido.");
+      if (!productRef) throw new StorefrontError("product_id es requerido.");
       const tenant = await resolveStorefront(adminClient, slug);
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(productRef);
 
-      const { data: product, error } = await adminClient
+      let productQuery = adminClient
         .from("products")
-        .select("id, name, description, retail_price, has_variants, categories:product_category_links(category:product_categories(name))")
-        .eq("id", productId)
+        .select(
+          "id, name, description, sku, retail_price, has_variants, track_inventory, brand:brands(name), categories:product_category_links(category:product_categories(id, name))",
+        )
         .eq("tenant_id", tenant.id)
         .eq("is_active", true)
         .eq("is_visible_in_catalog", true)
-        .is("deleted_at", null)
-        .maybeSingle();
+        .is("deleted_at", null);
+      productQuery = isUuid ? productQuery.eq("id", productRef) : productQuery.eq("slug", productRef);
+      const { data: product, error } = await productQuery.maybeSingle();
       if (error) throw new Error(error.message);
       if (!product) throw new StorefrontError("Producto no encontrado.", 404);
+      const productId = product.id;
 
       const { data: imageRows } = await adminClient
         .from("product_images")
@@ -276,6 +299,11 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
         url: adminClient.storage.from("product-images").getPublicUrl(img.storage_path).data.publicUrl,
         variant_id: img.variant_id,
       }));
+
+      // Mismo helper que list_products -- acá con un único id, para poder
+      // mostrar "Disponible -- N unidades" en el detalle (antes esta acción
+      // no exponía stock en absoluto, a diferencia de la grilla).
+      const { stockByProduct, stockByVariant } = await loadStock(adminClient, tenant.id, [productId]);
 
       let variants: Record<string, unknown>[] = [];
       if (product.has_variants) {
@@ -291,18 +319,33 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
             id: v.id,
             label: [v.option1_value, v.option2_value, v.option3_value].filter(Boolean).join(" / "),
             price: v.retail_price ?? product.retail_price,
+            available: stockByVariant.get(v.id) ?? 0,
           }),
         );
       }
 
+      const available = !product.track_inventory
+        ? null
+        : product.has_variants
+          ? variants.reduce((sum: number, v) => sum + (v.available as number), 0)
+          : (stockByProduct.get(productId) ?? 0);
+
+      // deno-lint-ignore no-explicit-any
+      const categoryRows = (product.categories ?? []) as any[];
       return {
         id: product.id,
         name: product.name,
         description: product.description,
+        sku: product.sku,
+        // El cliente de Supabase infiere brand:brands(name) como un arreglo
+        // (no puede saber por el string de select que brand_id es to-one) --
+        // mismo cast que list_products ya necesita para su columna `brand`.
+        brand_name: (product.brand as unknown as { name: string | null } | null)?.name ?? null,
         price: product.retail_price,
         has_variants: product.has_variants,
-        // deno-lint-ignore no-explicit-any
-        categories: (product.categories ?? []).map((c: any) => c.category?.name).filter(Boolean),
+        available,
+        categories: categoryRows.map((c) => c.category?.name).filter(Boolean),
+        category_ids: categoryRows.map((c) => c.category?.id).filter(Boolean),
         images,
         variants,
       };
@@ -312,7 +355,8 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       const sessionToken = body.session_token ? String(body.session_token).trim() : "";
       if (!sessionToken) return { items: [] };
       const cart = await resolveCart(adminClient, sessionToken);
-      return { status: cart.status, items: await loadCartItems(adminClient, cart.id) };
+      const [items, totals] = await Promise.all([loadCartItems(adminClient, cart.id), loadCartTotals(adminClient, cart.tenant_id, cart.id)]);
+      return { status: cart.status, items, totals };
     }
 
     case "add_to_cart": {
@@ -435,7 +479,8 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
         if (error) throw new Error(error.message);
       }
 
-      return { session_token: cart.session_token, items: await loadCartItems(adminClient, cart.id) };
+      const [items, totals] = await Promise.all([loadCartItems(adminClient, cart.id), loadCartTotals(adminClient, cart.tenant_id, cart.id)]);
+      return { session_token: cart.session_token, items, totals };
     }
 
     case "update_cart_item": {
@@ -456,7 +501,8 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       const { data: updated, error } = await adminClient.from("cart_items").update({ quantity }).eq("id", itemId).eq("cart_id", cart.id).select("id");
       if (error) throw new Error(error.message);
       if (!updated || updated.length === 0) throw new StorefrontError("Ítem no encontrado.", 404);
-      return { items: await loadCartItems(adminClient, cart.id) };
+      const [items, totals] = await Promise.all([loadCartItems(adminClient, cart.id), loadCartTotals(adminClient, cart.tenant_id, cart.id)]);
+      return { items, totals };
     }
 
     case "remove_cart_item": {
@@ -471,7 +517,24 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       const { data: removed, error } = await adminClient.from("cart_items").delete().eq("id", itemId).eq("cart_id", cart.id).select("id");
       if (error) throw new Error(error.message);
       if (!removed || removed.length === 0) throw new StorefrontError("Ítem no encontrado.", 404);
-      return { items: await loadCartItems(adminClient, cart.id) };
+      const [items, totals] = await Promise.all([loadCartItems(adminClient, cart.id), loadCartTotals(adminClient, cart.tenant_id, cart.id)]);
+      return { items, totals };
+    }
+
+    // Vacía el carrito de una sola vez -- pedido explícito del usuario, no
+    // había forma de sacar todo salvo quitar ítem por ítem. Un solo DELETE
+    // por cart_id, no un loop de remove_cart_item por línea.
+    case "clear_cart": {
+      const sessionToken = String(body.session_token ?? "").trim();
+      if (!sessionToken) throw new StorefrontError("session_token es requerido.");
+
+      const cart = await resolveCart(adminClient, sessionToken);
+      assertCartOpen(cart);
+
+      const { error } = await adminClient.from("cart_items").delete().eq("cart_id", cart.id);
+      if (error) throw new Error(error.message);
+      const [items, totals] = await Promise.all([loadCartItems(adminClient, cart.id), loadCartTotals(adminClient, cart.tenant_id, cart.id)]);
+      return { items, totals };
     }
 
     case "request_checkout_otp": {
@@ -801,6 +864,75 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
     default:
       throw new StorefrontError(`Acción desconocida: ${action}`);
   }
+}
+
+/** Conteo de productos VISIBLES por categoría propia (sin acumular a sus
+ * ancestros -- el frontend rellena esos totales sumando el subárbol con la
+ * misma función descendantIds que ya usa para filtrar, así el número que se
+ * ve en un nodo padre del árbol siempre coincide con la suma real de sus
+ * hijos). Dos consultas simples (ids visibles, después sus vínculos) en vez
+ * de un join embebido -- mismo estilo que el resto de este archivo
+ * (loadStock/categoryProductIds), evita depender de sintaxis de filtro sobre
+ * una relación embebida que no se usa en ningún otro lado del proyecto. */
+async function countProductsByCategory(adminClient: SupabaseClient, tenantId: string): Promise<Record<string, number>> {
+  const counts: Record<string, number> = {};
+  const { data: visible } = await adminClient
+    .from("products")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("is_active", true)
+    .eq("is_visible_in_catalog", true)
+    .is("deleted_at", null);
+  const visibleIds = (visible ?? []).map((p: { id: string }) => p.id);
+  if (visibleIds.length === 0) return counts;
+
+  const { data: links } = await adminClient.from("product_category_links").select("category_id").eq("tenant_id", tenantId).in("product_id", visibleIds);
+  for (const l of (links ?? []) as { category_id: string }[]) {
+    counts[l.category_id] = (counts[l.category_id] ?? 0) + 1;
+  }
+  return counts;
+}
+
+/** Resumen de totales del carrito (subtotal/descuentos/impuestos/total) --
+ * mismo cálculo (computeOrderTotals) y misma forma (OrderTotalsBreakdown del
+ * frontend) que ya usan Órdenes/POS, para que el checkout público pueda
+ * mostrar el mismo componente de resumen (OrderTotalsSummary) con números
+ * reales en vez de un subtotal plano armado a mano en el frontend. Envío
+ * siempre 0 -- la tienda pública todavía no calcula costo de envío (pedido
+ * explícito del usuario, 2026-09-06), solo pide la dirección para logística/
+ * factura, ver resolveOrderAddress. */
+async function loadCartTotals(adminClient: SupabaseClient, tenantId: string, cartId: string) {
+  const { data: items, error } = await adminClient.from("cart_items").select("product_id, quantity, unit_price").eq("cart_id", cartId);
+  if (error) throw new Error(error.message);
+
+  const taxEnabled = await isTenantTaxEnabled(adminClient, tenantId);
+  const productIds = Array.from(new Set((items ?? []).map((i: { product_id: string }) => i.product_id)));
+  const taxByProduct = new Map<string, { tax_type_code: string | null; tax_rate: number }>();
+  if (taxEnabled && productIds.length > 0) {
+    const { data: products } = await adminClient.from("products").select("id, tax_type_code, tax_rate").in("id", productIds);
+    for (const p of (products ?? []) as { id: string; tax_type_code: string | null; tax_rate: number }[]) {
+      taxByProduct.set(p.id, { tax_type_code: p.tax_type_code, tax_rate: p.tax_rate });
+    }
+  }
+
+  const taxableItems = (items ?? []).map((i: { product_id: string; quantity: number; unit_price: number }) => ({
+    quantity: i.quantity,
+    unit_price: i.unit_price,
+    tax_type_code: taxByProduct.get(i.product_id)?.tax_type_code ?? null,
+    tax_rate: taxByProduct.get(i.product_id)?.tax_rate ?? 0,
+  }));
+  const breakdown = computeOrderTotals(taxableItems, 0, taxEnabled);
+
+  return {
+    tax_enabled: taxEnabled,
+    subtotal: breakdown.subtotal,
+    discount_total: breakdown.discountTotal,
+    taxable_base: breakdown.taxableBase,
+    tax_total: breakdown.taxTotal,
+    shipping: 0,
+    total: breakdown.total,
+    tax_lines: breakdown.taxLines,
+  };
 }
 
 async function loadFirstImages(adminClient: SupabaseClient, productIds: string[]): Promise<Map<string, string>> {

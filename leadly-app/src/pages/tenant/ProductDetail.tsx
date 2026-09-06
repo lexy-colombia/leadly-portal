@@ -225,13 +225,13 @@ export function ProductDetail() {
     }
   }
 
-  if (error) return <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+  if (error) return <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>
   if (product === undefined) return <PageSpinner />
   if (product === null) {
     return (
       <div className="space-y-4">
         <p className="text-brand-500">{t('products.detail.notFound')}</p>
-        <Link to="/app/products" className="text-sm font-medium text-accent-600 hover:text-accent-700">
+        <Link to="/app/products" className="text-xs font-medium text-accent-600 hover:text-accent-700">
           {t('products.detail.backToList')}
         </Link>
       </div>
@@ -262,7 +262,7 @@ export function ProductDetail() {
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-xl font-bold text-brand-800">{product.name}</h1>
+                <h1 className="text-xs font-bold text-brand-800">{product.name}</h1>
                 <Badge variant={product.is_active ? 'secondary' : 'outline'}>{t(product.is_active ? 'common.status.active' : 'common.status.inactive')}</Badge>
                 {lowStock && <Badge variant="destructive">{t('products.detail.badges.lowStock')}</Badge>}
               </div>
@@ -284,14 +284,14 @@ export function ProductDetail() {
                   ) : (
                     <InitialsAvatar name={product.brand.name} size="xs" />
                   )}
-                  <span className="text-sm font-medium text-brand-700">{product.brand.name}</span>
+                  <span className="text-xs font-medium text-brand-700">{product.brand.name}</span>
                 </div>
               )}
 
               {/* SKU y categorías se movieron a la card "Información general"
                   de abajo (junto al resto de los datos del producto) --
                   antes se repetían acá arriba Y en la sección de Detalles. */}
-              {product.description && <p className="mt-2 text-sm text-brand-600">{product.description}</p>}
+              {product.description && <p className="mt-2 text-xs text-brand-600">{product.description}</p>}
             </div>
 
             <div className="flex shrink-0 items-center gap-2">
@@ -378,7 +378,7 @@ export function ProductDetail() {
                 por variante se ve en la card "Variantes" de arriba. */}
             {!product.has_variants && (
             <StatCard title={t('inventory.product.section.stockByWarehouse')}>
-              {stockError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{stockError}</p>}
+              {stockError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{stockError}</p>}
               {!stockByWarehouse && !stockError && <PageSpinner />}
               {stockByWarehouse && stockByWarehouse.length === 0 && <p className="text-xs text-brand-400">{t('inventory.product.empty.noStock')}</p>}
               {stockByWarehouse && stockByWarehouse.length > 0 && (
@@ -415,7 +415,7 @@ export function ProductDetail() {
             )}
 
             <StatCard title={t('inventory.product.section.movements')}>
-              {movementsError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{movementsError}</p>}
+              {movementsError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{movementsError}</p>}
               {!historyEntries && !movementsError && <PageSpinner />}
               {historyEntries && historyEntries.length === 0 && <p className="text-xs text-brand-400">{t('inventory.product.empty.noMovements')}</p>}
               {historyEntries && historyEntries.length > 0 && <HistoryTable entries={historyEntries} />}

@@ -22,6 +22,7 @@ export interface ProductInput {
   has_variants?: boolean
   tax_type_code?: string | null
   tax_rate?: number
+  is_visible_in_catalog?: boolean
 }
 
 export interface ProductCategoryRef {
@@ -363,6 +364,16 @@ export async function updateProduct(id: string, input: Partial<ProductInput>, ca
   // has to know/resend the current category list just to avoid wiping it.
   if (categoryIds !== undefined) await saveProductCategories(data.tenant_id, id, categoryIds)
   return data
+}
+
+/** Bulk toggle for the "Mostrar en tienda" row action in Products.tsx -- a
+ * single UPDATE ... WHERE id IN (...) instead of one request per selected
+ * product, since a tenant marking their whole catalog visible at once
+ * (e.g. 95 products) shouldn't mean 95 round-trips. */
+export async function bulkSetVisibleInCatalog(ids: string[], visible: boolean): Promise<void> {
+  if (ids.length === 0) return
+  const { error } = await supabase.from('products').update({ is_visible_in_catalog: visible }).in('id', ids)
+  if (error) throw error
 }
 
 export async function deleteProduct(id: string): Promise<void> {

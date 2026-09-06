@@ -39,17 +39,17 @@ export function ForgotPassword() {
   return (
     <AuthSplitLayout
       topRight={
-        <Link to="/login" className="text-sm font-medium text-accent-600 hover:text-accent-700">
+        <Link to="/login" className="text-xs font-medium text-accent-600 hover:text-accent-700">
           {t('auth.forgotPassword.backToLogin')}
         </Link>
       }
     >
       <div className="animate-fade-in">
-        <h1 className="text-2xl font-extrabold text-brand-800 sm:text-3xl">{t('auth.forgotPassword.title')}</h1>
+        <h1 className="text-xs font-extrabold text-brand-800 sm:text-xs">{t('auth.forgotPassword.title')}</h1>
         <p className="mt-1 text-brand-400">{t('auth.forgotPassword.subtitle')}</p>
 
         {sent ? (
-          <p className="mt-6 rounded-lg bg-accent-50 px-4 py-3 text-sm text-accent-700">
+          <p className="mt-6 rounded-lg bg-accent-50 px-4 py-3 text-xs text-accent-700">
             {t('auth.forgotPassword.sent.prefix')} <span className="font-medium">{normalizeEmail(email)}</span>{' '}
             {t('auth.forgotPassword.sent.suffix')}
           </p>
@@ -70,7 +70,7 @@ export function ForgotPassword() {
               <FieldError message={emailError} />
             </div>
 
-            {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
+            {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
 
             <Button type="submit" variant="secondary" className="w-full" disabled={submitting}>
               {submitting ? t('auth.forgotPassword.submitting') : t('auth.forgotPassword.submit')}

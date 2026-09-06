@@ -1,4 +1,4 @@
-import { AiSparkleIcon, ArchiveIcon, BoxIcon, BuildingIcon, CalendarIcon, ChatBubbleIcon, CheckIcon, CreditCardIcon, DashboardIcon, GlobeIcon, KeyIcon, MegaphoneIcon, ReceiptIcon, RefreshIcon, ScanIcon, SettingsIcon, TargetIcon, UsersIcon, WalletIcon } from '@/components/atoms/icons'
+import { AiSparkleIcon, ArchiveIcon, BoxIcon, BuildingIcon, CalendarIcon, ChatBubbleIcon, CheckIcon, CreditCardIcon, DashboardIcon, DollarIcon, GlobeIcon, KeyIcon, MegaphoneIcon, ReceiptIcon, RefreshIcon, ScanIcon, SettingsIcon, TargetIcon, UsersIcon, WalletIcon } from '@/components/atoms/icons'
 import type { TranslationKey } from '../i18n/translations'
 import type { ComponentType } from 'react'
 
@@ -80,6 +80,17 @@ export const TENANT_MODULES: TenantModuleDefinition[] = [
   // es una lista de tickets propia (Returns.tsx), no vive adentro de otra
   // pantalla.
   { key: 'returns', labelKey: 'common.nav.returns', to: '/app/returns', icon: RefreshIcon, viewAction: 'returns.view' },
+  // Sin viewAction a propósito (2026-09-06) -- mismo criterio que billing/
+  // integrations: gatea solo por tenant_enabled_modules, sin entrar todavía
+  // al catálogo granular de permission_actions (se puede sumar más adelante
+  // si se pide).
+  {
+    key: 'expenses',
+    labelKey: 'common.nav.expenses',
+    to: '/app/expenses',
+    icon: DollarIcon,
+    subRoutes: [{ labelKey: 'common.nav.expenseCategories', to: '/app/expenses/categories' }],
+  },
   // Tareas se fusionó dentro de Calendario (2026-08-19, pedido explícito del
   // usuario: "el calendario debería ser la matriz de mi CRM") -- mismo
   // patrón que 'inventory': el module_key/gating por tenant se conserva

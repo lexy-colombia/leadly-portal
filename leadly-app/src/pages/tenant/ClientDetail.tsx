@@ -94,7 +94,7 @@ function Field({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="min-w-0">
       <dt className="text-xs text-brand-400">{label}</dt>
-      <dd className="truncate text-sm font-semibold text-brand-800">{value}</dd>
+      <dd className="truncate text-xs font-semibold text-brand-800">{value}</dd>
     </div>
   )
 }
@@ -102,7 +102,7 @@ function Field({ label, value }: { label: string; value: ReactNode }) {
 function StatCard({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="rounded-xl border border-brand-100 p-4">
-      <h3 className="mb-3 text-sm font-semibold text-brand-800">{title}</h3>
+      <h3 className="mb-3 text-xs font-semibold text-brand-800">{title}</h3>
       {children}
     </div>
   )
@@ -139,13 +139,13 @@ export function ClientDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
-  if (error) return <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+  if (error) return <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>
   if (contact === undefined) return <PageSpinner />
   if (contact === null) {
     return (
       <div className="space-y-4">
         <p className="text-brand-500">{t('contacts.detail.notFound')}</p>
-        <Link to="/app/clients" className="text-sm font-medium text-accent-600 hover:text-accent-700">
+        <Link to="/app/clients" className="text-xs font-medium text-accent-600 hover:text-accent-700">
           {t('contacts.detail.backToContacts')}
         </Link>
       </div>
@@ -378,7 +378,7 @@ function ClientDetailContent({
           <InitialsAvatar name={contact.full_name} size="lg" />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl font-bold text-brand-800">{contact.full_name}</h1>
+              <h1 className="text-xs font-bold text-brand-800">{contact.full_name}</h1>
               {!contact.is_active && <Badge variant="outline">{t('common.status.inactive')}</Badge>}
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-brand-400">
@@ -451,7 +451,7 @@ function ClientDetailContent({
                 <CalendarIcon width={18} height={18} />
               </span>
               <div>
-                <p className="text-sm font-semibold text-brand-800">
+                <p className="text-xs font-semibold text-brand-800">
                   {t('contacts.detail.nextAppointment.title', { date: formatDateTime(nextAppointment.scheduled_at, language) })}
                 </p>
                 {nextAppointment.notes && <p className="text-xs text-brand-500">{nextAppointment.notes}</p>}
@@ -500,7 +500,7 @@ function ClientDetailContent({
             </form>
 
             {(!notes || !appointments) && <PageSpinner />}
-            {notes && appointments && timeline.length === 0 && <p className="py-6 text-center text-sm text-brand-400">{t('contacts.detail.activity.empty')}</p>}
+            {notes && appointments && timeline.length === 0 && <p className="py-6 text-center text-xs text-brand-400">{t('contacts.detail.activity.empty')}</p>}
             {notes && appointments && timeline.length > 0 && (
               <ul>
                 {timelinePage.items.map((item, idx) => (
@@ -516,7 +516,7 @@ function ClientDetailContent({
                     <div className="min-w-0 flex-1 rounded-xl bg-brand-50 px-4 py-3">
                       {item.kind === 'appointment' ? (
                         <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-sm font-medium text-brand-700">
+                          <p className="text-xs font-medium text-brand-700">
                             {t('contacts.detail.activity.appointmentLabel', { date: formatDateTime(item.appointment.scheduled_at, language) })}
                           </p>
                           <Badge variant="outline" className={APPOINTMENT_STATUS_BADGE_CLASS[item.appointment.status]}>
@@ -525,11 +525,11 @@ function ClientDetailContent({
                         </div>
                       ) : (
                         <div className="flex items-start gap-1.5">
-                          <p className="whitespace-pre-wrap text-sm text-brand-700">{item.note.content}</p>
+                          <p className="whitespace-pre-wrap text-xs text-brand-700">{item.note.content}</p>
                           {item.note.created_by_ai && <AiBadge />}
                         </div>
                       )}
-                      {item.kind === 'appointment' && item.appointment.notes && <p className="mt-0.5 text-sm text-brand-500">{item.appointment.notes}</p>}
+                      {item.kind === 'appointment' && item.appointment.notes && <p className="mt-0.5 text-xs text-brand-500">{item.appointment.notes}</p>}
                       <p className="mt-1.5 text-xs text-brand-400">{formatDateTime(item.date, language)}</p>
                     </div>
                   </li>
@@ -543,7 +543,7 @@ function ClientDetailContent({
         <TabsContent value="oportunidades">
           <Panel>
             {!opportunities && <PageSpinner />}
-            {opportunities && opportunities.length === 0 && <p className="py-6 text-center text-sm text-brand-400">{t('contacts.detail.opportunities.empty')}</p>}
+            {opportunities && opportunities.length === 0 && <p className="py-6 text-center text-xs text-brand-400">{t('contacts.detail.opportunities.empty')}</p>}
             {opportunities && opportunities.length > 0 && (
               <ul className="space-y-2">
                 {opportunitiesPage.items.map((o) => (
@@ -553,10 +553,10 @@ function ClientDetailContent({
                       className="flex w-full items-center justify-between gap-3 rounded-xl border border-brand-100 px-4 py-3 text-left transition-colors hover:bg-brand-50"
                     >
                       <span className="min-w-0">
-                        <span className="block truncate text-sm font-medium text-brand-800">{o.title}</span>
+                        <span className="block truncate text-xs font-medium text-brand-800">{o.title}</span>
                         <span className="block text-xs text-brand-400">{o.stage?.name ?? '—'}</span>
                       </span>
-                      <span className="shrink-0 text-sm font-semibold text-brand-700">{formatCurrency(o.value, o.currency)}</span>
+                      <span className="shrink-0 text-xs font-semibold text-brand-700">{formatCurrency(o.value, o.currency)}</span>
                     </button>
                   </li>
                 ))}
@@ -569,13 +569,13 @@ function ClientDetailContent({
         <TabsContent value="ventas">
           <Panel>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <p className="text-sm text-brand-400">{t('contacts.detail.sales.description')}</p>
+              <p className="text-xs text-brand-400">{t('contacts.detail.sales.description')}</p>
               <Button size="sm" onClick={() => navigate(`/app/sales/new?contactId=${contact.id}`)}>
                 <PlusIcon width={13} height={13} /> {t('contacts.detail.sales.new')}
               </Button>
             </div>
             {!orders && <PageSpinner />}
-            {orders && orders.length === 0 && <p className="py-6 text-center text-sm text-brand-400">{t('contacts.detail.sales.empty')}</p>}
+            {orders && orders.length === 0 && <p className="py-6 text-center text-xs text-brand-400">{t('contacts.detail.sales.empty')}</p>}
             {orders && orders.length > 0 && (
               <ul className="space-y-2">
                 {ordersPage.items.map((o) => (
@@ -592,7 +592,7 @@ function ClientDetailContent({
                         <Badge variant="outline" className={ORDER_STATUS_BADGE_CLASS[o.status]}>
                           {t(ORDER_STATUS_LABEL[o.status])}
                         </Badge>
-                        <span className="text-sm font-semibold text-brand-700">{formatCurrency(o.total, o.currency)}</span>
+                        <span className="text-xs font-semibold text-brand-700">{formatCurrency(o.total, o.currency)}</span>
                       </span>
                     </button>
                   </li>
@@ -606,7 +606,7 @@ function ClientDetailContent({
         <TabsContent value="conversaciones">
           <Panel>
             {!conversations && <PageSpinner />}
-            {conversations && conversations.length === 0 && <p className="py-6 text-center text-sm text-brand-400">{t('contacts.detail.conversations.empty')}</p>}
+            {conversations && conversations.length === 0 && <p className="py-6 text-center text-xs text-brand-400">{t('contacts.detail.conversations.empty')}</p>}
             {conversations && conversations.length > 0 && (
               <div className="space-y-2">
                 {conversationsPage.items.map((conv) => (
@@ -622,7 +622,7 @@ function ClientDetailContent({
                       <span className="min-w-0">
                         <span className="flex items-center gap-1.5">
                           <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${conv.mode === 'ia' ? 'bg-accent-500' : 'bg-amber-500'}`} />
-                          <span className="text-sm font-medium text-brand-800">{conv.mode === 'ia' ? t('contacts.detail.conversations.modeIa') : t('contacts.detail.conversations.modeHuman')}</span>
+                          <span className="text-xs font-medium text-brand-800">{conv.mode === 'ia' ? t('contacts.detail.conversations.modeIa') : t('contacts.detail.conversations.modeHuman')}</span>
                           {conv.status === 'closed' && (
                             <Badge variant="outline" className="border-transparent bg-red-100 text-red-700">
                               {t('contacts.detail.conversations.closed')}
@@ -644,20 +644,20 @@ function ClientDetailContent({
         <TabsContent value="direcciones">
           <Panel>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <p className="text-sm text-brand-400">{t('contacts.detail.addresses.description')}</p>
+              <p className="text-xs text-brand-400">{t('contacts.detail.addresses.description')}</p>
               <Button size="sm" onClick={() => setAddressDrawer({ open: true, address: null })}>
                 <PlusIcon width={13} height={13} /> {t('contacts.detail.addresses.new')}
               </Button>
             </div>
             {!addresses && <PageSpinner />}
-            {addresses && addresses.length === 0 && <p className="py-6 text-center text-sm text-brand-400">{t('contacts.detail.addresses.empty')}</p>}
+            {addresses && addresses.length === 0 && <p className="py-6 text-center text-xs text-brand-400">{t('contacts.detail.addresses.empty')}</p>}
             {addresses && addresses.length > 0 && (
               <ul className="space-y-2">
                 {addressesPage.items.map((a) => (
                   <li key={a.id} className="flex items-start justify-between gap-3 rounded-xl border border-brand-100 px-4 py-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        {a.label && <p className="text-sm font-semibold text-brand-800">{a.label}</p>}
+                        {a.label && <p className="text-xs font-semibold text-brand-800">{a.label}</p>}
                         {a.is_default && (
                           <Badge variant="outline" className="border-transparent bg-emerald-100 text-emerald-700">
                             {t('contacts.detail.addresses.default')}
@@ -674,7 +674,7 @@ function ClientDetailContent({
                           </Badge>
                         )}
                       </div>
-                      <p className="mt-1 text-sm text-brand-700">
+                      <p className="mt-1 text-xs text-brand-700">
                         {a.line1}
                         {a.line2 ? `, ${a.line2}` : ''}
                         {a.city ? `, ${a.city}` : ''}
@@ -708,20 +708,20 @@ function ClientDetailContent({
             <Panel>
               <div className="mb-4 grid grid-cols-3 gap-3">
                 <StatCard title={t('credit.tab.charged')}>
-                  <p className="text-lg font-semibold text-brand-800">{formatCurrency(totalCharged)}</p>
+                  <p className="text-xs font-semibold text-brand-800">{formatCurrency(totalCharged)}</p>
                 </StatCard>
                 <StatCard title={t('credit.tab.paid')}>
-                  <p className="text-lg font-semibold text-emerald-700">{formatCurrency(totalPaid)}</p>
+                  <p className="text-xs font-semibold text-emerald-700">{formatCurrency(totalPaid)}</p>
                 </StatCard>
                 <StatCard title={t('credit.tab.balance')}>
-                  <p className={`text-lg font-semibold ${creditBalance > 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                  <p className={`text-xs font-semibold ${creditBalance > 0 ? 'text-red-700' : 'text-emerald-700'}`}>
                     {creditBalance > 0 ? formatCurrency(creditBalance) : t('credit.tab.noBalance')}
                   </p>
                 </StatCard>
               </div>
 
               <div className="mb-3 flex items-center justify-between">
-                <h4 className="text-sm font-semibold text-brand-800">{t('credit.tab.movements')}</h4>
+                <h4 className="text-xs font-semibold text-brand-800">{t('credit.tab.movements')}</h4>
                 <Button size="sm" onClick={() => setCreditPaymentDrawerOpen(true)}>
                   <PlusIcon width={13} height={13} /> {t('credit.tab.registerPayment')}
                 </Button>
@@ -729,7 +729,7 @@ function ClientDetailContent({
 
               {(!creditCharges || !creditPayments) && <PageSpinner />}
               {creditCharges && creditPayments && creditMovements.length === 0 && (
-                <p className="py-6 text-center text-sm text-brand-400">{t('credit.tab.noMovements')}</p>
+                <p className="py-6 text-center text-xs text-brand-400">{t('credit.tab.noMovements')}</p>
               )}
               {creditMovements.length > 0 && (
                 <ul className="space-y-2">
@@ -743,7 +743,7 @@ function ClientDetailContent({
                             </Badge>
                             <p className="text-xs text-brand-400">{formatDate(m.charge.created_at)}</p>
                           </div>
-                          {m.charge.notes && <p className="mt-1 truncate text-sm text-brand-700">{m.charge.notes}</p>}
+                          {m.charge.notes && <p className="mt-1 truncate text-xs text-brand-700">{m.charge.notes}</p>}
                         </div>
                         <span className="shrink-0 font-semibold text-red-700">-{formatCurrency(m.charge.amount)}</span>
                       </li>

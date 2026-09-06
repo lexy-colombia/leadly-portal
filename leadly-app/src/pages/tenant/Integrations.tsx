@@ -25,7 +25,7 @@ export function Integrations() {
             <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-50 text-brand-300">
               <LockClosedIcon width={26} height={26} />
             </span>
-            <p className="max-w-sm text-sm text-brand-400">{t('integrations.adminOnly')}</p>
+            <p className="max-w-sm text-xs text-brand-400">{t('integrations.adminOnly')}</p>
           </div>
         </Card>
       )}

@@ -219,7 +219,7 @@ export function NewConversationDrawer({
             </>
           )}
 
-          {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
+          {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
 
           <div className="flex gap-2 border-t border-brand-100 pt-4">
             {templates && templates.length > 0 && (
@@ -317,7 +317,7 @@ export function NewConversationDrawer({
           </Select>
         </div>
 
-        {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
+        {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
 
         <div className="flex gap-2 border-t border-brand-100 pt-4">
           <Button type="button" onClick={handleSubmit} disabled={submitting}>

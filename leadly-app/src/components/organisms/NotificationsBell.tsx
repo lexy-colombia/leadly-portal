@@ -86,7 +86,7 @@ export function NotificationsBell({ theme = 'dark' }: { theme?: 'dark' | 'light'
       {open && (
         <div className="absolute right-0 top-full z-50 mt-2 w-80 overflow-hidden rounded-2xl border border-brand-100 bg-white shadow-lg">
           <div className="flex items-center justify-between border-b border-brand-100 px-4 py-3">
-            <p className="text-sm font-semibold text-brand-800">{t('common.notifications.title')}</p>
+            <p className="text-xs font-semibold text-brand-800">{t('common.notifications.title')}</p>
             {unreadCount > 0 && (
               <span className="text-xs font-medium text-accent-600">{t('common.notifications.unreadCount', { count: unreadCount })}</span>
             )}
@@ -100,7 +100,7 @@ export function NotificationsBell({ theme = 'dark' }: { theme?: 'dark' | 'light'
                     <Icon width={14} height={14} />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-brand-800">{n.title}</p>
+                    <p className="truncate text-xs font-medium text-brand-800">{n.title}</p>
                     <p className="truncate text-xs text-brand-500">{n.detail}</p>
                     <p className="mt-0.5 text-[11px] text-brand-300">{n.time}</p>
                   </div>

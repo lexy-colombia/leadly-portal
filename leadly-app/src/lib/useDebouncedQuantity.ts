@@ -15,7 +15,7 @@ const COMMIT_DELAY_MS = 500
  * el servidor. Si el componente se desmonta con un cambio pendiente (ej: el
  * usuario navegó justo después de tocar +), lo manda igual en vez de
  * perderlo. */
-export function useDebouncedQuantity(initialValue: number, onCommit: (quantity: number) => Promise<void>) {
+export function useDebouncedQuantity(initialValue: number, onCommit: (quantity: number) => Promise<unknown>) {
   const [value, setValueState] = useState(initialValue)
   const [saving, setSaving] = useState(false)
   const valueRef = useRef(initialValue)

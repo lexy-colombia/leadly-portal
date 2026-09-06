@@ -72,7 +72,7 @@ export function ComboboxFilter({
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-64 p-0" align="start">
-          {/* Command's own defaults are text-sm -- explicitly matched down to
+          {/* Command's own defaults are text-xs -- explicitly matched down to
               text-xs everywhere here so the options don't render noticeably
               bigger than the trigger button's own label. */}
           <Command>

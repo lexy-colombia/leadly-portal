@@ -59,7 +59,7 @@ export function AppointmentDetailDrawer({
     <Drawer open={open} onClose={onClose} title={t('calendar.detail.title')}>
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <Link to={`/app/clients/${appointment.contact_id}`} className="text-base font-semibold text-accent-600 hover:underline">
+          <Link to={`/app/clients/${appointment.contact_id}`} className="text-xs font-semibold text-accent-600 hover:underline">
             {appointment.contact_full_name ?? t('calendar.detail.contactFallback')}
           </Link>
           <Badge variant="outline" className={STATUS_BADGE_CLASS[appointment.status]}>
@@ -67,11 +67,11 @@ export function AppointmentDetailDrawer({
           </Badge>
         </div>
 
-        <p className="text-sm text-brand-700">{formatDateTime(appointment.scheduled_at, language)}</p>
+        <p className="text-xs text-brand-700">{formatDateTime(appointment.scheduled_at, language)}</p>
 
-        {appointment.notes && <p className="rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-600">{appointment.notes}</p>}
+        {appointment.notes && <p className="rounded-lg bg-brand-50 px-3 py-2 text-xs text-brand-600">{appointment.notes}</p>}
 
-        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
 
         {appointment.status === 'activa' && (
           <div className="flex flex-wrap gap-2 border-t border-brand-100 pt-4">

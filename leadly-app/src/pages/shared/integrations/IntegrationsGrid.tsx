@@ -101,7 +101,7 @@ export function IntegrationsGrid({ tenantId, drawerDescription }: { tenantId: st
 
   return (
     <div className="space-y-4">
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
       {!providers && !error && <PageSpinner />}
 
       {providers && (
@@ -122,7 +122,7 @@ export function IntegrationsGrid({ tenantId, drawerDescription }: { tenantId: st
                     )}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-brand-800">{provider.name}</p>
+                    <p className="truncate text-xs font-semibold text-brand-800">{provider.name}</p>
                     <span className="inline-block rounded-full bg-brand-50 px-2 py-0.5 text-[11px] text-brand-500">{t(CATEGORY_LABEL_KEY[provider.category])}</span>
                   </div>
                 </div>

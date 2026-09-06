@@ -77,7 +77,7 @@ export function CreateCompany() {
   return (
     <AuthSplitLayout>
       <div className="animate-fade-in">
-        <h1 className="text-2xl font-extrabold text-brand-800 sm:text-3xl">{t('auth.createCompany.title')}</h1>
+        <h1 className="text-xs font-extrabold text-brand-800 sm:text-xs">{t('auth.createCompany.title')}</h1>
         <p className="mt-1 text-brand-400">{t('auth.createCompany.subtitle')}</p>
 
         <form onSubmit={handleSubmit} noValidate className="mt-6 space-y-4">
@@ -105,7 +105,7 @@ export function CreateCompany() {
             <FieldError message={fullNameError} />
           </div>
 
-          {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
+          {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
 
           <Button type="submit" variant="secondary" className="w-full" disabled={submitting}>
             {submitting ? t('auth.createCompany.submitting') : t('auth.createCompany.submit')}
@@ -113,7 +113,7 @@ export function CreateCompany() {
         </form>
 
         <div className="mt-8 rounded-xl border border-brand-100 bg-brand-50/50 p-4">
-          <p className="text-sm text-brand-500">{t('auth.createCompany.wrongAccount')}</p>
+          <p className="text-xs text-brand-500">{t('auth.createCompany.wrongAccount')}</p>
 
           {deleteError && <p className="mt-2 text-xs text-red-600">{deleteError}</p>}
 

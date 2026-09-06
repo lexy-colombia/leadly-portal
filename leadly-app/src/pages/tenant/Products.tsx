@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import { useHeaderSearchSlot } from '@/contexts/HeaderSearchSlotContext'
-import { deleteProduct, getProductImageUrl, listProducts, updateProduct } from '../../lib/api/products'
+import { bulkSetVisibleInCatalog, deleteProduct, getProductImageUrl, listProducts, updateProduct } from '../../lib/api/products'
 import type { ProductWithImages } from '../../lib/api/products'
 import { listStockTotalsByTenant } from '../../lib/api/stockMovements'
 import type { ProductStockTotal } from '../../lib/api/stockMovements'
@@ -18,6 +18,7 @@ import { AlertIcon, PencilIcon, PlusIcon, SearchIcon, TrashIcon } from '@/compon
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ProductDrawer } from './products/ProductDrawer'
 
@@ -88,6 +89,8 @@ export function Products() {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [togglingId, setTogglingId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkUpdating, setBulkUpdating] = useState(false)
 
   // Debounced so typing a search term doesn't fire a DB round trip per
   // keystroke -- the query only runs 350ms after the user stops typing.
@@ -141,6 +144,14 @@ export function Products() {
 
   useEffect(reload, [tenantId, page, debouncedSearch, categoryIds, brandId, warehouseId, lowStockOnly])
 
+  // A selection tied to ids from the previous page/filter would silently
+  // apply a bulk action to products the user can no longer see -- clearing
+  // it whenever the list itself changes keeps "selected" always in sync
+  // with what's on screen.
+  useEffect(() => {
+    setSelectedIds(new Set())
+  }, [products])
+
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
 
   async function handleDelete(id: string) {
@@ -167,6 +178,34 @@ export function Products() {
       setError(err instanceof Error ? err.message : t('products.errors.save'))
     } finally {
       setTogglingId(null)
+    }
+  }
+
+  function toggleSelectAll(checked: boolean) {
+    setSelectedIds(checked && products ? new Set(products.map((p) => p.id)) : new Set())
+  }
+
+  function toggleSelectOne(id: string, checked: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (checked) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }
+
+  async function handleBulkSetVisible(visible: boolean) {
+    const ids = Array.from(selectedIds)
+    setBulkUpdating(true)
+    setError(null)
+    try {
+      await bulkSetVisibleInCatalog(ids, visible)
+      setSelectedIds(new Set())
+      reload()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('products.list.bulk.error'))
+    } finally {
+      setBulkUpdating(false)
     }
   }
 
@@ -239,7 +278,24 @@ export function Products() {
         </Button>
       </div>
 
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 rounded-2xl border border-brand-100 bg-brand-50/40 px-3 py-2">
+          <span className="text-xs font-medium text-brand-700">{t('products.list.bulk.selected', { count: selectedIds.size })}</span>
+          <div className="ml-auto flex items-center gap-2">
+            <Button type="button" variant="outline" size="sm" disabled={bulkUpdating} onClick={() => handleBulkSetVisible(true)}>
+              {t('products.list.bulk.showInStore')}
+            </Button>
+            <Button type="button" variant="outline" size="sm" disabled={bulkUpdating} onClick={() => handleBulkSetVisible(false)}>
+              {t('products.list.bulk.hideFromStore')}
+            </Button>
+            <Button type="button" variant="ghost" size="sm" disabled={bulkUpdating} onClick={() => setSelectedIds(new Set())}>
+              {t('products.list.bulk.clear')}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
       {loading && !products && <PageSpinner />}
 
       {products && products.length === 0 && (
@@ -254,6 +310,12 @@ export function Products() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-8" onClick={(e) => e.stopPropagation()}>
+                    <Checkbox
+                      checked={products.length > 0 && selectedIds.size === products.length ? true : selectedIds.size > 0 ? 'indeterminate' : false}
+                      onCheckedChange={(checked) => toggleSelectAll(checked === true)}
+                    />
+                  </TableHead>
                   <TableHead></TableHead>
                   <TableHead>{t('products.table.product')}</TableHead>
                   <TableHead>{t('products.table.brand')}</TableHead>
@@ -270,6 +332,9 @@ export function Products() {
                   const cover = product.images[0]
                   return (
                     <TableRow key={product.id} onClick={() => navigate(`/app/products/${product.id}`)} className="cursor-pointer">
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <Checkbox checked={selectedIds.has(product.id)} onCheckedChange={(checked) => toggleSelectOne(product.id, checked === true)} />
+                      </TableCell>
                       <TableCell>
                         <div className="h-9 w-9 overflow-hidden rounded-lg border border-brand-100">
                           <ProductImage src={cover ? getProductImageUrl(cover.storage_path) : null} name={product.name} className="h-full w-full" iconSize={16} />

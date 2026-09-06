@@ -26,7 +26,7 @@ export function CreditReceiptDialog({ open, onClose, payment, client }: { open: 
         <DialogHeader>
           <DialogTitle>{t('credit.receipt.title')}</DialogTitle>
         </DialogHeader>
-        <div className="space-y-2 rounded-xl border border-brand-100 p-4 text-sm">
+        <div className="space-y-2 rounded-xl border border-brand-100 p-4 text-xs">
           <div className="flex items-center justify-between border-b border-dashed border-brand-200 pb-2">
             <span className="font-semibold text-brand-800">{tenant?.name}</span>
             <span className="text-xs text-brand-400">

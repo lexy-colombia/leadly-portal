@@ -392,7 +392,7 @@ export function ProductVariantsCard({
     <div className="space-y-4">
       <div className="flex items-center justify-between rounded-lg border border-brand-100 px-4 py-3">
         <div>
-          <p className="text-sm font-medium text-brand-700">{t('products.drawer.variants.enable')}</p>
+          <p className="text-xs font-medium text-brand-700">{t('products.drawer.variants.enable')}</p>
           <p className="mt-0.5 text-xs text-brand-400">{t('products.drawer.variants.enableHint')}</p>
         </div>
         <Switch checked={product.has_variants} onCheckedChange={handleToggle} disabled={!product.has_variants && hasExistingStock} />
@@ -446,7 +446,7 @@ export function ProductVariantsCard({
           </div>
           {optionsDraft.length > 0 && <p className="text-xs text-brand-400">{t('products.drawer.variants.generateHint')}</p>}
 
-          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
 
           {product.variants.length > 0 ? (
             <div className="divide-y divide-brand-100 rounded-lg border border-brand-100">
@@ -455,7 +455,7 @@ export function ProductVariantsCard({
               ))}
             </div>
           ) : (
-            optionsDraft.length > 0 && <p className="text-sm text-brand-400">{t('products.drawer.variants.empty')}</p>
+            optionsDraft.length > 0 && <p className="text-xs text-brand-400">{t('products.drawer.variants.empty')}</p>
           )}
         </>
       )}

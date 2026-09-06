@@ -1,5 +1,6 @@
 import { supabase } from '../supabaseClient'
 import type { Brand, ProductCategory } from '../../types/domain'
+import type { OrderTotalsBreakdown } from './orders'
 
 // Cliente de la tienda pública (marketplace) -- llama a la Edge Function
 // `storefront`, pública y sin JWT (mismo criterio que whatsapp-webhook).
@@ -17,9 +18,8 @@ export interface StorefrontProductVariant {
   id: string
   label: string
   price: number
-  /** Solo viene en list_products (para el selector rápido desde la grilla)
-   * -- get_product no lo trae porque el detalle ya no necesita decidir si
-   * habilitar el botón de agregar antes de que el cliente elija variante. */
+  /** Stock de esta variante puntual -- viene tanto de list_products (selector
+   * rápido desde la grilla) como de get_product (detalle). */
   available?: number
 }
 
@@ -27,6 +27,11 @@ export interface StorefrontProductSummary {
   id: string
   name: string
   sku: string | null
+  /** URL amigable del producto (autogenerado a partir del nombre, ver
+   * products_set_default_slug en la DB) -- el link de la card cae a `id`
+   * cuando es null (productos creados antes de este cambio, o una carrera
+   * rarísima donde el backfill no llegó a correr todavía). */
+  slug: string | null
   brand_name: string | null
   price: number
   has_variants: boolean
@@ -45,9 +50,15 @@ export interface StorefrontProductDetail {
   id: string
   name: string
   description: string | null
+  sku: string | null
+  brand_name: string | null
   price: number
   has_variants: boolean
+  /** null = el tenant no lleva control de inventario (track_inventory=false),
+   * tratado como siempre disponible -- mismo criterio que StorefrontProductSummary. */
+  available: number | null
   categories: string[]
+  category_ids: string[]
   images: { url: string; variant_id: string | null }[]
   variants: StorefrontProductVariant[]
 }
@@ -155,7 +166,12 @@ export function getStorefront(slug: string): Promise<StorefrontInfo> {
  * reutiliza el mismo CategoryTreeFilter + descendantIds que ya usa el
  * catálogo interno del tenant (Products.tsx), que esperan parent_category_id
  * para armar el árbol. */
-export function listStorefrontCategories(slug: string): Promise<{ categories: ProductCategory[] }> {
+/** `counts` es por categoría PROPIA (sin acumular a sus ancestros) -- el
+ * caller suma el subárbol con descendantIds, mismo criterio ya usado para
+ * filtrar, así el número que se ve en un nodo padre siempre coincide con la
+ * suma real de sus hijos en vez de un segundo cálculo separado en el
+ * backend. */
+export function listStorefrontCategories(slug: string): Promise<{ categories: ProductCategory[]; counts: Record<string, number> }> {
   return callStorefront('list_categories', { slug })
 }
 
@@ -165,8 +181,8 @@ export function listStorefrontBrands(slug: string): Promise<{ brands: Brand[] }>
 
 export function listStorefrontProducts(
   slug: string,
-  opts?: { search?: string; category_ids?: string[]; brand_id?: string; sort?: string; offset?: number; limit?: number },
-): Promise<{ products: StorefrontProductSummary[]; has_more: boolean }> {
+  opts?: { search?: string; category_ids?: string[]; brand_id?: string; min_price?: number; max_price?: number; sort?: string; offset?: number; limit?: number },
+): Promise<{ products: StorefrontProductSummary[]; has_more: boolean; total?: number }> {
   return callStorefront('list_products', { slug, ...opts })
 }
 
@@ -174,7 +190,7 @@ export function getStorefrontProduct(slug: string, productId: string): Promise<S
   return callStorefront('get_product', { slug, product_id: productId })
 }
 
-export function getStorefrontCart(sessionToken: string | null): Promise<{ status?: string; items: StorefrontCartItem[] }> {
+export function getStorefrontCart(sessionToken: string | null): Promise<{ status?: string; items: StorefrontCartItem[]; totals?: OrderTotalsBreakdown | null }> {
   return callStorefront('get_cart', { session_token: sessionToken })
 }
 
@@ -184,16 +200,20 @@ export function addToStorefrontCart(params: {
   product_id: string
   variant_id?: string
   quantity: number
-}): Promise<{ session_token: string; items: StorefrontCartItem[] }> {
+}): Promise<{ session_token: string; items: StorefrontCartItem[]; totals: OrderTotalsBreakdown }> {
   return callStorefront('add_to_cart', params)
 }
 
-export function updateStorefrontCartItem(sessionToken: string, itemId: string, quantity: number): Promise<{ items: StorefrontCartItem[] }> {
+export function updateStorefrontCartItem(sessionToken: string, itemId: string, quantity: number): Promise<{ items: StorefrontCartItem[]; totals: OrderTotalsBreakdown }> {
   return callStorefront('update_cart_item', { session_token: sessionToken, item_id: itemId, quantity })
 }
 
-export function removeStorefrontCartItem(sessionToken: string, itemId: string): Promise<{ items: StorefrontCartItem[] }> {
+export function removeStorefrontCartItem(sessionToken: string, itemId: string): Promise<{ items: StorefrontCartItem[]; totals: OrderTotalsBreakdown }> {
   return callStorefront('remove_cart_item', { session_token: sessionToken, item_id: itemId })
+}
+
+export function clearStorefrontCart(sessionToken: string): Promise<{ items: StorefrontCartItem[]; totals: OrderTotalsBreakdown }> {
+  return callStorefront('clear_cart', { session_token: sessionToken })
 }
 
 export function requestCheckoutOtp(sessionToken: string, phone: string): Promise<{ sent: boolean }> {

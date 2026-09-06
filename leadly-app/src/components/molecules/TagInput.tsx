@@ -59,7 +59,7 @@ export function TagInput({
         onKeyDown={handleKeyDown}
         onBlur={commitDraft}
         placeholder={value.length === 0 ? placeholder : undefined}
-        className="min-w-[80px] flex-1 border-0 bg-transparent p-0.5 text-sm text-brand-800 placeholder:text-brand-300 focus:outline-none focus:ring-0"
+        className="min-w-[80px] flex-1 border-0 bg-transparent p-0.5 text-xs text-brand-800 placeholder:text-brand-300 focus:outline-none focus:ring-0"
       />
     </div>
   )

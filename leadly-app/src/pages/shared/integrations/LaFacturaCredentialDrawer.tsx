@@ -115,7 +115,7 @@ export function LaFacturaCredentialDrawer({
 
   return (
     <Drawer open={open} onClose={onClose} title="LaFactura.co" description={description}>
-      {!loaded && !error && <p className="text-sm text-brand-400">{t('common.status.loading')}</p>}
+      {!loaded && !error && <p className="text-xs text-brand-400">{t('common.status.loading')}</p>}
 
       {loaded && (
         <div className="space-y-4">

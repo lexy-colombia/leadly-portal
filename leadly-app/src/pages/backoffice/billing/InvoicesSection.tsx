@@ -108,15 +108,15 @@ export function InvoicesSection() {
       <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
         <Card className="!p-4">
           <p className="text-xs text-brand-400">{t('backoffice.invoicesSection.stats.pending')}</p>
-          <p className="mt-1 text-lg font-bold text-brand-800">{invoices ? formatMoney(pendingTotalCents, 'COP') : '—'}</p>
+          <p className="mt-1 text-xs font-bold text-brand-800">{invoices ? formatMoney(pendingTotalCents, 'COP') : '—'}</p>
         </Card>
         <Card className="!p-4">
           <p className="text-xs text-brand-400">{t('backoffice.invoicesSection.stats.overdue')}</p>
-          <p className="mt-1 text-lg font-bold text-brand-800">{invoices ? overdueCount : '—'}</p>
+          <p className="mt-1 text-xs font-bold text-brand-800">{invoices ? overdueCount : '—'}</p>
         </Card>
         <Card className="!p-4">
           <p className="text-xs text-brand-400">{t('backoffice.invoicesSection.stats.paidThisMonth')}</p>
-          <p className="mt-1 text-lg font-bold text-brand-800">{invoices ? formatMoney(paidThisMonthCents, 'COP') : '—'}</p>
+          <p className="mt-1 text-xs font-bold text-brand-800">{invoices ? formatMoney(paidThisMonthCents, 'COP') : '—'}</p>
         </Card>
       </div>
 
@@ -127,7 +127,7 @@ export function InvoicesSection() {
             placeholder={t('backoffice.invoicesSection.search.placeholder')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="!py-1.5 !pl-8 text-sm"
+            className="!py-1.5 !pl-8 text-xs"
           />
         </div>
 
@@ -135,7 +135,7 @@ export function InvoicesSection() {
           <button
             type="button"
             onClick={() => setFiltersOpen((o) => !o)}
-            className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+            className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
               hasActiveFilters ? 'border-accent-300 bg-accent-50 text-accent-700' : 'border-brand-200 text-brand-600 hover:bg-brand-50'
             }`}
           >
@@ -179,7 +179,7 @@ export function InvoicesSection() {
         </span>
       </div>
 
-      {error && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
       {!invoices && !error && <PageSpinner />}
 
       {filtered && filtered.length === 0 && (

@@ -169,11 +169,11 @@ function ManualInvoiceForm({
         </div>
         <div className="flex flex-col justify-end">
           <p className="text-xs text-brand-400">{t('backoffice.tenantBilling.manualInvoice.total')}</p>
-          <p className="text-sm font-semibold text-brand-800">{formatMoney(totalCents, 'COP')}</p>
+          <p className="text-xs font-semibold text-brand-800">{formatMoney(totalCents, 'COP')}</p>
         </div>
       </div>
 
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
       <div className="flex gap-2">
         <Button size="sm" onClick={handleSubmit} disabled={submitting}>
           {submitting ? t('backoffice.tenantBilling.manualInvoice.creating') : t('backoffice.tenantBilling.manualInvoice.create')}
@@ -219,7 +219,7 @@ export function TenantBillingSection({ tenantId }: { tenantId: string }) {
         </Button>
       }
     >
-      {error && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
 
       {manualInvoiceOpen && (
         <ManualInvoiceForm

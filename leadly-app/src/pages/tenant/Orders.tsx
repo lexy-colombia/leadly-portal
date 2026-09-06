@@ -88,7 +88,7 @@ function SummaryTile({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 rounded-lg border border-brand-100 bg-white px-2.5 py-1.5">
       <p className="truncate text-[10px] text-brand-400">{label}</p>
-      <p className="truncate text-sm font-bold text-brand-800">{value}</p>
+      <p className="truncate text-xs font-bold text-brand-800">{value}</p>
     </div>
   )
 }
@@ -442,7 +442,7 @@ export function Orders() {
         </div>
       )}
 
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
       {loading && !orders && <PageSpinner />}
 
       {orders && orders.length === 0 && (

@@ -40,7 +40,7 @@ export function ConversationListItem({
       <InitialsAvatar name={name} size="md" />
       <span className="flex min-w-0 flex-1 items-center gap-2">
         <span className="min-w-0 flex-1 space-y-0.5">
-          <span className="block truncate text-sm font-medium text-brand-800">{name}</span>
+          <span className="block truncate text-xs font-medium text-brand-800">{name}</span>
           <span className="block truncate text-xs text-brand-400">
             {conversation.mode === 'ia' ? t('inbox.mode.ia') : t('inbox.mode.humano')}
             {conversation.agent && <> · {conversation.agent.full_name}</>}

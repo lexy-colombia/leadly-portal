@@ -110,10 +110,10 @@ export function ReturnDetailDrawer({ open, onClose, returnId, tenantId }: { open
   return (
     <Drawer open={open} onClose={onClose} title={t('returns.detail.title')} description={ret?.sales_order ? t('returns.detail.order', { number: ret.sales_order.number }) : undefined}>
       <div className="space-y-5">
-        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
 
         {ret === undefined && <PageSpinner />}
-        {ret === null && <p className="text-sm text-brand-500">{t('returns.detail.errors.load')}</p>}
+        {ret === null && <p className="text-xs text-brand-500">{t('returns.detail.errors.load')}</p>}
 
         {ret && (
           <>
@@ -138,11 +138,11 @@ export function ReturnDetailDrawer({ open, onClose, returnId, tenantId }: { open
 
             <div>
               <Label>{t('returns.detail.fields.reason')}</Label>
-              <p className="mt-1 text-sm text-brand-700">{t(RETURN_REASON_LABEL_KEY[ret.reason])}</p>
+              <p className="mt-1 text-xs text-brand-700">{t(RETURN_REASON_LABEL_KEY[ret.reason])}</p>
             </div>
 
             <div className="border-t border-brand-100 pt-4">
-              <p className="mb-2 text-sm font-semibold text-brand-800">{t('returns.detail.items.title')}</p>
+              <p className="mb-2 text-xs font-semibold text-brand-800">{t('returns.detail.items.title')}</p>
               {!items && <PageSpinner />}
               {items && (
                 <div className="space-y-2">
@@ -208,7 +208,7 @@ export function ReturnDetailDrawer({ open, onClose, returnId, tenantId }: { open
             )}
 
             <div className="border-t border-brand-100 pt-4">
-              <p className="mb-3 text-sm font-semibold text-brand-800">{t('returns.detail.timeline.title')}</p>
+              <p className="mb-3 text-xs font-semibold text-brand-800">{t('returns.detail.timeline.title')}</p>
               {!history && <PageSpinner />}
               {history && (
                 <ol className="space-y-3">
@@ -221,7 +221,7 @@ export function ReturnDetailDrawer({ open, onClose, returnId, tenantId }: { open
                           {index < history.length - 1 && <span className="mt-0.5 w-px flex-1 bg-brand-100" />}
                         </div>
                         <div className="pb-3">
-                          <p className="text-sm font-medium text-brand-800">{status?.name ?? '—'}</p>
+                          <p className="text-xs font-medium text-brand-800">{status?.name ?? '—'}</p>
                           <p className="text-xs text-brand-400">{formatDateTime(entry.created_at, language)}</p>
                         </div>
                       </li>

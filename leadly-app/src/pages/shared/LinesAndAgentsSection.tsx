@@ -59,7 +59,7 @@ function MetricCard({ icon, iconClass, value, label, sublabel }: { icon: ReactNo
     <div className="flex min-w-0 items-center gap-3 rounded-xl border border-brand-100 bg-white p-3">
       <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${iconClass}`}>{icon}</span>
       <div className="min-w-0">
-        <p className="truncate text-lg font-bold text-brand-800">{value}</p>
+        <p className="truncate text-xs font-bold text-brand-800">{value}</p>
         <p className="truncate text-xs text-brand-500">{label}</p>
         {sublabel && <p className="truncate text-[11px] text-brand-300">{sublabel}</p>}
       </div>
@@ -197,7 +197,7 @@ export function LinesAndAgentsSection({
 
   return (
     <div className="space-y-3.5">
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>

@@ -11,7 +11,7 @@ export function Changelog() {
       {sections.map((section) => (
         <Card key={section.heading}>
           <h2 className="mb-2 font-semibold text-brand-700">{section.heading}</h2>
-          <div className="space-y-1 text-sm text-brand-600 whitespace-pre-wrap">{section.body}</div>
+          <div className="space-y-1 text-xs text-brand-600 whitespace-pre-wrap">{section.body}</div>
         </Card>
       ))}
     </div>

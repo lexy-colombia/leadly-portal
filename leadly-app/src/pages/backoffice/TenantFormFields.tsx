@@ -29,7 +29,7 @@ export function TenantFormFields({ form, hideNotes = false, compact = false }: {
               key={type}
               type="button"
               onClick={() => form.setEntityType(type)}
-              className={`rounded-xl border font-medium transition-colors ${compact ? 'px-2.5 py-1.5 text-xs' : 'px-3 py-2.5 text-sm'} ${
+              className={`rounded-xl border font-medium transition-colors ${compact ? 'px-2.5 py-1.5 text-xs' : 'px-3 py-2.5 text-xs'} ${
                 form.entityType === type
                   ? 'border-accent-400 bg-accent-50 text-accent-700'
                   : 'border-brand-200 text-brand-500 hover:bg-brand-50'

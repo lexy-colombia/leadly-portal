@@ -392,6 +392,10 @@ export interface Product {
   has_variants: boolean
   tax_type_code: string | null
   tax_rate: number
+  /** Opt-in para la tienda pública (storefront) -- default false, ver
+   * CLAUDE.md: ningún producto aparece en /tienda/:slug hasta que el tenant
+   * lo marque a propósito, distinto de is_active ("vendible en general"). */
+  is_visible_in_catalog: boolean
   deleted_at: string | null
   deleted_by: string | null
   created_at: string
@@ -1297,5 +1301,66 @@ export interface SalesInvoiceWithholding {
   rate: number
   base: number
   amount: number
+  created_at: string
+}
+
+// --- Módulo de Gastos. Un gasto se asocia a un proveedor ya existente
+// (Supplier, no una entidad nueva) y opcionalmente a una categoría propia
+// (ExpenseCategory, catálogo plano por tenant). Una línea de "entrada de
+// inventario" (ExpenseInventoryEntry) sobre un gasto crea un stock_movement
+// real (reference_type='compra') y sobreescribe purchase_price del
+// producto/variante -- ver add_expense_inventory_entry en la migración
+// 20260906035734_expense_inventory_entries.sql.
+
+export type ExpenseStatus = 'pendiente' | 'pagado' | 'anulado'
+
+export interface ExpenseCategory {
+  id: string
+  tenant_id: string
+  name: string
+  description: string | null
+  color: string | null
+  deleted_at: string | null
+  deleted_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Expense {
+  id: string
+  tenant_id: string
+  supplier_id: string | null
+  category_id: string | null
+  amount: number
+  currency: string
+  description: string | null
+  payment_method: string | null
+  status: ExpenseStatus
+  expense_date: string
+  due_date: string | null
+  payment_date: string | null
+  external_source: string | null
+  external_id: string | null
+  created_by: string | null
+  deleted_at: string | null
+  deleted_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+// Append-only a propósito (ver la migración) -- sin campos de soft-delete,
+// una línea ya aplicada no se edita ni se borra desde la app.
+export interface ExpenseInventoryEntry {
+  id: string
+  tenant_id: string
+  expense_id: string
+  product_id: string
+  variant_id: string | null
+  warehouse_id: string
+  quantity: number
+  unit_cost: number
+  subtotal: number
+  notes: string | null
+  created_by: string | null
   created_at: string
 }

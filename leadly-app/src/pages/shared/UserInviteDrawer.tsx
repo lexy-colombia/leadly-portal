@@ -100,7 +100,7 @@ export function UserInviteDrawer({
     <Drawer open={open} onClose={onClose} title={t('account.invite.title')} description={t('account.invite.description')}>
       {success ? (
         <div className="space-y-4">
-          <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+          <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
             {t('account.invite.sentPrefix')} <span className="font-medium">{email}</span>.
           </p>
           <Button type="button" variant="ghost" onClick={onClose}>
@@ -164,7 +164,7 @@ export function UserInviteDrawer({
             <FieldError message={roleError} />
           </div>
 
-          {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
+          {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
 
           <div className="flex gap-2 border-t border-brand-100 pt-5">
             <Button type="submit" variant="secondary" disabled={submitting}>

@@ -306,13 +306,13 @@ export function AppShell({
               {pageHeader.backTo ? (
                 <Link
                   to={pageHeader.backTo}
-                  className="flex min-w-0 items-center gap-1 truncate text-sm font-semibold text-brand-800 transition-colors hover:text-accent-700 sm:text-base"
+                  className="flex min-w-0 items-center gap-1 truncate text-xs font-semibold text-brand-800 transition-colors hover:text-accent-700 sm:text-xs"
                 >
                   <ChevronLeftIcon width={16} height={16} className="shrink-0" />
                   <span className="truncate">{pageHeader.title}</span>
                 </Link>
               ) : (
-                <h1 className="truncate text-sm font-semibold text-brand-800 sm:text-base">{pageHeader.title}</h1>
+                <h1 className="truncate text-xs font-semibold text-brand-800 sm:text-xs">{pageHeader.title}</h1>
               )}
               {pageHeader.badge && (
                 <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-700">

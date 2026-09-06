@@ -202,7 +202,7 @@ export function AddressDrawer({
           <Textarea id="address-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className={`mt-1 ${TEXTAREA_CLASS}`} />
         </div>
 
-        {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
+        {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
 
         <div className="flex gap-2 border-t border-brand-100 pt-4">
           <Button type="submit" disabled={submitting}>

@@ -48,7 +48,7 @@ export function Login() {
   return (
     <AuthSplitLayout
       topRight={
-        <span className="flex items-center gap-3 text-sm">
+        <span className="flex items-center gap-3 text-xs">
           <span className="hidden text-brand-400 sm:inline">{t('auth.login.noAccount')}</span>
           <Link to="/signup" className="rounded-lg border border-accent-200 px-3 py-1.5 font-medium text-accent-600 hover:bg-accent-50">
             {t('auth.login.signUp')}
@@ -57,7 +57,7 @@ export function Login() {
       }
     >
       <div className="animate-fade-in">
-        <h1 className="text-2xl font-extrabold text-brand-800 sm:text-3xl">{t('auth.login.title')}</h1>
+        <h1 className="text-xs font-extrabold text-brand-800 sm:text-xs">{t('auth.login.title')}</h1>
         <p className="mt-1 text-brand-400">{t('auth.login.subtitle')}</p>
 
         <form onSubmit={handleSubmit} noValidate className="mt-6 space-y-4">
@@ -95,7 +95,7 @@ export function Login() {
             <FieldError message={passwordError} />
           </div>
 
-          {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
+          {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
 
           <Button type="submit" variant="secondary" className="w-full" disabled={submitting}>
             {submitting ? t('auth.login.submitting') : t('auth.login.submit')}

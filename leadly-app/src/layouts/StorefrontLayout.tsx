@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link, Outlet, useParams } from 'react-router-dom'
-import { ShoppingCartIcon } from 'lucide-react'
+import { Link, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Loader2Icon, SearchIcon, ShoppingCartIcon } from 'lucide-react'
 import { useLanguage } from '../contexts/LanguageContext'
 import { getStorefront, getStorefrontCart, type StorefrontCartItem, type StorefrontInfo } from '../lib/api/storefront'
 import { getStorefrontCartToken } from '../lib/storefrontCart'
@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 
 export interface StorefrontOutletContext {
   slug: string
@@ -31,6 +32,15 @@ export interface StorefrontOutletContext {
    * explícito del usuario) en vez de texto inline -- una sola instancia acá
    * arriba, las páginas hijas solo la invocan. */
   showError: (message: string) => void
+  /** El buscador vive en el header (visible en toda la tienda, no solo en el
+   * catálogo) -- el estado se guarda acá arriba para que el input sobreviva
+   * la navegación entre catálogo/detalle/carrito. StorefrontCatalog es quien
+   * efectivamente filtra con esto y reporta si hay una consulta en vuelo
+   * (`setSearching`) para que el header muestre el ícono girando. */
+  search: string
+  setSearch: (value: string) => void
+  searching: boolean
+  setSearching: (value: boolean) => void
 }
 
 /** Layout propio y liviano para la tienda pública (marketplace) -- ruta sin
@@ -41,11 +51,28 @@ export interface StorefrontOutletContext {
 export function StorefrontLayout() {
   const { slug = '' } = useParams<{ slug: string }>()
   const { t } = useLanguage()
+  const navigate = useNavigate()
+  const location = useLocation()
   const [tenant, setTenant] = useState<StorefrontInfo | null>(null)
   const [notFound, setNotFound] = useState(false)
   const [loading, setLoading] = useState(true)
   const [cartCount, setCartCount] = useState(0)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [search, setSearchState] = useState('')
+  const [searching, setSearching] = useState(false)
+
+  // Escribir en el buscador desde cualquier página que no sea el catálogo
+  // (detalle de producto, carrito) lleva de vuelta ahí para ver resultados --
+  // el catálogo es el único que sabe filtrar con esto, no tiene sentido
+  // dejar el texto tipeado sin ningún lugar donde aplicarse.
+  const catalogPath = `/tienda/${slug}`
+  const setSearch = useCallback(
+    (value: string) => {
+      setSearchState(value)
+      if (location.pathname !== catalogPath) navigate(catalogPath)
+    },
+    [catalogPath, location.pathname, navigate],
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -121,8 +148,8 @@ export function StorefrontLayout() {
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
-          <Link to={`/tienda/${slug}`} className="flex min-w-0 items-center gap-2.5">
+        <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
+          <Link to={`/tienda/${slug}`} className="flex min-w-0 shrink-0 items-center gap-2.5">
             {tenant.logo_url ? (
               <img src={tenant.logo_url} alt={tenant.name} className="h-9 w-9 shrink-0 rounded-full object-cover" />
             ) : (
@@ -130,25 +157,33 @@ export function StorefrontLayout() {
                 {tenant.name.charAt(0).toUpperCase()}
               </div>
             )}
-            <span className="truncate text-base font-bold text-foreground">{tenant.name}</span>
+            <span className="hidden truncate text-base font-bold text-foreground sm:inline">{tenant.name}</span>
           </Link>
-          <Button asChild size="icon" className="relative shrink-0">
+          <InputGroup className="mx-auto hidden h-9 max-w-md sm:flex">
+            <InputGroupAddon>{searching ? <Loader2Icon className="animate-spin" /> : <SearchIcon />}</InputGroupAddon>
+            <InputGroupInput placeholder={t('storefront.header.searchPlaceholder')} value={search} onChange={(e) => setSearch(e.target.value)} />
+          </InputGroup>
+          <Button asChild variant="outline" className="relative ml-auto shrink-0 gap-2 rounded-full">
             <Link to={`/tienda/${slug}/carrito`} aria-label={t('storefront.header.cart')}>
-              <ShoppingCartIcon className="size-5" />
+              <ShoppingCartIcon className="size-4" />
+              <span className="hidden sm:inline">{t('storefront.header.cart')}</span>
               {cartCount > 0 && (
-                <Badge
-                  variant="secondary"
-                  className="absolute -top-1.5 -right-1.5 h-4.5 min-w-4.5 justify-center rounded-full border-2 border-background px-1 text-[10px]"
-                >
+                <Badge variant="destructive" className="h-4.5 min-w-4.5 justify-center rounded-full px-1 text-[10px]">
                   {cartCount > 99 ? '99+' : cartCount}
                 </Badge>
               )}
             </Link>
           </Button>
         </div>
+        <div className="mx-auto max-w-6xl px-4 pb-3 sm:hidden">
+          <InputGroup className="h-9">
+            <InputGroupAddon>{searching ? <Loader2Icon className="animate-spin" /> : <SearchIcon />}</InputGroupAddon>
+            <InputGroupInput placeholder={t('storefront.header.searchPlaceholder')} value={search} onChange={(e) => setSearch(e.target.value)} />
+          </InputGroup>
+        </div>
       </header>
       <main className="mx-auto max-w-6xl px-4 py-6">
-        <Outlet context={{ slug, tenant, refreshCartCount, showError } satisfies StorefrontOutletContext} />
+        <Outlet context={{ slug, tenant, refreshCartCount, showError, search, setSearch, searching, setSearching } satisfies StorefrontOutletContext} />
       </main>
 
       <Dialog open={!!errorMessage} onOpenChange={(open) => !open && setErrorMessage(null)}>

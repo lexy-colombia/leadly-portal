@@ -25,7 +25,7 @@ export function AuthMarketingPanel() {
     <div className="relative hidden flex-col justify-between overflow-hidden bg-brand-800 p-10 text-white lg:flex lg:w-[46%] xl:p-14">
       <div>
         <Logo size="lg" onDark />
-        <p className="mt-6 max-w-sm text-lg text-brand-100">
+        <p className="mt-6 max-w-sm text-xs text-brand-100">
           {t('auth.marketing.heroPrefix')} <span className="font-semibold text-accent-400">{t('auth.marketing.heroHighlight')}</span>
         </p>
       </div>
@@ -38,7 +38,7 @@ export function AuthMarketingPanel() {
             </span>
             <div>
               <p className="font-semibold text-white">{t(titleKey)}</p>
-              <p className="text-sm text-brand-200">{t(descriptionKey)}</p>
+              <p className="text-xs text-brand-200">{t(descriptionKey)}</p>
             </div>
           </li>
         ))}
@@ -70,8 +70,8 @@ function TrendGraphic() {
         ))}
       </svg>
       <div className="absolute bottom-0 right-0 max-w-[13rem] rounded-xl border border-white/10 bg-brand-900/80 p-4 backdrop-blur">
-        <p className="text-xl font-extrabold text-accent-400">+37%</p>
-        <p className="text-sm font-medium text-white">{t('auth.marketing.trendLabel')}</p>
+        <p className="text-xs font-extrabold text-accent-400">+37%</p>
+        <p className="text-xs font-medium text-white">{t('auth.marketing.trendLabel')}</p>
         <p className="text-xs text-brand-300">{t('auth.marketing.trendPeriod')}</p>
       </div>
     </div>

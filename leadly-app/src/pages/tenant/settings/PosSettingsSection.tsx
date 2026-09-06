@@ -34,17 +34,17 @@ export function PosSettingsSection({ tenant, onSaved }: { tenant: Tenant; onSave
         <div className="space-y-3.5">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-sm font-medium text-brand-700">{t('settings.pos.openTabsLabel')}</p>
+              <p className="text-xs font-medium text-brand-700">{t('settings.pos.openTabsLabel')}</p>
               <p className="text-xs text-brand-400">{t('settings.pos.openTabsDescription')}</p>
             </div>
             <Switch checked={tenant.pos_allow_open_tabs} disabled={toggling} onChange={handleToggle} />
           </div>
 
-          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
 
           {tenant.pos_allow_open_tabs && (
             <div className="border-t border-brand-100 pt-3.5">
-              <p className="mb-2 text-sm font-medium text-brand-700">{t('settings.pos.pointsTitle')}</p>
+              <p className="mb-2 text-xs font-medium text-brand-700">{t('settings.pos.pointsTitle')}</p>
               <PosPointsSection tenantId={tenant.id} />
             </div>
           )}

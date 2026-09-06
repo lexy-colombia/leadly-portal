@@ -9,7 +9,7 @@ export function AuroraCallout({ message }: { message: ReactNode }) {
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-800 text-accent-400">
         <AiSparkleIcon width={18} height={18} />
       </span>
-      <p className="text-sm text-brand-700">{message}</p>
+      <p className="text-xs text-brand-700">{message}</p>
     </div>
   )
 }

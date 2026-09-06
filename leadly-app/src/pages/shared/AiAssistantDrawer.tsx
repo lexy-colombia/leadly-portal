@@ -118,7 +118,7 @@ export function AiAssistantDrawer({
         ) : undefined
       }
     >
-      {loadError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{loadError}</p>}
+      {loadError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{loadError}</p>}
       {!loadError && loading && <PageSpinner />}
       {ready && (
         <AiAssistantDrawerForm
@@ -189,11 +189,11 @@ function SkillsSection({ assistantId, updatedBy, readOnly }: { assistantId: stri
         <p className="-mt-1 text-xs text-brand-400">
           {readOnly ? t('settings.assistant.skills.descriptionReadOnly') : t('settings.assistant.skills.descriptionEditable')}
         </p>
-        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
         {!skills && !error && <PageSpinner />}
-        {skills && skills.length === 0 && <p className="text-sm text-brand-400">{t('settings.assistant.skills.emptyCatalog')}</p>}
+        {skills && skills.length === 0 && <p className="text-xs text-brand-400">{t('settings.assistant.skills.emptyCatalog')}</p>}
         {readOnly && skills && skills.length > 0 && enabledKeys.size === 0 && (
-          <p className="text-sm text-brand-400">{t('settings.assistant.skills.emptyReadOnly')}</p>
+          <p className="text-xs text-brand-400">{t('settings.assistant.skills.emptyReadOnly')}</p>
         )}
         {skills && skills.length > 0 && (readOnly ? enabledKeys.size > 0 : true) && (
           <div className="space-y-2">
@@ -204,7 +204,7 @@ function SkillsSection({ assistantId, updatedBy, readOnly }: { assistantId: stri
                 return (
                   <div key={skill.id} className="flex items-start justify-between gap-3 rounded-xl border border-brand-100 px-4 py-3">
                     <div>
-                      <p className="text-sm font-medium text-brand-800">{skill.name}</p>
+                      <p className="text-xs font-medium text-brand-800">{skill.name}</p>
                       <p className="mt-0.5 text-xs text-brand-400">{skill.description}</p>
                     </div>
                     {readOnly ? (
@@ -382,7 +382,7 @@ function AiAssistantDrawerForm({
         </div>
       </FormSection>
 
-      {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
+      {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
     </form>
   )
 }

@@ -45,7 +45,7 @@ export function TenantModulesSection({ tenantId }: { tenantId: string }) {
   return (
     <div className="space-y-3">
       <p className="-mt-1 text-xs text-brand-400">{t('backoffice.clienteDetalle.modules.subtitle')}</p>
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
       {!enabledKeys && !error && <PageSpinner />}
       {enabledKeys && (
         <div className="grid gap-1.5 sm:grid-cols-2">
@@ -58,7 +58,7 @@ export function TenantModulesSection({ tenantId }: { tenantId: string }) {
                   <span className="shrink-0 text-brand-400">
                     <Icon width={13} height={13} />
                   </span>
-                  <p className="truncate text-sm font-medium text-brand-800">{t(module.labelKey)}</p>
+                  <p className="truncate text-xs font-medium text-brand-800">{t(module.labelKey)}</p>
                 </div>
                 <Switch checked={enabled} disabled={togglingKey === module.key} onChange={(v) => handleToggle(module.key, v)} />
               </div>

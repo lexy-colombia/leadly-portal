@@ -53,7 +53,7 @@ export function Signup() {
   return (
     <AuthSplitLayout
       topRight={
-        <span className="flex items-center gap-3 text-sm">
+        <span className="flex items-center gap-3 text-xs">
           <span className="hidden text-brand-400 sm:inline">{t('auth.signup.hasAccount')}</span>
           <Link to="/login" className="rounded-lg border border-accent-200 px-3 py-1.5 font-medium text-accent-600 hover:bg-accent-50">
             {t('auth.signup.signIn')}
@@ -62,11 +62,11 @@ export function Signup() {
       }
     >
       <div className="animate-fade-in">
-        <h1 className="text-2xl font-extrabold text-brand-800 sm:text-3xl">{t('auth.signup.title')}</h1>
+        <h1 className="text-xs font-extrabold text-brand-800 sm:text-xs">{t('auth.signup.title')}</h1>
         <p className="mt-1 text-brand-400">{t('auth.signup.subtitle')}</p>
 
         {confirmationSent ? (
-          <p className="mt-6 rounded-lg bg-accent-50 px-4 py-3 text-sm text-accent-700">
+          <p className="mt-6 rounded-lg bg-accent-50 px-4 py-3 text-xs text-accent-700">
             {t('auth.signup.confirmationSent.prefix')} <span className="font-medium">{normalizeEmail(email)}</span>{' '}
             {t('auth.signup.confirmationSent.suffix')}
           </p>
@@ -115,7 +115,7 @@ export function Signup() {
                 <FieldError message={passwordError} />
               </div>
 
-              {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
+              {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
 
               <Button type="submit" variant="secondary" className="w-full" disabled={submitting}>
                 {submitting ? t('auth.signup.submitting') : t('auth.signup.submit')}

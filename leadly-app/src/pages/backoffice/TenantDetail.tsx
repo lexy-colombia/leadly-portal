@@ -44,13 +44,13 @@ export function TenantDetail() {
     }
   }, [id])
 
-  if (error) return <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+  if (error) return <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>
   if (tenant === undefined) return <PageSpinner />
   if (tenant === null) {
     return (
       <div className="space-y-4">
         <p className="text-brand-500">{t('backoffice.clienteDetalle.notFound')}</p>
-        <Link to="/backoffice/clients" className="text-sm font-medium text-accent-600 hover:text-accent-700">
+        <Link to="/backoffice/clients" className="text-xs font-medium text-accent-600 hover:text-accent-700">
           {t('backoffice.clienteDetalle.backToClients')}
         </Link>
       </div>
@@ -69,7 +69,7 @@ function Field({ icon, label, value }: { icon: ReactNode; label: string; value: 
       <span className="mt-0.5 shrink-0 text-brand-300">{icon}</span>
       <div className="min-w-0">
         <p className="text-xs text-brand-400">{label}</p>
-        <p className="truncate text-sm text-brand-700">{value}</p>
+        <p className="truncate text-xs text-brand-700">{value}</p>
       </div>
     </div>
   )
@@ -149,7 +149,7 @@ function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onT
               {t('backoffice.clienteDetalle.breadcrumb')}
             </Link>
             <div className="mt-0.5 flex items-center gap-2">
-              <h1 className="text-lg font-bold text-brand-800 sm:text-xl">{tenant.name}</h1>
+              <h1 className="text-xs font-bold text-brand-800 sm:text-xs">{tenant.name}</h1>
               <button onClick={() => setEditOpen(true)} aria-label={t('backoffice.clienteDetalle.editAria')} className="text-brand-300 hover:text-brand-600">
                 <PencilIcon width={14} height={14} />
               </button>
@@ -181,7 +181,7 @@ function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onT
                 ) : (
                   <button
                     onClick={() => setConfirmingDeactivate(true)}
-                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-red-600 hover:bg-red-50"
                   >
                     {t('backoffice.clienteDetalle.deactivate')}
                   </button>
@@ -190,7 +190,7 @@ function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onT
                 <button
                   onClick={handleActivate}
                   disabled={statusUpdating}
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-brand-700 hover:bg-brand-50"
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-brand-700 hover:bg-brand-50"
                 >
                   {statusUpdating ? t('backoffice.clienteDetalle.activating') : t('backoffice.clienteDetalle.activate')}
                 </button>
@@ -208,7 +208,7 @@ function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onT
             </Badge>
           </div>
 
-          <dl className="space-y-3 border-t border-brand-100 py-4 text-sm">
+          <dl className="space-y-3 border-t border-brand-100 py-4 text-xs">
             <Field
               icon={tenant.entity_type === 'empresa' ? <BuildingIcon width={14} height={14} /> : <UserIcon width={14} height={14} />}
               label={tenant.entity_type === 'empresa' ? t('backoffice.clienteDetalle.fields.legalName') : t('backoffice.clienteDetalle.fields.fullName')}
@@ -237,7 +237,7 @@ function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onT
           {tenant.notes && (
             <div className="border-t border-brand-100 pt-4">
               <p className="mb-1 text-xs font-medium text-brand-400">{t('backoffice.clienteDetalle.fields.notes')}</p>
-              <p className="whitespace-pre-wrap text-sm text-brand-600">{tenant.notes}</p>
+              <p className="whitespace-pre-wrap text-xs text-brand-600">{tenant.notes}</p>
             </div>
           )}
         </Card>
@@ -274,7 +274,7 @@ function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onT
             <TabsContent value="usuarios">
               <Card>
                 <div className="mb-1 flex items-center justify-between">
-                  <p className="text-sm text-brand-500">{t('backoffice.clienteDetalle.usersSubtitle')}</p>
+                  <p className="text-xs text-brand-500">{t('backoffice.clienteDetalle.usersSubtitle')}</p>
                   <Button
                     variant="secondary"
                     size="sm"
@@ -291,7 +291,7 @@ function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onT
                     {t('backoffice.clienteDetalle.usersCount', { active: activeUserCount, max: maxUsers })}
                   </p>
                 )}
-                {usersError && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{usersError}</p>}
+                {usersError && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{usersError}</p>}
                 {!users && !usersError && <PageSpinner />}
                 {users && (
                   <UsersTable

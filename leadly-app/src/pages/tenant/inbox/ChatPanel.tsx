@@ -346,7 +346,7 @@ export function ChatPanel({
           </button>
           <InitialsAvatar name={name} size="sm" />
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-brand-800">{name}</p>
+            <p className="truncate text-xs font-semibold text-brand-800">{name}</p>
             <p className="truncate text-xs text-brand-400">
               {conversation.contact_phone}
               {conversation.whatsapp_line && <> · {conversation.whatsapp_line.display_name}</>}
@@ -437,7 +437,7 @@ export function ChatPanel({
                           type="button"
                           onClick={() => handleToggleTag(tag.id)}
                           disabled={tagsUpdating}
-                          className="flex flex-1 items-center gap-2 px-2 py-1.5 text-left text-sm text-brand-700 disabled:opacity-50"
+                          className="flex flex-1 items-center gap-2 px-2 py-1.5 text-left text-xs text-brand-700 disabled:opacity-50"
                         >
                           <span className={cn('flex size-3.5 shrink-0 items-center justify-center rounded-sm border', checked ? 'border-primary bg-primary text-primary-foreground' : 'border-input')}>
                             {checked && <CheckIcon className="size-2.5" />}
@@ -598,7 +598,7 @@ export function ChatPanel({
                 // it sits next to, which is what actually made this row look
                 // misaligned. Pinned close to button height instead, growing
                 // up to max-h-32 as the draft wraps to multiple lines.
-                className="!min-h-9 max-h-32 flex-1 resize-none !rounded-xl !border-brand-200 !py-2 !text-sm"
+                className="!min-h-9 max-h-32 flex-1 resize-none !rounded-xl !border-brand-200 !py-2 !text-xs"
               />
               <Button size="icon" onClick={handleSend} disabled={sending || (!draft.trim() && !attachment)}>
                 <SendIcon width={16} height={16} />

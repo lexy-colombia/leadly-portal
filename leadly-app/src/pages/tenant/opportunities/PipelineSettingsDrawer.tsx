@@ -185,7 +185,7 @@ export function PipelineSettingsDrawer({
     <>
       <Drawer open={open} onClose={onClose} title={t('opportunities.settings.title')} description={t('opportunities.settings.description')}>
         <div className="space-y-6">
-          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
 
           <form onSubmit={handleSavePipeline} className="space-y-3">
             <div>
@@ -208,7 +208,7 @@ export function PipelineSettingsDrawer({
           </form>
 
           <div className="border-t border-brand-100 pt-4">
-            <p className="mb-2 text-sm font-semibold text-brand-800">{t('opportunities.settings.stages.title')}</p>
+            <p className="mb-2 text-xs font-semibold text-brand-800">{t('opportunities.settings.stages.title')}</p>
             <div className="space-y-2">
               {localStages.map((stage, index) => (
                 <div key={stage.id} className="flex items-center gap-1.5 rounded-xl border border-brand-100 p-2">

@@ -10,13 +10,13 @@ export function IntegrationStatusBanner({ connected, connectedText, notConnected
         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
           <CheckIcon width={14} height={14} />
         </span>
-        <p className="text-sm font-medium text-emerald-800">{connectedText}</p>
+        <p className="text-xs font-medium text-emerald-800">{connectedText}</p>
       </div>
     )
   }
   return (
     <div className="rounded-xl border border-brand-100 bg-brand-50/60 px-3.5 py-3">
-      <p className="text-sm text-brand-500">{notConnectedText}</p>
+      <p className="text-xs text-brand-500">{notConnectedText}</p>
     </div>
   )
 }

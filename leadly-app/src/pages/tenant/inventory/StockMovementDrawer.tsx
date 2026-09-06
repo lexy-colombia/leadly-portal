@@ -141,7 +141,7 @@ export function StockMovementDrawer({
   return (
     <Drawer open={open} onClose={onClose} title={t('inventory.movementDrawer.title')} description={t('inventory.movementDrawer.description')}>
       {warehouses.length === 0 ? (
-        <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">{t('inventory.movementDrawer.errors.noWarehouses')}</p>
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">{t('inventory.movementDrawer.errors.noWarehouses')}</p>
       ) : (
         <div className="space-y-4">
           <Tabs value={mode} onValueChange={(v) => setMode(v as Mode)}>
@@ -156,7 +156,7 @@ export function StockMovementDrawer({
           </Tabs>
 
           {mode === 'transfer' && warehouses.length < 2 && (
-            <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">{t('inventory.movementDrawer.errors.needTwoWarehouses')}</p>
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">{t('inventory.movementDrawer.errors.needTwoWarehouses')}</p>
           )}
 
           <form onSubmit={handleSubmit} noValidate className="space-y-4">
@@ -284,7 +284,7 @@ export function StockMovementDrawer({
               />
             </div>
 
-            {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
+            {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
 
             <div className="flex gap-2 border-t border-brand-100 pt-4">
               <Button type="submit" disabled={submitting}>

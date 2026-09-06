@@ -47,7 +47,7 @@ export function ImageAttachmentPicker({ file, onChange }: { file: File | null; o
     return (
       <div className="flex items-center gap-3">
         <img src={previewUrl} alt={file.name} className="h-14 w-14 rounded-lg object-cover" />
-        <div className="min-w-0 flex-1 text-sm text-brand-600 truncate">{file.name}</div>
+        <div className="min-w-0 flex-1 text-xs text-brand-600 truncate">{file.name}</div>
         <button type="button" onClick={handleClear} className="text-brand-400 hover:text-brand-600" aria-label={t('common.attachment.remove')}>
           <XCircleIcon width={20} height={20} />
         </button>
@@ -62,7 +62,7 @@ export function ImageAttachmentPicker({ file, onChange }: { file: File | null; o
         <ImageIcon width={16} height={16} />
         {t('common.attachment.optional')}
       </Button>
-      {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
+      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
     </div>
   )
 }

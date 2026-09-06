@@ -26,7 +26,7 @@ export function MyAccount() {
             <div className="mb-4 flex items-center gap-3">
               <InitialsAvatar name={profile.full_name} size="md" />
               <div>
-                <p className="text-sm font-semibold text-brand-800">{profile.full_name}</p>
+                <p className="text-xs font-semibold text-brand-800">{profile.full_name}</p>
                 <Badge tone="neutral">{profile.role in ROLE_LABEL_KEY ? t(ROLE_LABEL_KEY[profile.role]) : profile.role}</Badge>
               </div>
             </div>
@@ -111,10 +111,10 @@ function ProfileForm({
         </div>
       </div>
 
-      {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
+      {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
       {success && <p className="text-xs text-emerald-600">{t('account.profile.updated')}</p>}
 
-      <Button type="submit" variant="secondary" disabled={submitting} className="!px-4 !py-2 text-sm">
+      <Button type="submit" variant="secondary" disabled={submitting} className="!px-4 !py-2 text-xs">
         {submitting ? t('common.actions.saving') : t('common.actions.saveChanges')}
       </Button>
     </form>
@@ -170,10 +170,10 @@ function PasswordForm() {
         </div>
       </div>
 
-      {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
+      {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
       {success && <p className="text-xs text-emerald-600">{t('account.password.updated')}</p>}
 
-      <Button type="submit" variant="secondary" disabled={submitting} className="!px-4 !py-2 text-sm">
+      <Button type="submit" variant="secondary" disabled={submitting} className="!px-4 !py-2 text-xs">
         {submitting ? t('account.password.updating') : t('account.password.submit')}
       </Button>
     </form>

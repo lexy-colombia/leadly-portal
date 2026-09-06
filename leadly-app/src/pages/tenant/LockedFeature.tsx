@@ -27,7 +27,7 @@ export function LockedFeature({
           <span className="flex h-7 w-7 items-center justify-center rounded-full bg-amber-100 text-amber-600">
             <LockClosedIcon width={14} height={14} />
           </span>
-          <p className="max-w-sm text-sm text-brand-500">{t(descriptionKey)}</p>
+          <p className="max-w-sm text-xs text-brand-500">{t(descriptionKey)}</p>
         </div>
       </Card>
     </div>

@@ -15,7 +15,7 @@ function StatCard({ icon, label, value }: { icon: ReactNode; label: string; valu
       <div className="flex items-center gap-3">
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-500">{icon}</span>
         <div className="min-w-0">
-          <p className="truncate text-xl font-bold text-brand-800">{value}</p>
+          <p className="truncate text-xs font-bold text-brand-800">{value}</p>
           <p className="truncate text-xs text-brand-400">{label}</p>
         </div>
       </div>
@@ -40,7 +40,7 @@ export function Dashboard() {
 
   return (
     <div className="space-y-4">
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <StatCard
@@ -84,7 +84,7 @@ export function Dashboard() {
                       <InitialsAvatar name={tenant.name} size="sm" />
                     )}
                     <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium text-brand-800">{tenant.name}</span>
+                      <span className="block truncate text-xs font-medium text-brand-800">{tenant.name}</span>
                       <span className="block truncate text-xs text-brand-400">
                         {t('backoffice.dashboard.since', { date: formatDate(tenant.created_at) })}
                       </span>

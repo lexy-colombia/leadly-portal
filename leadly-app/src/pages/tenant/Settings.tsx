@@ -84,7 +84,7 @@ export function Settings() {
       <div className="min-w-0 flex-1">
         {(active === 'company' || active === 'storefront' || active === 'pos' || active === 'documents') && (
           <>
-            {tenantError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{tenantError}</p>}
+            {tenantError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{tenantError}</p>}
             {!tenantError && tenant === undefined && <PageSpinner />}
             {tenant && active === 'company' && <CompanyProfileSection tenant={tenant} onSaved={setTenant} />}
             {tenant && active === 'storefront' && <StorefrontSection tenant={tenant} onSaved={setTenant} />}

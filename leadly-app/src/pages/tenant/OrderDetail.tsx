@@ -1367,7 +1367,6 @@ export function OrderDetail() {
           </div>
 
           {contactChangedNotice && <p className="mt-3 text-xs text-amber-600">{t('orders.detail.contactChangedNotice')}</p>}
-          {contactId && addresses.length === 0 && <p className="mt-3 text-xs text-brand-400">{t('orders.drawer.noAddressesHint')}</p>}
         </StatCard>
 
         {hasSidePanel && (

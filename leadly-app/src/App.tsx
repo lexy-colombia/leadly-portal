@@ -28,6 +28,8 @@ import { ClientDetail } from './pages/tenant/ClientDetail'
 import { Opportunities } from './pages/tenant/Opportunities'
 import { Products } from './pages/tenant/Products'
 import { Categories } from './pages/tenant/Categories'
+import { Expenses } from './pages/tenant/Expenses'
+import { ExpenseCategories } from './pages/tenant/ExpenseCategories'
 import { Brands } from './pages/tenant/Brands'
 import { Suppliers } from './pages/tenant/Suppliers'
 import { ProductDetail } from './pages/tenant/ProductDetail'
@@ -123,6 +125,10 @@ export default function App() {
             <Route path="pos" element={<RequireModule moduleKey="pos" action="pos.view"><Pos /></RequireModule>} />
             <Route path="credit" element={<RequireModule moduleKey="credit" action="credit.view"><Credit /></RequireModule>} />
             <Route path="returns" element={<RequireModule moduleKey="returns" action="returns.view"><Returns /></RequireModule>} />
+            {/* Sin action -- mismo criterio que billing/integrations, ver
+                modules.ts. */}
+            <Route path="expenses" element={<RequireModule moduleKey="expenses"><Expenses /></RequireModule>} />
+            <Route path="expenses/categories" element={<RequireModule moduleKey="expenses"><ExpenseCategories /></RequireModule>} />
             {/* Tareas se fusionó dentro de Calendario el 2026-08-19 -- ya no
                 tiene ruta propia. */}
             <Route path="tasks" element={<Navigate to="/app/calendar" replace />} />

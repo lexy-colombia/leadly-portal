@@ -30,7 +30,7 @@ import type { TaxType } from '../../../types/domain'
 // form is pinned to it so the drawer doesn't feel like a visually separate,
 // bigger design system from the list it edits. `!`-prefixed because Input/
 // Textarea/CurrencyInput each carry their own baked-in size (shadcn Input's
-// h-8, and a `md:text-sm` responsive override that would otherwise win back
+// h-8, and a `md:text-xs` responsive override that would otherwise win back
 // over a plain `text-xs` at desktop widths) that a same-specificity class
 // can't reliably beat.
 const FIELD_CLASS = '!h-7 !rounded-lg !text-xs'
@@ -243,6 +243,7 @@ export function ProductDrawer({
   const [trackInventory, setTrackInventory] = useState(true)
   const [lowStockThreshold, setLowStockThreshold] = useState('5')
   const [isActive, setIsActive] = useState(true)
+  const [visibleInCatalog, setVisibleInCatalog] = useState(false)
   const [taxTypeCode, setTaxTypeCode] = useState('01')
   const [taxRate, setTaxRate] = useState('19')
   const [taxTypes, setTaxTypes] = useState<TaxType[]>([])
@@ -266,6 +267,7 @@ export function ProductDrawer({
     setTrackInventory(product?.track_inventory ?? true)
     setLowStockThreshold(product ? String(product.low_stock_threshold) : '5')
     setIsActive(product?.is_active ?? true)
+    setVisibleInCatalog(product?.is_visible_in_catalog ?? false)
     setTaxTypeCode(product?.tax_type_code ?? '01')
     setTaxRate(product ? String(product.tax_rate) : '19')
     setTouched(false)
@@ -313,6 +315,7 @@ export function ProductDrawer({
         track_inventory: trackInventory,
         low_stock_threshold: Math.max(0, Math.trunc(Number(lowStockThreshold) || 0)),
         is_active: isActive,
+        is_visible_in_catalog: visibleInCatalog,
         tax_type_code: taxTypeCode || null,
         tax_rate: Number(taxRate) || 0,
       }
@@ -492,12 +495,21 @@ export function ProductDrawer({
               </Label>
               <Switch id="product-active" checked={isActive} onCheckedChange={setIsActive} />
             </div>
+            <div className="flex items-center justify-between px-3 py-2.5">
+              <div>
+                <Label htmlFor="product-visible-in-catalog" className="font-normal text-brand-700">
+                  {t('products.drawer.fields.visibleInCatalog')}
+                </Label>
+                <p className="text-[11px] text-brand-400">{t('products.drawer.fields.visibleInCatalogHint')}</p>
+              </div>
+              <Switch id="product-visible-in-catalog" checked={visibleInCatalog} onCheckedChange={setVisibleInCatalog} />
+            </div>
           </div>
         </Section>
 
         {product && <ProductImages tenantId={tenantId} product={product} onChanged={onSaved} />}
 
-        {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
+        {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
 
         <div className="flex gap-2 border-t border-brand-100 pt-4">
           <Button type="submit" disabled={submitting}>

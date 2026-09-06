@@ -106,7 +106,7 @@ export function CategoryTreeFilter({
                 ))}
               </div>
             )}
-            {/* Command's own defaults are text-sm -- explicitly matched down
+            {/* Command's own defaults are text-xs -- explicitly matched down
                 to text-xs everywhere here so the options don't render
                 noticeably bigger than the trigger button's own label. */}
             <CommandInput placeholder={searchPlaceholder} className="text-xs" />

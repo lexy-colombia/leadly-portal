@@ -335,7 +335,7 @@ export function Inbox() {
         </Button>
       </div>
 
-      {error && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
 
       <Card padded={false} className="flex min-h-0 flex-1 overflow-hidden">
         {!conversations && <PageSpinner />}
@@ -368,7 +368,7 @@ export function Inbox() {
                 <ChatPanel conversation={selected} agents={agents} onBack={() => setSelectedId(null)} />
               ) : (
                 <div className="flex h-full items-center justify-center">
-                  <p className="text-sm text-brand-400">{t('inbox.selectConversation')}</p>
+                  <p className="text-xs text-brand-400">{t('inbox.selectConversation')}</p>
                 </div>
               )}
             </div>

@@ -116,16 +116,16 @@ export function Billing() {
 
   return (
     <div className="animate-fade-in space-y-4">
-      <h1 className="text-xl font-bold text-brand-800 sm:text-2xl">{t('billing.title')}</h1>
+      <h1 className="text-xs font-bold text-brand-800 sm:text-xs">{t('billing.title')}</h1>
 
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
 
       <Card padded={false}>
         <CardSection title={t('billing.plan.title')}>
           {subscription === undefined && <PageSpinner />}
           {subscription === null && <EmptyState>{t('billing.plan.empty')}</EmptyState>}
           {subscription && (
-            <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
               <div>
                 <span className="font-medium text-brand-800">{plan?.name ?? t('billing.plan.fallbackName')}</span>
                 <span className="ml-2 text-brand-400">

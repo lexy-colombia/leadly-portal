@@ -5,7 +5,7 @@ export function ComingSoon() {
   return (
     <div className="space-y-4">
       <Card>
-        <p className="text-sm text-brand-500">{t('account.comingSoon.message')}</p>
+        <p className="text-xs text-brand-500">{t('account.comingSoon.message')}</p>
       </Card>
     </div>
   )

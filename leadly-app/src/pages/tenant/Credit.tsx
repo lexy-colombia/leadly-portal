@@ -56,28 +56,28 @@ export function Credit() {
         <div className="grid grid-cols-2 divide-x divide-y divide-brand-100 overflow-hidden rounded-2xl border border-brand-100 bg-white sm:grid-cols-5 sm:divide-y-0">
           <div className="px-4 py-3">
             <p className="text-xs text-brand-400">{t('credit.summary.clients')}</p>
-            <p className="text-lg font-bold text-brand-800">{summaries.length}</p>
+            <p className="text-xs font-bold text-brand-800">{summaries.length}</p>
           </div>
           <div className="px-4 py-3">
             <p className="text-xs text-brand-400">{t('credit.summary.withBalance')}</p>
-            <p className="text-lg font-bold text-brand-800">{totals.withBalance}</p>
+            <p className="text-xs font-bold text-brand-800">{totals.withBalance}</p>
           </div>
           <div className="px-4 py-3">
             <p className="text-xs text-brand-400">{t('credit.table.charged')}</p>
-            <p className="text-lg font-bold text-brand-800">{formatCurrency(totals.totalCharged)}</p>
+            <p className="text-xs font-bold text-brand-800">{formatCurrency(totals.totalCharged)}</p>
           </div>
           <div className="px-4 py-3">
             <p className="text-xs text-brand-400">{t('credit.table.paid')}</p>
-            <p className="text-lg font-bold text-emerald-700">{formatCurrency(totals.totalPaid)}</p>
+            <p className="text-xs font-bold text-emerald-700">{formatCurrency(totals.totalPaid)}</p>
           </div>
           <div className="px-4 py-3">
             <p className="text-xs text-brand-400">{t('credit.table.balance')}</p>
-            <p className={`text-lg font-bold ${totals.totalBalance > 0 ? 'text-red-700' : 'text-emerald-700'}`}>{formatCurrency(totals.totalBalance)}</p>
+            <p className={`text-xs font-bold ${totals.totalBalance > 0 ? 'text-red-700' : 'text-emerald-700'}`}>{formatCurrency(totals.totalBalance)}</p>
           </div>
         </div>
       )}
 
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
       {!summaries && !error && <PageSpinner />}
 
       {summaries && summaries.length === 0 && (

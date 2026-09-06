@@ -94,7 +94,7 @@ export function TenantsList() {
             placeholder={t('backoffice.clientesList.search.placeholder')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="!py-1.5 !pl-8 text-sm"
+            className="!py-1.5 !pl-8 text-xs"
           />
         </div>
 
@@ -102,7 +102,7 @@ export function TenantsList() {
           <button
             type="button"
             onClick={() => setFiltersOpen((o) => !o)}
-            className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+            className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
               hasActiveFilters ? 'border-accent-300 bg-accent-50 text-accent-700' : 'border-brand-200 text-brand-600 hover:bg-brand-50'
             }`}
           >
@@ -185,7 +185,7 @@ export function TenantsList() {
         </Button>
       </div>
 
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
       {!tenants && !error && <PageSpinner />}
 
       {filtered && filtered.length === 0 && (

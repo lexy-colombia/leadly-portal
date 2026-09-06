@@ -39,7 +39,7 @@ export interface NavItem {
 // any new plumbing.
 const ACTIVE_CLASSES = 'data-active:bg-accent-500/30 data-active:font-semibold data-active:text-white data-active:hover:bg-accent-500/30'
 
-// shadcn's default SidebarMenuButton size ("default": h-8, text-sm, and a
+// shadcn's default SidebarMenuButton size ("default": h-8, text-xs, and a
 // [&_svg]:size-4 icon rule baked into the shared variant classes, so a
 // smaller icon passed as a plain width/height prop gets overridden back up
 // to 16px unless this is repeated here too) read noticeably larger than the

@@ -56,7 +56,7 @@ function ProviderKeyCard({ provider }: { provider: AiKeyProvider }) {
         )
       }
     >
-      <p className="mb-3 text-sm text-brand-400">{t(PROVIDER_HINT_KEY[provider])}</p>
+      <p className="mb-3 text-xs text-brand-400">{t(PROVIDER_HINT_KEY[provider])}</p>
       <form onSubmit={handleSubmit} className="flex flex-wrap items-end gap-3">
         <div className="min-w-[240px] flex-1">
           <Label htmlFor={`key-${provider}`}>{configured ? t('backoffice.configuracion.apiKey.replace') : t('backoffice.configuracion.apiKey')}</Label>

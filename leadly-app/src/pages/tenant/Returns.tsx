@@ -74,19 +74,19 @@ export function Returns() {
           <div className="grid flex-1 grid-cols-2 divide-x divide-y divide-brand-100 overflow-hidden rounded-2xl border border-brand-100 bg-white sm:grid-cols-4 sm:divide-y-0">
             <div className="px-4 py-3">
               <p className="text-xs text-brand-400">{t('returns.summary.total')}</p>
-              <p className="text-lg font-bold text-brand-800">{returns.length}</p>
+              <p className="text-xs font-bold text-brand-800">{returns.length}</p>
             </div>
             <div className="px-4 py-3">
               <p className="text-xs text-brand-400">{t('returns.summary.pending')}</p>
-              <p className="text-lg font-bold text-brand-800">{totals.pending}</p>
+              <p className="text-xs font-bold text-brand-800">{totals.pending}</p>
             </div>
             <div className="px-4 py-3">
               <p className="text-xs text-brand-400">{t('returns.table.claimAmount')}</p>
-              <p className="text-lg font-bold text-brand-800">{formatCurrency(totals.totalClaimed, 'COP')}</p>
+              <p className="text-xs font-bold text-brand-800">{formatCurrency(totals.totalClaimed, 'COP')}</p>
             </div>
             <div className="px-4 py-3">
               <p className="text-xs text-brand-400">{t('returns.summary.resolved')}</p>
-              <p className="text-lg font-bold text-emerald-700">{formatCurrency(totals.totalResolved, 'COP')}</p>
+              <p className="text-xs font-bold text-emerald-700">{formatCurrency(totals.totalResolved, 'COP')}</p>
             </div>
           </div>
         ) : (
@@ -97,7 +97,7 @@ export function Returns() {
         </Button>
       </div>
 
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
       {!returns && !error && <PageSpinner />}
 
       {returns && returns.length === 0 && (

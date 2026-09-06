@@ -14,7 +14,7 @@ export function Table({
     <div
       className={bare ? 'overflow-x-auto' : 'overflow-x-auto rounded-2xl border border-brand-100/70 bg-white'}
     >
-      <table className={`w-full text-left text-sm ${className}`} {...props}>
+      <table className={`w-full text-left text-xs ${className}`} {...props}>
         {children}
       </table>
     </div>

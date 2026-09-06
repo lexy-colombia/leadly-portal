@@ -31,7 +31,7 @@ export function SettingsCategoryNav({
             type="button"
             onClick={() => onSelect(category.key)}
             aria-current={active ? 'true' : undefined}
-            className={`flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors lg:shrink ${
+            className={`flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-left text-xs font-medium transition-colors lg:shrink ${
               active ? 'bg-accent-50 text-accent-700' : 'text-brand-500 hover:bg-brand-50 hover:text-brand-700'
             }`}
           >

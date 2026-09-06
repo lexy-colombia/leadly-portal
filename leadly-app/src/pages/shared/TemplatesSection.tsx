@@ -107,8 +107,8 @@ export function TemplatesSection({ tenantId, canManage }: { tenantId: string; ca
 
   return (
     <div className="space-y-3.5">
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-      {syncMessage && <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{syncMessage}</p>}
+      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
+      {syncMessage && <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{syncMessage}</p>}
 
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Button variant="outline" size="sm" onClick={handleSync} disabled={syncing}>
@@ -575,7 +575,7 @@ function CreateTemplateDrawer({
         <TemplateButtonsEditor buttons={buttons} onChange={setButtons} />
         <FieldError message={buttonsError} />
 
-        {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</p>}
+        {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
       </form>
     </Drawer>
   )

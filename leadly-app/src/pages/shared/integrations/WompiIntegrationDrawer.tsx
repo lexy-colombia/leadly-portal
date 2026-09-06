@@ -106,7 +106,7 @@ export function WompiIntegrationDrawer({
 
   return (
     <Drawer open={open} onClose={onClose} title="Wompi" description={description}>
-      {!loaded && !error && <p className="text-sm text-brand-400">{t('common.status.loading')}</p>}
+      {!loaded && !error && <p className="text-xs text-brand-400">{t('common.status.loading')}</p>}
 
       {loaded && (
         <div className="space-y-4">

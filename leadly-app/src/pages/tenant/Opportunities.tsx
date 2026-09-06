@@ -69,7 +69,7 @@ function MetricTile({ label, value, tone = 'neutral' }: { label: string; value: 
   const valueClass = tone === 'success' ? 'text-green-600' : tone === 'danger' ? 'text-red-600' : 'text-brand-800'
   return (
     <div className="min-w-0 rounded-lg border border-brand-100 bg-white px-2 py-1">
-      <p className={`truncate text-xs font-bold sm:text-sm ${valueClass}`}>{value}</p>
+      <p className={`truncate text-xs font-bold sm:text-xs ${valueClass}`}>{value}</p>
       <p className="truncate text-[10px] text-brand-400">{label}</p>
     </div>
   )
@@ -287,7 +287,7 @@ export function Opportunities() {
                     setSelectedPipelineId(p.id)
                     setPipelinePopoverOpen(false)
                   }}
-                  className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm ${
+                  className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs ${
                     p.id === selectedPipelineId ? 'bg-accent-50 text-accent-700' : 'text-brand-700 hover:bg-brand-50'
                   }`}
                 >
@@ -438,7 +438,7 @@ export function Opportunities() {
         <MetricTile label={t('opportunities.metrics.pendingTasks')} value={tasks === null ? '—' : String(pendingTaskCount)} />
       </div>
 
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
       {(!opportunities || pipelines === undefined) && !error && <PageSpinner />}
 
       {opportunities && pipeline && stages.length > 0 && viewMode === 'lista' && (
