@@ -241,17 +241,19 @@ export function AppShell({
     [location.pathname, navItems, t],
   )
   const isLight = theme === 'light'
-  // Inbox (the tenant's index route, "/app") is the one page that manages
-  // its own internal scrolling -- a two-pane chat layout with an
-  // independently scrollable conversation list and message thread, each
-  // capped to the available height. Every other route just wants to grow
-  // naturally and let this wrapper be the one scrollbar for the whole
-  // page, so the padded/auto-scroll treatment stays the default; this is
-  // the single opt-out. Without it, this wrapper's own overflow-y-auto
-  // was the only scroll container, so the whole page (sidebar list +
-  // every message) scrolled together as one long column instead of the
-  // list and the thread scrolling independently (explicit bug report).
-  const isFullBleed = location.pathname === '/app'
+  // Inbox ("/app/conversations", the tenant's index route until the
+  // 2026-09-06 change that made Ventas the post-login landing page) is the
+  // one page that manages its own internal scrolling -- a two-pane chat
+  // layout with an independently scrollable conversation list and message
+  // thread, each capped to the available height. Every other route just
+  // wants to grow naturally and let this wrapper be the one scrollbar for
+  // the whole page, so the padded/auto-scroll treatment stays the default;
+  // this is the single opt-out. Without it, this wrapper's own
+  // overflow-y-auto was the only scroll container, so the whole page
+  // (sidebar list + every message) scrolled together as one long column
+  // instead of the list and the thread scrolling independently (explicit
+  // bug report).
+  const isFullBleed = location.pathname === '/app/conversations'
 
   // Same leadly:-prefixed localStorage key the hand-rolled shell already
   // used -- kept as the single source of truth for collapse persistence

@@ -147,7 +147,7 @@ export function Inbox() {
   const selected = conversations?.find((c) => c.id === selectedId) ?? null
 
   return (
-    // AppShell gives this route (the tenant index, "/app") a bare
+    // AppShell gives this route ("/app/conversations") a bare
     // `overflow-hidden` content wrapper with no padding -- every other
     // route gets p-5/lg:p-8 for free, Inbox replicates it here itself so
     // it still has the same breathing room, but capped by `h-full` instead

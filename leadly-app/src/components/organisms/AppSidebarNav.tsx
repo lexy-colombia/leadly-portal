@@ -86,12 +86,14 @@ function NavGroup({ item, onNavigate }: { item: NavItem; onNavigate: () => void 
   const children = item.children!
   // Prefix-matching (pathname.startsWith(`${c.to}/`)) is only meaningful for
   // a child that is its own real section with sub-pages (e.g. /app/opportunities
-  // matching /app/opportunities/:id). It is never meaningful for the bare
-  // index route (Conversaciones, to: "/app") -- every single tenant page
-  // starts with "/app/", so without this guard that one child silently
-  // prefix-matched every route in the app, making the CRM group render as
-  // "active" on every page, not just Conversaciones. Same reasoning would
-  // apply to "/backoffice" if a backoffice nav ever grew a group.
+  // matching /app/opportunities/:id). It would never be meaningful for a
+  // bare base path like "/app" or "/backoffice" -- every single tenant/
+  // backoffice page starts with that prefix, so without this guard a child
+  // pointing straight at one would silently prefix-match every route in the
+  // app. No nav item is actually "/app" or "/backoffice" bare anymore
+  // (Conversaciones moved off the tenant index route to "/app/conversations"
+  // on 2026-09-06, when Ventas became the post-login landing page instead),
+  // but the guard stays as a backstop in case one ever does again.
   const isChildActive = children.some(
     (c) => pathname === c.to || (c.to !== '/app' && c.to !== '/backoffice' && pathname.startsWith(`${c.to}/`)),
   )

@@ -43,6 +43,11 @@
   "products.table.available": "{count} disp.",
   "products.table.low": "· bajo",
   "products.table.noControl": "Sin control",
+  "products.table.quickStock.title": "Ajustar stock",
+  "products.table.quickStock.warehouse": "Bodega",
+  "products.table.quickStock.quantity": "Cantidad disponible",
+  "products.table.quickStock.invalid": "Ingresa una cantidad válida.",
+  "products.table.quickStock.error": "No se pudo actualizar el stock.",
 
   "products.detail.loadError": "No se pudo cargar el producto.",
   "products.detail.notFound": "No encontramos este producto.",

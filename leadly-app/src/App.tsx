@@ -101,7 +101,12 @@ export default function App() {
               </RequireAuth>
             }
           >
-            <Route index element={<RequireModule moduleKey="conversations" action="conversations.view"><Inbox /></RequireModule>} />
+            {/* El landing post-login pasó a ser Ventas (pedido explícito del
+                usuario, 2026-09-06) -- Conversaciones tenía la ruta índice
+                bare "/app" antes, ahora vive en su propia ruta para no
+                perder el link directo del nav (ver modules.ts). */}
+            <Route index element={<Navigate to="/app/sales" replace />} />
+            <Route path="conversations" element={<RequireModule moduleKey="conversations" action="conversations.view"><Inbox /></RequireModule>} />
             <Route path="dashboard" element={<RequireModule moduleKey="dashboard"><TenantDashboard /></RequireModule>} />
             <Route path="clients" element={<RequireModule moduleKey="contacts" action="contacts.view"><Clients /></RequireModule>} />
             <Route path="clients/:id" element={<RequireModule moduleKey="contacts" action="contacts.view"><ClientDetail /></RequireModule>} />

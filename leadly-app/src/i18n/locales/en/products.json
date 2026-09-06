@@ -43,6 +43,11 @@
   "products.table.available": "{count} avail.",
   "products.table.low": "· low",
   "products.table.noControl": "Not tracked",
+  "products.table.quickStock.title": "Adjust stock",
+  "products.table.quickStock.warehouse": "Warehouse",
+  "products.table.quickStock.quantity": "Available quantity",
+  "products.table.quickStock.invalid": "Enter a valid quantity.",
+  "products.table.quickStock.error": "Couldn't update stock.",
 
   "products.detail.loadError": "Couldn't load the product.",
   "products.detail.notFound": "We couldn't find this product.",

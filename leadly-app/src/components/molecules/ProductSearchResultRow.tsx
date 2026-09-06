@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { ProductImage } from '@/components/atoms'
+import { cn } from '@/lib/utils'
 
 /** Fila de un resultado de búsqueda de productos -- antes vivía duplicada
  * (misma imagen/nombre/SKU, mismas clases) en PosFastCheckout.tsx y en
@@ -10,12 +11,15 @@ import { ProductImage } from '@/components/atoms'
  * armarla desde `images[0].storage_path`) y qué mostrar a la derecha (el
  * POS suma precio/stock ahí mismo; el editor de ítems no, esos datos se ven
  * recién una vez que la línea ya está agregada) queda del lado de quien
- * llama, vía `right`. */
+ * llama, vía `right`. `highlighted` refleja la selección por teclado de
+ * ProductSearchBox (flechas arriba/abajo) -- mismo fondo que el hover, para
+ * que navegar con el teclado se vea igual que pasar el mouse por encima. */
 export function ProductSearchResultRow({
   imageUrl,
   name,
   sku,
   disabled = false,
+  highlighted = false,
   onClick,
   right,
 }: {
@@ -23,6 +27,7 @@ export function ProductSearchResultRow({
   name: string
   sku: string | null
   disabled?: boolean
+  highlighted?: boolean
   onClick: () => void
   right?: ReactNode
 }) {
@@ -31,7 +36,10 @@ export function ProductSearchResultRow({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-accent-50 disabled:cursor-not-allowed disabled:opacity-40"
+      className={cn(
+        'flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-accent-50 disabled:cursor-not-allowed disabled:opacity-40',
+        highlighted && 'bg-accent-50',
+      )}
     >
       <ProductImage src={imageUrl} name={name} className="size-7 shrink-0 rounded-md" iconSize={13} />
       <span className="min-w-0 flex-1">

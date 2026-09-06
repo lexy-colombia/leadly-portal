@@ -6,8 +6,8 @@ import { useLanguage } from '../../contexts/LanguageContext'
 import { useHeaderSearchSlot } from '@/contexts/HeaderSearchSlotContext'
 import { bulkSetVisibleInCatalog, deleteProduct, getProductImageUrl, listProducts, updateProduct } from '../../lib/api/products'
 import type { ProductWithImages } from '../../lib/api/products'
-import { listStockTotalsByTenant } from '../../lib/api/stockMovements'
-import type { ProductStockTotal } from '../../lib/api/stockMovements'
+import { listStockByWarehouse, listStockTotalsByTenant, recordStockMovement } from '../../lib/api/stockMovements'
+import type { ProductStockTotal, ProductWarehouseStockRow } from '../../lib/api/stockMovements'
 import { descendantIds, listProductCategories } from '../../lib/api/productCategories'
 import { listBrands } from '../../lib/api/brands'
 import { listWarehouses } from '../../lib/api/warehouses'
@@ -19,6 +19,9 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ProductDrawer } from './products/ProductDrawer'
 
@@ -51,6 +54,168 @@ function isLowStock(product: ProductWithImages, stockTotals: Map<string, Product
   return product.track_inventory && availableStock(product, stockTotals) <= product.low_stock_threshold
 }
 
+function warehouseStock(rows: ProductWarehouseStockRow[], productId: string, warehouseId: string): number {
+  return rows.filter((r) => r.product_id === productId && r.warehouse_id === warehouseId && r.variant_id === null).reduce((sum, r) => sum + r.quantity, 0)
+}
+
+/** Click-to-edit del stock directo desde la lista, mismo espíritu que el
+ * Switch de Activo/Inactivo de al lado -- pedido explícito del usuario de
+ * no tener que entrar al detalle del producto solo para corregir una
+ * cantidad. Como el modelo real es un kardex (stock_movements, ver
+ * CLAUDE.md), no hay ningún campo "cantidad" que sobreescribir: lo que el
+ * usuario tipea acá se compara contra lo que ya hay y se registra como un
+ * ajuste_positivo/ajuste_negativo por la diferencia, igual que haría a
+ * mano desde StockMovementDrawer. Solo se ofrece para productos sin
+ * variantes (`has_variants`) -- con variantes el número de la lista es una
+ * suma entre combinaciones y bodegas, no hay "una" cantidad que editar acá
+ * sin antes elegir cuál variante, eso sigue viviendo en el detalle. */
+function QuickStockPopover({
+  product,
+  warehouses,
+  stockRows,
+  currentTotal,
+  lowStock,
+  onSaved,
+}: {
+  product: ProductWithImages
+  warehouses: Warehouse[]
+  stockRows: ProductWarehouseStockRow[]
+  currentTotal: number
+  lowStock: boolean
+  onSaved: () => void
+}) {
+  const { t } = useLanguage()
+  const defaultWarehouseId = warehouses.find((w) => w.is_default)?.id ?? warehouses[0]?.id ?? ''
+  const singleWarehouse = warehouses.length <= 1
+
+  const [open, setOpen] = useState(false)
+  const [warehouseId, setWarehouseId] = useState(defaultWarehouseId)
+  const [quantity, setQuantity] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  function currentFor(id: string): number {
+    return singleWarehouse ? currentTotal : warehouseStock(stockRows, product.id, id)
+  }
+
+  function handleOpenChange(next: boolean) {
+    setOpen(next)
+    if (next) {
+      setWarehouseId(defaultWarehouseId)
+      setQuantity(String(currentFor(defaultWarehouseId)))
+      setError(null)
+    }
+  }
+
+  async function handleSave() {
+    if (!warehouseId) return
+    const target = Number(quantity)
+    if (!Number.isFinite(target) || target < 0) {
+      setError(t('products.table.quickStock.invalid'))
+      return
+    }
+    const delta = target - currentFor(warehouseId)
+    if (delta === 0) {
+      setOpen(false)
+      return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      await recordStockMovement({
+        tenant_id: product.tenant_id,
+        product_id: product.id,
+        warehouse_id: warehouseId,
+        movement_type: delta > 0 ? 'ajuste_positivo' : 'ajuste_negativo',
+        quantity: Math.abs(delta),
+      })
+      setOpen(false)
+      onSaved()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('products.table.quickStock.error'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (warehouses.length === 0) {
+    return (
+      <Badge variant={lowStock ? 'destructive' : 'secondary'}>
+        {t('products.table.available', { count: currentTotal })} {lowStock && t('products.table.low')}
+      </Badge>
+    )
+  }
+
+  return (
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger asChild>
+        <button type="button" className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent-300">
+          <Badge variant={lowStock ? 'destructive' : 'secondary'} className="cursor-pointer transition hover:brightness-95">
+            {t('products.table.available', { count: currentTotal })} {lowStock && t('products.table.low')}
+          </Badge>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-56">
+        <p className="text-xs font-semibold text-brand-800">{t('products.table.quickStock.title')}</p>
+
+        {!singleWarehouse && (
+          <div>
+            <span className="mb-0.5 block text-[11px] font-medium text-brand-400">{t('products.table.quickStock.warehouse')}</span>
+            <Select
+              value={warehouseId}
+              onValueChange={(v) => {
+                setWarehouseId(v)
+                setQuantity(String(currentFor(v)))
+              }}
+            >
+              <SelectTrigger className="w-full !h-7 !rounded-lg !text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {warehouses.map((w) => (
+                  <SelectItem key={w.id} value={w.id} className="text-xs">
+                    {w.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
+        <div>
+          <span className="mb-0.5 block text-[11px] font-medium text-brand-400">{t('products.table.quickStock.quantity')}</span>
+          <Input
+            type="number"
+            min="0"
+            step="1"
+            autoFocus
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                handleSave()
+              }
+            }}
+            className="text-right"
+          />
+        </div>
+
+        {error && <p className="text-xs font-medium text-red-600">{error}</p>}
+
+        <div className="flex justify-end gap-2 pt-0.5">
+          <Button type="button" variant="ghost" size="xs" onClick={() => setOpen(false)} disabled={saving}>
+            {t('common.actions.cancel')}
+          </Button>
+          <Button type="button" size="xs" onClick={handleSave} disabled={saving}>
+            {saving ? t('common.actions.saving') : t('common.actions.save')}
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 /** Proveedores se sacó de acá el 2026-08-17 (ruta propia
  * /app/products/suppliers, ver Suppliers.tsx/modules.ts) -- pedido
  * explícito del usuario de que "Productos" sea solo el catálogo, no un
@@ -71,6 +236,7 @@ export function Products() {
   const [products, setProducts] = useState<ProductWithImages[] | null>(null)
   const [totalCount, setTotalCount] = useState(0)
   const [stockTotals, setStockTotals] = useState<Map<string, ProductStockTotal>>(new Map())
+  const [stockRows, setStockRows] = useState<ProductWarehouseStockRow[]>([])
   const [categories, setCategories] = useState<ProductCategory[]>([])
   const [brands, setBrands] = useState<Brand[]>([])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
@@ -140,6 +306,12 @@ export function Products() {
       .catch((err) => setError(err.message ?? t('products.errors.load')))
       .finally(() => setLoading(false))
     listStockTotalsByTenant(tenantId).then(setStockTotals).catch(() => {})
+    // Desglose por bodega para QuickStockPopover cuando hay más de una --
+    // se pide siempre (no solo si `warehouses.length > 1`) porque ese
+    // estado se carga en un efecto aparte y todavía puede estar vacío la
+    // primera vez que `reload` corre, dejando el prefill del popover en 0
+    // para un tenant multi-bodega hasta el próximo reload.
+    listStockByWarehouse(tenantId).then(setStockRows).catch(() => {})
   }
 
   useEffect(reload, [tenantId, page, debouncedSearch, categoryIds, brandId, warehouseId, lowStockOnly])
@@ -366,13 +538,22 @@ export function Products() {
                         )}
                       </TableCell>
                       <TableCell className="text-xs text-brand-700">{formatCurrency(product.retail_price, product.currency)}</TableCell>
-                      <TableCell>
-                        {product.track_inventory ? (
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        {!product.track_inventory ? (
+                          <span className="text-xs text-brand-400">{t('products.table.noControl')}</span>
+                        ) : product.has_variants ? (
                           <Badge variant={lowStock ? 'destructive' : 'secondary'}>
                             {t('products.table.available', { count: availableStock(product, stockTotals) })} {lowStock && t('products.table.low')}
                           </Badge>
                         ) : (
-                          <span className="text-xs text-brand-400">{t('products.table.noControl')}</span>
+                          <QuickStockPopover
+                            product={product}
+                            warehouses={warehouses}
+                            stockRows={stockRows}
+                            currentTotal={availableStock(product, stockTotals)}
+                            lowStock={lowStock}
+                            onSaved={reload}
+                          />
                         )}
                       </TableCell>
                       <TableCell onClick={(e) => e.stopPropagation()}>

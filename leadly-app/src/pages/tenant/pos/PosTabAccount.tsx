@@ -112,25 +112,27 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
   }, [tenantId])
 
   useEffect(() => {
-    getCart(cartId).then((cart) => {
-      if (!cart) return
-      setContactId(cart.contact_id ?? '')
-      setPosPointId(cart.pos_point_id ?? '')
-      setLabel(cart.label ?? '')
-      setItems(
-        cart.items.map((i) => ({
-          product_id: i.product_id,
-          variant_id: i.variant_id,
-          warehouse_id: i.warehouse_id,
-          product_name: i.product_name,
-          sku: i.sku,
-          quantity: i.quantity,
-          unit_price: i.unit_price,
-          discount_amount: i.discount_amount,
-        })),
-      )
-      setLoaded(true)
-    })
+    getCart(cartId)
+      .then((cart) => {
+        if (!cart) return
+        setContactId(cart.contact_id ?? '')
+        setPosPointId(cart.pos_point_id ?? '')
+        setLabel(cart.label ?? '')
+        setItems(
+          cart.items.map((i) => ({
+            product_id: i.product_id,
+            variant_id: i.variant_id,
+            warehouse_id: i.warehouse_id,
+            product_name: i.product_name,
+            sku: i.sku,
+            quantity: i.quantity,
+            unit_price: i.unit_price,
+            discount_amount: i.discount_amount,
+          })),
+        )
+        setLoaded(true)
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : t('pos.tabs.errors.save')))
     listChargesFromCart(cartId).then(setCharges).catch(() => {})
   }, [cartId])
 

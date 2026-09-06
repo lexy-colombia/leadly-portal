@@ -49,7 +49,7 @@ export interface TenantModuleDefinition {
 
 export const TENANT_MODULES: TenantModuleDefinition[] = [
   { key: 'dashboard', labelKey: 'common.nav.dashboard', to: '/app/dashboard', icon: DashboardIcon },
-  { key: 'conversations', labelKey: 'common.nav.conversations', to: '/app', icon: ChatBubbleIcon, viewAction: 'conversations.view' },
+  { key: 'conversations', labelKey: 'common.nav.conversations', to: '/app/conversations', icon: ChatBubbleIcon, viewAction: 'conversations.view' },
   { key: 'contacts', labelKey: 'common.nav.contacts', to: '/app/clients', icon: BuildingIcon, viewAction: 'contacts.view' },
   { key: 'pipeline', labelKey: 'common.nav.pipeline', to: '/app/opportunities', icon: TargetIcon, viewAction: 'pipeline.view' },
   {

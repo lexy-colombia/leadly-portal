@@ -6,9 +6,9 @@ import { descendantIds } from '../../../lib/api/productCategories'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { CategoryTreeFilter, ComboboxFilter, CurrencyInput, IconInput, ProductSearchResultRow } from '@/components/molecules'
+import { CategoryTreeFilter, ComboboxFilter, CurrencyInput, ProductSearchBox, ProductSearchResultRow } from '@/components/molecules'
 import { ProductImage } from '@/components/atoms'
-import { ScanIcon, TrashIcon } from '@/components/atoms/icons'
+import { TrashIcon } from '@/components/atoms/icons'
 import type { OrderItemInput, StockShortfall } from '../../../lib/api/orders'
 import { formatVariantLabel, getProductImageUrl, type ProductWithImages } from '../../../lib/api/products'
 import type { ProductWarehouseStockRow } from '../../../lib/api/stockMovements'
@@ -187,6 +187,17 @@ export function OrderItemsEditor({
     setScanError(null)
   }
 
+  /** Seleccionar un resultado (click o Enter con la fila resaltada por
+   * teclado, ver ProductSearchBox) agrega la línea y limpia lo buscado --
+   * pedido explícito del usuario: sin esto había que hacer click en el
+   * campo y borrar a mano el texto antes de poder buscar el siguiente
+   * producto. */
+  function handlePick(product: ProductWithImages) {
+    addProductLine(product)
+    setQuery('')
+    setScanError(null)
+  }
+
   function addCustomLine() {
     onChange([...items, { product_id: null, warehouse_id: null, product_name: '', sku: null, quantity: 1, unit_price: 0, discount_amount: 0, tax_type_code: null, tax_rate: 0 }])
   }
@@ -238,39 +249,32 @@ export function OrderItemsEditor({
         </Button>
       </div>
 
-      <div className="relative mt-2">
-        <IconInput
-          icon={<ScanIcon className="size-3.5" />}
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value)
-            setScanError(null)
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              handleScanSubmit()
-            }
-          }}
-          placeholder={t('orders.itemsEditor.search.placeholder')}
-          autoFocus
-          className="!rounded-lg !text-xs"
-        />
-      </div>
-      {scanError && <p className="mt-1 text-[11px] font-medium text-red-600">{scanError}</p>}
-
-      <div className="mt-2 max-h-64 divide-y divide-brand-100 overflow-y-auto rounded-lg border border-brand-100 bg-white">
-        {results.length === 0 && <p className="px-3 py-4 text-center text-xs text-brand-400">{t('orders.itemsEditor.noProductResults')}</p>}
-        {results.map((p) => (
+      <ProductSearchBox
+        className="mt-2"
+        value={query}
+        onChange={(v) => {
+          setQuery(v)
+          setScanError(null)
+        }}
+        onEnter={handleScanSubmit}
+        results={results}
+        getKey={(p) => p.id}
+        onSelect={handlePick}
+        placeholder={t('orders.itemsEditor.search.placeholder')}
+        autoFocus
+        inputClassName="!rounded-lg"
+        error={scanError}
+        emptyLabel={t('orders.itemsEditor.noProductResults')}
+        renderResult={(p, highlighted, select) => (
           <ProductSearchResultRow
-            key={p.id}
             imageUrl={p.images[0] ? getProductImageUrl(p.images[0].storage_path) : null}
             name={p.name}
             sku={p.sku}
-            onClick={() => addProductLine(p)}
+            highlighted={highlighted}
+            onClick={select}
           />
-        ))}
-      </div>
+        )}
+      />
     </div>
   )
 

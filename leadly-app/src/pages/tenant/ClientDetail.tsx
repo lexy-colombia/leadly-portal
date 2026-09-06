@@ -623,7 +623,7 @@ function ClientDetailContent({
                 {conversationsPage.items.map((conv) => (
                   <button
                     key={conv.id}
-                    onClick={() => navigate(`/app?c=${conv.id}`)}
+                    onClick={() => navigate(`/app/conversations?c=${conv.id}`)}
                     className="flex w-full items-center justify-between gap-3 rounded-xl border border-brand-100 px-4 py-3 text-left transition-colors hover:bg-brand-50"
                   >
                     <span className="flex min-w-0 items-center gap-3">

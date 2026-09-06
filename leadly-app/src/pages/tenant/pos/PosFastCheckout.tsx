@@ -12,13 +12,13 @@ import { getClientCreditSummary } from '../../../lib/api/credit'
 import { getStoreCreditBalance } from '../../../lib/api/returns'
 import type { Client, OrderPaymentMethod } from '../../../types/domain'
 import { PageSpinner } from '@/components/atoms'
-import { CurrencyInput, OrderTotalsSummary, ProductSearchResultRow } from '@/components/molecules'
+import { CurrencyInput, OrderTotalsSummary, ProductSearchBox, ProductSearchResultRow } from '@/components/molecules'
 import { PrinterIcon } from '@/components/atoms/icons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ScanIcon, TrashIcon } from '@/components/atoms/icons'
+import { TrashIcon } from '@/components/atoms/icons'
 import { ClientPickerCard } from '../clients/ClientPickerCard'
 
 function formatCurrency(value: number, currency = 'COP'): string {
@@ -341,61 +341,51 @@ export function PosFastCheckout() {
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
       <div className="space-y-4 lg:col-span-2">
         {/* Escaneo / búsqueda */}
-        <div className="relative rounded-2xl border border-brand-100 bg-white p-3.5">
-          <div className="relative">
-            <ScanIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-brand-300" />
-            <Input
-              ref={scanInputRef}
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value)
-                setScanError(null)
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  handleScanSubmit()
+        <div className="rounded-2xl border border-brand-100 bg-white p-3.5">
+          <ProductSearchBox
+            inputRef={scanInputRef}
+            value={query}
+            onChange={(v) => {
+              setQuery(v)
+              setScanError(null)
+            }}
+            onEnter={handleScanSubmit}
+            results={query.trim().length >= 2 ? results : []}
+            getKey={(p) => p.id}
+            onSelect={handlePick}
+            placeholder={t('pos.scan.placeholder')}
+            autoFocus
+            inputClassName="h-11"
+            hint={<p className="mt-1.5 text-[11px] text-brand-400">{t('pos.scan.hint')}</p>}
+            error={scanError}
+            loading={searching && query.trim().length >= 2}
+            loadingLabel={
+              <span className="flex items-center gap-2">
+                <SearchIcon className="size-3.5 animate-pulse" /> {t('pos.search.searching')}
+              </span>
+            }
+            emptyLabel={query.trim().length >= 2 ? t('pos.search.empty', { term: query }) : null}
+            renderResult={(p, highlighted, select) => (
+              <ProductSearchResultRow
+                imageUrl={p.image_url}
+                name={p.name}
+                sku={p.sku}
+                highlighted={highlighted}
+                disabled={p.track_inventory && !p.has_variants && (p.available ?? 0) <= 0}
+                onClick={select}
+                right={
+                  <>
+                    <span className="block text-xs font-semibold text-brand-800">{formatCurrency(p.price)}</span>
+                    {p.track_inventory && !p.has_variants && (
+                      <span className={`block text-[10px] ${(p.available ?? 0) <= 0 ? 'text-red-500' : 'text-brand-400'}`}>
+                        {(p.available ?? 0) <= 0 ? t('pos.stock.out') : t('pos.stock.available', { count: p.available ?? 0 })}
+                      </span>
+                    )}
+                  </>
                 }
-              }}
-              placeholder={t('pos.scan.placeholder')}
-              autoFocus
-              className="h-11 pl-9 text-xs"
-            />
-          </div>
-          <p className="mt-1.5 text-[11px] text-brand-400">{t('pos.scan.hint')}</p>
-          {scanError && <p className="mt-1.5 text-xs font-medium text-red-600">{scanError}</p>}
-
-          {query.trim().length >= 2 && (
-            <div className="mt-2 max-h-72 divide-y divide-brand-100 overflow-y-auto rounded-lg border border-brand-100">
-              {searching && (
-                <p className="flex items-center gap-2 px-3 py-3 text-xs text-brand-400">
-                  <SearchIcon className="size-3.5 animate-pulse" /> {t('pos.search.searching')}
-                </p>
-              )}
-              {!searching && results.length === 0 && <p className="px-3 py-4 text-center text-xs text-brand-400">{t('pos.search.empty', { term: query })}</p>}
-              {!searching &&
-                results.map((p) => (
-                  <ProductSearchResultRow
-                    key={p.id}
-                    imageUrl={p.image_url}
-                    name={p.name}
-                    sku={p.sku}
-                    disabled={p.track_inventory && !p.has_variants && (p.available ?? 0) <= 0}
-                    onClick={() => handlePick(p)}
-                    right={
-                      <>
-                        <span className="block text-xs font-semibold text-brand-800">{formatCurrency(p.price)}</span>
-                        {p.track_inventory && !p.has_variants && (
-                          <span className={`block text-[10px] ${(p.available ?? 0) <= 0 ? 'text-red-500' : 'text-brand-400'}`}>
-                            {(p.available ?? 0) <= 0 ? t('pos.stock.out') : t('pos.stock.available', { count: p.available ?? 0 })}
-                          </span>
-                        )}
-                      </>
-                    }
-                  />
-                ))}
-            </div>
-          )}
+              />
+            )}
+          />
         </div>
 
         {/* Carrito */}
