@@ -899,9 +899,13 @@ export interface Appointment {
 }
 
 /** Appointment + the contact's display name, for tenant-wide views (the
- * calendar) that aren't already scoped to one contact. */
+ * calendar) that aren't already scoped to one contact. `assignee_full_name`
+ * mirrors the join tasks.ts already had (`assignee:profiles!assigned_to`) --
+ * needed so the calendar's list view can show a real "Responsable" for citas,
+ * not just tareas. */
 export interface AppointmentWithContact extends Appointment {
   contact_full_name: string | null
+  assignee_full_name: string | null
 }
 
 export interface WhatsappMessage {

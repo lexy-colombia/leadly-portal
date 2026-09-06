@@ -7,15 +7,16 @@ import type { AppointmentStatus, AppointmentWithContact, Appointment } from '../
 export async function listAppointmentsForTenantRange(tenantId: string, rangeStart: string, rangeEnd: string): Promise<AppointmentWithContact[]> {
   const { data, error } = await supabase
     .from('appointments')
-    .select('*, clients(full_name)')
+    .select('*, clients(full_name), assignee:profiles!assigned_to(full_name)')
     .eq('tenant_id', tenantId)
     .gte('scheduled_at', rangeStart)
     .lt('scheduled_at', rangeEnd)
     .order('scheduled_at', { ascending: true })
   if (error) throw error
-  return data.map(({ clients, ...appointment }) => ({
+  return data.map(({ clients, assignee, ...appointment }) => ({
     ...appointment,
     contact_full_name: (clients as { full_name: string } | null)?.full_name ?? null,
+    assignee_full_name: (assignee as { full_name: string } | null)?.full_name ?? null,
   }))
 }
 

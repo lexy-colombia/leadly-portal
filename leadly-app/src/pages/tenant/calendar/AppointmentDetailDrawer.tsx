@@ -46,7 +46,7 @@ export function AppointmentDetailDrawer({
     setError(null)
     try {
       const updated = await updateAppointmentStatus(appointment.id, status)
-      onChanged({ ...updated, contact_full_name: appointment.contact_full_name })
+      onChanged({ ...updated, contact_full_name: appointment.contact_full_name, assignee_full_name: appointment.assignee_full_name })
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : t('calendar.errors.updateFailed'))

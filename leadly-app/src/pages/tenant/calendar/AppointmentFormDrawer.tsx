@@ -27,6 +27,10 @@ export interface AppointmentEditInitial {
   contactId: string
   dateTime: string
   notes: string
+  /** Not editable from this form (no assignee field here) -- threaded through
+   * purely so onSaved can round-trip AppointmentWithContact without losing
+   * the assignee name the list/detail views already had. */
+  assigneeFullName: string | null
 }
 
 export function AppointmentFormDrawer({
@@ -83,7 +87,7 @@ export function AppointmentFormDrawer({
       const appointment = editing
         ? await updateAppointment(editing.id, { contactId: selectedContact.id, scheduledAt: new Date(dateTime).toISOString(), notes: notes.trim() })
         : await createAppointment(tenantId, selectedContact.id, new Date(dateTime).toISOString(), notes.trim())
-      onSaved({ ...appointment, contact_full_name: selectedContact.full_name })
+      onSaved({ ...appointment, contact_full_name: selectedContact.full_name, assignee_full_name: editing?.assigneeFullName ?? null })
       onClose()
     } catch (err) {
       setFormError(err instanceof Error ? err.message : t(isEdit ? 'calendar.errors.updateFailed' : 'calendar.errors.createFailed'))
