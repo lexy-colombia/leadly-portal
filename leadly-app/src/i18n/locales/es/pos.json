@@ -64,6 +64,7 @@
   "pos.tabs.errors.charge": "No se pudo cobrar la cuenta.",
   "pos.tabs.errors.create": "No se pudo abrir la cuenta.",
   "pos.tabs.errors.noWalkIn": "No se encontró el cliente Consumidor Final del tenant.",
+  "pos.tabs.errors.stockShortfall": "Hay productos sin stock suficiente -- corrígelos (quítalos o cambia de bodega) antes de cobrar.",
   "pos.totals.title": "Resumen de la venta",
   "pos.totals.taxHint": "El impuesto ya está incluido en el precio de cada producto.",
   "pos.totals.empty": "Agrega productos para ver el total.",

@@ -57,6 +57,12 @@ export function PosFastCheckout() {
 
   const [walkIn, setWalkIn] = useState<Client | null>(null)
   const [cart, setCart] = useState<CartLine[]>([])
+  // Idempotencia del cobro: un mismo uuid por intento de venta, reenviado
+  // tal cual en cada reintento de "Cobrar" -- así un click repetido tras un
+  // error nunca crea una cotización/venta duplicada (bug real reportado:
+  // ver comentario de cabecera de pos-checkout). Se regenera recién al
+  // arrancar una venta nueva (resetForNewSale), nunca en cada click.
+  const checkoutTokenRef = useRef(crypto.randomUUID())
 
   const [query, setQuery] = useState('')
   const [searching, setSearching] = useState(false)
@@ -134,6 +140,12 @@ export function PosFastCheckout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customer, storeCreditBalance])
 
+  // Alta libre, sin ningún chequeo acá -- pedido explícito del usuario
+  // 2026-09-06: "no debo hacer validaciones en front de nada en estos
+  // componentes de pos". El único chequeo de stock real es el que devuelve
+  // el servidor (stock_shortfalls, ver useOrderTotalsPreview más abajo),
+  // que resalta la línea en rojo y deshabilita "Cobrar" -- nunca se decide
+  // acá si algo se puede o no se puede agregar.
   function addToCart(product: PosProduct, variant: PosVariantOption | null, qty = 1) {
     const key = lineKey({ product_id: product.id, variant_id: variant?.id ?? null })
     setCart((prev) => {
@@ -221,7 +233,7 @@ export function PosFastCheckout() {
     unit_price: l.price,
     discount_amount: 0,
   }))
-  const { totals, loading: totalsLoading, error: totalsError } = useOrderTotalsPreview(previewItems)
+  const { totals, stockShortfalls, loading: totalsLoading, error: totalsError } = useOrderTotalsPreview(previewItems)
 
   // Mientras el desglose viaja (o si falla), el botón de cobrar y el vuelto
   // siguen funcionando con la suma de las líneas: el total no depende del
@@ -236,7 +248,12 @@ export function PosFastCheckout() {
   // acá el pago siempre es por el total porque el POS no admite pagos
   // divididos en esta primera ronda).
   const storeCreditExceeded = method === 'saldo_favor' && total > storeCreditBalance
-  const canCharge = cart.length > 0 && !charging && !storeCreditExceeded && !(method === 'efectivo' && (tendered.trim() === '' || tenderedNumber < total))
+  const canCharge =
+    cart.length > 0 &&
+    !charging &&
+    !storeCreditExceeded &&
+    stockShortfalls.length === 0 &&
+    !(method === 'efectivo' && (tendered.trim() === '' || tenderedNumber < total))
 
   async function handleCharge() {
     if (cart.length === 0) {
@@ -254,6 +271,7 @@ export function PosFastCheckout() {
           amount: total,
           amount_tendered: method === 'efectivo' ? tenderedNumber : undefined,
         },
+        checkout_token: checkoutTokenRef.current,
       })
       setResult(response)
       if (receiptPrinter.autoPrintEnabled) receiptPrinter.print(response.order.id)
@@ -273,6 +291,9 @@ export function PosFastCheckout() {
     setChargeError(null)
     setQuery('')
     setScanError(null)
+    // Venta nueva -- nuevo token, para que no quede pegado al intento de
+    // cobro anterior (ya cerrado con éxito).
+    checkoutTokenRef.current = crypto.randomUUID()
   }
 
   if (!tenantId) return <PageSpinner />
@@ -371,7 +392,6 @@ export function PosFastCheckout() {
                 name={p.name}
                 sku={p.sku}
                 highlighted={highlighted}
-                disabled={p.track_inventory && !p.has_variants && (p.available ?? 0) <= 0}
                 onClick={select}
                 right={
                   <>
@@ -407,13 +427,16 @@ export function PosFastCheckout() {
             <div>
               {cart.map((l) => {
                 const key = lineKey(l)
-                const short = l.available != null && l.available < l.quantity
+                // Único chequeo de stock real: lo que devolvió calculate-order
+                // en el mismo preview de totales -- nunca `l.available`
+                // (número cacheado de cuando se buscó/escaneó el producto).
+                const shortfall = stockShortfalls.find((s) => s.productId === l.product_id && s.variantId === (l.variant_id ?? null))
                 return (
-                  <div key={key} className="flex items-center gap-2.5 border-b border-brand-100 py-2 last:border-b-0">
+                  <div key={key} className={`flex items-center gap-2.5 border-b py-2 last:border-b-0 ${shortfall ? 'border-red-100 bg-red-50/60' : 'border-brand-100'}`}>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-xs font-medium text-brand-800">{l.name}</p>
                       <p className="truncate text-xs text-brand-400">{[l.variantLabel, l.sku ? `SKU: ${l.sku}` : null].filter(Boolean).join(' · ') || '—'}</p>
-                      {short && <p className="text-[11px] font-medium text-red-500">{t('pos.stock.available', { count: l.available ?? 0 })}</p>}
+                      {shortfall && <p className="text-[11px] font-medium text-red-500">{t('pos.stock.available', { count: shortfall.available })}</p>}
                     </div>
                     <Input
                       type="number"
@@ -421,7 +444,7 @@ export function PosFastCheckout() {
                       value={l.quantity}
                       onChange={(e) => updateQuantity(key, Number(e.target.value) || 0)}
                       aria-label={t('pos.cart.quantity')}
-                      className={`h-8 w-16 text-right ${short ? 'border-red-400 text-red-700' : ''}`}
+                      className={`h-8 w-16 text-right ${shortfall ? 'border-red-400 text-red-700' : ''}`}
                     />
                     <p className="w-24 shrink-0 text-right text-xs font-semibold text-brand-800">{formatCurrency(l.price * l.quantity)}</p>
                     <Button type="button" variant="destructive" size="icon-xs" onClick={() => removeLine(key)} aria-label={t('pos.cart.remove')} className="shrink-0 rounded-full">
@@ -451,12 +474,11 @@ export function PosFastCheckout() {
                   <button
                     key={v.id}
                     type="button"
-                    disabled={v.available != null && v.available <= 0}
                     onClick={() => {
                       addToCart(variantPickerFor, v)
                       setVariantPickerFor(null)
                     }}
-                    className="flex w-full items-center justify-between rounded-lg border border-brand-100 px-3 py-2 text-left text-xs hover:bg-accent-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="flex w-full items-center justify-between rounded-lg border border-brand-100 px-3 py-2 text-left text-xs hover:bg-accent-50"
                   >
                     <span>{v.label}</span>
                     <span className="flex items-center gap-2">
@@ -590,6 +612,10 @@ export function PosFastCheckout() {
             <p className="mb-3 text-xs font-medium text-red-600">
               {t('orders.paymentDrawer.errors.amountExceedsBalance', { amount: formatCurrency(storeCreditBalance) })}
             </p>
+          )}
+
+          {stockShortfalls.length > 0 && (
+            <p className="mb-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-700">{t('pos.tabs.errors.stockShortfall')}</p>
           )}
 
           {chargeError && <p className="mb-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-700">{chargeError}</p>}

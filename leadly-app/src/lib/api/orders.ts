@@ -100,12 +100,44 @@ export function hasIncompleteVariantSelection(items: OrderItemInput[], products:
 export interface StockShortfall {
   productId: string
   variantId: string | null
-  warehouseId: string
+  /** null cuando la línea no tiene bodega puntual (POS de venta rápida, que
+   * no tiene selector) -- el chequeo del servidor sumó todas las bodegas. */
+  warehouseId: string | null
   productName: string
-  sku: string | null
-  warehouseName: string
+  /** sku/warehouseName solo los completa el chequeo cliente de abajo (para
+   * el diálogo de OrderDetail.tsx) -- el que devuelve calculate-order
+   * (ver ApiStockShortfall/mapApiStockShortfalls) no los necesita: nada los
+   * renderiza hoy fuera de ese diálogo, que solo muestra un conteo. */
+  sku?: string | null
+  warehouseName?: string
   requested: number
   available: number
+}
+
+/** Forma tal cual la devuelve calculate-order (snake_case, `stock_shortfalls`
+ * en su respuesta) -- ver `_shared/orders/stockAvailability.ts` del lado del
+ * servidor. Único chequeo real de stock para POS y Órdenes desde 2026-09-06:
+ * ni PosFastCheckout, ni PosTabAccount, ni (para la composición de un pedido
+ * nuevo) OrderDetail.tsx vuelven a calcular esto por su cuenta -- reciben
+ * esta lista tal cual y la usan solo para resaltar/deshabilitar. */
+export interface ApiStockShortfall {
+  product_id: string
+  variant_id: string | null
+  warehouse_id: string | null
+  product_name: string
+  available: number
+  requested: number
+}
+
+export function mapApiStockShortfalls(shortfalls: ApiStockShortfall[]): StockShortfall[] {
+  return shortfalls.map((s) => ({
+    productId: s.product_id,
+    variantId: s.variant_id,
+    warehouseId: s.warehouse_id,
+    productName: s.product_name,
+    available: s.available,
+    requested: s.requested,
+  }))
 }
 
 /** Fresh product_stock read (not whatever snapshot the page happened to
@@ -397,8 +429,15 @@ export interface CalculateOrderInput {
   items: OrderItemInput[]
 }
 
-export async function calculateOrder(input: CalculateOrderInput): Promise<SalesOrder> {
-  const { data, error } = await supabase.functions.invoke<SalesOrder & { error?: string }>('calculate-order', { body: input })
+/** `stockShortfalls` (2026-09-06): calculate-order ahora siempre devuelve,
+ * junto al pedido actualizado, qué líneas piden más de lo que hay real en
+ * stock (ver ApiStockShortfall) -- nunca bloquea este guardado con eso
+ * (bloquear la creación/confirmación real es cosa de create-order/pos-checkout
+ * y del trigger de confirmación), solo informa para que OrderDetail.tsx
+ * pinte esas líneas en rojo y deshabilite "Confirmar" mientras exista
+ * alguna, sin volver a calcular nada por su cuenta. */
+export async function calculateOrder(input: CalculateOrderInput): Promise<SalesOrder & { stockShortfalls: StockShortfall[] }> {
+  const { data, error } = await supabase.functions.invoke<SalesOrder & { stock_shortfalls?: ApiStockShortfall[]; error?: string }>('calculate-order', { body: input })
   if (error) {
     const context = (error as { context?: Response }).context
     if (context && typeof context.json === 'function') {
@@ -413,7 +452,8 @@ export async function calculateOrder(input: CalculateOrderInput): Promise<SalesO
     }
     throw error
   }
-  return data as SalesOrder
+  const { stock_shortfalls, ...order } = data as SalesOrder & { stock_shortfalls?: ApiStockShortfall[] }
+  return { ...(order as SalesOrder), stockShortfalls: mapApiStockShortfalls(stock_shortfalls ?? []) }
 }
 
 /** Desglose de impuestos tal como lo calculó y guardó el servidor -- se usa
@@ -442,8 +482,8 @@ export interface OrderTotalsBreakdown {
  * real con el mismo computeOrderTotals que después persiste el pedido.
  * Nunca se calcula acá -- ver la regla del proyecto de cero lógica de
  * negocio en el frontend. */
-export async function previewOrderTotals(items: OrderItemInput[], shipping = 0): Promise<OrderTotalsBreakdown> {
-  const { data, error } = await supabase.functions.invoke<{ totals: OrderTotalsBreakdown; error?: string }>('calculate-order', {
+async function invokePreview(items: OrderItemInput[], shipping: number): Promise<{ totals: OrderTotalsBreakdown; stock_shortfalls?: ApiStockShortfall[] }> {
+  const { data, error } = await supabase.functions.invoke<{ totals: OrderTotalsBreakdown; stock_shortfalls?: ApiStockShortfall[]; error?: string }>('calculate-order', {
     body: { preview: true, items, shipping },
   })
   if (error) {
@@ -461,7 +501,20 @@ export async function previewOrderTotals(items: OrderItemInput[], shipping = 0):
     throw error
   }
   if (data?.error) throw new Error(data.error)
-  return (data as { totals: OrderTotalsBreakdown }).totals
+  return data as { totals: OrderTotalsBreakdown; stock_shortfalls?: ApiStockShortfall[] }
+}
+
+export async function previewOrderTotals(items: OrderItemInput[], shipping = 0): Promise<OrderTotalsBreakdown> {
+  const result = await invokePreview(items, shipping)
+  return result.totals
+}
+
+/** Mismo preview de arriba, pero además trae `stockShortfalls` -- usado por
+ * useOrderTotalsPreview para que el POS pueda resaltar/deshabilitar sin
+ * calcular nada por su cuenta (ver mapApiStockShortfalls). */
+export async function previewOrderTotalsWithStock(items: OrderItemInput[], shipping = 0): Promise<{ totals: OrderTotalsBreakdown; stockShortfalls: StockShortfall[] }> {
+  const result = await invokePreview(items, shipping)
+  return { totals: result.totals, stockShortfalls: mapApiStockShortfalls(result.stock_shortfalls ?? []) }
 }
 
 /** Mismo desglose, pero de un pedido que YA existe: sale de los valores que

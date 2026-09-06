@@ -235,6 +235,12 @@ export interface PosCheckoutInput {
   contact_id?: string | null
   items: { product_id: string; variant_id?: string | null; quantity: number }[]
   payment: { method: PosPaymentMethod; amount: number; amount_tendered?: number }
+  /** Idempotencia: mismo uuid en cada reintento del mismo intento de cobro
+   * -- si el primer intento ya creó (y quizás confirmó/cobró) el pedido pero
+   * la respuesta nunca llegó a buen puerto, el servidor retoma esa MISMA
+   * fila en vez de crear una cotización duplicada. Ver comentario de
+   * cabecera de pos-checkout. */
+  checkout_token?: string
 }
 
 export interface PosCheckoutResult {

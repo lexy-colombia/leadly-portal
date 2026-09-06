@@ -8,7 +8,7 @@ import { searchPosClients } from '../../../lib/api/pos'
 import { getClientCreditSummary } from '../../../lib/api/credit'
 import { getStoreCreditBalance } from '../../../lib/api/returns'
 import { previewOrderTotals } from '../../../lib/api/orders'
-import type { OrderItemInput, OrderTotalsBreakdown } from '../../../lib/api/orders'
+import type { OrderItemInput, OrderTotalsBreakdown, StockShortfall } from '../../../lib/api/orders'
 import { useOrderTotalsPreview } from '../../../lib/useOrderTotalsPreview'
 import { listProducts } from '../../../lib/api/products'
 import type { ProductWithImages } from '../../../lib/api/products'
@@ -69,6 +69,13 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Líneas que piden más de lo que hay en stock real -- las devuelve
+  // calculate-order en cada guardado (ver saveCartDraft), nunca se calculan
+  // acá. Mientras haya alguna: OrderItemsEditor las pinta en rojo (prop
+  // `shortfalls`, ya existía para esto) y "Cobrar" queda deshabilitado --
+  // el cajero tiene que borrar la línea o cambiarla de bodega para poder
+  // seguir. Pedido explícito del usuario 2026-09-06.
+  const [stockShortfalls, setStockShortfalls] = useState<StockShortfall[]>([])
   const [cancelling, setCancelling] = useState(false)
   const [confirmingCancel, setConfirmingCancel] = useState(false)
   const [charging, setCharging] = useState(false)
@@ -87,6 +94,13 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
    * creaba acá, así que cerrar el drawer sin pagar dejaba la venta hecha y
    * la cuenta sin sus productos (bug reportado por el usuario). */
   const [pendingCharge, setPendingCharge] = useState<{ items?: { id: string; quantity: number }[]; totals: OrderTotalsBreakdown } | null>(null)
+  // Idempotencia del cobro: un mismo uuid por cada apertura del drawer de
+  // pago, reenviado tal cual en cada reintento de "Guardar" dentro de esa
+  // MISMA apertura -- así un "Guardar" repetido tras un error (ej. falló el
+  // registro del pago después de ya haber creado el pedido) retoma esa
+  // fila en vez de crear un pedido duplicado. Se regenera en cada
+  // handleCharge, nunca dentro de un mismo intento en curso.
+  const chargeTokenRef = useRef<string | null>(null)
 
   // Dividir cuenta por producto -- opcional, aparte del botón "Cobrar"
   // principal (que sigue cobrando todo de un tirón, sin este paso extra,
@@ -168,6 +182,10 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
   const primedRef = useRef(false)
   const drawerDoneRef = useRef(false)
   const lastSyncedRef = useRef('')
+  // Cuántas líneas tenía el carrito la última vez que se corrió este efecto
+  // -- para distinguir "se agregó un producto" (la cuenta creció) de
+  // "se editó cantidad/precio de una línea que ya estaba".
+  const prevItemCountRef = useRef(0)
 
   function snapshot(): string {
     return JSON.stringify({ contactId, posPointId, label, items })
@@ -177,8 +195,9 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
     setSaving(true)
     setError(null)
     try {
-      await saveCartDraft({ cart_id: cartId, contact_id: contactId, items, pos_point_id: posPointId || null, label: label || null })
+      const { stockShortfalls } = await saveCartDraft({ cart_id: cartId, contact_id: contactId, items, pos_point_id: posPointId || null, label: label || null })
       lastSyncedRef.current = snapshot()
+      setStockShortfalls(stockShortfalls)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('pos.tabs.errors.save'))
       throw err
@@ -193,12 +212,23 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
     if (!primedRef.current) {
       primedRef.current = true
       lastSyncedRef.current = snap
+      prevItemCountRef.current = items.length
       return
     }
     if (snap === lastSyncedRef.current) return
-    const timer = setTimeout(() => {
-      void flush()
-    }, 2000)
+    // Un producto recién agregado (la cuenta creció) se guarda al instante
+    // -- así el cajero ve de una si esa línea no cumple con el stock (roja +
+    // "Cobrar" deshabilitado, ver stockShortfalls) en vez de enterarse 2s
+    // después. Editar cantidad/precio de una línea que ya estaba sigue con
+    // el debounce de siempre, para no guardar en cada tecla tipeada.
+    const justAddedItem = items.length > prevItemCountRef.current
+    prevItemCountRef.current = items.length
+    const timer = setTimeout(
+      () => {
+        void flush()
+      },
+      justAddedItem ? 0 : 2000,
+    )
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded, contactId, posPointId, label, items])
@@ -272,6 +302,7 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
         : (totals ?? (await previewOrderTotals(items)))
       setSplitItems(null)
       drawerDoneRef.current = false
+      chargeTokenRef.current = crypto.randomUUID()
       setPendingCharge({ items: selectedItems, totals: chargeTotals })
     } catch (err) {
       setError(err instanceof Error ? err.message : t('pos.tabs.errors.charge'))
@@ -386,7 +417,19 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
-          <OrderItemsEditor items={items} products={products} categories={categories} brands={brands} warehouses={warehouses} stockRows={stockRows} onChange={setItems} />
+          <OrderItemsEditor
+            items={items}
+            products={products}
+            categories={categories}
+            brands={brands}
+            warehouses={warehouses}
+            stockRows={stockRows}
+            shortfalls={stockShortfalls}
+            onChange={(next) => {
+              setStockShortfalls([])
+              setItems(next)
+            }}
+          />
 
           {/* Lo ya cobrado de esta mesa. Sin esto, después de cobrar la
               cuenta quedaba abierta y vacía y no había forma de saber qué
@@ -576,9 +619,12 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
               </Button>
             </>
           ) : (
-            <Button type="button" size="lg" className="w-full" disabled={!canCheckout || charging} onClick={handleChargeAll}>
-              {charging ? t('pos.actions.charging') : t('pos.tabs.charge')}
-            </Button>
+            <>
+              {stockShortfalls.length > 0 && <p className="mb-2 text-center text-xs font-medium text-red-600">{t('pos.tabs.errors.stockShortfall')}</p>}
+              <Button type="button" size="lg" className="w-full" disabled={!canCheckout || charging || stockShortfalls.length > 0} onClick={handleChargeAll}>
+                {charging ? t('pos.actions.charging') : t('pos.tabs.charge')}
+              </Button>
+            </>
           )}
           {(items.length > 1 || items.some((i) => i.quantity > 1)) && (
             <button
@@ -622,7 +668,7 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
           order={null}
           totals={pendingCharge.totals}
           pendingAmount={pendingCharge.totals.total}
-          createOrder={() => createOrderFromCart(cartId, pendingCharge.items, { keepCartOpen: true, confirm: true })}
+          createOrder={() => createOrderFromCart(cartId, pendingCharge.items, { keepCartOpen: true, confirm: true, checkoutToken: chargeTokenRef.current ?? undefined })}
           creditEnabled={customer?.credit_enabled ?? false}
           storeCreditBalance={storeCreditBalance}
           onSaved={(chargedOrder) => {

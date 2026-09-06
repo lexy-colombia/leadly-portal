@@ -22,6 +22,21 @@
  * se llama, y se muestra el error que devuelva. Ver memoria de sesión
  * "no frontend validation" -- esto es lo que la originó.
  *
+ * `stock_shortfalls` (2026-09-06, pedido explícito del usuario, corrige un
+ * primer intento equivocado del mismo día): TODA llamada (preview, editar un
+ * pedido real, o armar un carrito -- portal y POS por igual) devuelve, junto
+ * a lo que ya devolvía, la lista de líneas cuya cantidad pedida supera el
+ * stock real disponible (por bodega puntual si la línea tiene warehouse_id,
+ * sumado en todas las bodegas si no) -- ver `_shared/orders/stockAvailability.ts`.
+ * Nunca bloquea el guardado del carrito/borrador con esto: el frontend usa
+ * esta lista solo para pintar esas líneas en rojo y deshabilitar "Cobrar"/
+ * "Crear pedido" mientras exista alguna, forzando a que el cajero/agente la
+ * arregle (borrar la línea o cambiar de bodega) ANTES de poder avanzar --
+ * pero el borrador en sí se guarda tal cual se mandó, para que la línea
+ * problemática siga visible y editable en vez de desaparecer sola. El
+ * bloqueo real y duro (rechazar la creación de la venta, sin excepción) vive
+ * en create-order/pos-checkout, nunca acá -- ver sus comentarios.
+ *
  * Deliberadamente AFUERA de este alcance:
  * - Pagos (sales_order_payments) -- es una transacción financiera con su
  *   propio flujo (PaymentDrawer, Wompi, crédito), no un campo editable del
@@ -48,6 +63,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { persistOrderItems, type ResolvedOrderItem } from "../_shared/orders/persistOrderItems.ts";
 import { computeOrderTotals } from "../_shared/orders/computeOrderTotals.ts";
 import { isTenantTaxEnabled } from "../_shared/invoicing/queueInvoiceGeneration.ts";
+import { findStockShortfalls } from "../_shared/orders/stockAvailability.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 
 interface RawItemInput {
@@ -184,6 +200,11 @@ Deno.serve(async (req) => {
       body.shipping ?? 0,
       taxEnabled,
     );
+    const shortfalls = await findStockShortfalls(
+      adminClient,
+      tenantId,
+      items.map((item) => ({ product_id: item.product_id, variant_id: item.variant_id, warehouse_id: item.warehouse_id, product_name: item.product_name, quantity: item.quantity })),
+    );
     return json({
       totals: {
         tax_enabled: taxEnabled,
@@ -195,6 +216,7 @@ Deno.serve(async (req) => {
         total: totals.total,
         tax_lines: totals.taxLines,
       },
+      stock_shortfalls: shortfalls,
     });
   }
 
@@ -283,7 +305,12 @@ Deno.serve(async (req) => {
       await persistOrderItems(adminClient, tenantId, orderId, resolvedItems, body.shipping ?? 0);
       const { data: updatedOrder, error: reloadError } = await adminClient.from("sales_orders").select("*").eq("id", orderId).single();
       if (reloadError) return json({ error: reloadError.message }, 500);
-      return json(updatedOrder);
+      const shortfalls = await findStockShortfalls(
+        adminClient,
+        tenantId,
+        resolvedItems.map((item) => ({ product_id: item.product_id, variant_id: item.variant_id, warehouse_id: item.warehouse_id, product_name: item.product_name, quantity: item.quantity })),
+      );
+      return json({ ...updatedOrder, stock_shortfalls: shortfalls });
     } catch (err) {
       return json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }
@@ -334,6 +361,18 @@ Deno.serve(async (req) => {
     cartId = newCart.id;
   }
 
+  // Chequeo de stock -- ver el comentario de `stock_shortfalls` en la
+  // cabecera del archivo: solo informa, NUNCA rechaza este guardado. El
+  // borrador se guarda tal cual se mandó, con la línea problemática incluida
+  // -- el frontend la pinta en rojo y deshabilita "Cobrar"/"Crear pedido"
+  // usando la lista que se devuelve más abajo, sin volver a calcular nada
+  // por su cuenta.
+  const shortfalls = await findStockShortfalls(
+    adminClient,
+    tenantId,
+    items.map((item) => ({ product_id: item.product_id, variant_id: item.variant_id, warehouse_id: item.warehouse_id, product_name: item.product_name, quantity: item.quantity })),
+  );
+
   // Reemplaza todos los cart_items -- mismo criterio "reemplaza todo, no
   // hace merge/diff" que ya usa persistOrderItems, sin impuesto.
   const { error: deleteItemsError } = await adminClient.from("cart_items").delete().eq("cart_id", cartId);
@@ -357,5 +396,5 @@ Deno.serve(async (req) => {
 
   const { data: cart, error: reloadCartError } = await adminClient.from("carts").select("*, items:cart_items(*)").eq("id", cartId).single();
   if (reloadCartError) return json({ error: reloadCartError.message }, 500);
-  return json({ cart });
+  return json({ cart, stock_shortfalls: shortfalls });
 });

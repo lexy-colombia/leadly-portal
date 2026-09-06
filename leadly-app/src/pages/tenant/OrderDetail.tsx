@@ -587,7 +587,7 @@ export function OrderDetail() {
     setActionError(null)
     setSavingDraft(true)
     try {
-      await calculateOrder({
+      const { stockShortfalls: shortfalls } = await calculateOrder({
         order_id: orderId,
         contact_id: contactId,
         opportunity_id: opportunityId || null,
@@ -597,6 +597,10 @@ export function OrderDetail() {
         shipping: Number(shippingDraft) || 0,
         items,
       })
+      // Mismo estado que el chequeo pre-confirmar de más abajo -- ahora se
+      // mantiene al día con cada autoguardado, no solo justo antes de
+      // confirmar.
+      setStockShortfalls(shortfalls)
       lastSyncedSnapshotRef.current = snapshot
       reloadOrder()
       reloadItems()
@@ -642,7 +646,7 @@ export function OrderDetail() {
   const lastSyncedCartSnapshotRef = useRef('')
 
   async function syncCartDraft(): Promise<string> {
-    const cart = await saveCartDraft({
+    const { cart, stockShortfalls: shortfalls } = await saveCartDraft({
       cart_id: cartId,
       contact_id: contactId,
       opportunity_id: opportunityId || null,
@@ -653,6 +657,11 @@ export function OrderDetail() {
       items,
       origin: 'portal',
     })
+    // Mismo estado que ya usaba el chequeo pre-confirmar (findStockShortfalls
+    // más abajo) -- ahora se actualiza en vivo con cada autoguardado, en vez
+    // de solo calcularse recién al intentar confirmar. OrderItemsEditor ya
+    // sabía pintar estas líneas en rojo (prop `shortfalls`).
+    setStockShortfalls(shortfalls)
     if (cart.id !== cartId) {
       setCartId(cart.id)
       const next = new URLSearchParams(searchParams)
@@ -901,7 +910,7 @@ export function OrderDetail() {
       // paso a confirmada es una segunda llamada, ahora que los ítems ya
       // existen de verdad y el trigger de confirmación tiene algo real
       // contra qué validar stock.
-      const cart = await saveCartDraft({
+      const { cart, stockShortfalls: shortfalls } = await saveCartDraft({
         cart_id: cartId,
         contact_id: contactId,
         opportunity_id: opportunityId || null,
@@ -912,7 +921,12 @@ export function OrderDetail() {
         items: validItems,
         origin: 'portal',
       })
+      setStockShortfalls(shortfalls)
       setCartId(cart.id)
+      // create-order valida stock real antes de crear nada (rechaza sin
+      // dejar ninguna fila huérfana si algo no alcanza) -- el pre-chequeo
+      // de arriba (findStockShortfalls) es solo para avisar antes, esto es
+      // lo que de verdad bloquea si igual llegó a pasar algo.
       const created = await createOrderFromCart(cart.id)
       if (status === 'confirmada') await updateOrderStatus(created.id, 'confirmada')
       navigate(`/app/sales/${created.id}`, { replace: true })

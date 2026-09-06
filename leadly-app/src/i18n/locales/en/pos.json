@@ -64,6 +64,7 @@
   "pos.tabs.errors.charge": "Couldn't charge the tab.",
   "pos.tabs.errors.create": "Couldn't open the tab.",
   "pos.tabs.errors.noWalkIn": "The tenant's walk-in customer couldn't be found.",
+  "pos.tabs.errors.stockShortfall": "Some products don't have enough stock -- fix them (remove or change warehouse) before charging.",
   "pos.totals.title": "Sale summary",
   "pos.totals.taxHint": "Tax is already included in each product's price.",
   "pos.totals.empty": "Add products to see the total.",

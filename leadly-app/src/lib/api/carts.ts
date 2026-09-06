@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient'
-import type { OrderItemInput } from './orders'
+import { mapApiStockShortfalls, type ApiStockShortfall, type OrderItemInput, type StockShortfall } from './orders'
 import type { Cart, CartItem, OrderPaymentMethod, SalesOrder } from '../../types/domain'
 
 export type CartWithItems = Cart & { items: CartItem[] }
@@ -43,10 +43,17 @@ export interface SaveCartDraftInput {
 }
 
 /** Arma/edita un carrito -- calculate-order sin order_id, ver el
- * comentario de cabecera de esa Edge Function. Nunca toca sales_orders. */
-export async function saveCartDraft(input: SaveCartDraftInput): Promise<CartWithItems> {
-  const { cart } = await invokeAndUnwrap<{ cart: CartWithItems }>('calculate-order', input)
-  return cart
+ * comentario de cabecera de esa Edge Function. Nunca toca sales_orders.
+ *
+ * `stockShortfalls` (2026-09-06): calculate-order siempre devuelve, junto al
+ * carrito, qué líneas piden más de lo que hay en stock real -- nunca
+ * rechaza este guardado por eso (el borrador se guarda tal cual, con la
+ * línea problemática incluida). El caller (PosTabAccount.tsx, OrderDetail.tsx)
+ * usa esta lista, y solo esta, para pintar esas líneas en rojo y deshabilitar
+ * "Cobrar"/"Crear pedido" -- nunca vuelve a calcular esto por su cuenta. */
+export async function saveCartDraft(input: SaveCartDraftInput): Promise<{ cart: CartWithItems; stockShortfalls: StockShortfall[] }> {
+  const { cart, stock_shortfalls } = await invokeAndUnwrap<{ cart: CartWithItems; stock_shortfalls?: ApiStockShortfall[] }>('calculate-order', input)
+  return { cart, stockShortfalls: mapApiStockShortfalls(stock_shortfalls ?? []) }
 }
 
 /** Único momento en que un carrito se convierte en un pedido real -- ver
@@ -59,9 +66,9 @@ export async function saveCartDraft(input: SaveCartDraftInput): Promise<CartWith
 export async function createOrderFromCart(
   cartId: string,
   items?: { id: string; quantity: number }[],
-  { keepCartOpen = false, confirm = false }: { keepCartOpen?: boolean; confirm?: boolean } = {},
+  { keepCartOpen = false, confirm = false, checkoutToken }: { keepCartOpen?: boolean; confirm?: boolean; checkoutToken?: string } = {},
 ): Promise<SalesOrder> {
-  return invokeAndUnwrap<SalesOrder>('create-order', { cart_id: cartId, items, keep_cart_open: keepCartOpen, confirm })
+  return invokeAndUnwrap<SalesOrder>('create-order', { cart_id: cartId, items, keep_cart_open: keepCartOpen, confirm, checkout_token: checkoutToken })
 }
 
 /** Cerrar la mesa -- deliberadamente separado de cobrar (pedido explícito

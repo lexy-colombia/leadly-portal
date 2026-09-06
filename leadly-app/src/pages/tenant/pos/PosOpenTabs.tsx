@@ -167,7 +167,7 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
     try {
       const walkIn = await getWalkInClient(tenantId)
       if (!walkIn) throw new Error(t('pos.tabs.errors.noWalkIn'))
-      const cart = await saveCartDraft({ contact_id: walkIn.id, origin: 'pos', pos_point_id: posPointId, items: [] })
+      const { cart } = await saveCartDraft({ contact_id: walkIn.id, origin: 'pos', pos_point_id: posPointId, items: [] })
       setSelectedCartId(cart.id)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('pos.tabs.errors.create'))

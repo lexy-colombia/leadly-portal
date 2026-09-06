@@ -52,10 +52,35 @@
  * proporcional cuando se divide una línea con discount_amount: ese
  * descuento se aplica completo la primera vez que se cobra esa línea
  * entera, nunca a una fracción -- simplificación deliberada, no hay forma
- * no ambigua de repartir un monto fijo entre unidades sueltas. */
+ * no ambigua de repartir un monto fijo entre unidades sueltas.
+ *
+ * `checkout_token` (opcional, 2026-09-06): mismo mecanismo de idempotencia
+ * que pos-checkout -- bug real reportado en vivo, el botón "Guardar" del
+ * pago de una cuenta abierta llama a `createOrder()` (esta función, con
+ * `confirm: true`) recién dentro de PaymentDrawer; si ESE paso ya creó el
+ * pedido pero el registro del pago que sigue falló (network, etc.), un
+ * reintento del cajero volvía a llamar acá con el mismo carrito y creaba
+ * OTRO pedido duplicado. Con el token, un reintento retoma la fila que ya
+ * se insertó (y ya se confirmó, si sales_channel='pos' -- ver
+ * guard_sales_order_confirmation) en vez de insertar otra.
+ *
+ * Chequeo de stock antes de crear (2026-09-06, corrige un bug real de
+ * producción -- una venta se había creado sin que nadie validara que había
+ * inventario): a diferencia de calculate-order (que solo informa
+ * `stock_shortfalls`, sin bloquear el guardado del carrito), ACÁ el chequeo
+ * es duro -- si alguna línea pide más de lo que hay en su bodega (o en
+ * cualquier bodega, si la línea no tiene una puntual), se rechaza la
+ * creación ENTERA antes de tocar la base: no se inserta `sales_orders`, no
+ * se persisten ítems, no se mueve nada del carrito. El carrito queda
+ * exactamente como estaba, abierto, para que se siga editando desde el
+ * front (borrar la línea o cambiar de bodega) y se reintente cuando el
+ * problema esté resuelto. Pedido explícito del usuario: "el endpoint de
+ * crear orden siempre debe validar... si hay algo que no, rechaza la
+ * creación y no crea cotizaciones". */
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { persistOrderItems, type ResolvedOrderItem } from "../_shared/orders/persistOrderItems.ts";
+import { findStockShortfalls } from "../_shared/orders/stockAvailability.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 
 interface CreateOrderBody {
@@ -63,6 +88,7 @@ interface CreateOrderBody {
   items?: { id: string; quantity: number }[];
   keep_cart_open?: boolean;
   confirm?: boolean;
+  checkout_token?: string | null;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -171,50 +197,88 @@ Deno.serve(async (req) => {
     };
   });
 
-  const { data: newOrder, error: insertError } = await adminClient
-    .from("sales_orders")
-    .insert({
-      tenant_id: tenantId,
-      cart_id: cart.id,
-      contact_id: cart.contact_id,
-      opportunity_id: cart.opportunity_id,
-      notes: cart.notes,
-      valid_until: cart.valid_until,
-      shipping_address_id: cart.shipping_address_id,
-      billing_address_id: cart.billing_address_id,
-      status: "cotizacion",
-      subtotal: 0,
-      discount_total: 0,
-      total: 0,
-      tax_total: 0,
-      shipping: 0,
-      // De dónde salió el pedido, para poder distinguirlo en Ventas y
-      // para que el POS se salte todo lo de envío. Un carrito del portal
-      // es "portal" (antes quedaba en null, indistinguible de los que
-      // crea la IA).
-      sales_channel: cart.origin === "pos" ? "pos" : "portal",
-      pos_point_id: cart.pos_point_id,
-      label: cart.label,
-      created_by: caller.id,
-    })
-    .select("id")
-    .single();
-  if (insertError) return json({ error: insertError.message }, 500);
-  const orderId = newOrder.id as string;
-
-  try {
-    await persistOrderItems(adminClient, tenantId, orderId, resolvedItems, cart.shipping ?? 0);
-  } catch (err) {
-    return json({ error: err instanceof Error ? err.message : String(err) }, 500);
+  // Idempotencia (ver comentario de cabecera): un reintento con el mismo
+  // checkout_token retoma el pedido que un intento anterior ya insertó (y
+  // tal vez ya confirmó) en vez de crear otro.
+  const checkoutToken = body.checkout_token || null;
+  let orderId: string | null = null;
+  let alreadyConfirmed = false;
+  if (checkoutToken) {
+    const { data: existingOrder, error: existingOrderError } = await adminClient
+      .from("sales_orders")
+      .select("id, status")
+      .eq("tenant_id", tenantId)
+      .eq("checkout_token", checkoutToken)
+      .maybeSingle();
+    if (existingOrderError) return json({ error: existingOrderError.message }, 500);
+    if (existingOrder) {
+      orderId = existingOrder.id as string;
+      alreadyConfirmed = existingOrder.status === "confirmada";
+    }
   }
 
-  // Confirmar antes de tocar el carrito: si el trigger rechaza (stock,
-  // dirección), la cuenta conserva todos sus productos. El prefijo tipo
-  // "BILLING_ADDRESS_REQUIRED: " que agrega el trigger se saca acá, igual
-  // que hace updateOrderStatus en el frontend -- el resto del texto ya es
-  // un mensaje claro en español.
-  if (body.confirm) {
-    const { error: confirmError } = await adminClient.from("sales_orders").update({ status: "confirmada" }).eq("id", orderId);
+  if (!orderId) {
+    // Rechazo duro -- ver comentario de cabecera. Se corre ACÁ, antes de
+    // cualquier insert, para que un stock insuficiente no deje ninguna
+    // fila huérfana ni toque el carrito.
+    const shortfalls = await findStockShortfalls(
+      adminClient,
+      tenantId,
+      resolvedItems.map((item) => ({ product_id: item.product_id, variant_id: item.variant_id, warehouse_id: item.warehouse_id, product_name: item.product_name, quantity: item.quantity })),
+    );
+    if (shortfalls.length > 0) {
+      const detail = shortfalls.map((s) => `"${s.product_name}" (disponible ${s.available}, pedido ${s.requested})`).join(", ");
+      return json({ error: `Sin stock suficiente para: ${detail}.` }, 409);
+    }
+
+    const { data: newOrder, error: insertError } = await adminClient
+      .from("sales_orders")
+      .insert({
+        tenant_id: tenantId,
+        cart_id: cart.id,
+        contact_id: cart.contact_id,
+        opportunity_id: cart.opportunity_id,
+        notes: cart.notes,
+        valid_until: cart.valid_until,
+        shipping_address_id: cart.shipping_address_id,
+        billing_address_id: cart.billing_address_id,
+        status: "cotizacion",
+        subtotal: 0,
+        discount_total: 0,
+        total: 0,
+        tax_total: 0,
+        shipping: 0,
+        // De dónde salió el pedido, para poder distinguirlo en Ventas y
+        // para que el POS se salte todo lo de envío. Un carrito del portal
+        // es "portal" (antes quedaba en null, indistinguible de los que
+        // crea la IA).
+        sales_channel: cart.origin === "pos" ? "pos" : "portal",
+        pos_point_id: cart.pos_point_id,
+        label: cart.label,
+        created_by: caller.id,
+        checkout_token: checkoutToken,
+      })
+      .select("id")
+      .single();
+    if (insertError) return json({ error: insertError.message }, 500);
+    orderId = newOrder.id as string;
+
+    try {
+      await persistOrderItems(adminClient, tenantId, orderId, resolvedItems, cart.shipping ?? 0);
+    } catch (err) {
+      return json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+  const resolvedOrderId: string = orderId;
+
+  // Confirmar antes de tocar el carrito: si el trigger rechaza (dirección,
+  // o stock para un canal que no sea 'pos' -- ver
+  // guard_sales_order_confirmation), la cuenta conserva todos sus
+  // productos. El prefijo tipo "BILLING_ADDRESS_REQUIRED: " que agrega el
+  // trigger se saca acá, igual que hace updateOrderStatus en el frontend --
+  // el resto del texto ya es un mensaje claro en español.
+  if (body.confirm && !alreadyConfirmed) {
+    const { error: confirmError } = await adminClient.from("sales_orders").update({ status: "confirmada" }).eq("id", resolvedOrderId);
     if (confirmError) {
       const cleaned = confirmError.message.replace(/^[A-Z_]+:\s*/, "");
       return json({ error: cleaned || confirmError.message }, 409);
@@ -250,14 +314,14 @@ Deno.serve(async (req) => {
   // el POS para el próximo cobro parcial. Con `keep_cart_open` no se cierra
   // nunca acá: cobrar no es cerrar la mesa (ver comentario de cabecera).
   if (!body.keep_cart_open && (!remaining || remaining === 0)) {
-    const { error: cartUpdateError } = await adminClient.from("carts").update({ status: "converted", converted_order_id: orderId }).eq("id", cart.id);
+    const { error: cartUpdateError } = await adminClient.from("carts").update({ status: "converted", converted_order_id: resolvedOrderId }).eq("id", cart.id);
     if (cartUpdateError) return json({ error: cartUpdateError.message }, 500);
   } else {
     const { error: cartTouchError } = await adminClient.from("carts").update({ last_activity_at: new Date().toISOString() }).eq("id", cart.id);
     if (cartTouchError) return json({ error: cartTouchError.message }, 500);
   }
 
-  const { data: order, error: reloadError } = await adminClient.from("sales_orders").select("*").eq("id", orderId).single();
+  const { data: order, error: reloadError } = await adminClient.from("sales_orders").select("*").eq("id", resolvedOrderId).single();
   if (reloadError) return json({ error: reloadError.message }, 500);
   return json(order);
 });

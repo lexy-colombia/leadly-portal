@@ -15,10 +15,29 @@
  * siempre -- queda en 'pending' hasta que una ronda futura conecte el envío
  * síncrono.
  *
- * Sin direcciones ni despacho: la venta nace con sales_channel='pos', que
+ * Sin direcciones: la venta nace con sales_channel='pos', que
  * guard_sales_order_confirmation (20260904..._pos_guard_confirmation_skip_address)
- * ya sabe saltarse para el bloque de direcciones -- el chequeo de stock real
- * sigue aplicando igual que cualquier otro canal.
+ * ya sabe saltarse -- una venta de mostrador no tiene envío.
+ *
+ * Chequeo de stock ANTES de crear nada (2026-09-06, corrige un bug real: una
+ * venta se había creado sin que nadie validara inventario): se rechaza acá,
+ * antes del primer insert, si algún ítem pide más de lo disponible (sumado
+ * en todas las bodegas del tenant -- esta pantalla no tiene selector de
+ * bodega) -- no se crea ninguna fila si esto falla. El trigger de DB
+ * (guard_sales_order_confirmation, 20260906..._pos_orders_skip_stock_check_and_idempotency)
+ * ya NO repite este chequeo al confirmar para sales_channel='pos' -- sería
+ * redundante, el filtro real vive acá, antes de que exista nada que
+ * confirmar.
+ *
+ * `checkout_token` (opcional, 2026-09-06): bug real reportado en vivo -- sin
+ * esto, cada click en "Cobrar" que llegaba a ejecutarse (por ej. si el
+ * registro del pago fallaba por una razón transitoria) insertaba una
+ * `sales_orders` nueva desde cero, y el cajero terminaba con varias
+ * cotizaciones/ventas duplicadas de la misma cuenta. El frontend genera un
+ * uuid una sola vez por intento de cobro y lo reenvía tal cual en cada
+ * reintento -- si ya existe un pedido con ese token para este tenant, se
+ * retoma esa MISMA fila (confirma si no confirmó, cobra si no cobró) en vez
+ * de crear otra.
  *
  * Auth: JWT del cajero (tenant_agent con el permiso pos.checkout, o
  * tenant_admin/superadmin sin restricción -- mismo has_permission() que ya
@@ -29,6 +48,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
 import { persistOrderItems, type ResolvedOrderItem } from "../_shared/orders/persistOrderItems.ts";
 import { confirmSalesOrder } from "../_shared/orders/confirmSalesOrder.ts";
+import { findStockShortfalls } from "../_shared/orders/stockAvailability.ts";
 
 interface PosCheckoutItem {
   product_id: string;
@@ -40,6 +60,7 @@ interface PosCheckoutBody {
   contact_id?: string | null;
   items?: PosCheckoutItem[];
   payment?: { method?: string; amount?: number; amount_tendered?: number };
+  checkout_token?: string | null;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -151,60 +172,114 @@ Deno.serve(async (req) => {
     });
   }
 
-  // Nace en 'cotizacion' porque persistOrderItems/confirmSalesOrder esperan
-  // ese punto de partida (mismo criterio que calculate-order) -- se confirma
-  // dos pasos más abajo, ya con los ítems reales cargados.
-  const { data: newOrder, error: insertError } = await adminClient
-    .from("sales_orders")
-    .insert({
-      tenant_id: tenantId,
-      contact_id: contactId,
-      sales_channel: "pos",
-      status: "cotizacion",
-      subtotal: 0,
-      discount_total: 0,
-      total: 0,
-      tax_total: 0,
-      shipping: 0,
-      created_by: caller.id,
-    })
+  // Idempotencia (ver comentario de cabecera): si este checkout_token ya
+  // generó un pedido en un intento anterior (uno que falló después de
+  // insertarlo, ej. un timeout al registrar el pago), se retoma esa MISMA
+  // fila -- nunca se inserta una segunda `sales_orders` para el mismo
+  // intento de cobro.
+  const checkoutToken = body.checkout_token || null;
+  let orderId: string | null = null;
+  let alreadyConfirmed = false;
+  if (checkoutToken) {
+    const { data: existingOrder, error: existingOrderError } = await adminClient
+      .from("sales_orders")
+      .select("id, status")
+      .eq("tenant_id", tenantId)
+      .eq("checkout_token", checkoutToken)
+      .maybeSingle();
+    if (existingOrderError) return json({ error: existingOrderError.message }, 500);
+    if (existingOrder) {
+      orderId = existingOrder.id as string;
+      alreadyConfirmed = existingOrder.status === "confirmada";
+    }
+  }
+
+  if (!orderId) {
+    // Rechazo duro -- ver comentario de cabecera. Antes de insertar nada.
+    const shortfalls = await findStockShortfalls(
+      adminClient,
+      tenantId,
+      resolvedItems.map((item) => ({ product_id: item.product_id, variant_id: item.variant_id, warehouse_id: item.warehouse_id, product_name: item.product_name, quantity: item.quantity })),
+    );
+    if (shortfalls.length > 0) {
+      const detail = shortfalls.map((s) => `"${s.product_name}" (disponible ${s.available}, pedido ${s.requested})`).join(", ");
+      return json({ error: `Sin stock suficiente para: ${detail}.` }, 409);
+    }
+
+    // Nace en 'cotizacion' porque persistOrderItems/confirmSalesOrder esperan
+    // ese punto de partida (mismo criterio que calculate-order) -- se confirma
+    // dos pasos más abajo, ya con los ítems reales cargados.
+    const { data: newOrder, error: insertError } = await adminClient
+      .from("sales_orders")
+      .insert({
+        tenant_id: tenantId,
+        contact_id: contactId,
+        sales_channel: "pos",
+        status: "cotizacion",
+        subtotal: 0,
+        discount_total: 0,
+        total: 0,
+        tax_total: 0,
+        shipping: 0,
+        created_by: caller.id,
+        checkout_token: checkoutToken,
+      })
+      .select("id")
+      .single();
+    if (insertError) return json({ error: insertError.message }, 500);
+    orderId = newOrder.id as string;
+
+    try {
+      await persistOrderItems(adminClient, tenantId, orderId, resolvedItems, 0);
+    } catch (err) {
+      return json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  }
+
+  // A esta altura orderId siempre está resuelto (viene del lookup por token
+  // o de la fila recién insertada).
+  const resolvedOrderId = orderId as string;
+
+  if (!alreadyConfirmed) {
+    const confirmResult = await confirmSalesOrder(adminClient, tenantId, contactId as string, resolvedOrderId);
+    if (confirmResult.blocked) {
+      // Con sales_channel='pos' el trigger ya no bloquea por stock (ver
+      // 20260906..._pos_orders_skip_stock_check_and_idempotency) -- si esto
+      // dispara igual es por otra razón real (ej. el pedido no estaba en
+      // 'cotizacion'), la cotización queda tal cual, sin borrar nada.
+      const reasonMessage =
+        confirmResult.reason === "insufficient_stock"
+          ? (confirmResult.detail ?? "Stock insuficiente.")
+          : "No se pudo confirmar la venta -- faltan datos requeridos.";
+      return json({ error: reasonMessage }, 409);
+    }
+  }
+
+  // Idem para el pago: si un intento anterior con este mismo token ya lo
+  // registró, no se duplica -- se sigue de largo con lo que ya quedó.
+  const { data: existingPayments, error: existingPaymentsError } = await adminClient
+    .from("sales_order_payments")
     .select("id")
-    .single();
-  if (insertError) return json({ error: insertError.message }, 500);
-  const orderId = newOrder.id as string;
-
-  try {
-    await persistOrderItems(adminClient, tenantId, orderId, resolvedItems, 0);
-  } catch (err) {
-    return json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    .eq("order_id", resolvedOrderId)
+    .is("deleted_at", null)
+    .limit(1);
+  if (existingPaymentsError) return json({ error: existingPaymentsError.message }, 500);
+  if (!existingPayments || existingPayments.length === 0) {
+    const paidAt = new Date().toISOString().slice(0, 10);
+    const notes = body.payment?.amount_tendered
+      ? `Recibido: ${body.payment.amount_tendered} · Vuelto: ${Math.max(0, body.payment.amount_tendered - (paymentAmount as number))}`
+      : null;
+    const { error: paymentError } = await adminClient.from("sales_order_payments").insert({
+      tenant_id: tenantId,
+      order_id: resolvedOrderId,
+      method,
+      amount: paymentAmount,
+      paid_at: paidAt,
+      notes,
+      created_by: caller.id,
+    });
+    if (paymentError) return json({ error: paymentError.message }, 500);
   }
-
-  const confirmResult = await confirmSalesOrder(adminClient, tenantId, contactId as string, orderId);
-  if (confirmResult.blocked) {
-    // Sin stock real -- la venta no llegó a confirmarse, queda la
-    // cotización huérfana en la base (mismo comportamiento que el resto del
-    // sistema ante un stock insuficiente, no se borra nada).
-    const reasonMessage =
-      confirmResult.reason === "insufficient_stock"
-        ? (confirmResult.detail ?? "Stock insuficiente.")
-        : "No se pudo confirmar la venta -- faltan datos requeridos.";
-    return json({ error: reasonMessage }, 409);
-  }
-
-  const paidAt = new Date().toISOString().slice(0, 10);
-  const notes = body.payment?.amount_tendered
-    ? `Recibido: ${body.payment.amount_tendered} · Vuelto: ${Math.max(0, body.payment.amount_tendered - (paymentAmount as number))}`
-    : null;
-  const { error: paymentError } = await adminClient.from("sales_order_payments").insert({
-    tenant_id: tenantId,
-    order_id: orderId,
-    method,
-    amount: paymentAmount,
-    paid_at: paidAt,
-    notes,
-    created_by: caller.id,
-  });
-  if (paymentError) return json({ error: paymentError.message }, 500);
 
   // Si el tenant tiene DIAN activo, apply_sales_order_confirmed_effects ya
   // reservó la fila de sales_invoices (queda 'pending' -- el envío síncrono
@@ -213,12 +288,12 @@ Deno.serve(async (req) => {
   const { data: invoice } = await adminClient
     .from("sales_invoices")
     .select("id, status, cufe, status_detail")
-    .eq("order_id", orderId)
+    .eq("order_id", resolvedOrderId)
     .order("attempt_number", { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  const { data: order } = await adminClient.from("sales_orders").select("id, number, subtotal, total, tax_total, currency").eq("id", orderId).single();
+  const { data: order } = await adminClient.from("sales_orders").select("id, number, subtotal, total, tax_total, currency").eq("id", resolvedOrderId).single();
 
   return json({ order, invoice: invoice ?? null });
 });
