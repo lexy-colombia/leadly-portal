@@ -389,6 +389,18 @@ export async function getOrder(id: string): Promise<OrderDetail | null> {
   return data as unknown as OrderDetail | null
 }
 
+/** Misma tabla que `getOrder`, sin ninguno de sus 5 joins (contacto,
+ * oportunidad, ambas direcciones, perfil, punto de venta) -- para callers
+ * que solo necesitan las columnas propias de `sales_orders` (ej.
+ * PaymentDrawer, que solo lee moneda/totales/id). PosTabAccount la usa para
+ * abrir "Agregar pago" sobre un cargo ya hecho: `getOrder` se sentía lento
+ * ahí porque pedía relaciones que ese drawer nunca mira. */
+export async function getOrderBare(id: string): Promise<SalesOrder | null> {
+  const { data, error } = await supabase.from('sales_orders').select('*').eq('id', id).is('deleted_at', null).maybeSingle()
+  if (error) throw error
+  return data
+}
+
 export async function listOrderItems(orderId: string): Promise<SalesOrderItem[]> {
   const { data, error } = await supabase.from('sales_order_items').select('*').eq('order_id', orderId).order('display_order', { ascending: true })
   if (error) throw error

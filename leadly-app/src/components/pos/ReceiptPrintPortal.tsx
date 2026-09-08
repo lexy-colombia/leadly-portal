@@ -172,7 +172,7 @@ export function ReceiptPrintPortal({ children, paperWidth, onDone }: { children:
         .pos-receipt-total-line { display: flex; justify-content: space-between; font-weight: 800; font-size: 1.15em; margin-top: 2px; }
         .pos-receipt-fiscal { text-align: center; }
         .pos-receipt-cufe { word-break: break-all; }
-        .pos-receipt-qr { display: block; width: 100px; height: 100px; margin: 5px auto; }
+        .pos-receipt-qr { display: block; width: 100%; height: auto; margin: 5px auto; }
         .pos-receipt-footer { text-align: center; margin-top: 6px; font-weight: 600; }
         .pos-receipt-disclaimer { text-align: center; margin-top: 4px; font-size: 0.85em; }
         @media print {

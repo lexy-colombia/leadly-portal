@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getPaymentCredentialStatus } from '../../../lib/api/billing'
-import { getIntegrationCredential, getIntegrationCredentialConfiguredSecrets, listIntegrationProviders } from '../../../lib/api/integrations'
+import { getIntegrationCredential, getIntegrationCredentialConfiguredSecrets, isDianDirectoConnected, listIntegrationProviders } from '../../../lib/api/integrations'
 import type { IntegrationCategory, IntegrationProvider } from '../../../types/domain'
 import { PageSpinner } from '@/components/atoms'
 import { GlobeIcon } from '@/components/atoms/icons'
@@ -43,16 +43,13 @@ async function checkConnected(providerKey: string, tenantId: string | null): Pro
     // (ver WompiIntegrationDrawer), así que no se exige acá.
     return status.configuredSecrets.includes('private_key') && status.configuredSecrets.includes('events_key')
   }
+  // dian_directo tiene su propio criterio (certificado + contraseña, no
+  // solo un secreto suelto) -- ver isDianDirectoConnected, compartido con
+  // PosTabAccount.tsx para que ambos lugares digan "conectado" lo mismo.
+  if (providerKey === 'dian_directo') return isDianDirectoConnected(tenantId)
   const credential = await getIntegrationCredential(providerKey, tenantId)
   if (!credential) return false
   const secrets = await getIntegrationCredentialConfiguredSecrets(credential.id)
-  if (providerKey === 'dian_directo') {
-    // "Conectado" acá exige el certificado subido (config.storage_path) +
-    // su contraseña -- solo tener un secreto suelto sin el archivo no sirve
-    // para firmar nada.
-    const config = (credential.config ?? {}) as Record<string, unknown>
-    return !!config.storage_path && secrets.includes('certificate_password')
-  }
   return secrets.length > 0
 }
 

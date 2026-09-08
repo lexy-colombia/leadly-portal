@@ -200,8 +200,8 @@ export function PosReceiptTicket({ data }: { data: PosReceiptData }) {
           <div className="pos-receipt-fiscal">
             {fiscal.isValidated && fiscal.cufe ? (
               <>
-                <p className="pos-receipt-cufe">CUFE: {fiscal.cufe}</p>
                 {fiscal.qrDataUrl && <img src={fiscal.qrDataUrl} alt="" className="pos-receipt-qr" />}
+                <p className="pos-receipt-cufe">CUFE: {fiscal.cufe}</p>
                 <p>{t('pos.receipt.verifyHint')}</p>
               </>
             ) : (

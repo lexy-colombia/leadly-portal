@@ -2,7 +2,8 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { createPayment, createWompiPaymentLink, PAYMENT_METHOD_LABEL_KEY } from '../../../lib/api/orderPayments'
 import { getOrderTotalsBreakdown, type OrderTotalsBreakdown } from '../../../lib/api/orders'
 import { getPaymentCredentialStatus } from '../../../lib/api/billing'
-import type { OrderPaymentMethod, SalesOrder } from '../../../types/domain'
+import { sendPosInvoiceForOrder } from '../../../lib/api/salesInvoices'
+import type { Client, OrderPaymentMethod, SalesOrder } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import { FieldError } from '@/components/atoms'
 import { CurrencyInput, OrderTotalsSummary } from '@/components/molecules'
@@ -11,8 +12,10 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Copy } from 'lucide-react'
+import { ClientPickerCard } from '../clients/ClientPickerCard'
 
 function formatCurrency(value: number, currency = 'COP'): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
@@ -33,6 +36,9 @@ export function PaymentDrawer({
   creditEnabled,
   storeCreditBalance,
   pendingAmount,
+  dianConnected = false,
+  defaultBuyer = null,
+  onSearchBuyers,
   onSaved,
 }: {
   open: boolean
@@ -55,7 +61,7 @@ export function PaymentDrawer({
    * había perdido sus productos (bug reportado 2026-09-04). Ahora abrir el
    * drawer no escribe nada: recién al guardar se crea el pedido y, acto
    * seguido, su pago. */
-  createOrder?: () => Promise<SalesOrder>
+  createOrder?: (buyerContactId?: string | null) => Promise<SalesOrder>
   /** Only clients with clients.credit_enabled can be charged to their
    * credit account -- 'credito' is hidden from the method select
    * otherwise (also enforced server-side, see apply_credit_payment_charge). */
@@ -70,10 +76,30 @@ export function PaymentDrawer({
    * still owed, not blank) and caps how much a single payment can be for
    * (a sale can't end up "overpaid"). */
   pendingAmount: number
+  /** true solo si el caller ya confirmó que el tenant tiene 'dian_directo'
+   * activo (2026-09-08) -- con esto en false/ausente, nada de lo nuevo de
+   * facturación se renderiza ni corre: la feature queda 100% inerte para
+   * cualquier tenant sin facturación electrónica. */
+  dianConnected?: boolean
+  /** Comprador ya elegido de la cuenta/pedido -- precarga el selector de
+   * "a nombre de quién factura" para que el caso común (facturarle al mismo
+   * que ya está en la cuenta) no pida ningún click extra. Solo se usa
+   * cuando `order` es null (flujo de creación, POS) -- un pedido ya
+   * existente ("Agregar pago") ya tiene comprador fijo, no se puede
+   * cambiar acá. */
+  defaultBuyer?: Client | null
+  /** Fuente de candidatos para el selector de comprador -- mismo callback
+   * que ya le pasa el caller a su propio ClientPickerCard (ej.
+   * searchPosClients), no se reimplementa la búsqueda acá. */
+  onSearchBuyers?: (query: string) => Promise<Client[]>
   /** Recibe el pedido que se acaba de cobrar (el existente, o el que
    * `createOrder` acaba de crear) -- así el caller puede, por ejemplo,
-   * disparar la impresión del ticket sin tener que volver a resolverlo. */
-  onSaved: (order: SalesOrder) => void
+   * disparar la impresión del ticket sin tener que volver a resolverlo.
+   * `einvoicing` solo viene definido si se pidió factura electrónica en
+   * este cobro: `error` no-nulo significa que la DIAN rechazó o el envío
+   * falló -- el pago YA quedó registrado igual (nunca se revierte por
+   * esto), es el caller quien decide qué mostrar/qué hacer con ese error. */
+  onSaved: (order: SalesOrder, einvoicing?: { attempted: boolean; error: string | null }) => void
 }) {
   const { t } = useLanguage()
   const currencyCode = order?.currency ?? currency
@@ -106,6 +132,13 @@ export function PaymentDrawer({
   // (una línea más, un envío distinto).
   const [totals, setTotals] = useState<OrderTotalsBreakdown | null>(null)
 
+  // Facturación electrónica al cobrar (2026-09-08) -- ver dianConnected.
+  // Nunca marcado por default: es una decisión explícita del cajero en
+  // cada cobro, no algo que se herede de un cobro anterior.
+  const [wantsInvoice, setWantsInvoice] = useState(false)
+  const [invoiceBuyer, setInvoiceBuyer] = useState<Client | null>(null)
+  const [sendingInvoice, setSendingInvoice] = useState(false)
+
   useEffect(() => {
     if (!open) return
     setMethod('efectivo')
@@ -118,6 +151,9 @@ export function PaymentDrawer({
     setWompiLink(null)
     setWompiError(null)
     setWompiCopied(false)
+    setWantsInvoice(false)
+    setInvoiceBuyer(defaultBuyer)
+    setSendingInvoice(false)
     if (!order) {
       // Todavía no hay pedido (POS): el desglose ya viene calculado por el
       // servidor desde el caller, no hay nada que consultar.
@@ -226,7 +262,7 @@ export function PaymentDrawer({
       // Acá es donde el cobro se hace real: si el pedido todavía no existe
       // (POS), se crea y confirma recién ahora -- cerrar este drawer sin
       // guardar no deja nada hecho.
-      const target = order ?? (createOrder ? await createOrder() : null)
+      const target = order ?? (createOrder ? await createOrder(wantsInvoice ? (invoiceBuyer?.id ?? null) : undefined) : null)
       if (!target) throw new Error(t('orders.paymentDrawer.errors.save'))
 
       await createPayment({
@@ -237,7 +273,31 @@ export function PaymentDrawer({
         paid_at: paidAt || undefined,
         notes: finalNotes,
       })
-      onSaved(target)
+
+      // Envío a la DIAN, SIEMPRE después del pago -- un rechazo acá nunca
+      // revierte el cobro, la plata ya entró independientemente de si el
+      // documento fiscal se pudo emitir. Solo se intenta cuando este mismo
+      // pago deja el saldo en $0 -- una venta parcial no se factura todavía
+      // (mismo candado que ya aplica el servidor, ver dian-submit).
+      let einvoicing: { attempted: boolean; error: string | null } | undefined
+      if (wantsInvoice && pendingAmount - amountValue <= 0) {
+        setSendingInvoice(true)
+        try {
+          // Un rechazo de la DIAN NO es un error HTTP -- dian-submit
+          // responde 200 con status:'error' + faultReason (resultado de
+          // negocio esperado, no una falla de la llamada), mismo criterio
+          // que ya usa OrderDetail.tsx::handleSendInvoice. Sin este chequeo
+          // explícito, un rechazo real quedaba tratado como éxito.
+          const result = await sendPosInvoiceForOrder(target.id)
+          einvoicing = { attempted: true, error: result.status === 'error' ? (result.faultReason ?? t('orders.paymentDrawer.einvoicing.errors.send')) : null }
+        } catch (err) {
+          einvoicing = { attempted: true, error: err instanceof Error ? err.message : t('orders.paymentDrawer.einvoicing.errors.send') }
+        } finally {
+          setSendingInvoice(false)
+        }
+      }
+
+      onSaved(target, einvoicing)
       onClose()
     } catch (err) {
       setFormError(err instanceof Error ? err.message : t('orders.paymentDrawer.errors.save'))
@@ -316,6 +376,39 @@ export function PaymentDrawer({
         </div>
       </div>
 
+      {/* Facturación electrónica DIAN al cobrar (2026-09-08) -- solo
+          existe si el caller ya confirmó que el tenant tiene DIAN
+          conectada. El selector de comprador solo aplica al flujo de
+          creación (POS): un pedido ya existente ("Agregar pago") ya tiene
+          su comprador fijo desde que se creó. */}
+      {dianConnected && (
+        <div className="mb-4 rounded-xl border border-brand-100 bg-brand-50/40 p-3">
+          <div className="flex items-center gap-2">
+            <Checkbox id="payment-generate-invoice" checked={wantsInvoice} onCheckedChange={(v) => setWantsInvoice(!!v)} />
+            <Label htmlFor="payment-generate-invoice" className="text-xs font-semibold text-brand-800">
+              {t('orders.paymentDrawer.einvoicing.checkbox')}
+            </Label>
+          </div>
+          {wantsInvoice && !order && (
+            <div className="mt-2">
+              <ClientPickerCard
+                tenantId={tenantId}
+                client={invoiceBuyer}
+                onSelect={setInvoiceBuyer}
+                onSearch={onSearchBuyers ?? (async () => [])}
+                emptyLabel={t('pos.customer.walkIn')}
+                allowClear
+                clearActionLabel={t('pos.customer.useWalkIn')}
+                bare
+              />
+              {invoiceBuyer && (!invoiceBuyer.dian_document_type_code || !invoiceBuyer.document_number) && (
+                <p className="mt-1 text-[11px] text-amber-700">{t('orders.paymentDrawer.einvoicing.missingDocWarning')}</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {order && wompiConnected && pendingAmount > 0 && (
         <div className="mb-4 space-y-2 rounded-lg border border-brand-100 bg-brand-50/40 p-3">
           <p className="text-xs font-medium text-brand-700">{t('orders.paymentDrawer.wompi.title')}</p>
@@ -377,7 +470,7 @@ export function PaymentDrawer({
 
         <div className="flex gap-2 border-t border-brand-100 pt-5">
           <Button type="submit" disabled={submitting}>
-            {submitting ? t('common.actions.saving') : t('common.actions.save')}
+            {sendingInvoice ? t('orders.paymentDrawer.einvoicing.sending') : submitting ? t('common.actions.saving') : t('common.actions.save')}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>
             {t('common.actions.cancel')}

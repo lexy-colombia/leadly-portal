@@ -60,3 +60,20 @@ export async function getIntegrationCredentialConfiguredSecrets(credentialId: st
   if (error) throw error
   return (data as string[]) ?? []
 }
+
+/** "Conectado" real para DIAN directo -- NO es `is_active` (ese campo
+ * defaultea a `true` en la tabla y la fila se crea apenas se toca CUALQUIER
+ * campo del drawer, ej. cambiar de sandbox a producción, mucho antes de
+ * subir el certificado). Exige el certificado subido (`config.storage_path`)
+ * Y su contraseña -- mismo criterio que ya usaba IntegrationsGrid.tsx
+ * (`checkConnected`) y DianDirectoCredentialDrawer.tsx para su propio banner
+ * de estado, ahora compartido para que un tercer lugar (PosTabAccount.tsx)
+ * no reinvente una versión más floja del mismo chequeo. */
+export async function isDianDirectoConnected(tenantId: string | null): Promise<boolean> {
+  const credential = await getIntegrationCredential('dian_directo', tenantId)
+  if (!credential) return false
+  const config = (credential.config ?? {}) as Record<string, unknown>
+  if (!config.storage_path) return false
+  const secrets = await getIntegrationCredentialConfiguredSecrets(credential.id)
+  return secrets.includes('certificate_password')
+}

@@ -7,7 +7,8 @@ import { getClient } from '../../../lib/api/clients'
 import { searchPosClients } from '../../../lib/api/pos'
 import { getClientCreditSummary } from '../../../lib/api/credit'
 import { getStoreCreditBalance } from '../../../lib/api/returns'
-import { previewOrderTotals } from '../../../lib/api/orders'
+import { isDianDirectoConnected } from '../../../lib/api/integrations'
+import { previewOrderTotals, getOrderBare } from '../../../lib/api/orders'
 import type { OrderItemInput, OrderTotalsBreakdown, StockShortfall } from '../../../lib/api/orders'
 import { useOrderTotalsPreview } from '../../../lib/useOrderTotalsPreview'
 import { listProducts } from '../../../lib/api/products'
@@ -17,7 +18,7 @@ import { listBrands } from '../../../lib/api/brands'
 import { listWarehouses } from '../../../lib/api/warehouses'
 import { listStockByWarehouse } from '../../../lib/api/stockMovements'
 import type { ProductWarehouseStockRow } from '../../../lib/api/stockMovements'
-import type { Brand, CartItem, Client, PosPoint, ProductCategory, Warehouse } from '../../../types/domain'
+import type { Brand, CartItem, Client, PosPoint, ProductCategory, SalesOrder, Warehouse } from '../../../types/domain'
 import { OrderItemsEditor } from '../orders/OrderItemsEditor'
 import { PaymentDrawer } from '../orders/PaymentDrawer'
 import { ClientPickerCard } from '../clients/ClientPickerCard'
@@ -67,6 +68,14 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
 
   const [creditBalance, setCreditBalance] = useState(0)
   const [storeCreditBalance, setStoreCreditBalance] = useState(0)
+  // Factura electrónica al cobrar (2026-09-08) -- todo lo nuevo de
+  // facturación en PaymentDrawer queda inerte mientras esto sea false.
+  // isDianDirectoConnected exige certificado + contraseña reales, NO solo
+  // is_active=true -- ese campo defaultea a true en la fila apenas se toca
+  // cualquier campo del drawer de Integraciones, mucho antes de terminar de
+  // configurarla (bug real encontrado en vivo: un tenant sin certificado
+  // subido ya veía el check acá).
+  const [dianConnected, setDianConnected] = useState(false)
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -89,6 +98,16 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
   // ON DELETE SET NULL), y lo que corresponde ahí es cerrarla.
   const [charges, setCharges] = useState<CartCharge[]>([])
   const [confirmingClose, setConfirmingClose] = useState(false)
+  // Cobrar el saldo pendiente de un cargo ya hecho (pago parcial) sin salir
+  // de esta pantalla -- antes la única forma era abrir el pedido en otra
+  // pestaña o buscarlo en Órdenes, pedido explícito del usuario de
+  // resolverlo ahí mismo. `getOrderBare` trae el pedido (PaymentDrawer
+  // necesita el objeto entero, no solo el resumen de CartCharge) recién al
+  // tocar "Agregar pago", nunca antes -- sin los joins de `getOrder`
+  // (contacto/oportunidad/direcciones/perfil/punto de venta), que este
+  // drawer no lee y que eran el motivo real de la demora reportada.
+  const [payingCharge, setPayingCharge] = useState<{ order: SalesOrder; pendingAmount: number } | null>(null)
+  const [payingChargeId, setPayingChargeId] = useState<string | null>(null)
   /** Cobro en curso: qué se va a cobrar y por cuánto. Abrir el drawer con
    * esto NO escribe nada -- el pedido se crea (y se confirma) recién cuando
    * el cajero registra el pago, ver createOrder en PaymentDrawer. Antes se
@@ -124,6 +143,9 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
     listBrands(tenantId).then(setBrands).catch(() => {})
     listWarehouses(tenantId).then(setWarehouses).catch(() => {})
     listStockByWarehouse(tenantId).then(setStockRows).catch(() => {})
+    isDianDirectoConnected(tenantId)
+      .then(setDianConnected)
+      .catch(() => setDianConnected(false))
   }, [tenantId])
 
   useEffect(() => {
@@ -257,6 +279,24 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
     }
   }
 
+  /** Cierra la cuenta sola apenas queda en $0 -- sin productos por cobrar en
+   * el carrito y sin ningún cargo con saldo pendiente, seguir mostrándola
+   * en el listado de mesas abiertas no aporta nada (pedido explícito del
+   * usuario). Mientras quede un cargo con saldo pendiente NO cierra sola --
+   * mismo criterio de siempre ("cobrar no cierra la mesa"), ahora resuelto
+   * ahí mismo con "Agregar pago" (ver handleOpenChargePayment) en vez de
+   * obligar a salir a Órdenes. `cartItemCount` se recibe como parámetro (no
+   * se lee del estado `items`) porque justo después de cobrar ese estado
+   * todavía no se actualizó -- usar el array recién releído del servidor
+   * evita decidir con un conteo viejo. */
+  async function closeIfFullyPaid(cartItemCount: number, freshCharges: CartCharge[]) {
+    const fullyPaid = freshCharges.length > 0 && freshCharges.every((c) => c.total - c.paid <= 0)
+    if (cartItemCount === 0 && fullyPaid) {
+      await closeCart(cartId).catch(() => {})
+      onClosed()
+    }
+  }
+
   const posPointName = points.find((p) => p.id === posPointId)?.name ?? null
 
   async function handleCancel() {
@@ -268,6 +308,26 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
       setError(err instanceof Error ? err.message : t('pos.tabs.errors.cancel'))
       setCancelling(false)
       setConfirmingCancel(false)
+    }
+  }
+
+  /** Abre el pago del saldo pendiente de un cargo ya hecho (pago parcial)
+   * sin salir de esta pantalla -- antes había que abrir el pedido en otra
+   * pestaña o buscarlo en Órdenes. Trae el pedido recién acá (PaymentDrawer
+   * necesita el objeto entero, CartCharge es solo un resumen) con
+   * `getOrderBare` -- sin joins, el fetch más barato posible antes de abrir
+   * el drawer. */
+  async function handleOpenChargePayment(charge: CartCharge) {
+    setError(null)
+    setPayingChargeId(charge.id)
+    try {
+      const order = await getOrderBare(charge.id)
+      if (!order) throw new Error(t('pos.tabs.errors.loadOrder'))
+      setPayingCharge({ order, pendingAmount: charge.total - charge.paid })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('pos.tabs.errors.loadOrder'))
+    } finally {
+      setPayingChargeId(null)
     }
   }
 
@@ -366,28 +426,27 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
     return sum + qty * i.unit_price - discount
   }, 0)
 
-  /** Tras pagar (total o parcial), la cuenta puede seguir teniendo
-   * productos sin cobrar -- create-order la deja abierta en ese caso. Si
-   * todavía queda algo, se recarga acá mismo mostrando lo que resta; si
-   * no, se vuelve al listado (la mesa quedó libre). */
-  /** Se llama al salir del drawer de pago, se haya registrado el pago o no
-   * -- nunca se vuelve al listado: cobrar no cierra la mesa (pedido
-   * explícito del usuario). Releer es obligatorio en los DOS casos: los
-   * ítems que se acaban de cobrar ya salieron del carrito del lado del
-   * servidor, así que si el estado local se quedara con ellos el
-   * autoguardado los volvería a insertar en la cuenta y se cobrarían dos
-   * veces. Si no quedó nada, la cuenta sigue abierta e igual de usable (se
-   * le pueden seguir cargando productos) hasta que el cajero apriete
-   * "Cerrar cuenta". */
-  async function handlePaymentDrawerDone() {
+  /** Se llama al salir del drawer de pago, se haya registrado el pago o no.
+   * Releer es obligatorio en los DOS casos: los ítems que se acaban de
+   * cobrar ya salieron del carrito del lado del servidor, así que si el
+   * estado local se quedara con ellos el autoguardado los volvería a
+   * insertar en la cuenta y se cobrarían dos veces. Si no quedó nada Y no
+   * hay ningún cargo con saldo pendiente, la cuenta se cierra sola
+   * (closeIfFullyPaid); si queda algo por cobrar -- productos sin cobrar, o
+   * un cargo con saldo pendiente -- sigue abierta e igual de usable.
+   * `allowAutoClose=false` cuando este cobro pidió factura electrónica y la
+   * DIAN la rechazó (o el envío falló) -- la cuenta se queda abierta y
+   * visible a propósito, para que el cajero vea el error ahí mismo en vez
+   * de que la pantalla navegue afuera sola. */
+  async function handlePaymentDrawerDone(allowAutoClose = true) {
     // PaymentDrawer llama onSaved() y acto seguido onClose() al guardar --
     // ambos apuntan acá, así que sin esta guarda se releería el carrito dos
     // veces por el mismo cobro.
     if (drawerDoneRef.current) return
     drawerDoneRef.current = true
     setPendingCharge(null)
-    listChargesFromCart(cartId).then(setCharges).catch(() => {})
-    const cart = await getCart(cartId).catch(() => null)
+    const [cart, freshCharges] = await Promise.all([getCart(cartId).catch(() => null), listChargesFromCart(cartId).catch(() => [] as CartCharge[])])
+    setCharges(freshCharges)
     if (!cart) return
     // Vuelve a "primer render" para el autosave -- este es el nuevo estado
     // base recién leído del servidor, no una edición pendiente que haya que
@@ -406,6 +465,7 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
         discount_amount: i.discount_amount,
       })),
     )
+    if (allowAutoClose) await closeIfFullyPaid(cart.items.length, freshCharges)
   }
 
   if (!loaded) return <PageSpinner />
@@ -479,6 +539,19 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
                           <span className="text-xs font-semibold text-brand-800">{formatCurrency(charge.total, charge.currency)}</span>
                         </span>
                       </div>
+                      {pending > 0 && (
+                        <div className="mt-1 flex justify-end">
+                          <Button
+                            type="button"
+                            size="xs"
+                            variant="outline"
+                            onClick={() => handleOpenChargePayment(charge)}
+                            disabled={payingChargeId === charge.id}
+                          >
+                            {payingChargeId === charge.id ? t('common.actions.loading') : t('pos.tabs.charges.addPayment')}
+                          </Button>
+                        </div>
+                      )}
                       <ul className="mt-1 space-y-0.5">
                         {charge.items.map((item, index) => (
                           <li key={index} className="flex items-baseline justify-between gap-3 text-xs text-brand-500">
@@ -665,17 +738,55 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
       {pendingCharge && (
         <PaymentDrawer
           open
-          onClose={handlePaymentDrawerDone}
+          onClose={() => handlePaymentDrawerDone()}
           tenantId={tenantId}
           order={null}
           totals={pendingCharge.totals}
           pendingAmount={pendingCharge.totals.total}
-          createOrder={() => createOrderFromCart(cartId, pendingCharge.items, { keepCartOpen: true, confirm: true, checkoutToken: chargeTokenRef.current ?? undefined })}
+          createOrder={(buyerContactId) =>
+            createOrderFromCart(cartId, pendingCharge.items, {
+              keepCartOpen: true,
+              confirm: true,
+              checkoutToken: chargeTokenRef.current ?? undefined,
+              buyerContactId,
+            })
+          }
           creditEnabled={customer?.credit_enabled ?? false}
           storeCreditBalance={storeCreditBalance}
-          onSaved={(chargedOrder) => {
+          dianConnected={dianConnected}
+          defaultBuyer={customer}
+          onSearchBuyers={(q) => searchPosClients(tenantId, q)}
+          onSaved={(chargedOrder, einvoicing) => {
+            if (einvoicing?.error) setError(einvoicing.error)
             if (receiptPrinter.autoPrintEnabled) receiptPrinter.print(chargedOrder.id, posPointName)
-            handlePaymentDrawerDone()
+            handlePaymentDrawerDone(!einvoicing?.error)
+          }}
+        />
+      )}
+
+      {/* Saldo pendiente de un cargo ya hecho (pago parcial) -- ver
+          handleOpenChargePayment. A diferencia del drawer de arriba, acá
+          el pedido ya existe (`order`, no `createOrder`): registrar el
+          pago no crea nada nuevo, solo suma el pago que falta -- ni el
+          comprador de la factura se puede elegir acá (ya quedó fijo cuando
+          se creó el pedido), PaymentDrawer no muestra ese selector cuando
+          `order` no es null. */}
+      {payingCharge && (
+        <PaymentDrawer
+          open
+          onClose={() => setPayingCharge(null)}
+          tenantId={tenantId}
+          order={payingCharge.order}
+          pendingAmount={payingCharge.pendingAmount}
+          creditEnabled={customer?.credit_enabled ?? false}
+          storeCreditBalance={storeCreditBalance}
+          dianConnected={dianConnected}
+          onSaved={async (_order, einvoicing) => {
+            setPayingCharge(null)
+            if (einvoicing?.error) setError(einvoicing.error)
+            const freshCharges = await listChargesFromCart(cartId).catch(() => [] as CartCharge[])
+            setCharges(freshCharges)
+            if (!einvoicing?.error) await closeIfFullyPaid(items.length, freshCharges)
           }}
         />
       )}

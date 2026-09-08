@@ -88,6 +88,35 @@ async function invokeDianSubmit(action: 'send_invoice' | 'retry_invoice', invoic
   return data as SendSalesInvoiceResult
 }
 
+/** Envía a la DIAN, en el momento de cobrar, la factura que el trigger de
+ * confirmación ya reservó para un pedido del POS -- acción `send_pos_invoice`
+ * de dian-submit, deliberadamente más angosta que sendSalesInvoiceToDian
+ * (esa es admin-only para reenviar/reintentar cualquier factura; esta la
+ * puede disparar cualquiera con permiso `pos.checkout`, solo sobre pedidos
+ * `sales_channel='pos'` ya pagos del todo). Nunca crea una factura -- si el
+ * pedido no tiene ninguna reservada, o el comprador elegido no tiene datos
+ * fiscales, el servidor responde con un error claro. */
+export async function sendPosInvoiceForOrder(orderId: string): Promise<SendSalesInvoiceResult> {
+  const { data, error } = await supabase.functions.invoke<SendSalesInvoiceResult & { error?: string }>('dian-submit', {
+    body: { action: 'send_pos_invoice', order_id: orderId },
+  })
+  if (error) {
+    const context = (error as { context?: Response }).context
+    if (context && typeof context.json === 'function') {
+      let specificMessage: string | undefined
+      try {
+        const body = await context.json()
+        specificMessage = body?.error
+      } catch {
+        /* fall through to generic error */
+      }
+      if (specificMessage) throw new Error(specificMessage)
+    }
+    throw error
+  }
+  return data as SendSalesInvoiceResult
+}
+
 interface InvoicePdfResponse {
   pdf_base64: string
   filename: string

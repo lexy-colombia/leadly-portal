@@ -66,9 +66,32 @@ export async function saveCartDraft(input: SaveCartDraftInput): Promise<{ cart: 
 export async function createOrderFromCart(
   cartId: string,
   items?: { id: string; quantity: number }[],
-  { keepCartOpen = false, confirm = false, checkoutToken }: { keepCartOpen?: boolean; confirm?: boolean; checkoutToken?: string } = {},
+  {
+    keepCartOpen = false,
+    confirm = false,
+    checkoutToken,
+    buyerContactId,
+  }: {
+    keepCartOpen?: boolean
+    confirm?: boolean
+    checkoutToken?: string
+    /** Comprador de ESTA orden puntual (facturación DIAN por división del
+     * POS) -- ausente = el contacto de la cuenta de siempre; string = un
+     * cliente puntual distinto; `null` explícito = el walk-in del tenant.
+     * `undefined` se omite del body (JSON.stringify no serializa claves
+     * `undefined`), así el servidor distingue "no mandaron nada" de "sí,
+     * mandaron null" -- ver create-order/index.ts. */
+    buyerContactId?: string | null
+  } = {},
 ): Promise<SalesOrder> {
-  return invokeAndUnwrap<SalesOrder>('create-order', { cart_id: cartId, items, keep_cart_open: keepCartOpen, confirm, checkout_token: checkoutToken })
+  return invokeAndUnwrap<SalesOrder>('create-order', {
+    cart_id: cartId,
+    items,
+    keep_cart_open: keepCartOpen,
+    confirm,
+    checkout_token: checkoutToken,
+    buyer_contact_id: buyerContactId,
+  })
 }
 
 /** Cerrar la mesa -- deliberadamente separado de cobrar (pedido explícito

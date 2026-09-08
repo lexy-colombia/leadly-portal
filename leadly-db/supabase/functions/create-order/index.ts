@@ -89,6 +89,15 @@ interface CreateOrderBody {
   keep_cart_open?: boolean;
   confirm?: boolean;
   checkout_token?: string | null;
+  // Comprador de ESTA orden puntual, para facturación DIAN por división
+  // (2026-09-08, POS "Dividir cuenta"): ausente = comportamiento de
+  // siempre (contact_id: cart.contact_id); string = un cliente puntual
+  // distinto al de la cuenta (validado contra el tenant del caller antes
+  // de usarlo, nunca confiar en el id tal cual); null explícito = el
+  // walk-in del tenant. Nunca se aplica sobre un pedido ya existente
+  // (retry por checkout_token) -- el comprador de un pedido ya creado no
+  // se puede cambiar después.
+  buyer_contact_id?: string | null;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -217,6 +226,25 @@ Deno.serve(async (req) => {
     }
   }
 
+  // Comprador de esta orden puntual -- ver CreateOrderBody. Solo se resuelve
+  // cuando de verdad se va a insertar una orden nueva (nunca sobre un
+  // retry que ya encontró una existente por checkout_token).
+  let resolvedContactId: string = cart.contact_id;
+  if (!orderId && body.buyer_contact_id !== undefined) {
+    if (body.buyer_contact_id === null) {
+      const { data: walkIn } = await adminClient.from("clients").select("id").eq("tenant_id", tenantId).eq("is_walk_in", true).maybeSingle();
+      if (!walkIn) return json({ error: "No se encontró el cliente de mostrador del tenant." }, 500);
+      resolvedContactId = walkIn.id as string;
+    } else {
+      // callerClient (RLS) en vez de adminClient -- si el cliente es de otro
+      // tenant, esto viene null igual que "no existe", nunca confiar en el
+      // id sin comprobar dueño primero.
+      const { data: buyer } = await callerClient.from("clients").select("id").eq("id", body.buyer_contact_id).maybeSingle();
+      if (!buyer) return json({ error: "Cliente no encontrado." }, 404);
+      resolvedContactId = buyer.id as string;
+    }
+  }
+
   if (!orderId) {
     // Rechazo duro -- ver comentario de cabecera. Se corre ACÁ, antes de
     // cualquier insert, para que un stock insuficiente no deje ninguna
@@ -236,7 +264,7 @@ Deno.serve(async (req) => {
       .insert({
         tenant_id: tenantId,
         cart_id: cart.id,
-        contact_id: cart.contact_id,
+        contact_id: resolvedContactId,
         opportunity_id: cart.opportunity_id,
         notes: cart.notes,
         valid_until: cart.valid_until,
