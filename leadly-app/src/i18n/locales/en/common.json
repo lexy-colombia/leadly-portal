@@ -54,6 +54,8 @@
   "common.actions.retry": "Retry",
   "common.actions.view": "View",
   "common.actions.add": "Add",
+  "common.actions.decreaseQuantity": "Decrease quantity",
+  "common.actions.increaseQuantity": "Increase quantity",
   "common.actions.search": "Search",
   "common.actions.clearFilters": "Clear filters",
   "common.actions.viewAll": "View all",

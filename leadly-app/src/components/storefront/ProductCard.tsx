@@ -5,6 +5,7 @@ import { useDebouncedQuantity } from '@/lib/useDebouncedQuantity'
 import type { StorefrontProductSummary, StorefrontProductVariant } from '@/lib/api/storefront'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { QuantityStepper } from '@/components/molecules'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { StorefrontImage } from '@/components/storefront/StorefrontImage'
 
@@ -145,33 +146,14 @@ function ProductCardAction({
   }
 
   return (
-    <div className={`relative flex h-7 items-center justify-between rounded-lg border transition-colors ${saving ? 'border-primary/60' : 'border-border'}`}>
-      <button type="button" onClick={() => nudge(-1)} className="flex h-full flex-1 items-center justify-center text-foreground hover:bg-muted" aria-label={decreaseLabel}>
-        <MinusIcon className="size-3.5" />
-      </button>
-      <input
-        type="number"
-        inputMode="numeric"
-        min={0}
-        value={value}
-        onChange={(e) => setValue(Number(e.target.value))}
-        className="w-8 border-0 bg-transparent text-center text-xs font-medium text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-      />
-      <button
-        type="button"
-        disabled={outOfStock}
-        onClick={() => nudge(1)}
-        className="flex h-full flex-1 items-center justify-center text-foreground hover:bg-muted disabled:opacity-40"
-        aria-label={increaseLabel}
-      >
-        <PlusIcon className="size-3.5" />
-      </button>
-      {saving && (
-        <span className="absolute -top-1.5 -right-1.5 flex size-3.5 items-center justify-center rounded-full bg-background">
-          <Loader2Icon className="size-3 animate-spin text-primary" />
-        </span>
-      )}
-    </div>
+    <QuantityStepper
+      value={value}
+      onChange={setValue}
+      disableIncrement={outOfStock}
+      saving={saving}
+      decreaseLabel={decreaseLabel}
+      increaseLabel={increaseLabel}
+    />
   )
 }
 

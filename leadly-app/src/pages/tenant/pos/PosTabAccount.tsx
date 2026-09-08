@@ -22,6 +22,7 @@ import { OrderItemsEditor } from '../orders/OrderItemsEditor'
 import { PaymentDrawer } from '../orders/PaymentDrawer'
 import { ClientPickerCard } from '../clients/ClientPickerCard'
 import { ConfirmDialog } from '@/components/organisms'
+import { QuantityStepper } from '@/components/molecules'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -425,6 +426,7 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
             warehouses={warehouses}
             stockRows={stockRows}
             shortfalls={stockShortfalls}
+            searchAlwaysOpen
             onChange={(next) => {
               setStockShortfalls([])
               setItems(next)
@@ -698,22 +700,14 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
                     {item.quantity === 1 ? (
                       <Checkbox checked={qty > 0} onCheckedChange={(checked) => setSplitQuantity(item, checked ? 1 : 0)} />
                     ) : (
-                      <div className="flex shrink-0 items-center gap-1">
-                        <Button type="button" variant="outline" size="icon-xs" onClick={() => setSplitQuantity(item, qty - 1)} disabled={qty <= 0}>
-                          −
-                        </Button>
-                        <Input
-                          type="number"
-                          min={0}
-                          max={item.quantity}
-                          value={qty}
-                          onChange={(e) => setSplitQuantity(item, Number(e.target.value) || 0)}
-                          className="h-7 w-12 text-center"
-                        />
-                        <Button type="button" variant="outline" size="icon-xs" onClick={() => setSplitQuantity(item, qty + 1)} disabled={qty >= item.quantity}>
-                          +
-                        </Button>
-                      </div>
+                      <QuantityStepper
+                        value={qty}
+                        onChange={(v) => setSplitQuantity(item, v)}
+                        max={item.quantity}
+                        decreaseLabel={t('common.actions.decreaseQuantity')}
+                        increaseLabel={t('common.actions.increaseQuantity')}
+                        className="w-24 shrink-0"
+                      />
                     )}
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-xs text-brand-800">{item.product_name}</span>

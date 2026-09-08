@@ -12,10 +12,9 @@ import { getClientCreditSummary } from '../../../lib/api/credit'
 import { getStoreCreditBalance } from '../../../lib/api/returns'
 import type { Client, OrderPaymentMethod } from '../../../types/domain'
 import { PageSpinner } from '@/components/atoms'
-import { CurrencyInput, OrderTotalsSummary, ProductSearchBox, ProductSearchResultRow } from '@/components/molecules'
+import { CurrencyInput, OrderTotalsSummary, ProductSearchBox, ProductSearchResultRow, QuantityStepper } from '@/components/molecules'
 import { PrinterIcon } from '@/components/atoms/icons'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { TrashIcon } from '@/components/atoms/icons'
@@ -69,6 +68,7 @@ export function PosFastCheckout() {
   const [results, setResults] = useState<PosProduct[]>([])
   const [scanError, setScanError] = useState<string | null>(null)
   const [variantPickerFor, setVariantPickerFor] = useState<PosProduct | null>(null)
+  const [variantPickerQty, setVariantPickerQty] = useState(1)
   const scanInputRef = useRef<HTMLInputElement>(null)
 
   const [customer, setCustomer] = useState<Client | null>(null)
@@ -167,11 +167,12 @@ export function PosFastCheckout() {
     })
   }
 
-  function handlePick(product: PosProduct) {
+  function handlePick(product: PosProduct, quantity = 1) {
     if (product.has_variants) {
       setVariantPickerFor(product)
+      setVariantPickerQty(quantity)
     } else {
-      addToCart(product, null)
+      addToCart(product, null, quantity)
     }
     setQuery('')
     setResults([])
@@ -195,6 +196,7 @@ export function PosFastCheckout() {
         setResults([])
       } else if (match.product.has_variants) {
         setVariantPickerFor(match.product)
+        setVariantPickerQty(1)
         setQuery('')
         setResults([])
       } else {
@@ -438,13 +440,13 @@ export function PosFastCheckout() {
                       <p className="truncate text-xs text-brand-400">{[l.variantLabel, l.sku ? `SKU: ${l.sku}` : null].filter(Boolean).join(' · ') || '—'}</p>
                       {shortfall && <p className="text-[11px] font-medium text-red-500">{t('pos.stock.available', { count: shortfall.available })}</p>}
                     </div>
-                    <Input
-                      type="number"
-                      min="1"
+                    <QuantityStepper
                       value={l.quantity}
-                      onChange={(e) => updateQuantity(key, Number(e.target.value) || 0)}
-                      aria-label={t('pos.cart.quantity')}
-                      className={`h-8 w-16 text-right ${shortfall ? 'border-red-400 text-red-700' : ''}`}
+                      onChange={(v) => updateQuantity(key, v)}
+                      invalid={!!shortfall}
+                      decreaseLabel={t('common.actions.decreaseQuantity')}
+                      increaseLabel={t('common.actions.increaseQuantity')}
+                      className="w-24 shrink-0"
                     />
                     <p className="w-24 shrink-0 text-right text-xs font-semibold text-brand-800">{formatCurrency(l.price * l.quantity)}</p>
                     <Button type="button" variant="destructive" size="icon-xs" onClick={() => removeLine(key)} aria-label={t('pos.cart.remove')} className="shrink-0 rounded-full">
@@ -468,14 +470,17 @@ export function PosFastCheckout() {
                   <XIcon className="size-4 text-brand-400" />
                 </button>
               </div>
-              <p className="mb-2 text-xs text-brand-400">{t('pos.search.chooseVariant')}</p>
+              <p className="mb-2 text-xs text-brand-400">
+                {t('pos.search.chooseVariant')}
+                {variantPickerQty > 1 && ` (×${variantPickerQty})`}
+              </p>
               <div className="max-h-72 space-y-1.5 overflow-y-auto">
                 {variantPickerFor.variants.map((v) => (
                   <button
                     key={v.id}
                     type="button"
                     onClick={() => {
-                      addToCart(variantPickerFor, v)
+                      addToCart(variantPickerFor, v, variantPickerQty)
                       setVariantPickerFor(null)
                     }}
                     className="flex w-full items-center justify-between rounded-lg border border-brand-100 px-3 py-2 text-left text-xs hover:bg-accent-50"

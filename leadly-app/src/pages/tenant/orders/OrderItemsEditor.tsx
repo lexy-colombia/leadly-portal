@@ -6,7 +6,7 @@ import { descendantIds } from '../../../lib/api/productCategories'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { CategoryTreeFilter, ComboboxFilter, CurrencyInput, ProductSearchBox, ProductSearchResultRow } from '@/components/molecules'
+import { CategoryTreeFilter, ComboboxFilter, CurrencyInput, ProductSearchBox, ProductSearchResultRow, QuantityStepper } from '@/components/molecules'
 import { ProductImage } from '@/components/atoms'
 import { TrashIcon } from '@/components/atoms/icons'
 import type { OrderItemInput, StockShortfall } from '../../../lib/api/orders'
@@ -74,6 +74,7 @@ export function OrderItemsEditor({
   shortfalls = [],
   currency = 'COP',
   locked = false,
+  searchAlwaysOpen = false,
   onChange,
 }: {
   items: OrderItemInput[]
@@ -94,6 +95,12 @@ export function OrderItemsEditor({
    * de UX: deshabilita los controles en vez de dejar que el agente edite y
    * recién se entere del error al perder el foco). */
   locked?: boolean
+  /** true solo en el POS (PosTabAccount, venta rápida): el buscador de
+   * productos queda visible siempre, sin el paso extra de tocar "Agregar
+   * producto" primero -- ni el botón para abrirlo ni la X para cerrarlo se
+   * muestran, así nunca puede quedar oculto por accidente. Órdenes (fuera
+   * del POS) sigue con el buscador colapsado por default. */
+  searchAlwaysOpen?: boolean
   onChange: (items: OrderItemInput[]) => void
 }) {
   const { t } = useLanguage()
@@ -104,7 +111,7 @@ export function OrderItemsEditor({
   // espacio, no solo deshabilitarlo con un solo valor fijo.
   const singleWarehouse = warehouses.length <= 1
 
-  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(searchAlwaysOpen)
   const [query, setQuery] = useState('')
   const [scanError, setScanError] = useState<string | null>(null)
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null)
@@ -142,7 +149,7 @@ export function OrderItemsEditor({
   /** `variant` is only passed by the barcode scanner (see handleScanSubmit)
    * -- clicking a search result never knows the variant upfront, that's
    * still resolved afterwards via the row's own variant Select. */
-  function addProductLine(product: ProductWithImages, variant: ProductVariant | null = null) {
+  function addProductLine(product: ProductWithImages, variant: ProductVariant | null = null, quantity = 1) {
     onChange([
       ...items,
       {
@@ -151,7 +158,7 @@ export function OrderItemsEditor({
         warehouse_id: defaultWarehouseId,
         product_name: product.name,
         sku: variant?.sku ?? product.sku,
-        quantity: 1,
+        quantity,
         // A variant product's unit_price isn't known until a variant is
         // chosen -- see handleVariantSelect -- so this leaves it at 0 rather
         // than defaulting to the parent's retail_price, which would be
@@ -192,8 +199,8 @@ export function OrderItemsEditor({
    * pedido explícito del usuario: sin esto había que hacer click en el
    * campo y borrar a mano el texto antes de poder buscar el siguiente
    * producto. */
-  function handlePick(product: ProductWithImages) {
-    addProductLine(product)
+  function handlePick(product: ProductWithImages, quantity = 1) {
+    addProductLine(product, null, quantity)
     setQuery('')
     setScanError(null)
   }
@@ -244,9 +251,11 @@ export function OrderItemsEditor({
             {t('orders.itemsEditor.search.activeOnly')}
           </Button>
         </div>
-        <Button type="button" variant="ghost" size="icon-sm" onClick={() => setSearchOpen(false)} aria-label={t('common.actions.close')}>
-          <XIcon className="size-3.5" />
-        </Button>
+        {!searchAlwaysOpen && (
+          <Button type="button" variant="ghost" size="icon-sm" onClick={() => setSearchOpen(false)} aria-label={t('common.actions.close')}>
+            <XIcon className="size-3.5" />
+          </Button>
+        )}
       </div>
 
       <ProductSearchBox
@@ -278,7 +287,7 @@ export function OrderItemsEditor({
     </div>
   )
 
-  if (items.length === 0 && !searchOpen) {
+  if (items.length === 0 && !searchOpen && !searchAlwaysOpen) {
     return (
       <div>
         <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-brand-200 py-12 text-center">
@@ -395,17 +404,15 @@ export function OrderItemsEditor({
                   </div>
                 )}
 
-                <div className="w-20 shrink-0">
+                <div className="w-24 shrink-0">
                   <span className={`mb-0.5 block text-[11px] font-medium ${isShort ? 'text-red-500' : 'text-brand-400'}`}>{t('orders.itemsEditor.quantity')}</span>
-                  <Input
-                    type="number"
-                    min="0"
-                    step="1"
+                  <QuantityStepper
                     value={item.quantity}
-                    onChange={(e) => updateItem(index, { quantity: Number(e.target.value) || 0 })}
-                    aria-invalid={isShort}
+                    onChange={(v) => updateItem(index, { quantity: v })}
+                    invalid={isShort}
                     disabled={locked}
-                    className={`text-right ${isShort ? 'border-red-400 text-red-700 focus-visible:ring-red-300' : ''}`}
+                    decreaseLabel={t('common.actions.decreaseQuantity')}
+                    increaseLabel={t('common.actions.increaseQuantity')}
                   />
                 </div>
 
@@ -448,9 +455,11 @@ export function OrderItemsEditor({
             <Button type="button" variant="ghost" size="sm" onClick={addCustomLine}>
               {t('orders.itemsEditor.addLine')}
             </Button>
-            <Button type="button" size="sm" onClick={() => setSearchOpen((v) => !v)}>
-              <PlusIcon className="size-3.5" /> {t('orders.itemsEditor.addProduct')}
-            </Button>
+            {!searchAlwaysOpen && (
+              <Button type="button" size="sm" onClick={() => setSearchOpen((v) => !v)}>
+                <PlusIcon className="size-3.5" /> {t('orders.itemsEditor.addProduct')}
+              </Button>
+            )}
           </div>
           {searchPanel}
         </div>
