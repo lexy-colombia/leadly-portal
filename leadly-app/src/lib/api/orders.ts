@@ -245,6 +245,10 @@ export interface OrdersSummary {
   paid: number
   pending: number
   average: number
+  /** Cuántos de los pedidos filtrados ya tienen factura DIAN aceptada, y
+   * cuánto suman -- ver sales_orders.has_invoice. */
+  invoicedCount: number
+  invoicedTotal: number
   byMethod: Partial<Record<OrderPaymentMethod, number>>
   topTables: { table: string; count: number; total: number }[]
 }
@@ -255,6 +259,9 @@ export interface ListOrdersPageParams {
   status?: OrderStatus | null
   channel?: SalesOrder['sales_channel']
   contactId?: string | null
+  /** null/ausente = sin filtrar, true = solo facturadas, false = solo sin
+   * factura DIAN. */
+  hasInvoice?: boolean | null
   /** YYYY-MM-DD, ambos inclusive -- resueltos server-side. */
   dateFrom?: string | null
   dateTo?: string | null
@@ -288,6 +295,8 @@ export async function listOrdersPage(params: ListOrdersPageParams): Promise<List
       paid: number
       pending: number
       average: number
+      invoiced_count: number
+      invoiced_total: number
       by_method: Record<string, number>
       top_tables: { table: string; count: number; total: number }[]
     }
@@ -299,6 +308,7 @@ export async function listOrdersPage(params: ListOrdersPageParams): Promise<List
       status: params.status ?? null,
       channel: params.channel ?? null,
       contact_id: params.contactId ?? null,
+      has_invoice: params.hasInvoice ?? null,
       date_from: params.dateFrom ?? null,
       date_to: params.dateTo ?? null,
       search: params.search ?? '',
@@ -330,6 +340,8 @@ export async function listOrdersPage(params: ListOrdersPageParams): Promise<List
       paid: data.summary.paid,
       pending: data.summary.pending,
       average: data.summary.average,
+      invoicedCount: data.summary.invoiced_count,
+      invoicedTotal: data.summary.invoiced_total,
       byMethod: data.summary.by_method as Partial<Record<OrderPaymentMethod, number>>,
       topTables: data.summary.top_tables,
     },

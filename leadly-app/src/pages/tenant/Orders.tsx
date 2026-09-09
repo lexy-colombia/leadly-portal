@@ -38,6 +38,9 @@ interface OrderFilters {
   status: OrderStatus | null
   channel: SalesOrder['sales_channel']
   contact: string | null
+  /** null = sin filtrar, true = solo facturadas (DIAN), false = solo sin
+   * factura -- ver sales_orders.has_invoice. */
+  hasInvoice: boolean | null
   dateFrom: string
   dateTo: string
 }
@@ -61,7 +64,7 @@ function todayIso(): string {
  * elegido. Es a lo que vuelve "Borrar filtros" (una función, no una
  * constante: "hoy" cambia). */
 function defaultOrderFilters(): OrderFilters {
-  return { status: null, channel: null, contact: null, dateFrom: todayIso(), dateTo: todayIso() }
+  return { status: null, channel: null, contact: null, hasInvoice: null, dateFrom: todayIso(), dateTo: todayIso() }
 }
 
 function formatCurrency(value: number, currency: string): string {
@@ -176,6 +179,7 @@ export function Orders() {
       status: filters.status,
       channel: filters.channel,
       contactId: filters.contact,
+      hasInvoice: filters.hasInvoice,
       dateFrom: filters.dateFrom,
       dateTo: filters.dateTo,
       search: debouncedSearch,
@@ -323,6 +327,21 @@ export function Orders() {
           />
         </FilterField>
 
+        <FilterField label={t('orders.filters.labels.invoiced')}>
+          <ComboboxFilter
+            options={[
+              { id: 'yes', label: t('orders.filters.invoiced.yes') },
+              { id: 'no', label: t('orders.filters.invoiced.no') },
+            ]}
+            value={draft.hasInvoice === null ? null : draft.hasInvoice ? 'yes' : 'no'}
+            onChange={(id) => setDraft((d) => ({ ...d, hasInvoice: id === null ? null : id === 'yes' }))}
+            placeholder={t('orders.filters.all')}
+            searchPlaceholder={t('orders.filters.search')}
+            emptyLabel={t('orders.filters.noResults')}
+            triggerClassName={FILTER_TRIGGER_CLASS}
+          />
+        </FilterField>
+
         <FilterField label={t('orders.filters.dateFrom')}>
           <Input
             type="date"
@@ -379,12 +398,14 @@ export function Orders() {
           {/* Siempre visibles, nunca detrás del toggle -- pedido explícito
               del usuario, a diferencia del desglose por método (ver abajo),
               que sí es "el detalle" que se abre/cierra. */}
-          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-5">
+          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4 lg:grid-cols-7">
             <SummaryTile label={t('orders.summary.count')} value={String(salesSummary.count)} />
             <SummaryTile label={t('orders.summary.total')} value={formatCurrency(salesSummary.total, salesSummary.currency)} />
             <SummaryTile label={t('orders.summary.paid')} value={formatCurrency(salesSummary.paid, salesSummary.currency)} />
             <SummaryTile label={t('orders.summary.pending')} value={formatCurrency(salesSummary.pending, salesSummary.currency)} />
             <SummaryTile label={t('orders.summary.average')} value={formatCurrency(salesSummary.average, salesSummary.currency)} />
+            <SummaryTile label={t('orders.summary.invoicedCount')} value={String(salesSummary.invoicedCount)} />
+            <SummaryTile label={t('orders.summary.invoicedTotal')} value={formatCurrency(salesSummary.invoicedTotal, salesSummary.currency)} />
           </div>
 
           <div className="overflow-hidden rounded-2xl border border-brand-100 bg-white">

@@ -531,6 +531,12 @@ export interface SalesOrder {
   label: string | null
   status: OrderStatus
   delivery_status: DeliveryStatus
+  /** true solo cuando la DIAN ya aceptó/recibió de verdad la factura
+   * electrónica de este pedido (nunca 'pending'/'blocked_missing_buyer_data'/
+   * 'rejected'/'error') -- denormalizado para filtrar/sumar en la lista de
+   * Órdenes sin joinear contra sales_invoices en cada carga. Nunca vuelve a
+   * false (ver 20260908120000_sales_orders_has_invoice.sql). */
+  has_invoice: boolean
   currency: string
   subtotal: number
   discount_total: number

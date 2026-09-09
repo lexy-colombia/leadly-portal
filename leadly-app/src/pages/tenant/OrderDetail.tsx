@@ -1065,6 +1065,16 @@ export function OrderDetail() {
 
   const dispatchLocksOrder = !!order && (dispatchStatus !== null || order.delivery_status !== 'pendiente')
   const locked = !isNew && !!order && (dianLocksOrder || dispatchLocksOrder || order.status === 'cancelada')
+  // Bug real reportado por el usuario: cliente/direcciones/oportunidad/
+  // envío/ítems se editaban igual (sin ningún candado visual) en un pedido
+  // ya `confirmada` -- pero el autosave (ver saveDraft más abajo) se niega
+  // a guardar nada que no sea `cotizacion`, mismo candado que ya aplica
+  // calculate-order del lado del servidor. El control quedaba interactivo
+  // pero cualquier cambio se perdía en silencio, sin botón de "Guardar" que
+  // lo compensara. `draftLocked` es el candado real de todo ese borrador
+  // (mismos 7 campos de currentDraftSnapshot) -- `locked` a secas sigue
+  // existiendo solo para el botón "Anular", que es un caso aparte.
+  const draftLocked = locked || (!!order && order.status !== 'cotizacion')
 
   const addressField = (kind: 'shipping' | 'billing') => {
     const value = kind === 'shipping' ? shippingAddressId : billingAddressId
@@ -1089,7 +1099,7 @@ export function OrderDetail() {
               {selected.phone && <p className="truncate text-xs text-brand-400">{formatPhoneDisplay(selected.phone)}</p>}
               {selected.tax_id && <p className="truncate text-xs text-brand-400">{t('orders.detail.addressTaxId')}: {selected.tax_id}</p>}
             </div>
-            {!locked && (
+            {!draftLocked && (
               <Button type="button" variant="default" size="icon-sm" onClick={() => setEditing(true)} aria-label={t('orders.detail.changeAddressAria')} className="shrink-0">
                 <PencilIcon width={12} height={12} />
               </Button>
@@ -1104,7 +1114,7 @@ export function OrderDetail() {
               placeholder={t('orders.detail.noAddress')}
               searchPlaceholder={t('orders.detail.searchAddress')}
               emptyLabel={t('orders.detail.noAddressResults')}
-              disabled={locked}
+              disabled={draftLocked}
               className="min-w-0 flex-1"
               triggerClassName="min-w-0 flex-1 shrink"
             />
@@ -1113,7 +1123,7 @@ export function OrderDetail() {
               variant="default"
               size="icon"
               onClick={() => setAddressDrawerOpen(true)}
-              disabled={!contactId || locked}
+              disabled={!contactId || draftLocked}
               aria-label={t('orders.detail.newAddressAria')}
               className="shrink-0"
             >
@@ -1264,7 +1274,7 @@ export function OrderDetail() {
                   onSelect={handleClientPicked}
                   onSearch={searchOrderContacts}
                   emptyLabel={t('orders.drawer.fields.selectPlaceholder')}
-                  disabled={locked}
+                  disabled={draftLocked}
                   bare
                 />
                 <FieldError message={contactError} />
@@ -1341,7 +1351,7 @@ export function OrderDetail() {
                   placeholder={t('orders.drawer.fields.noOpportunity')}
                   searchPlaceholder={t('orders.detail.searchOpportunity')}
                   emptyLabel={t('orders.detail.noOpportunityResults')}
-                  disabled={locked}
+                  disabled={draftLocked}
                   className="mt-1 w-full"
                   triggerClassName="min-w-0 flex-1 shrink"
                 />
@@ -1429,7 +1439,7 @@ export function OrderDetail() {
           stockRows={stockRows}
           shortfalls={stockShortfalls}
           currency={order?.currency ?? 'COP'}
-          locked={locked}
+          locked={draftLocked}
           onChange={(next) => {
             setItems(next)
             // Stale otherwise -- a shortfall found for the old quantities/
@@ -1457,7 +1467,7 @@ export function OrderDetail() {
             currency={order?.currency}
             shippingSlot={
               showShipping ? (
-                <CurrencyInput value={shippingDraft} onChange={(e) => setShippingDraft(e.target.value)} disabled={locked} className="h-7 w-28 text-right text-xs" />
+                <CurrencyInput value={shippingDraft} onChange={(e) => setShippingDraft(e.target.value)} disabled={draftLocked} className="h-7 w-28 text-right text-xs" />
               ) : undefined
             }
           />
