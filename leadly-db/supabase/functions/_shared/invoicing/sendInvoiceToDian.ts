@@ -214,8 +214,15 @@ export async function sendInvoiceToDian(adminClient: any, tenantId: string, invo
 
   const zipKeyMatch = responseBody.match(/<b:zipkey>([^<]+)<\/b:zipkey>/i);
   const faultMatch = responseBody.match(/<s:Text[^>]*>([^<]+)<\/s:Text>/);
+  // Un HTTP 200 no significa "aceptada" -- SendTestSetAsync puede responder
+  // 200 con éxito=false y el motivo real en ProcessedMessage (ej. "MIMEType
+  // del archivo inválido"), sin ningún s:Fault. Sin este match el error
+  // quedaba invisible y el usuario solo veía el mensaje genérico de "no se
+  // pudo enviar" -- encontrado en vivo el 2026-09-09 (bug real de zip.ts,
+  // ya corregido, pero el mensaje real tampoco se estaba mostrando).
+  const processedMessageMatch = responseBody.match(/<c:ProcessedMessage>([^<]+)<\/c:ProcessedMessage>/i);
   const zipKey = zipKeyMatch ? zipKeyMatch[1] : null;
-  const faultReason = zipKey ? null : (faultMatch?.[1] ?? null);
+  const faultReason = zipKey ? null : (faultMatch?.[1] ?? processedMessageMatch?.[1] ?? null);
 
   const nowIso = now.toISOString();
   if (zipKey) {
@@ -237,6 +244,14 @@ export async function sendInvoiceToDian(adminClient: any, tenantId: string, invo
       .from("tenant_dian_profile")
       .update({ next_invoice_number: Number(invoiceNumber) + 1 })
       .eq("tenant_id", tenantId);
+    // Flag denormalizado para filtrar/sumar "Órdenes" sin joinear contra
+    // sales_invoices en cada carga -- ver get_sales_orders_summary. Solo se
+    // pone en true, nunca se revierte (no existe un flujo de anular una
+    // factura ya aceptada).
+    await adminClient
+      .from("sales_orders")
+      .update({ has_invoice: true })
+      .eq("id", invoicePre.order_id);
   } else {
     await adminClient
       .from("sales_invoices")

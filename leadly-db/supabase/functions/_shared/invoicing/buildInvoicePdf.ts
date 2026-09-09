@@ -93,6 +93,18 @@ export interface BuildInvoicePdfInput {
    * tenant-logos) -- null si el tenant no cargó uno, o si no se pudo
    * descargar (nunca bloquea la generación del PDF por esto). */
   logoBytes: Uint8Array | null;
+  /** Título del encabezado -- default es el ternario isRemision de
+   * siempre. Usado por sales-credit-note-pdf para poner "Nota Crédito
+   * Electrónica" sin duplicar todo este archivo. */
+  documentTitle?: string;
+  /** Rótulo del código de verificación al pie -- "CUFE" por defecto. Una
+   * nota crédito usa "CUDE" (mismo campo `cufe`/`qrVerificationUrl` del
+   * input, es solo la etiqueta la que cambia). */
+  verificationLabel?: string;
+  /** Línea extra en el bloque de cliente/fechas -- para una nota crédito,
+   * "Corrige la factura: <prefijo+número>". null/undefined = no se dibuja
+   * nada nuevo (factura/remisión normales). */
+  referenceNote?: string | null;
 }
 
 /** Mismo identificador que se ve en el encabezado ("POS-3393") -- prefijo de
@@ -281,7 +293,7 @@ export async function buildInvoicePdf(input: BuildInvoicePdfInput): Promise<Uint
   // factura formal. "Shrink to fit" para que un tenant con nombre largo
   // nunca produzca un título que se salga de su columna.
   const rightBlockCenter = rightBlockX + rightBlockW / 2;
-  const titleText = input.isRemision ? "Remisión" : "Factura Electrónica de Venta";
+  const titleText = input.documentTitle ?? (input.isRemision ? "Remisión" : "Factura Electrónica de Venta");
   centerText(titleText, rightBlockCenter, headerTop, { size: fitTextSize(titleText, font, rightBlockW - 8, 13, 9) });
   const titleRuleY = headerTop - 7;
   page.drawLine({ start: { x: rightBlockX, y: titleRuleY }, end: { x: pageWidth - margin, y: titleRuleY }, thickness: 0.75, color: line });
@@ -434,6 +446,7 @@ export async function buildInvoicePdf(input: BuildInvoicePdfInput): Promise<Uint
   // remisión no existe ese concepto, así que la fila no se dibuja.
   if (!input.isRemision) rightBoxLines.push(["Expedición:", isValidated ? formatDateEs(input.issueDate) : "Pendiente"])
   rightBoxLines.push(["Método de pago:", input.paymentMethodLabel ?? "—"])
+  if (input.referenceNote) rightBoxLines.push(["Referencia:", input.referenceNote])
   // Mismo cuerpo de texto (7.5pt) e interlineado proporcional que el bloque
   // del vendedor en el encabezado, para que todo el documento lea en una
   // sola escala tipográfica.
@@ -622,7 +635,7 @@ export async function buildInvoicePdf(input: BuildInvoicePdfInput): Promise<Uint
     fy -= 14;
 
     if (showDianBlock) {
-      text("CUFE:", margin, fy, { size: 7, f: bold });
+      text(`${input.verificationLabel ?? "CUFE"}:`, margin, fy, { size: 7, f: bold });
       cufeLines.forEach((l, idx) => text(l, valueX, fy - idx * 9, { size: 7, color: gray }));
       text("URL:", margin, fy - Math.max(1, cufeLines.length) * 9, { size: 7, f: bold });
       urlLines.forEach((l, idx) => text(l, valueX, fy - Math.max(1, cufeLines.length) * 9 - idx * 9, { size: 7, color: gray }));

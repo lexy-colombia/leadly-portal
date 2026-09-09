@@ -16,6 +16,12 @@ import { makeIntegrationSecretGetter, resolveTenantIntegrationCredential } from 
 import { createDeal, createOrUpdateContact, getDealPipelines } from "../_shared/integrations/hubspot.ts";
 import { resolveShopifyDomain, searchCustomerByPhone, searchOrders, searchProducts } from "../_shared/integrations/shopify.ts";
 import { combinePhone, splitPhone } from "../_shared/phone.ts";
+import {
+  bookAppointmentForContact,
+  cancelActiveAppointmentForContact,
+  findActiveUpcomingAppointment,
+  listActiveUpcomingAppointmentsForContact,
+} from "../_shared/appointments/manageAppointment.ts";
 
 const CATALOG_SEARCH_LIMIT = 15;
 const CATEGORY_LIST_LIMIT = 5;
@@ -160,6 +166,12 @@ async function executeTool(
       if (isNaN(scheduledAt.getTime())) throw new Error("scheduled_at no es una fecha válida.");
       if (scheduledAt.getTime() < Date.now()) throw new Error("La fecha debe ser en el futuro.");
       const notes = parameters.notes ? String(parameters.notes).trim() : null;
+      let durationMinutes: number | undefined;
+      if (parameters.duration_minutes !== undefined && parameters.duration_minutes !== null) {
+        const parsedDuration = Number(parameters.duration_minutes);
+        if (!Number.isFinite(parsedDuration) || parsedDuration <= 0) throw new Error("duration_minutes debe ser un número positivo.");
+        durationMinutes = Math.round(parsedDuration);
+      }
 
       // Same line the conversation is already happening on -- no need to
       // look up "the contact's latest conversation" like the frontend drawer
@@ -170,92 +182,36 @@ async function executeTool(
         .eq("id", conversationId)
         .maybeSingle();
 
-      // Idempotent by (contact, activa) instead of trusting the model to
-      // call list_contact_appointments and check first -- a stateless
-      // per-turn model that offers to schedule again later in the same
-      // conversation (e.g. the closing-rule flow re-offering an advisor)
-      // will happily call this a second time. Found for real 2026-08-14: the
-      // same contact ended up with two active appointments for the exact
-      // same slot because the model re-ran the whole "qué día y hora"
-      // exchange after already booking one. Treating a second call as a
-      // reschedule of the existing active appointment -- not a second row --
-      // is what the customer actually means by confirming a time again.
-      const { data: existing } = await adminClient
-        .from("appointments")
-        .select("id")
-        .eq("tenant_id", tenantId)
-        .eq("contact_id", contactId)
-        .eq("status", "activa")
-        .gte("scheduled_at", new Date().toISOString())
-        .order("scheduled_at", { ascending: true })
-        .limit(1)
-        .maybeSingle();
+      // bookAppointmentForContact handles the idempotent "reschedule the
+      // existing active appointment instead of creating a second one"
+      // behavior server-side now (ver _shared/appointments/
+      // manageAppointment.ts) -- same reasoning as before (bug found
+      // 2026-08-14), and it also fixes a bug that reasoning introduced: the
+      // reschedule branch now always recomputes ends_at instead of leaving
+      // it stale (it used to rely on a trigger that only covers INSERT).
+      const before = await findActiveUpcomingAppointment(adminClient, tenantId, contactId);
+      const appointment = await bookAppointmentForContact(adminClient, {
+        tenantId,
+        contactId,
+        whatsappLineId: conversation?.whatsapp_line_id ?? null,
+        scheduledAt,
+        durationMinutes,
+        notes,
+      });
 
-      let data: { id: string; scheduled_at: string; status: string } | null;
-      let error: { message: string } | null;
-      if (existing) {
-        ({ data, error } = await adminClient
-          .from("appointments")
-          .update({ scheduled_at: scheduledAt.toISOString(), notes, whatsapp_line_id: conversation?.whatsapp_line_id ?? null })
-          .eq("id", existing.id)
-          .select("id, scheduled_at, status")
-          .single());
-      } else {
-        ({ data, error } = await adminClient
-          .from("appointments")
-          .insert({
-            tenant_id: tenantId,
-            contact_id: contactId,
-            whatsapp_line_id: conversation?.whatsapp_line_id ?? null,
-            scheduled_at: scheduledAt.toISOString(),
-            notes,
-          })
-          .select("id, scheduled_at, status")
-          .single());
-      }
-      if (error) throw new Error(error.message);
-
-      // A real appointment is unambiguous evidence of negotiation -- enforce
-      // this server-side instead of trusting the model to also remember
-      // set_lead_stage in the same turn (it doesn't, reliably). Only bumps
-      // off the untouched 'lead' default; never downgrades or overrides a
-      // stage an agent or a later signal already set (contactado/cliente/etc).
-      await adminClient.from("clients").update({ stage: "negociacion" }).eq("id", contactId).eq("stage", "lead");
-
-      return { ...data, rescheduled: !!existing };
+      return { id: appointment.id, scheduled_at: appointment.scheduled_at, status: appointment.status, rescheduled: !!before };
     }
 
     case "list_contact_appointments": {
       if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
-      const { data, error } = await adminClient
-        .from("appointments")
-        .select("id, scheduled_at, notes, status")
-        .eq("tenant_id", tenantId)
-        .eq("contact_id", contactId)
-        .eq("status", "activa")
-        .gte("scheduled_at", new Date().toISOString())
-        .order("scheduled_at", { ascending: true });
-      if (error) throw new Error(error.message);
-      return { appointments: data ?? [] };
+      const appointments = await listActiveUpcomingAppointmentsForContact(adminClient, tenantId, contactId);
+      return { appointments };
     }
 
     case "cancel_appointment": {
       if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
-      const { data: appt, error } = await adminClient
-        .from("appointments")
-        .select("id")
-        .eq("tenant_id", tenantId)
-        .eq("contact_id", contactId)
-        .eq("status", "activa")
-        .order("scheduled_at", { ascending: true })
-        .limit(1)
-        .maybeSingle();
-      if (error) throw new Error(error.message);
-      if (!appt) throw new Error("Este cliente no tiene ninguna cita activa.");
-
-      const { error: updateError } = await adminClient.from("appointments").update({ status: "cancelada" }).eq("id", appt.id);
-      if (updateError) throw new Error(updateError.message);
-      return { id: appt.id, status: "cancelada" };
+      const appointment = await cancelActiveAppointmentForContact(adminClient, tenantId, contactId);
+      return { id: appointment.id, status: appointment.status };
     }
 
     case "list_pipelines": {

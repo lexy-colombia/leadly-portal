@@ -84,6 +84,64 @@ export async function computeCufe(input: CufeInput): Promise<string> {
     .join("");
 }
 
+/** CUDE (Código Único de Documento Electrónico) -- para Notas Crédito/
+ * Débito (y cualquier otro documento que no sea la factura misma). Fórmula
+ * tomada del Anexo Técnico v1.9, sección 11.4 "Generación de CUDE" (páginas
+ * 659-666 del PDF oficial) -- verificada carácter por carácter contra el
+ * ejemplo oficial 11.4.3 "Ejemplo de Identificador universal para Nota
+ * crédito": con los mismos valores de entrada del ejemplo, esta función
+ * produce exactamente el mismo hash SHA-384 que publica el documento
+ * (`907e4444decc9e59c160a2fb3b6659b33dc5b632a5008922b9a62f83f757b1c448e47f5867f2b50dbdb96f48c7681168`).
+ *
+ * ÚNICA diferencia real con el CUFE: el último campo antes de TipoAmbiente
+ * es el Software-PIN (nunca viaja en el XML), NO la clave técnica -- una
+ * nota crédito no tiene rango de numeración autorizado por la DIAN, así que
+ * no existe ninguna clave técnica que usar en su lugar. Confundir esto
+ * produciría un CUDE que la DIAN calcularía distinto y rechazaría por
+ * "UUID no está correctamente calculado". */
+export interface CudeInput {
+  /** Prefijo + número de la nota concatenado, ej. "NCSETP1". */
+  numFac: string;
+  fecFac: string;
+  horFac: string;
+  valFac: number;
+  valImp1Iva: number;
+  valImp2Inc: number;
+  valImp3Ica: number;
+  valTot: number;
+  nitOfe: string;
+  numAdq: string;
+  /** PIN del software (integration_credential_secrets, mismo secreto
+   * "software_pin" que ya usa el CUFE de la factura) -- nunca viaja en el
+   * XML, ver nota arriba. */
+  softwarePin: string;
+  tipoAmbiente: 1 | 2;
+}
+
+export async function computeCude(input: CudeInput): Promise<string> {
+  const raw =
+    input.numFac +
+    input.fecFac +
+    input.horFac +
+    formatMonetary(input.valFac) +
+    "01" +
+    formatMonetary(input.valImp1Iva) +
+    "04" +
+    formatMonetary(input.valImp2Inc) +
+    "03" +
+    formatMonetary(input.valImp3Ica) +
+    formatMonetary(input.valTot) +
+    input.nitOfe +
+    input.numAdq +
+    input.softwarePin +
+    String(input.tipoAmbiente);
+
+  const digest = await crypto.subtle.digest("SHA-384", new TextEncoder().encode(raw));
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 /** Código de Seguridad del Software -- Anexo Técnico sección 11.8. A
  * diferencia del CUFE (verificado byte a byte contra el ejemplo oficial),
  * esta fórmula se implementó tal cual la describe el documento pero SIN un

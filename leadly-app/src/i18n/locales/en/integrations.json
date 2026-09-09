@@ -80,6 +80,8 @@
   "integrations.dianDirecto.resolutionRangeTo": "Range to",
   "integrations.dianDirecto.resolutionValidFrom": "Valid from",
   "integrations.dianDirecto.resolutionValidUntil": "Valid until",
+  "integrations.dianDirecto.creditNotePrefix": "Credit note prefix",
+  "integrations.dianDirecto.creditNotePrefixPlaceholder": "E.g. NCSETP -- the DIAN doesn't require authorizing this sequence",
   "integrations.dianDirecto.section.withholding": "Withholding rates",
   "integrations.dianDirecto.withholdingType": "Withholding",
   "integrations.dianDirecto.withholdingConcept": "Concept"

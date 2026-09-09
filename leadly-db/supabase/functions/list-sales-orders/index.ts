@@ -40,6 +40,9 @@ interface ListSalesOrdersBody {
   date_from?: string | null;
   date_to?: string | null;
   search?: string | null;
+  /** Filtro por facturación DIAN -- null/ausente = sin filtrar, true = solo
+   * facturadas, false = solo sin factura. Ver sales_orders.has_invoice. */
+  has_invoice?: boolean | null;
 }
 
 interface OrdersSummaryRow {
@@ -48,6 +51,8 @@ interface OrdersSummaryRow {
   currency: string;
   paid: number;
   pending: number;
+  invoiced_count: number;
+  invoiced_total: number;
   by_method: Record<string, number>;
   top_tables: { table: string; count: number; total: number }[];
 }
@@ -120,7 +125,7 @@ Deno.serve(async (req) => {
       page,
       page_size: pageSize,
       total_pages: 1,
-      summary: { count: 0, total: 0, currency: "COP", paid: 0, pending: 0, average: 0, by_method: {}, top_tables: [] },
+      summary: { count: 0, total: 0, currency: "COP", paid: 0, pending: 0, average: 0, invoiced_count: 0, invoiced_total: 0, by_method: {}, top_tables: [] },
     });
   }
 
@@ -130,6 +135,7 @@ Deno.serve(async (req) => {
     if (body.status) q = q.eq("status", body.status);
     if (body.channel) q = q.eq("sales_channel", body.channel);
     if (body.contact_id) q = q.eq("contact_id", body.contact_id);
+    if (body.has_invoice !== null && body.has_invoice !== undefined) q = q.eq("has_invoice", body.has_invoice);
     if (dateFrom) q = q.gte("created_at", dateFrom);
     if (dateTo) q = q.lt("created_at", dateTo);
     if (search) {
@@ -159,6 +165,7 @@ Deno.serve(async (req) => {
       p_date_to: dateTo,
       p_search_number: searchNumber,
       p_search_contact_ids: searchContactIds,
+      p_has_invoice: body.has_invoice ?? null,
     }),
   ]);
 

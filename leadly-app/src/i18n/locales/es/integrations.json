@@ -80,6 +80,8 @@
   "integrations.dianDirecto.resolutionRangeTo": "Rango hasta",
   "integrations.dianDirecto.resolutionValidFrom": "Vigente desde",
   "integrations.dianDirecto.resolutionValidUntil": "Vigente hasta",
+  "integrations.dianDirecto.creditNotePrefix": "Prefijo de notas crédito",
+  "integrations.dianDirecto.creditNotePrefixPlaceholder": "Ej. NCSETP -- la DIAN no exige autorizar este consecutivo",
   "integrations.dianDirecto.section.withholding": "Tarifas de retención",
   "integrations.dianDirecto.withholdingType": "Retención",
   "integrations.dianDirecto.withholdingConcept": "Concepto"

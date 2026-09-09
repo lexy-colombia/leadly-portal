@@ -30,6 +30,7 @@ export const AI_TOOLS: AiToolDefinition[] = [
       type: "object",
       properties: {
         scheduled_at: { type: "string", description: "Fecha y hora de la cita en formato ISO 8601 (ej. 2026-08-15T15:00:00-05:00)." },
+        duration_minutes: { type: "integer", description: "Duración de la cita en minutos, solo si el cliente la mencionó (ej. \"necesito una hora\" -> 60). Opcional -- sin esto, la cita dura 30 minutos por defecto. Nunca le preguntes la duración si no la mencionó primero." },
         notes: { type: "string", description: "Motivo o notas de la cita (opcional)." },
       },
       required: ["scheduled_at"],

@@ -40,6 +40,7 @@ import "../_shared/invoicing/nodeCompatShim.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { sendTestInvoiceToDian } from "../_shared/invoicing/sendToDian.ts";
 import { sendInvoiceToDian } from "../_shared/invoicing/sendInvoiceToDian.ts";
+import { sendCreditNoteToDian } from "../_shared/invoicing/sendCreditNoteToDian.ts";
 import { createInvoiceAttempt } from "../_shared/invoicing/queueInvoiceGeneration.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 
@@ -53,7 +54,16 @@ Deno.serve(async (req) => {
   // preflight OPTIONS. Corregido en el mismo momento (2026-09-03).
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
-  let body: { tenant_id?: string; invoice_id?: string; order_id?: string; action?: string };
+  let body: {
+    tenant_id?: string;
+    invoice_id?: string;
+    order_id?: string;
+    action?: string;
+    amount?: number;
+    reason_code?: string;
+    reason_description?: string;
+    credit_note_id?: string;
+  };
   try {
     body = await req.json();
   } catch {
@@ -66,6 +76,14 @@ Deno.serve(async (req) => {
 
   if (body.action === "send_pos_invoice") {
     return await handleSendPosInvoice(req, body);
+  }
+
+  if (body.action === "create_credit_note") {
+    return await handleCreateCreditNote(req, body);
+  }
+
+  if (body.action === "retry_credit_note") {
+    return await handleRetryCreditNote(req, body);
   }
 
   return await handleSendTestInvoice(req, body);
@@ -119,7 +137,7 @@ async function handleSendInvoice(req: Request, body: { invoice_id?: string }, is
   // tenant, esto simplemente viene null, igual que "no existe".
   const { data: invoiceRow } = await callerClient
     .from("sales_invoices")
-    .select("id, tenant_id, order_id, status, attempt_number")
+    .select("id, tenant_id, order_id, status, attempt_number, total")
     .eq("id", body.invoice_id)
     .maybeSingle();
   if (!invoiceRow) return jsonResponse({ error: "Factura no encontrada." }, 404);
@@ -143,16 +161,36 @@ async function handleSendInvoice(req: Request, body: { invoice_id?: string }, is
   // Reintento: NUNCA se reescribe el intento fallido -- se crea una fila
   // nueva con attempt_number+1 y se envía ésa, tal como fue diseñada la
   // tabla ("el reintento es una fila nueva... auditoría legal completa", ver
-  // 20260903110000_sales_invoices.sql). El índice único parcial
-  // `sales_invoices_order_id_live_idx` sólo tolera un intento vivo por
-  // pedido, así que esto únicamente puede proceder si el anterior quedó en
-  // 'rejected'/'error' -- se valida acá para dar un mensaje claro en vez de
-  // dejar que reviente como violación de índice.
+  // 20260903110000_sales_invoices.sql). El trigger
+  // guard_sales_invoice_live_attempt (que reemplazó al índice único parcial
+  // que había acá antes) es el candado real del lado de la DB; esto solo
+  // adelanta la misma validación para dar un mensaje claro en vez de dejar
+  // que reviente como excepción de trigger. Dos casos legítimos de
+  // "reintento": la factura anterior fracasó (rejected/error), o la
+  // vigente ya está sent/accepted pero quedó totalmente acreditada por
+  // nota crédito -- volver a facturar el pedido después de corregirlo, no
+  // hay ningún flujo de "anular" en este esquema (ver la migración
+  // 20260909220000_sales_invoices_no_voided_reissue_after_credit.sql).
   let invoiceIdToSend = body.invoice_id;
   if (isRetry) {
-    if (invoiceRow.status !== "rejected" && invoiceRow.status !== "error") {
+    const canRetryFailed = invoiceRow.status === "rejected" || invoiceRow.status === "error";
+    let canReissueAfterCredit = false;
+    if (!canRetryFailed && (invoiceRow.status === "sent" || invoiceRow.status === "accepted")) {
+      const { data: creditNotes } = await adminClient
+        .from("sales_credit_notes")
+        .select("total")
+        .eq("invoice_id", invoiceRow.id)
+        .in("status", ["sent", "accepted"]);
+      const credited = (creditNotes ?? []).reduce((sum, cn) => sum + Number(cn.total), 0);
+      canReissueAfterCredit = credited + 0.01 >= Number(invoiceRow.total ?? 0);
+    }
+    if (!canRetryFailed && !canReissueAfterCredit) {
       return jsonResponse(
-        { error: `Esta factura está en estado "${invoiceRow.status}"; sólo se puede reintentar una rechazada por la DIAN o con error de envío.` },
+        {
+          error:
+            `Esta factura está en estado "${invoiceRow.status}"; sólo se puede reintentar una rechazada por la DIAN, ` +
+            `con error de envío, o emitir una nueva si la vigente ya fue acreditada por completo con una nota crédito.`,
+        },
         409,
       );
     }
@@ -266,6 +304,116 @@ async function handleSendPosInvoice(req: Request, body: { order_id?: string }): 
 
   try {
     const result = await sendInvoiceToDian(adminClient, order.tenant_id, invoice.id);
+    return jsonResponse(result);
+  } catch (err) {
+    return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+}
+
+/** Crea (create_credit_note_attempt, ver la migración) y manda de una sola
+ * vez una nota crédito sobre una factura ya aceptada por la DIAN. Mismo
+ * modelo de autorización que send_invoice/retry_invoice -- acción con
+ * efecto fiscal real, restringida a tenant_admin/superadmin, nunca a un
+ * tenant_agent. Toda la validación de negocio (factura aceptada, saldo
+ * disponible, tarifa de impuesto única) vive en la función de Postgres,
+ * que corre en una sola transacción -- acá solo se resuelve el caller y se
+ * pasa el resultado. */
+async function handleCreateCreditNote(
+  req: Request,
+  body: { invoice_id?: string; amount?: number; reason_code?: string; reason_description?: string },
+): Promise<Response> {
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) return jsonResponse({ error: "Missing Authorization header" }, 401);
+  if (!body.invoice_id) return jsonResponse({ error: "expected_invoice_id" }, 400);
+  if (typeof body.amount !== "number" || !Number.isFinite(body.amount) || body.amount <= 0) {
+    return jsonResponse({ error: "expected_positive_amount" }, 400);
+  }
+  if (!body.reason_code || !body.reason_description) {
+    return jsonResponse({ error: "expected_reason_code_and_description" }, 400);
+  }
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const callerClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } });
+
+  const {
+    data: { user: caller },
+    error: callerError,
+  } = await callerClient.auth.getUser();
+  if (callerError || !caller) return jsonResponse({ error: "Invalid session" }, 401);
+
+  const { data: profile } = await callerClient.from("profiles").select("role, tenant_id").eq("id", caller.id).maybeSingle();
+  if (!profile || (profile.role !== "tenant_admin" && profile.role !== "superadmin")) {
+    return jsonResponse({ error: "Solo un administrador del tenant puede emitir notas crédito." }, 403);
+  }
+
+  // RLS de sales_invoices ya aísla por tenant -- si la factura es de otro
+  // tenant, esto viene null, igual que "no existe". No se usa
+  // profile.tenant_id para esto: un superadmin (que puede emitir en
+  // nombre de cualquier tenant) tiene esa columna en null.
+  const { data: invoiceRow } = await callerClient.from("sales_invoices").select("tenant_id").eq("id", body.invoice_id).maybeSingle();
+  if (!invoiceRow) return jsonResponse({ error: "Factura no encontrada." }, 404);
+
+  // create_credit_note_attempt vuelve a validar tenant/rol/estado de la
+  // factura del lado de la DB (defensa en profundidad) -- se llama con el
+  // client del propio caller, no el admin, para que corra bajo su sesión
+  // real (auth.uid()/auth_active_tenant_id() dentro de la función).
+  const { data: newCreditNoteId, error: createError } = await callerClient.rpc("create_credit_note_attempt", {
+    p_invoice_id: body.invoice_id,
+    p_amount: body.amount,
+    p_reason_code: body.reason_code,
+    p_reason_description: body.reason_description,
+  });
+  if (createError) return jsonResponse({ error: createError.message }, 409);
+
+  const adminClient = createClient(supabaseUrl, serviceRoleKey);
+  try {
+    const result = await sendCreditNoteToDian(adminClient, invoiceRow.tenant_id, newCreditNoteId as string);
+    return jsonResponse(result);
+  } catch (err) {
+    return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+}
+
+/** Reintenta una nota crédito que quedó en 'error' o fue 'rejected' por la
+ * DIAN -- misma fila, mismos datos (monto/motivo ya validados al crearla),
+ * solo se vuelve a intentar el envío. No pasa por
+ * create_credit_note_attempt de nuevo (no hay nada nuevo que validar: la
+ * fila ya existe con su desglose de impuesto calculado). Mismo modelo de
+ * autorización que el resto de acciones con efecto fiscal real. */
+async function handleRetryCreditNote(req: Request, body: { credit_note_id?: string }): Promise<Response> {
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) return jsonResponse({ error: "Missing Authorization header" }, 401);
+  if (!body.credit_note_id) return jsonResponse({ error: "expected_credit_note_id" }, 400);
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const callerClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } });
+
+  const {
+    data: { user: caller },
+    error: callerError,
+  } = await callerClient.auth.getUser();
+  if (callerError || !caller) return jsonResponse({ error: "Invalid session" }, 401);
+
+  const { data: profile } = await callerClient.from("profiles").select("role").eq("id", caller.id).maybeSingle();
+  if (!profile || (profile.role !== "tenant_admin" && profile.role !== "superadmin")) {
+    return jsonResponse({ error: "Solo un administrador del tenant puede reintentar una nota crédito." }, 403);
+  }
+
+  // RLS de sales_credit_notes ya aísla por tenant -- si es de otro tenant,
+  // esto viene null, igual que "no existe".
+  const { data: creditNoteRow } = await callerClient.from("sales_credit_notes").select("tenant_id, status").eq("id", body.credit_note_id).maybeSingle();
+  if (!creditNoteRow) return jsonResponse({ error: "Nota crédito no encontrada." }, 404);
+  if (creditNoteRow.status !== "error" && creditNoteRow.status !== "rejected") {
+    return jsonResponse({ error: `Esta nota crédito está en estado "${creditNoteRow.status}", no se puede reintentar.` }, 409);
+  }
+
+  const adminClient = createClient(supabaseUrl, serviceRoleKey);
+  try {
+    const result = await sendCreditNoteToDian(adminClient, creditNoteRow.tenant_id, body.credit_note_id);
     return jsonResponse(result);
   } catch (err) {
     return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 500);

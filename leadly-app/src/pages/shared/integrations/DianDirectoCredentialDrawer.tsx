@@ -74,6 +74,7 @@ export function DianDirectoCredentialDrawer({
   const [softwareId, setSoftwareId] = useState('')
   const [testSetId, setTestSetId] = useState('')
   const [webserviceUrl, setWebserviceUrl] = useState('')
+  const [creditNotePrefix, setCreditNotePrefix] = useState('')
 
   const [taxTypes, setTaxTypes] = useState<TaxType[]>([])
   const [withholdingConfigs, setWithholdingConfigs] = useState<TenantWithholdingConfig[]>([])
@@ -123,6 +124,7 @@ export function DianDirectoCredentialDrawer({
         setSoftwareId(profile?.software_id ?? '')
         setTestSetId(profile?.test_set_id ?? '')
         setWebserviceUrl(profile?.webservice_url ?? '')
+        setCreditNotePrefix(profile?.credit_note_prefix ?? '')
 
         setTaxTypes(types.filter((tx) => tx.category === 'retencion'))
         setWithholdingConfigs(configs)
@@ -192,6 +194,7 @@ export function DianDirectoCredentialDrawer({
         software_id: softwareId.trim() || null,
         test_set_id: testSetId.trim() || null,
         webservice_url: webserviceUrl.trim() || null,
+        credit_note_prefix: creditNotePrefix.trim() || null,
         is_configured: isConfigured,
       })
 
@@ -439,6 +442,19 @@ export function DianDirectoCredentialDrawer({
                 <IntegrationFieldLabel htmlFor="dian-resolution-valid-until" label={t('integrations.dianDirecto.resolutionValidUntil')} />
                 <Input id="dian-resolution-valid-until" type="date" value={resolutionValidUntil} onChange={(e) => setResolutionValidUntil(e.target.value)} className={FIELD_CLASS} />
               </div>
+            </div>
+            {/* La DIAN no exige resolución autorizada para notas crédito
+                (el consecutivo lo define el propio contribuyente) -- por
+                eso es solo un prefijo suelto, sin rango ni vigencia. */}
+            <div>
+              <IntegrationFieldLabel htmlFor="dian-credit-note-prefix" label={t('integrations.dianDirecto.creditNotePrefix')} />
+              <Input
+                id="dian-credit-note-prefix"
+                value={creditNotePrefix}
+                onChange={(e) => setCreditNotePrefix(e.target.value)}
+                placeholder={t('integrations.dianDirecto.creditNotePrefixPlaceholder')}
+                className={`sm:w-1/2 ${FIELD_CLASS}`}
+              />
             </div>
           </IntegrationSection>
 

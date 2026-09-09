@@ -44,6 +44,7 @@ export type TenantDianProfileInput = Partial<
     | 'test_set_id'
     | 'webservice_url'
     | 'is_configured'
+    | 'credit_note_prefix'
   >
 >
 

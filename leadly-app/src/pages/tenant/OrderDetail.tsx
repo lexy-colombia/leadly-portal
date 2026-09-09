@@ -31,8 +31,17 @@ import { listProductCategories } from '../../lib/api/productCategories'
 import { listBrands } from '../../lib/api/brands'
 import { listWarehouses } from '../../lib/api/warehouses'
 import { listPaymentsForOrder, deletePayment, PAYMENT_METHOD_LABEL_KEY } from '../../lib/api/orderPayments'
-import { getLatestSalesInvoiceForOrder, getSalesOrderPdf, sendSalesInvoiceToDian, retrySalesInvoiceToDian } from '../../lib/api/salesInvoices'
-import type { SalesInvoice, SalesInvoiceStatus } from '../../types/domain'
+import {
+  listSalesInvoicesForOrder,
+  getSalesOrderPdf,
+  sendSalesInvoiceToDian,
+  retrySalesInvoiceToDian,
+  listCreditNotesForInvoice,
+  retryCreditNote,
+  getCreditNotePdf,
+} from '../../lib/api/salesInvoices'
+import type { SalesInvoice, SalesInvoiceStatus, SalesCreditNote } from '../../types/domain'
+import { CreditNoteDrawer } from './orders/CreditNoteDrawer'
 import { listCommentsForOrder, createComment } from '../../lib/api/orderComments'
 import type { OrderCommentWithAuthor } from '../../lib/api/orderComments'
 import { listTasksForOpportunity } from '../../lib/api/tasks'
@@ -87,7 +96,6 @@ const INVOICE_STATUS_VARIANT: Record<SalesInvoiceStatus, string> = {
   accepted: 'bg-emerald-100 text-emerald-700',
   rejected: 'bg-red-100 text-red-700',
   error: 'bg-red-100 text-red-700',
-  voided: 'bg-brand-100 text-brand-500',
 }
 
 
@@ -275,13 +283,21 @@ export function OrderDetail() {
   // explícito: no debe existir un módulo togglable aparte -- el backend ya
   // solo genera una fila de sales_invoices cuando hay una credencial activa
   // de 'dian_directo', ver queueInvoiceGeneration; acá simplemente se lee lo
-  // que exista, sin un segundo gate redundante). Solo interesa el intento
-  // VIGENTE: o la factura fue aceptada por la DIAN o no lo fue, y en ese
-  // caso por qué. El historial de reintentos se sigue guardando en la base
-  // (son registros fiscales) pero no se muestra -- feedback explícito del
-  // usuario 2026-09-03: "¿para qué me sirve guardar los reintentos? ese dato
-  // no es útil".
-  const [latestInvoice, setLatestInvoice] = useState<SalesInvoice | null>(null)
+  // que exista, sin un segundo gate redundante).
+  //
+  // A diferencia del diseño original (2026-09-03: "solo interesa el intento
+  // vigente, no un historial"), desde que existen las notas crédito
+  // (2026-09-09) SÍ hace falta ver más de un intento a la vez -- pedido
+  // explícito del usuario: "debería salirme el historial de documentos
+  // emitidos en esta orden". Una factura sent/accepted no se anula ni
+  // desaparece cuando se corrige con una nota crédito y se emite una nueva
+  // (ver 20260909220000_sales_invoices_no_voided_reissue_after_credit.sql);
+  // el pedido puede acumular más de un documento fiscal real en su
+  // historia, y el usuario tiene que poder verlos todos. `invoices[0]` (el
+  // de mayor attempt_number) sigue siendo "el vigente" para efecto de
+  // qué acción mostrar (enviar/reintentar/nota crédito/reemitir).
+  const [invoices, setInvoices] = useState<SalesInvoice[]>([])
+  const latestInvoice = invoices[0] ?? null
   const [sendingInvoice, setSendingInvoice] = useState(false)
   const [sendInvoiceError, setSendInvoiceError] = useState<string | null>(null)
   const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null)
@@ -289,12 +305,12 @@ export function OrderDetail() {
 
   function reloadInvoices() {
     if (!order?.id) {
-      setLatestInvoice(null)
+      setInvoices([])
       return
     }
-    getLatestSalesInvoiceForOrder(order.id)
-      .then(setLatestInvoice)
-      .catch(() => setLatestInvoice(null))
+    listSalesInvoicesForOrder(order.id)
+      .then(setInvoices)
+      .catch(() => setInvoices([]))
   }
 
   useEffect(() => {
@@ -302,10 +318,61 @@ export function OrderDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order?.id])
 
-  /** Envío del intento vigente, o reintento si ese intento ya fracasó. El
-   * reintento no reescribe la factura rechazada: el servidor crea un intento
-   * nuevo (attempt_number+1) y envía ése, por eso en ambos casos hace falta
-   * releer el listado -- después de un reintento hay una fila MÁS, no una
+  // ----- Notas crédito -- pedido explícito del usuario 2026-09-09, apenas
+  // después de confirmar que el envío de facturas reales ya funciona.
+  // Independiente del módulo Devoluciones (decisión explícita), vive acá
+  // mismo dentro de la card de factura -- mismo criterio de "todo junto,
+  // sin pantalla aparte" ya aplicado a la factura misma. Mapeadas por
+  // invoice_id (no un único arreglo) porque el historial ahora puede
+  // mostrar varias facturas emitidas a la vez, cada una con las suyas.
+  const [creditNotesByInvoice, setCreditNotesByInvoice] = useState<Record<string, SalesCreditNote[]>>({})
+  const [creditNoteDrawerOpen, setCreditNoteDrawerOpen] = useState(false)
+  const [retryingCreditNoteId, setRetryingCreditNoteId] = useState<string | null>(null)
+  const [retryCreditNoteError, setRetryCreditNoteError] = useState<string | null>(null)
+  const [downloadingCreditNoteId, setDownloadingCreditNoteId] = useState<string | null>(null)
+  const [creditNotePdfError, setCreditNotePdfError] = useState<string | null>(null)
+
+  // Solo una factura sent/accepted es un documento fiscal REAL (con cufe/
+  // número) -- un intento pending/blocked/generating/rejected/error nunca
+  // llegó a existir ante la DIAN, no pertenece al historial de "documentos
+  // emitidos".
+  const issuedInvoices = useMemo(() => invoices.filter((inv) => inv.status === 'sent' || inv.status === 'accepted'), [invoices])
+
+  function reloadCreditNotes() {
+    if (issuedInvoices.length === 0) {
+      setCreditNotesByInvoice({})
+      return
+    }
+    Promise.all(issuedInvoices.map((inv) => listCreditNotesForInvoice(inv.id).then((cns) => [inv.id, cns] as const)))
+      .then((pairs) => setCreditNotesByInvoice(Object.fromEntries(pairs)))
+      .catch(() => setCreditNotesByInvoice({}))
+  }
+
+  useEffect(() => {
+    reloadCreditNotes()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [issuedInvoices.map((inv) => inv.id).join(',')])
+
+  async function handleRetryCreditNote(creditNoteId: string) {
+    setRetryingCreditNoteId(creditNoteId)
+    setRetryCreditNoteError(null)
+    try {
+      await retryCreditNote(creditNoteId)
+    } catch (err) {
+      setRetryCreditNoteError(err instanceof Error ? err.message : t('einvoicing.creditNote.error'))
+    } finally {
+      setRetryingCreditNoteId(null)
+      reloadCreditNotes()
+    }
+  }
+
+  /** Envío del intento vigente, reintento si ese intento fracasó, o
+   * reemisión si el vigente ya está sent/accepted pero quedó totalmente
+   * acreditado por nota crédito (`canReissueInvoice` más abajo) -- las tres
+   * acciones comparten el mismo action `retry_invoice` del lado del
+   * servidor (siempre "crear un intento nuevo y enviarlo"), la UI solo
+   * cambia el label según cuál de las tres aplica. En los tres casos hace
+   * falta releer el listado completo -- aparece una fila MÁS, no una
    * modificada. */
   async function handleSendInvoice(retry = false) {
     if (!latestInvoice) return
@@ -351,6 +418,28 @@ export function OrderDetail() {
       setInvoicePdfError(err instanceof Error ? err.message : t('einvoicing.detail.pdfError'))
     } finally {
       setDownloadingInvoiceId(null)
+    }
+  }
+
+  /** Mismo patrón que handleDownloadInvoicePdf (pestaña abierta ANTES del
+   * await, por el bloqueador de pop-ups) -- ver ese comentario para el
+   * porqué exacto. */
+  async function handleDownloadCreditNotePdf(creditNoteId: string) {
+    const pendingTab = window.open('', '_blank')
+    setDownloadingCreditNoteId(creditNoteId)
+    setCreditNotePdfError(null)
+    try {
+      const { pdfBase64 } = await getCreditNotePdf(creditNoteId)
+      const bytes = Uint8Array.from(atob(pdfBase64), (c) => c.charCodeAt(0))
+      const blob = new Blob([bytes], { type: 'application/pdf' })
+      const url = URL.createObjectURL(blob)
+      if (pendingTab) pendingTab.location.href = url
+      else window.open(url, '_blank')
+    } catch (err) {
+      pendingTab?.close()
+      setCreditNotePdfError(err instanceof Error ? err.message : t('einvoicing.creditNote.pdfError'))
+    } finally {
+      setDownloadingCreditNoteId(null)
     }
   }
 
@@ -1161,47 +1250,185 @@ export function OrderDetail() {
   // está en un estado que normalmente lo mostraría -- distinto de "no sos
   // admin" (eso no se explica, es autoevidente por el rol).
   const invoiceBlockedByBalance = !isFullyPaid && isInvoiceAdmin && (latestInvoice?.status === 'pending' || latestInvoice?.status === 'rejected' || latestInvoice?.status === 'error')
-  // Una sola fila: el estado actual de la factura ante la DIAN y la acción
-  // que corresponda (enviarla, o reintentar si falló). Sin listado de
-  // intentos y sin botón de descarga -- la descarga vive una sola vez, en el
-  // encabezado del pedido (feedback explícito del usuario 2026-09-03).
+  // Saldo disponible para acreditar = total de la factura vigente menos lo
+  // que ya quedó acreditado por notas anteriores realmente enviadas/
+  // aceptadas -- un intento rechazado/con error nunca contó contra este
+  // saldo (ver create_credit_note_attempt). Puede llegar a 0 si ya se
+  // acreditó todo.
+  const latestInvoiceCreditNotes = latestInvoice ? (creditNotesByInvoice[latestInvoice.id] ?? []) : []
+  const creditedSoFar = latestInvoiceCreditNotes.filter((cn) => cn.status === 'sent' || cn.status === 'accepted').reduce((sum, cn) => sum + cn.total, 0)
+  const creditNoteAvailableBalance = Math.max(0, (latestInvoice?.total ?? 0) - creditedSoFar)
+  // Solo tiene sentido corregir una factura que la DIAN ya aceptó de
+  // verdad -- mismo candado real del lado del servidor
+  // (create_credit_note_attempt), esto es la parte de UX. Solo se ofrece
+  // sobre la vigente (invoices[0]): una factura anterior ya superada por
+  // una reemisión no se vuelve a corregir. Bug real reportado en vivo
+  // 2026-09-09: sin el chequeo de saldo, el botón seguía apareciendo
+  // aunque la factura ya estuviera acreditada del 100% -- create_credit_note_attempt
+  // igual la habría rechazado del lado del servidor (monto > saldo
+  // disponible), pero la UI no tiene por qué ofrecer una acción que ya se
+  // sabe de antemano que va a fallar.
+  const canIssueCreditNote = isInvoiceAdmin && (latestInvoice?.status === 'sent' || latestInvoice?.status === 'accepted') && creditNoteAvailableBalance > 0.01
+  // Una factura DIAN nunca se anula (ver
+  // 20260909220000_sales_invoices_no_voided_reissue_after_credit.sql) -- la
+  // forma de corregirla del todo y volver a facturar el pedido es
+  // acreditarla por completo con una o más notas crédito. El mismo trigger
+  // que valida esto server-side (guard_sales_invoice_live_attempt) es el
+  // candado real; esto es la parte de UX.
+  const canReissueInvoice =
+    isInvoiceAdmin && isFullyPaid && !!latestInvoice && (latestInvoice.status === 'sent' || latestInvoice.status === 'accepted') && creditedSoFar + 0.01 >= latestInvoice.total
+  // Pedido explícito del usuario 2026-09-09: "debería salirme el historial
+  // de documentos emitidos en esta orden" -- ya no alcanza con mostrar solo
+  // el intento vigente (ver el comentario grande arriba, junto a
+  // `invoices`), porque una factura corregida con nota crédito sigue
+  // siendo un documento real que el usuario tiene que poder ver aunque ya
+  // no sea "la actual". Solo la más reciente (issuedInvoices[0]) tiene
+  // acciones (nota crédito/descarga) -- las anteriores son de solo lectura.
   const invoiceCard = latestInvoice && (
     <StatCard title={t('einvoicing.cardTitle')}>
-      <div className="flex items-center justify-between gap-2">
-        <Badge variant="outline" className={`border-transparent ${INVOICE_STATUS_VARIANT[latestInvoice.status]}`}>
-          {t(`einvoicing.status.${latestInvoice.status}`)}
-        </Badge>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {canSendInvoice && (
-            <Button type="button" size="sm" onClick={() => handleSendInvoice()} disabled={sendingInvoice}>
-              {sendingInvoice ? t('einvoicing.detail.sending') : t('einvoicing.detail.send')}
-            </Button>
-          )}
-          {canRetryInvoice && (
-            <Button type="button" size="sm" onClick={() => handleSendInvoice(true)} disabled={sendingInvoice}>
-              <RefreshCwIcon className="size-3.5" />
-              {sendingInvoice ? t('einvoicing.detail.retrying') : t('einvoicing.detail.retry')}
-            </Button>
-          )}
+      {/* Estado accionable del intento vigente -- solo se muestra mientras
+          ese intento todavía no es un documento emitido de verdad (sin
+          cufe/número): una vez sent/accepted pasa a vivir como la entrada
+          más reciente del historial de abajo, sin esta franja aparte. */}
+      {latestInvoice.status !== 'sent' && latestInvoice.status !== 'accepted' && (
+        <div>
+          <div className="flex items-center justify-between gap-2">
+            <Badge variant="outline" className={`border-transparent ${INVOICE_STATUS_VARIANT[latestInvoice.status]}`}>
+              {t(`einvoicing.status.${latestInvoice.status}`)}
+            </Badge>
+            <div className="flex shrink-0 items-center gap-1.5">
+              {canSendInvoice && (
+                <Button type="button" size="sm" onClick={() => handleSendInvoice()} disabled={sendingInvoice}>
+                  {sendingInvoice ? t('einvoicing.detail.sending') : t('einvoicing.detail.send')}
+                </Button>
+              )}
+              {canRetryInvoice && (
+                <Button type="button" size="sm" onClick={() => handleSendInvoice(true)} disabled={sendingInvoice}>
+                  <RefreshCwIcon className="size-3.5" />
+                  {sendingInvoice ? t('einvoicing.detail.retrying') : t('einvoicing.detail.retry')}
+                </Button>
+              )}
+            </div>
+          </div>
+          {/* El motivo del rechazo es justamente lo que hace falta para
+              poder corregir y reintentar -- es el único dato del fracaso
+              que se conserva a la vista. */}
+          {latestInvoice.status_detail && <p className="mt-1.5 text-xs text-amber-700">{latestInvoice.status_detail}</p>}
+          {invoiceBlockedByBalance && <p className="mt-1.5 text-xs text-amber-700">{t('einvoicing.detail.balancePending', { amount: formatCurrency(balance, order?.currency) })}</p>}
+          {sendInvoiceError && <FieldError message={sendInvoiceError} />}
         </div>
-      </div>
-      {/* El motivo del rechazo es justamente lo que hace falta para poder
-          corregir y reintentar -- es el único dato del fracaso que se
-          conserva a la vista. */}
-      {latestInvoice.status_detail && <p className="mt-1.5 text-xs text-amber-700">{latestInvoice.status_detail}</p>}
-      {invoiceBlockedByBalance && <p className="mt-1.5 text-xs text-amber-700">{t('einvoicing.detail.balancePending', { amount: formatCurrency(balance, order?.currency) })}</p>}
-      {/* El CUFE es un hash que calculamos nosotros mismos antes de enviar
-          -- existe aunque la DIAN haya rechazado el documento (ver
-          sendInvoiceToDian.ts). Mostrarlo igual acá es engañoso: no
-          significa nada hasta que la DIAN lo acepte de verdad. Mismo
-          criterio ya aplicado al QR del PDF (buildInvoicePdf.ts) --
-          feedback explícito del usuario 2026-09-03. */}
-      {(latestInvoice.status === 'sent' || latestInvoice.status === 'accepted') && latestInvoice.cufe && (
-        <p className="mt-1.5 break-all text-[11px] text-brand-400">
-          {t('einvoicing.detail.cufe')}: {latestInvoice.cufe}
-        </p>
       )}
-      {sendInvoiceError && <FieldError message={sendInvoiceError} />}
+
+      {issuedInvoices.length > 0 && (
+        <div className={latestInvoice.status !== 'sent' && latestInvoice.status !== 'accepted' ? 'mt-3 space-y-3 border-t border-brand-100 pt-3' : 'space-y-3'}>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-medium text-brand-700">{t('einvoicing.history.title')}</p>
+            {canReissueInvoice && (
+              <Button type="button" size="sm" variant="outline" onClick={() => handleSendInvoice(true)} disabled={sendingInvoice}>
+                {sendingInvoice ? t('einvoicing.detail.sending') : t('einvoicing.detail.reissue')}
+              </Button>
+            )}
+          </div>
+          {sendInvoiceError && (latestInvoice.status === 'sent' || latestInvoice.status === 'accepted') && <FieldError message={sendInvoiceError} />}
+          {issuedInvoices.map((inv, index) => {
+            const isCurrent = index === 0
+            const cns = creditNotesByInvoice[inv.id] ?? []
+            return (
+              <div key={inv.id} className="rounded-lg border border-brand-100 p-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  {/* No se muestra el CUFE (un hash sin significado hasta
+                      que la DIAN lo acepta, pedido explícito del usuario) ni
+                      un tag de estado -- una vez que el documento aparece
+                      acá, ya sabemos que se emitió; no hace falta repetirlo. */}
+                  <div className="min-w-0">
+                    <span className="text-xs font-medium text-brand-700">
+                      {t('einvoicing.detail.invoiceNumber')}: {inv.invoice_prefix ?? ''}
+                      {inv.invoice_number ?? ''}
+                    </span>
+                    <span className="ml-1.5 text-[11px] text-brand-400">
+                      {inv.issue_date ? `${formatDate(inv.issue_date)} — ` : ''}
+                      {formatCurrency(inv.total, inv.currency)}
+                    </span>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    {isCurrent && canIssueCreditNote && (
+                      <Button type="button" size="sm" variant="outline" onClick={() => setCreditNoteDrawerOpen(true)}>
+                        {t('einvoicing.creditNote.button')}
+                      </Button>
+                    )}
+                    {isCurrent && (
+                      <Button
+                        type="button"
+                        size="icon-sm"
+                        variant="outline"
+                        onClick={handleDownloadInvoicePdf}
+                        disabled={downloadingInvoiceId !== null}
+                        aria-label={t('einvoicing.detail.downloadPdf')}
+                        title={t('einvoicing.detail.downloadPdf')}
+                      >
+                        <FileTextIcon className="size-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                {cns.length > 0 && (
+                  <div className="mt-2 space-y-1.5 border-t border-brand-100 pt-2">
+                    {cns.map((cn) => {
+                      // Mismo criterio que la factura: una nota crédito ya
+                      // sent/accepted es, ella también, un documento emitido
+                      // -- sin tag de estado. El tag se conserva solo
+                      // mientras sigue siendo un problema a resolver
+                      // (pendiente/en camino/rechazada/con error).
+                      const cnIsIssued = cn.status === 'sent' || cn.status === 'accepted'
+                      return (
+                        <div key={cn.id} className="flex items-center justify-between gap-2 rounded-lg bg-brand-50/60 px-2.5 py-1.5 text-xs">
+                          <div className="min-w-0 flex-1">
+                            <span className="font-medium text-brand-700">
+                              {cn.credit_note_prefix && cn.credit_note_number != null
+                                ? `${t('einvoicing.creditNote.number')} ${cn.credit_note_prefix}${cn.credit_note_number}`
+                                : t('einvoicing.creditNote.number')}
+                            </span>
+                            <span className="text-brand-400"> — {formatCurrency(cn.total, cn.currency)}</span>
+                            {cn.status_detail && <p className="mt-0.5 text-[11px] text-amber-700">{cn.status_detail}</p>}
+                          </div>
+                          <div className="flex shrink-0 items-center gap-1.5">
+                            {(cn.status === 'error' || cn.status === 'rejected') && isInvoiceAdmin && (
+                              <Button type="button" size="sm" variant="outline" onClick={() => handleRetryCreditNote(cn.id)} disabled={retryingCreditNoteId === cn.id}>
+                                <RefreshCwIcon className="size-3.5" />
+                                {retryingCreditNoteId === cn.id ? t('einvoicing.detail.retrying') : t('einvoicing.detail.retry')}
+                              </Button>
+                            )}
+                            {cnIsIssued && (
+                              <Button
+                                type="button"
+                                size="icon-sm"
+                                variant="outline"
+                                onClick={() => handleDownloadCreditNotePdf(cn.id)}
+                                disabled={downloadingCreditNoteId === cn.id}
+                                aria-label={t('einvoicing.detail.downloadPdf')}
+                                title={t('einvoicing.detail.downloadPdf')}
+                              >
+                                <FileTextIcon className="size-3.5" />
+                              </Button>
+                            )}
+                            {!cnIsIssued && (
+                              <Badge variant="outline" className={`border-transparent ${INVOICE_STATUS_VARIANT[cn.status]}`}>
+                                {t(`einvoicing.status.${cn.status}`)}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+          {creditNotePdfError && <FieldError message={creditNotePdfError} />}
+          {retryCreditNoteError && <FieldError message={retryCreditNoteError} />}
+        </div>
+      )}
     </StatCard>
   )
 
@@ -1662,6 +1889,17 @@ export function OrderDetail() {
 
       {receiptPrinter.portal}
       {receiptPrinter.error && <p className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 shadow-lg">{receiptPrinter.error}</p>}
+
+      {latestInvoice && (
+        <CreditNoteDrawer
+          open={creditNoteDrawerOpen}
+          onClose={() => setCreditNoteDrawerOpen(false)}
+          invoiceId={latestInvoice.id}
+          availableBalance={creditNoteAvailableBalance}
+          availableBalanceLabel={formatCurrency(creditNoteAvailableBalance, latestInvoice.currency)}
+          onCreated={() => reloadCreditNotes()}
+        />
+      )}
 
       {!isNew && order && profile?.tenant_id && showShipping && enabledModules?.has('dispatches') && (
         <DispatchDrawer

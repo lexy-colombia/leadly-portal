@@ -1226,6 +1226,11 @@ export interface TenantDianProfile {
   test_set_id: string | null
   webservice_url: string | null
   is_configured: boolean
+  // Numeración de notas crédito -- a diferencia de resolution_*, la DIAN no
+  // exige autorización previa para esto (el consecutivo lo define el propio
+  // contribuyente), por eso no hay rango/vigencia.
+  credit_note_prefix: string | null
+  next_credit_note_number: number
   created_at: string
   updated_at: string
   deleted_at: string | null
@@ -1258,7 +1263,6 @@ export type SalesInvoiceStatus =
   | 'accepted'
   | 'rejected'
   | 'error'
-  | 'voided'
 
 export interface SalesInvoice {
   id: string
@@ -1317,6 +1321,48 @@ export interface SalesInvoiceWithholding {
   base: number
   amount: number
   created_at: string
+}
+
+export type SalesCreditNoteStatus = 'pending' | 'sending' | 'sent' | 'accepted' | 'rejected' | 'error'
+
+/** Código DIAN fijo de cac:DiscrepancyResponse/cbc:ResponseCode -- ver
+ * CREDIT_NOTE_REASONS en lib/creditNoteReasons.ts para las 6 etiquetas. */
+export type CreditNoteReasonCode = '1' | '2' | '3' | '4' | '5' | '6'
+
+/** Nota crédito electrónica DIAN sobre una factura ya aceptada -- ver
+ * migración 20260909150000_sales_credit_notes.sql. Sin tabla de ítems
+ * propia a propósito: es una única línea sintética de "ajuste" (monto +
+ * tarifa de impuesto ya calculada del lado del servidor), no un editor de
+ * ítems. */
+export interface SalesCreditNote {
+  id: string
+  tenant_id: string
+  invoice_id: string
+  order_id: string
+  status: SalesCreditNoteStatus
+  status_detail: string | null
+  reason_code: CreditNoteReasonCode
+  reason_description: string
+  credit_note_prefix: string | null
+  credit_note_number: number | null
+  currency: string
+  issue_date: string | null
+  buyer_snapshot: Record<string, unknown>
+  seller_snapshot: Record<string, unknown>
+  tax_type_code: string | null
+  tax_rate: number
+  subtotal: number
+  tax_total: number
+  total: number
+  cude: string | null
+  dian_tracking_id: string | null
+  dian_response: Record<string, unknown> | null
+  sent_at: string | null
+  accepted_at: string | null
+  rejected_at: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
 }
 
 // --- Módulo de Gastos. Un gasto se asocia a un proveedor ya existente

@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient'
-import type { SalesInvoice } from '../../types/domain'
+import type { CreditNoteReasonCode, SalesCreditNote, SalesInvoice } from '../../types/domain'
 
 /** La factura DIAN de un pedido vive DENTRO de ese pedido (card en
  * OrderDetail.tsx), no en una lista propia -- feedback explícito del usuario
@@ -23,6 +23,27 @@ export async function getLatestSalesInvoiceForOrder(orderId: string): Promise<Sa
     .order('attempt_number', { ascending: false })
     .limit(1)
     .maybeSingle()
+  if (error) throw error
+  return data
+}
+
+/** Todos los intentos de factura de un pedido, más reciente primero --
+ * a diferencia de getLatestSalesInvoiceForOrder, esta SÍ importa el
+ * historial completo: pedido explícito del usuario 2026-09-09, "debería
+ * salirme el historial de documentos emitidos" -- una factura ya
+ * sent/accepted no se anula ni desaparece cuando se corrige con una nota
+ * crédito y se emite una nueva (ver
+ * 20260909220000_sales_invoices_no_voided_reissue_after_credit.sql), así
+ * que el pedido puede acumular más de un documento fiscal real en su
+ * historia. Los intentos rejected/error también vienen incluidos (quedan
+ * ocultos en el render, ver OrderDetail.tsx) -- no se filtran acá para no
+ * duplicar ese criterio en dos lugares. */
+export async function listSalesInvoicesForOrder(orderId: string): Promise<SalesInvoice[]> {
+  const { data, error } = await supabase
+    .from('sales_invoices')
+    .select('*')
+    .eq('order_id', orderId)
+    .order('attempt_number', { ascending: false })
   if (error) throw error
   return data
 }
@@ -117,6 +138,95 @@ export async function sendPosInvoiceForOrder(orderId: string): Promise<SendSales
   return data as SendSalesInvoiceResult
 }
 
+/** Historial completo de notas crédito de una factura (no solo la vigente,
+ * a diferencia de getLatestSalesInvoiceForOrder -- acá SÍ importa ver todos
+ * los intentos: cada nota crédito exitosa es un documento fiscal propio, no
+ * un "intento" de algo único). */
+export async function listCreditNotesForInvoice(invoiceId: string): Promise<SalesCreditNote[]> {
+  const { data, error } = await supabase
+    .from('sales_credit_notes')
+    .select('*')
+    .eq('invoice_id', invoiceId)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data
+}
+
+export interface CreateCreditNoteResult {
+  status: 'sent' | 'error'
+  httpStatus: number
+  cude: string | null
+  dianTrackingId: string | null
+  faultReason: string | null
+  creditNotePrefix: string
+  creditNoteNumber: number
+}
+
+/** Crea y envía de una sola vez una nota crédito sobre una factura ya
+ * aceptada por la DIAN (dian-submit, acción `create_credit_note`) -- solo
+ * tenant_admin/superadmin, la Edge Function lo vuelve a validar. Un rechazo
+ * de la DIAN (o un error de negocio, ej. saldo insuficiente) NO es
+ * necesariamente una excepción: si la creación misma falla (monto inválido,
+ * factura no aceptada) se lanza; si la DIAN rechaza el envío ya creado, la
+ * función responde 200 con `status: 'error'` -- mismo criterio que
+ * sendSalesInvoiceToDian. */
+export async function createAndSendCreditNote(
+  invoiceId: string,
+  input: { amount: number; reasonCode: CreditNoteReasonCode; reasonDescription: string },
+): Promise<CreateCreditNoteResult> {
+  const { data, error } = await supabase.functions.invoke<CreateCreditNoteResult & { error?: string }>('dian-submit', {
+    body: {
+      action: 'create_credit_note',
+      invoice_id: invoiceId,
+      amount: input.amount,
+      reason_code: input.reasonCode,
+      reason_description: input.reasonDescription,
+    },
+  })
+  if (error) {
+    const context = (error as { context?: Response }).context
+    if (context && typeof context.json === 'function') {
+      let specificMessage: string | undefined
+      try {
+        const body = await context.json()
+        specificMessage = body?.error
+      } catch {
+        /* fall through to generic error */
+      }
+      if (specificMessage) throw new Error(specificMessage)
+    }
+    throw error
+  }
+  return data as CreateCreditNoteResult
+}
+
+/** Reintenta una nota crédito que quedó en 'error' o 'rejected' -- misma
+ * fila, mismos datos ya validados al crearla (dian-submit, acción
+ * `retry_credit_note`). A diferencia de retrySalesInvoiceToDian, esto NO
+ * crea una fila nueva: una nota crédito no tiene el mismo problema de
+ * numeración encadenada que una factura (nunca llegó a consumir un
+ * consecutivo si falló antes de que la DIAN la aceptara). */
+export async function retryCreditNote(creditNoteId: string): Promise<CreateCreditNoteResult> {
+  const { data, error } = await supabase.functions.invoke<CreateCreditNoteResult & { error?: string }>('dian-submit', {
+    body: { action: 'retry_credit_note', credit_note_id: creditNoteId },
+  })
+  if (error) {
+    const context = (error as { context?: Response }).context
+    if (context && typeof context.json === 'function') {
+      let specificMessage: string | undefined
+      try {
+        const body = await context.json()
+        specificMessage = body?.error
+      } catch {
+        /* fall through to generic error */
+      }
+      if (specificMessage) throw new Error(specificMessage)
+    }
+    throw error
+  }
+  return data as CreateCreditNoteResult
+}
+
 interface InvoicePdfResponse {
   pdf_base64: string
   filename: string
@@ -141,6 +251,33 @@ interface InvoicePdfResponse {
 export async function getSalesOrderPdf(orderId: string): Promise<{ pdfBase64: string; filename: string }> {
   const { data, error } = await supabase.functions.invoke<InvoicePdfResponse>('sales-invoice-pdf', {
     body: { order_id: orderId },
+  })
+  if (error) {
+    const context = (error as { context?: Response }).context
+    if (context && typeof context.json === 'function') {
+      let specificMessage: string | undefined
+      try {
+        const body = await context.json()
+        specificMessage = body?.error
+      } catch {
+        /* fall through to generic error */
+      }
+      if (specificMessage) throw new Error(specificMessage)
+    }
+    throw error
+  }
+  return { pdfBase64: data!.pdf_base64, filename: data!.filename }
+}
+
+/** Representación gráfica (PDF) de una nota crédito ya enviada/aceptada --
+ * pedido explícito del usuario ("y como descargo o visualizo la nota
+ * crédito?", 2026-09-09). A diferencia de getSalesOrderPdf, sale del
+ * snapshot propio de la nota (no hay nada "en pantalla" que pueda haber
+ * cambiado después: una nota crédito no se vuelve a editar una vez
+ * creada), ver sales-credit-note-pdf/index.ts. */
+export async function getCreditNotePdf(creditNoteId: string): Promise<{ pdfBase64: string; filename: string }> {
+  const { data, error } = await supabase.functions.invoke<InvoicePdfResponse>('sales-credit-note-pdf', {
+    body: { credit_note_id: creditNoteId },
   })
   if (error) {
     const context = (error as { context?: Response }).context
