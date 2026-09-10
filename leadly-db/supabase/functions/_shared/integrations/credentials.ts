@@ -13,7 +13,7 @@ export interface IntegrationCredential {
   /** 'sandbox' | 'production' -- el mismo selector "Modo" que ya muestra
    * cada tarjeta de Integraciones. Para la DIAN la UI lo rotula
    * "Habilitación (pruebas)" / "Producción" y es lo que decide si se manda
-   * SendTestSetAsync contra el set de pruebas o SendBillAsync real (ver
+   * SendTestSetAsync contra el set de pruebas o SendBillSync real (ver
    * sendInvoiceToDian.ts). */
   mode: string;
 }

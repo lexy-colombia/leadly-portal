@@ -20,6 +20,7 @@ import { buildInvoiceZip } from "./zip.ts";
 import { buildSignedSoapEnvelope } from "./wsSecuritySoap.ts";
 import { resolveTenantIntegrationCredential, makeIntegrationSecretGetter } from "../integrations/credentials.ts";
 import { loadTenantCertificate, createMtlsClient, uint8ToBase64 } from "./dianClient.ts";
+import { colombiaIssueMoment } from "./colombiaTime.ts";
 
 const PROVIDER_KEY = "dian_directo";
 
@@ -80,11 +81,13 @@ export async function sendTestInvoiceToDian(
   const invoiceNumber = String(profile.resolution_range_from);
   const invoiceId = `${profile.resolution_prefix}${invoiceNumber}`;
   const now = new Date();
+  // Hora REAL de Colombia -- ver colombiaTime.ts.
+  const { issueDate, issueTime } = colombiaIssueMoment(now);
 
   const xmlInput: BuildInvoiceXmlInput = {
     invoiceId,
-    issueDate: now.toISOString().slice(0, 10),
-    issueTime: now.toISOString().slice(11, 19) + "-05:00",
+    issueDate,
+    issueTime,
     currency: "COP",
     environment: 2,
     seller: {
@@ -126,8 +129,8 @@ export async function sendTestInvoiceToDian(
       prefix: profile.resolution_prefix,
       rangeFrom: String(profile.resolution_range_from),
       rangeTo: String(profile.resolution_range_to ?? profile.resolution_range_from),
-      validFrom: profile.resolution_valid_from ?? now.toISOString().slice(0, 10),
-      validUntil: profile.resolution_valid_until ?? now.toISOString().slice(0, 10),
+      validFrom: profile.resolution_valid_from ?? issueDate,
+      validUntil: profile.resolution_valid_until ?? issueDate,
     },
     softwareId: profile.software_id,
     softwarePin,

@@ -43,6 +43,8 @@
   "common.actions.saveChanges": "Save changes",
   "common.actions.cancel": "Cancel",
   "common.actions.close": "Close",
+  "common.toast.saved": "Changes saved",
+  "common.toast.saveFailed": "Could not save the changes",
   "common.actions.understood": "Got it",
   "common.actions.edit": "Edit",
   "common.actions.delete": "Delete",

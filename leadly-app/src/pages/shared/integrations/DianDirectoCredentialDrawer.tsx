@@ -31,6 +31,7 @@ import { IntegrationFieldLabel, IntegrationSection } from './IntegrationFieldLab
 import { TrashIcon, UploadIcon } from '@/components/atoms/icons'
 import { RefreshCwIcon } from 'lucide-react'
 import { useLanguage } from '../../../contexts/LanguageContext'
+import { useToast } from '../../../contexts/ToastContext'
 
 const PROVIDER_KEY = 'dian_directo'
 const FIELD_CLASS = '!h-7 !rounded-lg !text-xs'
@@ -60,6 +61,7 @@ export function DianDirectoCredentialDrawer({
   description: string
 }) {
   const { t } = useLanguage()
+  const toast = useToast()
   const [mode, setMode] = useState<'sandbox' | 'production'>('sandbox')
   const [certificateFilename, setCertificateFilename] = useState('')
   const [certificatePassword, setCertificatePassword] = useState('')
@@ -104,14 +106,12 @@ export function DianDirectoCredentialDrawer({
   const [submitting, setSubmitting] = useState(false)
   const [uploadingCert, setUploadingCert] = useState(false)
   const [certError, setCertError] = useState<string | null>(null)
-  const [saved, setSaved] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!open || !tenantId) return
     setLoaded(false)
     setError(null)
-    setSaved(false)
     setCertificatePassword('')
     setTechnicalKey('')
     setSoftwarePin('')
@@ -236,6 +236,16 @@ export function DianDirectoCredentialDrawer({
       if (chosen.rangeTo != null) setResolutionRangeTo(String(chosen.rangeTo))
       if (chosen.validFrom) setResolutionValidFrom(chosen.validFrom.slice(0, 10))
       if (chosen.validUntil) setResolutionValidUntil(chosen.validUntil.slice(0, 10))
+      // Bug real 2026-09-10: la sincronización traía `technicalKey` de la
+      // DIAN (ver getNumberingRange.ts, GetNumberingRange sí lo devuelve por
+      // rango) pero nunca lo volcaba al formulario -- el campo se quedaba con
+      // lo que el usuario hubiera tipeado a mano (o el de habilitación, si
+      // nunca lo actualizó al pasar a producción), lo que rechaza el CUFE
+      // entero (FAD06) sin ningún aviso -- la DIAN no puede decir "tu clave
+      // técnica está mal", solo que el hash no cierra. Ahora se precarga
+      // igual que el resto de los campos de la resolución (sigue exigiendo
+      // "Guardar cambios" para persistir, mismo criterio ya documentado).
+      if (chosen.technicalKey) setTechnicalKey(chosen.technicalKey)
       setResolutionSyncNote(result.ranges.length > 1 ? t('integrations.dianDirecto.syncMultipleFound', { count: String(result.ranges.length) }) : t('integrations.dianDirecto.syncApplied'))
     } catch (err) {
       setResolutionSyncError(err instanceof Error ? err.message : t('integrations.dianDirecto.syncError'))
@@ -248,7 +258,6 @@ export function DianDirectoCredentialDrawer({
     if (!tenantId) return
     setSubmitting(true)
     setError(null)
-    setSaved(false)
     try {
       if (certificatePassword.trim()) await setIntegrationCredentialSecret(PROVIDER_KEY, tenantId, 'certificate_password', certificatePassword.trim())
       if (technicalKey.trim()) await setIntegrationCredentialSecret(PROVIDER_KEY, tenantId, 'technical_key', technicalKey.trim())
@@ -280,9 +289,18 @@ export function DianDirectoCredentialDrawer({
       setCertificatePassword('')
       setTechnicalKey('')
       setSoftwarePin('')
-      setSaved(true)
+      // Confirmación + cierre: el toast lo renderiza el ToastProvider en la
+      // raíz, así que sigue en pantalla aunque este drawer ya se desmontó.
+      toast.success(t('common.toast.saved'))
+      onClose()
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('integrations.errors.save'))
+      const message = err instanceof Error ? err.message : t('integrations.errors.save')
+      // El error se muestra por partida doble a propósito: en el toast
+      // (visible aunque el usuario esté mirando otra parte del formulario)
+      // y en línea, porque el drawer NO se cierra cuando algo falla -- lo
+      // que se escribió tiene que seguir ahí para poder corregirlo.
+      setError(message)
+      toast.error(t('common.toast.saveFailed'), message)
     } finally {
       setSubmitting(false)
     }
@@ -617,7 +635,6 @@ export function DianDirectoCredentialDrawer({
             <Button type="button" onClick={handleSubmit} disabled={submitting}>
               {submitting ? t('common.actions.saving') : t('common.actions.save')}
             </Button>
-            {saved && <span className="text-xs text-emerald-600">{t('integrations.configSaved')}</span>}
           </div>
         </div>
       )}

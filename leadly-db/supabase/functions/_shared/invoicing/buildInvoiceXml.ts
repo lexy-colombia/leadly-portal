@@ -164,7 +164,38 @@
  * `cbc:ID`/`CountrySubentityCode`) y queda como esa misma notificación
  * blanda, en vez de bloquear el envío por completo (decisión explícita:
  * una venta real no debería quedar sin poder facturarse solo porque le
- * falta el código DIVIPOLA de una dirección que si existe). */
+ * falta el código DIVIPOLA de una dirección que si existe).
+ *
+ * ⚠️ CUARTA RONDA 2026-09-10, primer rechazo real de PRODUCCIÓN (contra
+ * SendBillSync, ver sendInvoiceToDian.ts -- distinto ambiente, reglas
+ * nuevas que habilitación nunca disparó):
+ * 13. BUG DE FONDO (FAD06+FAD07): `cbc:UUID` (el CUFE) llevaba
+ *    `schemeID="2"` HARDCODEADO sin importar el ambiente -- correcto por
+ *    accidente en habilitación (`input.environment` también es 2 ahí) pero
+ *    roto en producción, donde `input.environment` es 1. Confirmado
+ *    carácter a carácter contra el Anexo Técnico v1.9 (tabla de reglas,
+ *    entradas FAD06/FAD07): `@schemeID` de `cbc:UUID` es el "testigo de que
+ *    el valor registrado... es lo que desea realizar el HFE: en igualdad
+ *    confirma el ambiente y en desigualdad rechaza el procesamiento" -- la
+ *    DIAN recalcula el CUFE usando el ambiente que ese atributo declara, así
+ *    que un `schemeID` que no coincide con el ambiente real vuelve inválido
+ *    el CUFE entero (FAD06) además de fallar por sí solo (FAD07). Ahora
+ *    `schemeID="${input.environment}"`, igual que `cbc:ProfileExecutionID`
+ *    (que sí ya usaba el valor real) -- mismo criterio que ya tenía bien
+ *    buildCreditNoteXml.ts desde el principio.
+ * 14. FAJ71 (rechazo, no notificación -- confirmado contra la tabla de
+ *    reglas: "R", no "N"): falta el grupo `cac:Contact` del EMISOR
+ *    (`/Invoice/cac:AccountingSupplierParty/cac:Party/cac:Contact/
+ *    cbc:ElectronicMail`) -- opcional en el esquema (`0..1`), pero real: es
+ *    el correo de recepción de documentos electrónicos que el tenant debe
+ *    tener registrado en su cuenta de facturación electrónica de la DIAN.
+ *    Se agrega con el correo de contacto real del tenant
+ *    (`tenants.contact_email`, ya cargado y obligatorio en Configuración,
+ *    nunca un valor inventado) -- pero si la DIAN tiene registrado un correo
+ *    DISTINTO para ese NIT, el rechazo persiste hasta que el tenant lo
+ *    actualice en el portal de la DIAN (o hasta que coincida con
+ *    `contact_email`); esa parte no es accionable desde este código, es un
+ *    dato de la cuenta DIAN del tenant, no del XML. */
 
 import { computeCufe, computeSoftwareSecurityCode } from "./cufe.ts";
 import { computeNitCheckDigit } from "./nit.ts";
@@ -209,6 +240,12 @@ export interface InvoiceXmlParty {
    * responsable) si no se especifica -- nunca se inventa O-13/O-23/O-47
    * sin dato real. */
   taxLevelCode?: string;
+  /** cac:Contact/cbc:ElectronicMail (regla FAJ71, rechazo) -- correo de
+   * recepción de documentos electrónicos del EMISOR ante la DIAN. Solo
+   * aplica al vendedor (ver el comentario de cabecera, ronda 2026-09-10);
+   * se omite el grupo entero si no hay un correo real cargado, nunca se
+   * inventa uno. */
+  electronicMail?: string | null;
 }
 
 export interface InvoiceXmlLineTax {
@@ -358,6 +395,19 @@ function partyBlock(
             <cbc:ID ${companyIdAttrs}>${esc(party.documentNumber)}</cbc:ID>
          </cac:PartyIdentification>`
       : "";
+  // cac:Contact/cbc:ElectronicMail (regla FAJ71) -- solo el emisor
+  // (AccountingSupplierParty), ver el comentario de cabecera. Se omite el
+  // grupo entero sin un correo real cargado. Va DESPUÉS de PartyLegalEntity
+  // -- orden exacto del esquema UBL 2.1 PartyType (PartyIdentification*,
+  // PartyName*, PostalAddress?, PhysicalLocation?, PartyTaxScheme*,
+  // PartyLegalEntity*, Contact?, Person*...), no junto a PartyName.
+  const contactXml =
+    tag === "cac:AccountingSupplierParty" && party.electronicMail
+      ? `
+         <cac:Contact>
+            <cbc:ElectronicMail>${esc(party.electronicMail)}</cbc:ElectronicMail>
+         </cac:Contact>`
+      : "";
   return `
    <${tag}>
       <cbc:AdditionalAccountID>${organizationType}</cbc:AdditionalAccountID>
@@ -377,7 +427,7 @@ function partyBlock(
          <cac:PartyLegalEntity>
             <cbc:RegistrationName>${esc(party.legalName)}</cbc:RegistrationName>
             <cbc:CompanyID ${companyIdAttrs}>${esc(party.documentNumber)}</cbc:CompanyID>${corporateRegistrationSchemeXml}
-         </cac:PartyLegalEntity>
+         </cac:PartyLegalEntity>${contactXml}
       </cac:Party>
    </${tag}>`;
 }
@@ -607,7 +657,7 @@ export async function buildInvoiceXml(input: BuildInvoiceXmlInput): Promise<{ xm
    <cbc:ProfileID>DIAN 2.1: Factura Electrónica de Venta</cbc:ProfileID>
    <cbc:ProfileExecutionID>${input.environment}</cbc:ProfileExecutionID>
    <cbc:ID>${esc(input.invoiceId)}</cbc:ID>
-   <cbc:UUID schemeID="2" schemeName="CUFE-SHA384">${cufe}</cbc:UUID>
+   <cbc:UUID schemeID="${input.environment}" schemeName="CUFE-SHA384">${cufe}</cbc:UUID>
    <cbc:IssueDate>${input.issueDate}</cbc:IssueDate>
    <cbc:IssueTime>${input.issueTime}</cbc:IssueTime>
    <cbc:InvoiceTypeCode>01</cbc:InvoiceTypeCode>

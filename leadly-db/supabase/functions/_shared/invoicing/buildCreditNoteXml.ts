@@ -68,6 +68,10 @@ export interface CreditNoteXmlParty {
   stateCode?: string | null;
   organizationType?: "1" | "2";
   taxLevelCode?: string;
+  /** Ver buildInvoiceXml.ts::InvoiceXmlParty -- mismo grupo cac:Contact/
+   * cbc:ElectronicMail del emisor (regla FAJ71), no probado todavía contra
+   * una nota crédito real de producción pero misma estructura de Party. */
+  electronicMail?: string | null;
 }
 
 export interface CreditNoteXmlTax {
@@ -139,6 +143,16 @@ function partyBlock(tag: "cac:AccountingSupplierParty" | "cac:AccountingCustomer
             <cbc:ID ${companyIdAttrs}>${esc(party.documentNumber)}</cbc:ID>
          </cac:PartyIdentification>`
       : "";
+  // cac:Contact/cbc:ElectronicMail (regla FAJ71) -- solo el emisor, mismo
+  // criterio y mismo orden (después de PartyLegalEntity) que
+  // buildInvoiceXml.ts::partyBlock.
+  const contactXml =
+    tag === "cac:AccountingSupplierParty" && party.electronicMail
+      ? `
+         <cac:Contact>
+            <cbc:ElectronicMail>${esc(party.electronicMail)}</cbc:ElectronicMail>
+         </cac:Contact>`
+      : "";
   // Grupos de dirección opcionales -- se omiten enteros sin dirección real
   // (ver buildInvoiceXml.ts::partyBlock para el porqué exacto).
   const hasAddress = Boolean(party.addressLine);
@@ -191,7 +205,7 @@ function partyBlock(tag: "cac:AccountingSupplierParty" | "cac:AccountingCustomer
          <cac:PartyLegalEntity>
             <cbc:RegistrationName>${esc(party.legalName)}</cbc:RegistrationName>
             <cbc:CompanyID ${companyIdAttrs}>${esc(party.documentNumber)}</cbc:CompanyID>
-         </cac:PartyLegalEntity>
+         </cac:PartyLegalEntity>${contactXml}
       </cac:Party>
    </${tag}>`;
 }

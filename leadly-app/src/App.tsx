@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import { LanguageProvider } from './contexts/LanguageContext'
+import { ToastProvider } from './contexts/ToastContext'
 import { RequireAuth, RequireModule, RequireRole } from './routes/guards'
 import { RootRedirect } from './routes/RootRedirect'
 import { Login } from './pages/auth/Login'
@@ -51,6 +52,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <LanguageProvider>
+      <ToastProvider>
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
@@ -169,6 +171,7 @@ export default function App() {
           <Route path="*" element={<RootRedirect />} />
         </Routes>
       </AuthProvider>
+      </ToastProvider>
       </LanguageProvider>
     </BrowserRouter>
   )

@@ -227,7 +227,7 @@ async function buildOrderSnapshot(
   const { data: tenant } = await adminClient
     .from("tenants")
     .select(
-      "legal_name, document_type, document_number, country, state_province, billing_address",
+      "legal_name, document_type, document_number, country, state_province, billing_address, contact_email",
     )
     .eq("id", tenantId)
     .maybeSingle();
@@ -262,6 +262,11 @@ async function buildOrderSnapshot(
     billing_address: tenant?.billing_address ?? null,
     country: tenant?.country ?? null,
     state_province: tenant?.state_province ?? null,
+    // cac:Contact/cbc:ElectronicMail del emisor (regla FAJ71, rechazo real
+    // de producción 2026-09-10) -- correo de contacto real del tenant, ya
+    // cargado y obligatorio en Configuración, nunca inventado. Ver
+    // buildInvoiceXml.ts para el porqué exacto.
+    contact_email: tenant?.contact_email ?? null,
     resolution: dianProfile
       ? {
         number: dianProfile.resolution_number,

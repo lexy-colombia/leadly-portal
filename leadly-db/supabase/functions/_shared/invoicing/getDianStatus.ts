@@ -132,8 +132,12 @@ function extractAll(xml: string, localName: string): string[] {
 
 /** Cada `DianResponse` trae adentro los campos escalares -- se extraen dentro
  * del bloque aislado (no del XML completo) para no mezclar campos de un
- * item con otro cuando `statuses.length > 1`. */
-function parseOneStatus(block: string): DianTrackStatus {
+ * item con otro cuando `statuses.length > 1`. Exportada porque
+ * `SendBillSync` (factura individual en producción, ver sendInvoiceToDian.ts)
+ * devuelve un único `DianResponse` DIRECTO en la respuesta -- sin envolver en
+ * un array como `GetStatusZip` -- así que ese caller la usa tal cual, sin
+ * pasar por `parseStatuses`. */
+export function parseOneStatus(block: string): DianTrackStatus {
   const isValidRaw = extractAll(block, "IsValid")[0] ?? null;
   const errorMessages = extractAll(block, "ErrorMessage")
     .flatMap((chunk) => {

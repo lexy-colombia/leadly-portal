@@ -18,15 +18,30 @@
  * "ContractFilter mismatch" en vivo) y se corrigió acá con los 15 nombres
  * reales de operación del WSDL. El nombre correcto es `GetNumberingRange`
  * (sin "Async" -- a diferencia de SendTestSetAsync/SendBillAsync, esta no
- * lleva ese sufijo). Request: 3 parámetros nominalmente opcionales en el
- * XSD (accountCode/accountCodeT/softwareCode) -- pero la DIAN respondió en
- * vivo "NIT de la empresa no informado en accountCode" al mandarlo vacío,
- * así que en la práctica `accountCode` SÍ hace falta -- va el NIT del
- * tenant (`tenants.document_number`, sin dígito de verificación, mismo
- * valor que ya se usa como `documentNumber` del vendedor en
- * buildInvoiceXml.ts). `accountCodeT` se sigue omitiendo (sin error propio
- * todavía sobre ese campo -- si la DIAN también lo pide, va a decirlo tan
- * claro como dijo lo de accountCode). Response:
+ * lleva ese sufijo). Request: los 3 parámetros
+ * (accountCode/accountCodeT/softwareCode) figuran como "Optional" en el
+ * XSD, pero el TEXTO del Anexo Técnico (numeral 7.15.2, tabla de la
+ * página 357) marca los tres como "R" -- requeridos -- y la DIAN los
+ * exige de verdad, uno por uno, a medida que se mandan vacíos:
+ * - `accountCode` = NIT del obligado a facturar (el tenant,
+ *   `tenants.document_number`, sin dígito de verificación, el mismo valor
+ *   que ya se usa como `documentNumber` del vendedor en
+ *   buildInvoiceXml.ts). Omitirlo dio en vivo "NIT de la empresa no
+ *   informado en accountCode".
+ * - `accountCodeT` = NIT del DUEÑO DEL SOFTWARE. Se venía omitiendo, y la
+ *   DIAN respondió en vivo (2026-09-10) "El código del software no
+ *   corresponde al NIT: ." -- con la cadena vacía justo después de los
+ *   dos puntos, que es exactamente el accountCodeT que nunca se mandó: la
+ *   DIAN valida el softwareCode contra el dueño declarado ahí, y contra un
+ *   dueño vacío no hay software que corresponda. En el modelo de esta
+ *   plataforma (`dian_directo` = "software propio": cada tenant registra
+ *   su propio software y `sts:SoftwareProvider/ProviderID` lleva su propio
+ *   NIT) el dueño del software ES el tenant, así que va el mismo NIT que
+ *   accountCode. El día que Lexy se registre como Proveedor Tecnológico
+ *   este campo pasa a ser el NIT de Lexy mientras accountCode sigue siendo
+ *   el del tenant -- son distintos justamente en ese escenario.
+ * - `softwareCode` = `tenant_dian_profile.software_id`.
+ * Response:
  * `GetNumberingRangeResponse > GetNumberingRangeResult` (tipo
  * `NumberRangeResponseList`) con `OperationCode`/`OperationDescription` +
  * `ResponseList` (array de `NumberRangeResponse`, con `ResolutionNumber`/
@@ -95,9 +110,13 @@ export async function getTenantNumberingRangeFromDian(adminClient: any, tenantId
 
   const cert = await loadTenantCertificate(adminClient, tenantId);
 
-  const accountCodeXml = `<wcf:accountCode>${escapeXml(String(tenant.document_number))}</wcf:accountCode>`;
+  const nit = escapeXml(String(tenant.document_number));
+  const accountCodeXml = `<wcf:accountCode>${nit}</wcf:accountCode>`;
+  // Mismo NIT que accountCode: en "software propio" el dueño del software
+  // es el propio tenant -- ver el comentario de cabecera.
+  const accountCodeTXml = `<wcf:accountCodeT>${nit}</wcf:accountCodeT>`;
   const softwareCodeXml = profile.software_id ? `<wcf:softwareCode>${escapeXml(String(profile.software_id))}</wcf:softwareCode>` : "";
-  const bodyXml = `<wcf:GetNumberingRange xmlns:wcf="http://wcf.dian.colombia">${accountCodeXml}${softwareCodeXml}</wcf:GetNumberingRange>`;
+  const bodyXml = `<wcf:GetNumberingRange xmlns:wcf="http://wcf.dian.colombia">${accountCodeXml}${accountCodeTXml}${softwareCodeXml}</wcf:GetNumberingRange>`;
   const envelope = await buildSignedSoapEnvelope({
     action: ACTION,
     to: profile.webservice_url,

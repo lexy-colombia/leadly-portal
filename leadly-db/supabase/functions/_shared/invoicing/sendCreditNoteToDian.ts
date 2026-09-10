@@ -2,17 +2,21 @@
  * ver la migración 20260909150000_sales_credit_notes.sql) a la DIAN --
  * mismo pipeline exacto que sendInvoiceToDian.ts: buildCreditNoteXml (CUDE)
  * -> signInvoiceXml (XAdES, genérico a cualquier UBL con el mismo hueco de
- * extensión) -> zip.ts -> wsSecuritySoap.ts -> mTLS fetch, SendTestSetAsync
- * (habilitación) -- SendBillAsync (producción) sigue fuera de alcance,
- * mismo motivo que en sendInvoiceToDian.ts. */
+ * extensión) -> zip.ts -> wsSecuritySoap.ts -> mTLS fetch. Mismos DOS
+ * ambientes que sendInvoiceToDian.ts (ver ese archivo para el porqué
+ * completo): `SendTestSetAsync` en habilitación (asíncrona, ZipKey +
+ * polling) y `SendBillSync` en producción (síncrona, veredicto en la misma
+ * respuesta) -- `SendBillAsync` es el método de envío POR LOTES, que la
+ * DIAN rechaza sin una autorización de cuenta aparte que no tenemos. */
 import { buildCreditNoteXml, type BuildCreditNoteXmlInput } from "./buildCreditNoteXml.ts";
 import { signInvoiceXml } from "./signInvoiceXml.ts";
 import { buildInvoiceZip } from "./zip.ts";
 import { buildSignedSoapEnvelope } from "./wsSecuritySoap.ts";
 import { resolveTenantIntegrationCredential, makeIntegrationSecretGetter } from "../integrations/credentials.ts";
 import { loadTenantCertificate, createMtlsClient, uint8ToBase64 } from "./dianClient.ts";
-import { pollDianTrackStatus } from "./getDianStatus.ts";
+import { pollDianTrackStatus, parseOneStatus } from "./getDianStatus.ts";
 import { interpretDianStatus, applyCreditNoteVerdict } from "./applyDianVerdict.ts";
+import { colombiaIssueMoment } from "./colombiaTime.ts";
 
 const PROVIDER_KEY = "dian_directo";
 
@@ -41,6 +45,9 @@ interface SellerSnapshot {
   country: string | null;
   state_province: string | null;
   is_self_withholding_agent?: boolean;
+  /** Ver buildInvoiceXml.ts (regla FAJ71) -- copiado tal cual del
+   * seller_snapshot de la factura referenciada. */
+  contact_email?: string | null;
 }
 
 export interface SendCreditNoteResult {
@@ -127,9 +134,13 @@ async function doSendCreditNoteToDian(adminClient: any, tenantId: string, credit
   if (!isProduction && !profile.test_set_id) throw new Error("Falta el Test Set ID en la configuración DIAN de este tenant.");
   const getSecret = makeIntegrationSecretGetter(adminClient, credential.id);
   const softwarePin = await getSecret("software_pin");
-  const technicalKey = await getSecret("technical_key"); // no se usa en el CUDE, sí en la firma WS-Security (mismo certificado)
   if (!softwarePin) throw new Error("Falta el PIN del software en Integraciones.");
-  if (!technicalKey) throw new Error("Falta la clave técnica en Integraciones.");
+  // La clave técnica NO se lee acá a propósito. El CUDE de una nota crédito
+  // usa el Software-PIN en su lugar (Anexo Técnico v1.9, numeral 11.4), y la
+  // firma del sobre WS-Security usa el certificado, no la clave -- el
+  // comentario anterior afirmaba lo contrario y era falso. Exigirla dejaba
+  // sin poder emitir notas crédito a un tenant al que solo le faltara un
+  // dato que este camino nunca usa.
 
   const cert = await loadTenantCertificate(adminClient, tenantId);
 
@@ -144,11 +155,13 @@ async function doSendCreditNoteToDian(adminClient: any, tenantId: string, credit
   const creditNotePrefix = profile.credit_note_prefix;
   const creditNoteDocId = `${creditNotePrefix}${creditNoteNumber}`;
   const now = new Date();
+  // Hora REAL de Colombia -- ver colombiaTime.ts.
+  const { issueDate, issueTime } = colombiaIssueMoment(now);
 
   const xmlInput: BuildCreditNoteXmlInput = {
     creditNoteId: creditNoteDocId,
-    issueDate: now.toISOString().slice(0, 10),
-    issueTime: now.toISOString().slice(11, 19) + "-05:00",
+    issueDate,
+    issueTime,
     currency: creditNote.currency ?? "COP",
     environment: isProduction ? 1 : 2,
     seller: {
@@ -162,6 +175,7 @@ async function doSendCreditNoteToDian(adminClient: any, tenantId: string, credit
       cityCode: seller.city_code ?? null,
       stateCode: seller.state_code ?? null,
       taxLevelCode: seller.is_self_withholding_agent ? "O-15" : "R-99-PN",
+      electronicMail: seller.contact_email ?? null,
     },
     buyer: {
       legalName: buyer.full_name ?? "N/A",
@@ -178,7 +192,7 @@ async function doSendCreditNoteToDian(adminClient: any, tenantId: string, credit
     referencedInvoice: {
       id: `${invoice.invoice_prefix}${invoice.invoice_number}`,
       cufe: invoice.cufe,
-      issueDate: (invoice.issue_date ?? now.toISOString()).slice(0, 10),
+      issueDate: invoice.issue_date ? String(invoice.issue_date).slice(0, 10) : issueDate,
     },
     reasonCode: creditNote.reason_code,
     reasonDescription: creditNote.reason_description,
@@ -201,11 +215,13 @@ async function doSendCreditNoteToDian(adminClient: any, tenantId: string, credit
   const zipBytes = buildInvoiceZip([{ fileName: `${creditNoteDocId}.xml`, content: new TextEncoder().encode(signedXml) }]);
   const zipBase64 = uint8ToBase64(zipBytes);
 
-  // Ver sendInvoiceToDian.ts -- producción usa SendBillAsync (sin testSetId).
-  const operation = isProduction ? "SendBillAsync" : "SendTestSetAsync";
+  // Ver sendInvoiceToDian.ts -- producción usa SendBillSync (individual,
+  // sin testSetId), no SendBillAsync (esa es la operación de envío por
+  // lotes, exige una autorización de cuenta aparte que no tenemos).
+  const operation = isProduction ? "SendBillSync" : "SendTestSetAsync";
   const soapAction = `http://wcf.dian.colombia/IWcfDianCustomerServices/${operation}`;
   const bodyXml = isProduction
-    ? `<wcf:SendBillAsync xmlns:wcf="http://wcf.dian.colombia"><wcf:fileName>${zipFileName}</wcf:fileName><wcf:contentFile>${zipBase64}</wcf:contentFile></wcf:SendBillAsync>`
+    ? `<wcf:SendBillSync xmlns:wcf="http://wcf.dian.colombia"><wcf:fileName>${zipFileName}</wcf:fileName><wcf:contentFile>${zipBase64}</wcf:contentFile></wcf:SendBillSync>`
     : `<wcf:SendTestSetAsync xmlns:wcf="http://wcf.dian.colombia"><wcf:fileName>${zipFileName}</wcf:fileName><wcf:contentFile>${zipBase64}</wcf:contentFile><wcf:testSetId>${profile.test_set_id}</wcf:testSetId></wcf:SendTestSetAsync>`;
 
   const envelope = await buildSignedSoapEnvelope({
@@ -235,13 +251,64 @@ async function doSendCreditNoteToDian(adminClient: any, tenantId: string, credit
     client.close?.();
   }
 
+  const nowIso = now.toISOString();
+
+  // SendBillSync (producción) es síncrona -- mismo criterio que
+  // sendInvoiceToDian.ts: el veredicto ya viene en esta respuesta, sin
+  // ZipKey y sin polling posterior.
+  if (isProduction) {
+    const faultMatch = responseBody.match(/<s:Text[^>]*>([^<]+)<\/s:Text>/) ?? responseBody.match(/<faultstring[^>]*>([^<]+)<\/faultstring>/i);
+    const parsed = faultMatch ? null : parseOneStatus(responseBody);
+    if (!parsed || parsed.isValid === null) {
+      const faultReason = faultMatch?.[1] ?? "La DIAN no devolvió un veredicto reconocible.";
+      await adminClient
+        .from("sales_credit_notes")
+        .update({ status: "error", status_detail: faultReason, cude, dian_response: { httpStatus, responseBody }, sent_at: nowIso })
+        .eq("id", creditNoteId);
+      return { status: "error", httpStatus, cude, dianTrackingId: null, faultReason, rejectionDetail: null, creditNotePrefix, creditNoteNumber: Number(creditNoteNumber) };
+    }
+
+    const { error: markSentError } = await adminClient
+      .from("sales_credit_notes")
+      .update({
+        status: "sent",
+        status_detail: null,
+        credit_note_prefix: creditNotePrefix,
+        credit_note_number: creditNoteNumber,
+        issue_date: nowIso,
+        cude,
+        dian_tracking_id: parsed.xmlDocumentKey,
+        dian_response: { httpStatus, responseBody },
+        sent_at: nowIso,
+      })
+      .eq("id", creditNoteId);
+    if (markSentError) {
+      throw new Error(`La DIAN validó la nota crédito pero no se pudo guardar el resultado: ${markSentError.message}`);
+    }
+
+    const verdict = interpretDianStatus(parsed);
+    await applyCreditNoteVerdict(adminClient, tenantId, creditNoteId, Number(creditNoteNumber), verdict);
+
+    return {
+      status: verdict.outcome === "accepted" ? "accepted" : verdict.outcome === "rejected" ? "rejected" : "sent",
+      httpStatus,
+      cude,
+      dianTrackingId: parsed.xmlDocumentKey,
+      faultReason: null,
+      rejectionDetail: verdict.outcome === "rejected" ? verdict.detail : null,
+      creditNotePrefix,
+      creditNoteNumber: Number(creditNoteNumber),
+    };
+  }
+
+  // A partir de acá: habilitación (SendTestSetAsync), asíncrona -- sin
+  // cambios respecto a antes.
   const zipKeyMatch = responseBody.match(/<b:zipkey>([^<]+)<\/b:zipkey>/i);
   const faultMatch = responseBody.match(/<s:Text[^>]*>([^<]+)<\/s:Text>/);
   const processedMessageMatch = responseBody.match(/<c:ProcessedMessage>([^<]+)<\/c:ProcessedMessage>/i);
   const zipKey = zipKeyMatch ? zipKeyMatch[1] : null;
   const faultReason = zipKey ? null : (faultMatch?.[1] ?? processedMessageMatch?.[1] ?? null);
 
-  const nowIso = now.toISOString();
   if (!zipKey) {
     // Falló el envío en sí -- el consecutivo (next_credit_note_number) NO
     // se toca, mismo criterio que sendInvoiceToDian.ts.
