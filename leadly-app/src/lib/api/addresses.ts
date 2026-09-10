@@ -14,6 +14,14 @@ export interface AddressInput {
   line2?: string | null
   city?: string | null
   state_province?: string | null
+  // Código DANE (DIVIPOLA) de municipio/departamento -- ver co_geo.ts. La
+  // DIAN los exige en la dirección de facturación del comprador cuando se
+  // trata de una operación con Colombia (reglas FAK09/FAK29/FAK32, ver
+  // buildInvoiceXml.ts). `city`/`state_province` siguen siendo el nombre
+  // legible (autocompletado desde el catálogo al elegir), estas dos son
+  // el código real que la DIAN valida.
+  city_code?: string | null
+  state_code?: string | null
   postal_code?: string | null
   country?: string | null
   notes?: string | null

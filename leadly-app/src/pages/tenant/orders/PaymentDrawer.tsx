@@ -289,7 +289,10 @@ export function PaymentDrawer({
           // que ya usa OrderDetail.tsx::handleSendInvoice. Sin este chequeo
           // explícito, un rechazo real quedaba tratado como éxito.
           const result = await sendPosInvoiceForOrder(target.id)
-          einvoicing = { attempted: true, error: result.status === 'error' ? (result.faultReason ?? t('orders.paymentDrawer.einvoicing.errors.send')) : null }
+          // 'rejected' ya es el veredicto real de la DIAN (el propio envío
+          // lo consulta antes de responder, ver sendInvoiceToDian.ts).
+          const failureDetail = result.status === 'error' ? result.faultReason : result.status === 'rejected' ? result.rejectionDetail : null
+          einvoicing = { attempted: true, error: failureDetail !== null ? failureDetail || t('orders.paymentDrawer.einvoicing.errors.send') : null }
         } catch (err) {
           einvoicing = { attempted: true, error: err instanceof Error ? err.message : t('orders.paymentDrawer.einvoicing.errors.send') }
         } finally {

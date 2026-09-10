@@ -39,6 +39,8 @@ import {
   listCreditNotesForInvoice,
   retryCreditNote,
   getCreditNotePdf,
+  checkInvoiceStatus,
+  checkCreditNoteStatus,
 } from '../../lib/api/salesInvoices'
 import type { SalesInvoice, SalesInvoiceStatus, SalesCreditNote } from '../../types/domain'
 import { CreditNoteDrawer } from './orders/CreditNoteDrawer'
@@ -331,6 +333,13 @@ export function OrderDetail() {
   const [retryCreditNoteError, setRetryCreditNoteError] = useState<string | null>(null)
   const [downloadingCreditNoteId, setDownloadingCreditNoteId] = useState<string | null>(null)
   const [creditNotePdfError, setCreditNotePdfError] = useState<string | null>(null)
+  // "Verificar estado" -- SendTestSetAsync es asíncrona, el acuse inicial
+  // ('sent') no es la validación final de la DIAN. Pedido explícito del
+  // usuario 2026-09-09 ("en el portal de la DIAN no salen esas facturas
+  // por ningún lado, en habilitación deberían salir"): sin esto, Leadly
+  // nunca volvía a preguntarle a la DIAN qué pasó después del acuse.
+  const [checkingStatusId, setCheckingStatusId] = useState<string | null>(null)
+  const [checkStatusError, setCheckStatusError] = useState<string | null>(null)
 
   // Solo una factura sent/accepted es un documento fiscal REAL (con cufe/
   // número) -- un intento pending/blocked/generating/rejected/error nunca
@@ -357,12 +366,58 @@ export function OrderDetail() {
     setRetryingCreditNoteId(creditNoteId)
     setRetryCreditNoteError(null)
     try {
-      await retryCreditNote(creditNoteId)
+      const result = await retryCreditNote(creditNoteId)
+      // Mismo criterio que handleSendInvoice -- 'rejected' ya es el
+      // veredicto real (el propio envío lo consulta antes de responder).
+      if (result.status === 'error') setRetryCreditNoteError(result.faultReason ?? t('einvoicing.creditNote.error'))
+      else if (result.status === 'rejected') setRetryCreditNoteError(result.rejectionDetail ?? t('einvoicing.creditNote.error'))
     } catch (err) {
       setRetryCreditNoteError(err instanceof Error ? err.message : t('einvoicing.creditNote.error'))
     } finally {
       setRetryingCreditNoteId(null)
       reloadCreditNotes()
+    }
+  }
+
+  /** Consulta GetStatusZip de verdad contra la DIAN con el trackId ya
+   * guardado, y refresca lo que corresponda si la fila cambió de estado
+   * server-side (`buildStatusUpdate` en dian-submit) -- el resultado crudo
+   * (`faultReason`/`statuses[0]`) se muestra tal cual si todavía no hay un
+   * veredicto claro, para no fingir que "no pasó nada" cuando en realidad
+   * la respuesta de la DIAN no se pudo interpretar. */
+  async function handleCheckInvoiceStatus(invoiceId: string) {
+    setCheckingStatusId(invoiceId)
+    setCheckStatusError(null)
+    try {
+      const result = await checkInvoiceStatus(invoiceId)
+      const status = result.statuses[0] ?? null
+      if (result.faultReason) setCheckStatusError(result.faultReason)
+      else if (!status || status.isValid === null) {
+        setCheckStatusError(status?.statusDescription ?? status?.statusMessage ?? t('einvoicing.detail.checkStatusPending'))
+      }
+      reloadInvoices()
+    } catch (err) {
+      setCheckStatusError(err instanceof Error ? err.message : t('einvoicing.detail.checkStatusError'))
+    } finally {
+      setCheckingStatusId(null)
+    }
+  }
+
+  async function handleCheckCreditNoteStatus(creditNoteId: string) {
+    setCheckingStatusId(creditNoteId)
+    setCheckStatusError(null)
+    try {
+      const result = await checkCreditNoteStatus(creditNoteId)
+      const status = result.statuses[0] ?? null
+      if (result.faultReason) setCheckStatusError(result.faultReason)
+      else if (!status || status.isValid === null) {
+        setCheckStatusError(status?.statusDescription ?? status?.statusMessage ?? t('einvoicing.detail.checkStatusPending'))
+      }
+      reloadCreditNotes()
+    } catch (err) {
+      setCheckStatusError(err instanceof Error ? err.message : t('einvoicing.detail.checkStatusError'))
+    } finally {
+      setCheckingStatusId(null)
     }
   }
 
@@ -380,7 +435,13 @@ export function OrderDetail() {
     setSendInvoiceError(null)
     try {
       const result = retry ? await retrySalesInvoiceToDian(latestInvoice.id) : await sendSalesInvoiceToDian(latestInvoice.id)
+      // 'rejected' ya es el veredicto REAL de la DIAN (el propio envío lo
+      // consulta antes de responder, ver sendInvoiceToDian.ts) -- se
+      // muestra igual que un error de envío para feedback inmediato, sin
+      // esperar a que reloadInvoices() termine de traer la fila
+      // actualizada (que también trae el mismo detalle en status_detail).
       if (result.status === 'error') setSendInvoiceError(result.faultReason ?? t('einvoicing.detail.sendError'))
+      else if (result.status === 'rejected') setSendInvoiceError(result.rejectionDetail ?? t('einvoicing.detail.sendError'))
       reloadInvoices()
     } catch (err) {
       setSendInvoiceError(err instanceof Error ? err.message : t('einvoicing.detail.sendError'))
@@ -1339,7 +1400,11 @@ export function OrderDetail() {
                   {/* No se muestra el CUFE (un hash sin significado hasta
                       que la DIAN lo acepta, pedido explícito del usuario) ni
                       un tag de estado -- una vez que el documento aparece
-                      acá, ya sabemos que se emitió; no hace falta repetirlo. */}
+                      acá, ya sabemos que se emitió; no hace falta repetirlo.
+                      Excepción: 'sent' sin confirmar todavía SÍ es relevante
+                      -- ver el comentario grande junto a checkingStatusId,
+                      el acuse inicial de SendTestSetAsync no es la
+                      validación final de la DIAN. */}
                   <div className="min-w-0">
                     <span className="text-xs font-medium text-brand-700">
                       {t('einvoicing.detail.invoiceNumber')}: {inv.invoice_prefix ?? ''}
@@ -1349,8 +1414,15 @@ export function OrderDetail() {
                       {inv.issue_date ? `${formatDate(inv.issue_date)} — ` : ''}
                       {formatCurrency(inv.total, inv.currency)}
                     </span>
+                    {inv.status === 'sent' && <span className="ml-1.5 text-[11px] font-medium text-amber-600">{t('einvoicing.detail.unconfirmed')}</span>}
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
+                    {isCurrent && inv.status === 'sent' && isInvoiceAdmin && (
+                      <Button type="button" size="sm" variant="outline" onClick={() => handleCheckInvoiceStatus(inv.id)} disabled={checkingStatusId === inv.id}>
+                        <RefreshCwIcon className="size-3.5" />
+                        {checkingStatusId === inv.id ? t('einvoicing.detail.checkingStatus') : t('einvoicing.detail.checkStatus')}
+                      </Button>
+                    )}
                     {isCurrent && canIssueCreditNote && (
                       <Button type="button" size="sm" variant="outline" onClick={() => setCreditNoteDrawerOpen(true)}>
                         {t('einvoicing.creditNote.button')}
@@ -1389,9 +1461,16 @@ export function OrderDetail() {
                                 : t('einvoicing.creditNote.number')}
                             </span>
                             <span className="text-brand-400"> — {formatCurrency(cn.total, cn.currency)}</span>
+                            {cn.status === 'sent' && <span className="ml-1.5 text-[11px] font-medium text-amber-600">{t('einvoicing.detail.unconfirmed')}</span>}
                             {cn.status_detail && <p className="mt-0.5 text-[11px] text-amber-700">{cn.status_detail}</p>}
                           </div>
                           <div className="flex shrink-0 items-center gap-1.5">
+                            {cn.status === 'sent' && isInvoiceAdmin && (
+                              <Button type="button" size="sm" variant="outline" onClick={() => handleCheckCreditNoteStatus(cn.id)} disabled={checkingStatusId === cn.id}>
+                                <RefreshCwIcon className="size-3.5" />
+                                {checkingStatusId === cn.id ? t('einvoicing.detail.checkingStatus') : t('einvoicing.detail.checkStatus')}
+                              </Button>
+                            )}
                             {(cn.status === 'error' || cn.status === 'rejected') && isInvoiceAdmin && (
                               <Button type="button" size="sm" variant="outline" onClick={() => handleRetryCreditNote(cn.id)} disabled={retryingCreditNoteId === cn.id}>
                                 <RefreshCwIcon className="size-3.5" />
@@ -1427,6 +1506,7 @@ export function OrderDetail() {
           })}
           {creditNotePdfError && <FieldError message={creditNotePdfError} />}
           {retryCreditNoteError && <FieldError message={retryCreditNoteError} />}
+          {checkStatusError && <FieldError message={checkStatusError} />}
         </div>
       )}
     </StatCard>

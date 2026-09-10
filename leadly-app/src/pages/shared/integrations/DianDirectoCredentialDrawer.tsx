@@ -12,11 +12,14 @@ import {
   getTenantDianProfile,
   listTaxTypes,
   listTenantWithholdingConfigs,
+  syncDianNumberingRange,
   updateTenantDianProfile,
+  type DianNumberingRange,
 } from '../../../lib/api/tenantDianProfile'
 import { uploadCertificateFile, validateCertificateFile } from '../../../lib/api/dianCertificate'
 import type { TaxType, TenantWithholdingConfig } from '../../../types/domain'
 import { FieldError } from '@/components/atoms'
+import { GeoSelect } from '@/components/molecules'
 import { Drawer } from '@/components/organisms'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -26,10 +29,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { IntegrationStatusBanner } from './IntegrationStatusBanner'
 import { IntegrationFieldLabel, IntegrationSection } from './IntegrationFieldLabel'
 import { TrashIcon, UploadIcon } from '@/components/atoms/icons'
+import { RefreshCwIcon } from 'lucide-react'
 import { useLanguage } from '../../../contexts/LanguageContext'
 
 const PROVIDER_KEY = 'dian_directo'
 const FIELD_CLASS = '!h-7 !rounded-lg !text-xs'
+const DIAN_HABILITACION_URL = 'https://vpfe-hab.dian.gov.co/WcfDianCustomerServices.svc'
+const DIAN_PRODUCTION_URL = 'https://vpfe.dian.gov.co/WcfDianCustomerServices.svc'
 
 /** Cada tenant es su propio facturador electrónico DIAN -- este drawer es
  * donde carga su certificado digital (.p12/.pfx), su resolución de
@@ -65,6 +71,8 @@ export function DianDirectoCredentialDrawer({
   const [fiscalRegime, setFiscalRegime] = useState<'responsable_iva' | 'no_responsable_iva' | ''>('')
   const [isSelfWithholdingAgent, setIsSelfWithholdingAgent] = useState(false)
   const [city, setCity] = useState('')
+  const [cityCode, setCityCode] = useState('')
+  const [stateCode, setStateCode] = useState('')
   const [resolutionNumber, setResolutionNumber] = useState('')
   const [resolutionPrefix, setResolutionPrefix] = useState('')
   const [resolutionRangeFrom, setResolutionRangeFrom] = useState('')
@@ -75,6 +83,15 @@ export function DianDirectoCredentialDrawer({
   const [testSetId, setTestSetId] = useState('')
   const [webserviceUrl, setWebserviceUrl] = useState('')
   const [creditNotePrefix, setCreditNotePrefix] = useState('')
+
+  // Botón "Sincronizar con la DIAN" -- pedido explícito del usuario
+  // 2026-09-09: en vez de copiar a mano prefijo/rango/vigencia cada vez
+  // que cambia la resolución, traerlos directo de la DIAN
+  // (GetNumberingRangeAsync). Deliberadamente manual, no automático (ver
+  // handleSyncResolution) -- decisión explícita del usuario por ahora.
+  const [syncingResolution, setSyncingResolution] = useState(false)
+  const [resolutionSyncError, setResolutionSyncError] = useState<string | null>(null)
+  const [resolutionSyncNote, setResolutionSyncNote] = useState<string | null>(null)
 
   const [taxTypes, setTaxTypes] = useState<TaxType[]>([])
   const [withholdingConfigs, setWithholdingConfigs] = useState<TenantWithholdingConfig[]>([])
@@ -115,6 +132,8 @@ export function DianDirectoCredentialDrawer({
         setFiscalRegime(profile?.fiscal_regime ?? '')
         setIsSelfWithholdingAgent(profile?.is_self_withholding_agent ?? false)
         setCity(profile?.city ?? '')
+        setCityCode(profile?.city_code ?? '')
+        setStateCode(profile?.state_code ?? '')
         setResolutionNumber(profile?.resolution_number ?? '')
         setResolutionPrefix(profile?.resolution_prefix ?? '')
         setResolutionRangeFrom(profile?.resolution_range_from != null ? String(profile.resolution_range_from) : '')
@@ -138,6 +157,15 @@ export function DianDirectoCredentialDrawer({
     try {
       await setIntegrationCredentialMode(PROVIDER_KEY, tenantId, next)
       setMode(next)
+      // La URL del web service va de la mano del ambiente (habilitación y
+      // producción son endpoints distintos de la DIAN). Si todavía apunta al
+      // otro ambiente se corrige sola -- queda editable igual, por si la
+      // DIAN cambia el endpoint. No se guarda acá: el usuario la ve en el
+      // campo y la confirma con "Guardar cambios", como el resto del perfil.
+      const pointsToOther = next === 'production' ? webserviceUrl.includes('vpfe-hab.') : webserviceUrl.includes('//vpfe.')
+      if (!webserviceUrl.trim() || pointsToOther) {
+        setWebserviceUrl(next === 'production' ? DIAN_PRODUCTION_URL : DIAN_HABILITACION_URL)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('integrations.errors.save'))
     }
@@ -169,6 +197,53 @@ export function DianDirectoCredentialDrawer({
     }
   }
 
+  /** De varias resoluciones vigentes devueltas por la DIAN (poco común,
+   * pero un NIT puede tener más de una activa a la vez para distintos
+   * documentos), se queda con la que todavía no venció -- y entre esas, la
+   * de vigencia más reciente. Si ninguna trae fecha parseable, se queda
+   * con la primera tal cual vino -- mejor eso que no completar nada. */
+  function pickActiveRange(ranges: DianNumberingRange[]): DianNumberingRange {
+    const today = new Date().toISOString().slice(0, 10)
+    const withParsedValidUntil = ranges.filter((r) => r.validUntil && !Number.isNaN(Date.parse(r.validUntil)))
+    const stillValid = withParsedValidUntil.filter((r) => (r.validUntil as string).slice(0, 10) >= today)
+    const pool = stillValid.length > 0 ? stillValid : withParsedValidUntil.length > 0 ? withParsedValidUntil : ranges
+    return pool.reduce((best, r) => {
+      if (!r.validFrom) return best
+      if (!best.validFrom) return r
+      return r.validFrom > best.validFrom ? r : best
+    }, pool[0])
+  }
+
+  async function handleSyncResolution() {
+    if (!tenantId) return
+    setSyncingResolution(true)
+    setResolutionSyncError(null)
+    setResolutionSyncNote(null)
+    try {
+      const result = await syncDianNumberingRange(tenantId)
+      if (result.faultReason) {
+        setResolutionSyncError(result.faultReason)
+        return
+      }
+      if (result.ranges.length === 0) {
+        setResolutionSyncError(result.operationDescription ?? t('integrations.dianDirecto.syncNoRanges'))
+        return
+      }
+      const chosen = pickActiveRange(result.ranges)
+      if (chosen.prefix) setResolutionPrefix(chosen.prefix)
+      if (chosen.resolutionNumber) setResolutionNumber(chosen.resolutionNumber)
+      if (chosen.rangeFrom != null) setResolutionRangeFrom(String(chosen.rangeFrom))
+      if (chosen.rangeTo != null) setResolutionRangeTo(String(chosen.rangeTo))
+      if (chosen.validFrom) setResolutionValidFrom(chosen.validFrom.slice(0, 10))
+      if (chosen.validUntil) setResolutionValidUntil(chosen.validUntil.slice(0, 10))
+      setResolutionSyncNote(result.ranges.length > 1 ? t('integrations.dianDirecto.syncMultipleFound', { count: String(result.ranges.length) }) : t('integrations.dianDirecto.syncApplied'))
+    } catch (err) {
+      setResolutionSyncError(err instanceof Error ? err.message : t('integrations.dianDirecto.syncError'))
+    } finally {
+      setSyncingResolution(false)
+    }
+  }
+
   async function handleSubmit() {
     if (!tenantId) return
     setSubmitting(true)
@@ -185,6 +260,8 @@ export function DianDirectoCredentialDrawer({
         fiscal_regime: fiscalRegime || null,
         is_self_withholding_agent: isSelfWithholdingAgent,
         city: city.trim() || null,
+        city_code: cityCode.trim() || null,
+        state_code: stateCode.trim() || null,
         resolution_number: resolutionNumber.trim() || null,
         resolution_prefix: resolutionPrefix.trim() || null,
         resolution_range_from: resolutionRangeFrom.trim() ? Number(resolutionRangeFrom) : null,
@@ -365,6 +442,9 @@ export function DianDirectoCredentialDrawer({
                     </SelectItem>
                   </SelectContent>
                 </Select>
+                {mode === 'production' && (
+                  <p className="mt-1 text-[10px] leading-tight text-amber-600">{t('integrations.dianDirecto.environmentHint')}</p>
+                )}
               </div>
               <div>
                 <IntegrationFieldLabel htmlFor="dian-fiscal-regime" label={t('integrations.dianDirecto.fiscalRegime')} />
@@ -389,30 +469,59 @@ export function DianDirectoCredentialDrawer({
               <Switch checked={isSelfWithholdingAgent} onCheckedChange={setIsSelfWithholdingAgent} />
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <IntegrationFieldLabel htmlFor="dian-city" label={t('integrations.dianDirecto.city')} />
-                <Input id="dian-city" value={city} onChange={(e) => setCity(e.target.value)} className={FIELD_CLASS} />
-              </div>
-              <div>
-                <IntegrationFieldLabel htmlFor="dian-software-id" label={t('integrations.dianDirecto.softwareId')} />
-                <Input id="dian-software-id" value={softwareId} onChange={(e) => setSoftwareId(e.target.value)} className={FIELD_CLASS} />
-              </div>
+            <div>
+              <IntegrationFieldLabel htmlFor="dian-software-id" label={t('integrations.dianDirecto.softwareId')} />
+              <Input id="dian-software-id" value={softwareId} onChange={(e) => setSoftwareId(e.target.value)} className={`sm:w-1/2 ${FIELD_CLASS}`} />
             </div>
 
+            {/* Departamento/ciudad elegidos de la lista real de la DIAN
+                (DIVIPOLA) -- ya trae el código correcto, sin que nadie
+                tenga que saberlo de memoria (antes era un campo de texto
+                libre para el código, pedido explícito del usuario
+                2026-09-09: "cargar eso a la base de datos"). `city` (el
+                nombre legible que ya usaba el XML) se completa solo desde
+                la elección -- ya no es un campo aparte. */}
+            <GeoSelect
+              stateCode={stateCode || null}
+              cityCode={cityCode || null}
+              onChange={({ stateCode: nextState, cityCode: nextCity, cityName }) => {
+                setStateCode(nextState ?? '')
+                setCityCode(nextCity ?? '')
+                setCity(cityName ?? '')
+              }}
+              stateLabel={t('integrations.dianDirecto.state')}
+              cityLabel={t('integrations.dianDirecto.city')}
+              idPrefix="dian-geo"
+            />
+
             <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <IntegrationFieldLabel htmlFor="dian-test-set-id" label={t('integrations.dianDirecto.testSetId')} />
-                <Input id="dian-test-set-id" value={testSetId} onChange={(e) => setTestSetId(e.target.value)} placeholder="00000000-0000-0000-0000-000000000000" className={FIELD_CLASS} />
-              </div>
+              {/* El Test Set ID solo aplica en habilitación -- en producción
+                  la operación es SendBillAsync, que no lo recibe. El ambiente
+                  lo decide el selector "Modo" de más arriba. */}
+              {mode === 'sandbox' && (
+                <div>
+                  <IntegrationFieldLabel htmlFor="dian-test-set-id" label={t('integrations.dianDirecto.testSetId')} />
+                  <Input id="dian-test-set-id" value={testSetId} onChange={(e) => setTestSetId(e.target.value)} placeholder="00000000-0000-0000-0000-000000000000" className={FIELD_CLASS} />
+                </div>
+              )}
               <div>
                 <IntegrationFieldLabel htmlFor="dian-webservice-url" label={t('integrations.dianDirecto.webserviceUrl')} />
-                <Input id="dian-webservice-url" value={webserviceUrl} onChange={(e) => setWebserviceUrl(e.target.value)} placeholder="https://vpfe-hab.dian.gov.co/WcfDianCustomerServices.svc" className={FIELD_CLASS} />
+                <Input id="dian-webservice-url" value={webserviceUrl} onChange={(e) => setWebserviceUrl(e.target.value)} placeholder={DIAN_HABILITACION_URL} className={FIELD_CLASS} />
               </div>
             </div>
           </IntegrationSection>
 
-          <IntegrationSection title={t('integrations.dianDirecto.section.resolution')}>
+          <IntegrationSection
+            title={t('integrations.dianDirecto.section.resolution')}
+            action={
+              <Button type="button" size="sm" variant="outline" onClick={handleSyncResolution} disabled={syncingResolution}>
+                <RefreshCwIcon className="size-3.5" />
+                {syncingResolution ? t('integrations.dianDirecto.syncing') : t('integrations.dianDirecto.sync')}
+              </Button>
+            }
+          >
+            {resolutionSyncError && <FieldError message={resolutionSyncError} />}
+            {resolutionSyncNote && <p className="text-xs text-emerald-600">{resolutionSyncNote}</p>}
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <IntegrationFieldLabel htmlFor="dian-resolution-number" label={t('integrations.dianDirecto.resolutionNumber')} />

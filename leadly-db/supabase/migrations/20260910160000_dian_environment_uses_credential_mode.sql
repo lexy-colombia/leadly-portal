@@ -1,0 +1,21 @@
+-- El ambiente DIAN (habilitación vs producción) NO necesita columna propia:
+-- lo expresa el selector "Modo" que ya tiene toda tarjeta de Integraciones
+-- (`integration_credentials.mode` = 'sandbox' | 'production'), rotulado para
+-- la DIAN como "Habilitación (pruebas)" / "Producción".
+--
+-- Contexto (2026-09-10): hasta hoy el código mandaba SIEMPRE
+-- `SendTestSetAsync` con `ProfileExecutionID=2`, sin mirar ese selector --
+-- ver el comentario de cabecera de sendInvoiceToDian.ts, que dejaba
+-- producción fuera de alcance "hasta tener al menos una factura de
+-- habilitación aceptada de punta a punta". Eso ya ocurrió (Barriles de la
+-- sexta, factura SETP990000001 "Procesado Correctamente"), y la DIAN cerró
+-- el set de pruebas: todo envío posterior por ese camino falla con "Set de
+-- prueba ... se encuentra Aceptado", que es lo que apareció al intentar la
+-- primera nota crédito. Desde ahora `mode` decide de verdad:
+--   sandbox    -> SendTestSetAsync + testSetId + ProfileExecutionID=2
+--   production -> SendBillAsync (sin testSetId) + ProfileExecutionID=1
+--
+-- Esta migración no cambia el esquema -- queda como registro de la decisión
+-- (una primera versión llegó a agregar `tenant_dian_profile.environment` y
+-- se revirtió por duplicar el mismo concepto en dos lugares distintos).
+select 1;

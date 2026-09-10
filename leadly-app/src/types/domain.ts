@@ -267,7 +267,6 @@ export interface Client {
   phone: string
   email: string | null
   company: string | null
-  nit: string | null
   document_type: TenantDocumentType | null
   document_number: string | null
   dian_document_type_code: string | null
@@ -568,6 +567,9 @@ export interface ContactAddress {
   line2: string | null
   city: string | null
   state_province: string | null
+  // Código DANE (DIVIPOLA) -- ver lib/api/geo.ts.
+  city_code: string | null
+  state_code: string | null
   postal_code: string | null
   country: string | null
   notes: string | null
@@ -1202,7 +1204,7 @@ export interface TaxType {
   is_active: boolean
 }
 
-/** Catálogo de solo lectura (dian_document_types) -- Tabla 3 del Anexo Técnico. */
+/** Catálogo de solo lectura (document_types) -- Tabla 3 del Anexo Técnico DIAN. */
 export interface DianDocumentType {
   code: string
   name: string
@@ -1215,6 +1217,12 @@ export interface TenantDianProfile {
   fiscal_regime: 'responsable_iva' | 'no_responsable_iva' | null
   is_self_withholding_agent: boolean
   city: string | null
+  // Código DANE (DIVIPOLA) de municipio/departamento -- exigido por la DIAN
+  // en la dirección del emisor (reglas FAJ09/FAJ12/FAJ29/FAJ32, rechazo
+  // real, ver buildInvoiceXml.ts). Sin catálogo autocompletado -- el tenant
+  // lo carga a mano una vez.
+  city_code: string | null
+  state_code: string | null
   resolution_number: string | null
   resolution_prefix: string | null
   resolution_range_from: number | null
@@ -1223,6 +1231,10 @@ export interface TenantDianProfile {
   resolution_valid_until: string | null
   next_invoice_number: number | null
   software_id: string | null
+  // Solo aplica en habilitación -- en producción la operación es
+  // SendBillAsync, que no recibe set de pruebas. El ambiente lo decide el
+  // selector "Modo" de la integración (integration_credentials.mode), no un
+  // campo propio de este perfil.
   test_set_id: string | null
   webservice_url: string | null
   is_configured: boolean

@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { createClient, updateClient } from '../../../lib/api/clients'
+import { createClient, updateClient, dianDocumentTypeCodeToGeneric } from '../../../lib/api/clients'
 import { listProfilesByTenant } from '../../../lib/api/users'
-import type { Client, Profile, TenantDocumentType } from '../../../types/domain'
+import type { Client, Profile } from '../../../types/domain'
 import { FieldError } from '@/components/atoms'
 import { ComboboxFilter, PhoneInput, TagInput } from '@/components/molecules'
 import { Drawer } from '@/components/organisms'
@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { COUNTRIES, DOCUMENT_TYPES } from '../../../lib/referenceData'
+import { COUNTRIES } from '../../../lib/referenceData'
 import { isNotBlank, isValidE164Phone, isValidEmail } from '../../../lib/validation'
 import { combinePhone, splitPhone } from '../../../lib/phone'
 import { useLanguage } from '../../../contexts/LanguageContext'
@@ -52,12 +52,9 @@ export function ContactDrawer({
   const [fullName, setFullName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
-  const [company, setCompany] = useState('')
   const [tags, setTags] = useState<string[]>([])
   const [assignedTo, setAssignedTo] = useState<string | null>(null)
   const [agents, setAgents] = useState<Profile[]>([])
-  const [nit, setNit] = useState('')
-  const [documentType, setDocumentType] = useState<TenantDocumentType | ''>('')
   const [documentNumber, setDocumentNumber] = useState('')
   const [country, setCountry] = useState('')
   const [notes, setNotes] = useState('')
@@ -81,11 +78,8 @@ export function ContactDrawer({
     // handleSubmit).
     setPhone(contact ? combinePhone(contact.phone_prefix, contact.phone) : '')
     setEmail(contact?.email ?? '')
-    setCompany(contact?.company ?? '')
     setTags(contact?.tags ?? [])
     setAssignedTo(contact?.assigned_to ?? null)
-    setNit(contact?.nit ?? '')
-    setDocumentType(contact?.document_type ?? '')
     setDocumentNumber(contact?.document_number ?? '')
     setCountry(contact?.country ?? '')
     setNotes(contact?.notes ?? '')
@@ -122,11 +116,16 @@ export function ContactDrawer({
         phone_prefix: dialCode,
         phone: localNumber,
         email: email.trim() || null,
-        company: company.trim() || null,
         tags,
         assigned_to: assignedTo,
-        nit: nit.trim() || null,
-        document_type: documentType || null,
+        // `document_type` (lista genérica NIT/CC/CE/RUC/RFC/PASAPORTE/OTRO)
+        // ya no se le pide al usuario por separado -- pedido explícito del
+        // usuario 2026-09-09: "se piden tipos de documentos y números de
+        // documentos varias veces". Se sigue escribiendo, derivado del
+        // tipo de documento DIAN elegido (la única fuente real ahora), para
+        // que ClientPickerCard.tsx/PosReceiptTicket.tsx (que lo muestran
+        // como etiqueta corta en tickets/buscadores) no se queden sin dato.
+        document_type: dianDocumentTypeCodeToGeneric(dianDocumentTypeCode || null),
         document_number: documentNumber.trim() || null,
         country: country || null,
         notes: notes.trim() || null,
@@ -190,31 +189,19 @@ export function ContactDrawer({
         </Section>
 
         <Section title={t('contacts.drawer.sections.classification')}>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="contact-company">{t('contacts.drawer.fields.company')}</Label>
-              <Input
-                id="contact-company"
-                value={company}
-                onChange={(e) => setCompany(e.target.value)}
-                placeholder={t('contacts.drawer.fields.companyPlaceholder')}
-                className={`mt-1 ${FIELD_CLASS}`}
+          <div>
+            <Label>{t('contacts.drawer.fields.assignedAgent')}</Label>
+            <div className="mt-1">
+              <ComboboxFilter
+                options={agents.map((a) => ({ id: a.id, label: a.full_name }))}
+                value={assignedTo}
+                onChange={setAssignedTo}
+                placeholder={t('contacts.drawer.fields.unassigned')}
+                searchPlaceholder={t('contacts.filters.agent.search')}
+                emptyLabel={t('contacts.filters.agent.noResults')}
+                className="w-full"
+                triggerClassName={COMBOBOX_TRIGGER_CLASS}
               />
-            </div>
-            <div>
-              <Label>{t('contacts.drawer.fields.assignedAgent')}</Label>
-              <div className="mt-1">
-                <ComboboxFilter
-                  options={agents.map((a) => ({ id: a.id, label: a.full_name }))}
-                  value={assignedTo}
-                  onChange={setAssignedTo}
-                  placeholder={t('contacts.drawer.fields.unassigned')}
-                  searchPlaceholder={t('contacts.filters.agent.search')}
-                  emptyLabel={t('contacts.filters.agent.noResults')}
-                  className="w-full"
-                  triggerClassName={COMBOBOX_TRIGGER_CLASS}
-                />
-              </div>
             </div>
           </div>
 
@@ -225,47 +212,67 @@ export function ContactDrawer({
         </Section>
 
         <Section title={t('contacts.drawer.sections.additional')}>
+          {/* Un solo tipo/número de documento -- pedido explícito del
+              usuario 2026-09-09: antes se pedía tres veces (NIT suelto,
+              "Tipo de documento" genérico, y "Tipo de documento DIAN" en
+              la sección de facturación electrónica, los tres compartiendo
+              en el fondo el mismo número). El catálogo DIAN es el que de
+              verdad hace falta para facturar, así que es el único que se
+              muestra -- ClientPickerCard.tsx/PosReceiptTicket.tsx siguen
+              mostrando una etiqueta corta derivada de esto (ver
+              dianDocumentTypeCodeToGeneric en handleSubmit). */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label htmlFor="contact-nit">{t('contacts.drawer.fields.nit')}</Label>
-              <Input id="contact-nit" value={nit} onChange={(e) => setNit(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
-            </div>
-            <div>
-              <Label htmlFor="contact-document-type">{t('contacts.drawer.fields.documentType')}</Label>
-              <Select value={documentType} onValueChange={(v) => setDocumentType(v as TenantDocumentType)}>
-                <SelectTrigger id="contact-document-type" className={`mt-1 w-full ${FIELD_CLASS}`}>
-                  <SelectValue placeholder={t('common.form.selectPlaceholder')} />
+              <Label htmlFor="contact-dian-document-type">{t('contacts.drawer.fields.dianDocumentType')}</Label>
+              {/* `key` incluye el propio valor a propósito -- pasarle solo un
+               * `value` nuevo a un Select de Radix ya montado no alcanzaba
+               * para que mostrara la etiqueta correcta al editar (se quedaba
+               * en blanco aun con la etiqueta ya resuelta explícita más
+               * abajo). Forzar un remount completo cada vez que
+               * dianDocumentTypeCode cambia (por el useEffect al abrir en
+               * modo edición, o por el propio onValueChange) elimina
+               * cualquier estado interno de Radix que no se estuviera
+               * actualizando solo. */}
+              <Select key={`${contact?.id ?? 'new'}-${dianDocumentTypeCode}-${dianDocumentTypes.length}`} value={dianDocumentTypeCode} onValueChange={setDianDocumentTypeCode}>
+                <SelectTrigger id="contact-dian-document-type" className={`mt-1 w-full ${FIELD_CLASS}`}>
+                  {/* Radix solo aprende la etiqueta de un item una vez que
+                   * SelectContent se monta (recién al abrir el dropdown una
+                   * vez), así que un <SelectValue /> vacío se ve en blanco
+                   * al editar aunque dianDocumentTypeCode ya traiga un valor
+                   * real -- se pasa la etiqueta ya resuelta en vez de
+                   * depender de eso (mismo fix que ProductDrawer.tsx). */}
+                  <SelectValue placeholder={t('common.form.selectPlaceholder')}>{dianDocumentTypes.find((d) => d.code === dianDocumentTypeCode)?.name}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  {DOCUMENT_TYPES.map((d) => (
-                    <SelectItem key={d.value} value={d.value}>
-                      {t(d.labelKey)}
+                  {dianDocumentTypes.map((d) => (
+                    <SelectItem key={d.code} value={d.code}>
+                      {d.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="contact-document-number">{t('contacts.drawer.fields.documentNumber')}</Label>
               <Input id="contact-document-number" value={documentNumber} onChange={(e) => setDocumentNumber(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
             </div>
-            <div>
-              <Label htmlFor="contact-country">{t('contacts.drawer.fields.country')}</Label>
-              <Select value={country} onValueChange={setCountry}>
-                <SelectTrigger id="contact-country" className={`mt-1 w-full ${FIELD_CLASS}`}>
-                  <SelectValue placeholder={t('common.form.selectPlaceholder')} />
-                </SelectTrigger>
-                <SelectContent>
-                  {COUNTRIES.map((c) => (
-                    <SelectItem key={c.code} value={c.code}>
-                      {t(c.labelKey)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+          </div>
+          <div>
+            <Label htmlFor="contact-country">{t('contacts.drawer.fields.country')}</Label>
+            <Select key={`${contact?.id ?? 'new'}-${country}`} value={country} onValueChange={setCountry}>
+              <SelectTrigger id="contact-country" className={`mt-1 w-full sm:w-1/2 ${FIELD_CLASS}`}>
+                {/* Mismo fix que el select de tipo de documento arriba --
+                 * ver ese comentario. */}
+                <SelectValue placeholder={t('common.form.selectPlaceholder')}>{COUNTRIES.find((c) => c.code === country) ? t(COUNTRIES.find((c) => c.code === country)!.labelKey) : undefined}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {COUNTRIES.map((c) => (
+                  <SelectItem key={c.code} value={c.code}>
+                    {t(c.labelKey)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div>
             <Label htmlFor="contact-notes">{t('contacts.drawer.fields.notes')}</Label>
@@ -289,22 +296,6 @@ export function ContactDrawer({
         </Section>
 
         <Section title={t('contacts.drawer.sections.einvoicing')}>
-          <div>
-            <Label htmlFor="contact-dian-document-type">{t('contacts.drawer.fields.dianDocumentType')}</Label>
-            <Select value={dianDocumentTypeCode} onValueChange={setDianDocumentTypeCode}>
-              <SelectTrigger id="contact-dian-document-type" className={`mt-1 w-full ${FIELD_CLASS}`}>
-                <SelectValue placeholder={t('common.form.selectPlaceholder')} />
-              </SelectTrigger>
-              <SelectContent>
-                {dianDocumentTypes.map((d) => (
-                  <SelectItem key={d.code} value={d.code}>
-                    {d.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="mt-1 text-[11px] text-brand-400">{t('contacts.drawer.fields.dianDocumentTypeHint')}</p>
-          </div>
           <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
             <div>
               <Label htmlFor="contact-withholding" className="font-normal text-brand-700">

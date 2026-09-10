@@ -34,7 +34,43 @@
  * buscarla en el lugar donde la DIAN exige que esté. Por eso este archivo
  * NO usa `SignedXml.Verify()` para nada -- implementa su propia
  * verificación (recursiva, sí funciona) como red de seguridad antes de
- * mandar cualquier factura real. */
+ * mandar cualquier factura real.
+ *
+ * ⚠️ RONDA 2026-09-10, contra el rechazo real y persistente ZE02 ("Valor de
+ * la Firma inválido") -- consultado el Anexo Técnico 1.9 oficial (numeral
+ * 6.5.10 y 8.8.5) en vez de seguir probando a ciegas.
+ *
+ * Causa real #1, ENCONTRADA Y CORREGIDA (sigue vigente en el código de más
+ * abajo): faltaba la SEGUNDA de las tres `ds:Reference` que exige el Anexo
+ * (DC02/DC10-DC12) -- el digest de `ds:KeyInfo`. `xadesjs` nunca la agrega
+ * sola (solo agrega la de `SignedProperties`), así que `SignedInfo` quedaba
+ * con 2 referencias en vez de 3. Confirmado contra el Anexo y contra el
+ * ejemplo oficial Generica.xml.
+ *
+ * Hipótesis #2, PROBADA Y DESCARTADA -- no la repitas: con la referencia de
+ * arriba ya agregada, un envío real SIGUIÓ rechazando ZE02. Se sospechó que
+ * `xmldsigjs` canonicalizaba `SignedInfo`/`KeyInfo`/`SignedProperties` mal
+ * (inyectando los 9 namespaces de la raíz `Invoice` -- "atrae contexto de
+ * ancestros", comportamiento que el propio estándar respalda: W3C XMLDSig
+ * Core 7.3) y se probó forzar la canonicalización "mínima" (como si cada
+ * elemento fuera un documento standalone). Se DESCARTÓ con evidencia dura:
+ * se consiguió una factura real ya ACEPTADA por la DIAN (de otro software,
+ * Jerónimo Martins Colombia) y se verificaron sus tres valores (digest de
+ * KeyInfo, digest de SignedProperties, SignatureValue) bajo ambas
+ * convenciones -- los tres coinciden EXACTO con "atrae contexto" (la que
+ * `xmldsigjs` ya usa por defecto) y NINGUNO con la forma mínima. La
+ * convención que ya usa este archivo es la correcta.
+ *
+ * Causa real #2, ENCONTRADA Y CORREGIDA (la de fondo, tras 9 rechazos
+ * idénticos): la primera `ds:Reference` salía SIN el atributo `URI`. El
+ * Anexo exige `URI=""` (DC05) y el estándar XMLDSig le da un significado
+ * completamente distinto a omitirlo -- la DIAN no podía resolver qué se
+ * había firmado y daba la firma por inválida. Se encontró volcando el XML
+ * real que generábamos (ver `debug_dump_invoice_xml` en dian-submit) y
+ * comparándolo contra una factura real ya aceptada. Ninguna verificación
+ * propia lo detectaba porque todas asumían "documento completo" sin mirar
+ * ese atributo -- si volvés a tocar esta parte, verificá SIEMPRE contra un
+ * documento real aceptado, no solo contra la autoconsistencia interna. */
 import { DOMParser, XMLSerializer } from "npm:@xmldom/xmldom@0.8";
 import * as xmldsig from "npm:xmldsigjs@2";
 import * as xades from "npm:xadesjs@2";
@@ -55,6 +91,15 @@ function bufToBase64(buf: ArrayBuffer): string {
   let binary = "";
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
   return btoa(binary);
+}
+
+/** Sufijo aleatorio para el `Id` de `KeyInfo` (ver el comentario en
+ * `signInvoiceXml` sobre la referencia faltante) -- hex, nunca empieza con
+ * un dígito real de por sí (el prefijo "xmldsig-" ya lo garantiza), válido
+ * como NCName de XML. */
+function randomHex(byteLength: number): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(byteLength));
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /** Identificador de política de firma XAdES-EPES exigido por la DIAN --
@@ -96,13 +141,67 @@ export async function signInvoiceXml(input: SignInvoiceXmlInput): Promise<string
 
   // deno-lint-ignore no-explicit-any
   const signedXml = new (xades as any).SignedXml(signatureTarget);
+
+  // Causa real de ZE02 ("Valor de la Firma inválido"), confirmada contra el
+  // Anexo Técnico 1.9 (numeral 6.5.10, reglas DC02/DC10-DC12) y verificada
+  // con una firma de prueba fuera de este archivo: `ds:SignedInfo` DEBE
+  // contener exactamente TRES `ds:Reference` -- (1) el documento completo
+  // (enveloped), (2) un digest de `ds:KeyInfo` (URI="#{id}-KeyInfo"), (3) un
+  // digest de `xades:SignedProperties`. `xadesjs` arma automáticamente la
+  // (1) (la que pasamos abajo) y la (3) (la agrega sola al procesar
+  // `signingCertificate`/`policy`/`signerRole`), pero NUNCA arma la (2) --
+  // no existe ningún código en la librería que la agregue. Sin ella,
+  // `SignedInfo` queda con solo 2 referencias: la firma que se calcula es
+  // internamente autoconsistente (por eso `verifySignedInvoiceXml` de más
+  // abajo siempre dio `true`) pero no es la que la DIAN reconstruye al
+  // validar el documento recibido -- de ahí que un `crypto.subtle.verify`
+  // externo sobre el `SignedInfo` tal cual queda en el XML final SIEMPRE
+  // daba `false`, confirmado con un certificado de prueba fuera de este
+  // pipeline. Se agrega a mano: se le da un `Id` al `KeyInfo` ANTES de
+  // firmar y se referencia esa misma id sin `transforms` -- sin transforms
+  // explícitos, `xmldsigjs` aplica C14N (no exclusivo, igual que
+  // `CanonicalizationMethod`) como transform implícito por defecto, que es
+  // exactamente lo que muestra el ejemplo oficial Generica.xml para esa
+  // misma referencia.
+  const keyInfoId = `xmldsig-${randomHex(8)}-KeyInfo`;
+  // deno-lint-ignore no-explicit-any
+  (signedXml as any).XmlSignature.KeyInfo = new (xmldsig as any).KeyInfo();
+  (signedXml as any).XmlSignature.KeyInfo.Id = keyInfoId;
+
   await signedXml.Sign(
     { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
     input.privateKey,
     doc,
     {
       x509: [certB64],
-      references: [{ hash: "SHA-256", transforms: ["enveloped", "c14n"] }],
+      // Un solo transform ("enveloped") en la referencia del documento
+      // completo -- confirmado contra Generica.xml y contra el Anexo
+      // Técnico (DC06/DC07: el grupo Transforms de esa referencia trae un
+      // único TransForm, el enveloped-signature). La referencia a KeyInfo
+      // (ver arriba) va sin transforms -- Generica.xml tampoco le pone
+      // ninguno.
+      references: [
+        // `uri: ""` es OBLIGATORIO y NO es lo mismo que omitirlo: el Anexo
+        // Técnico exige `URI=""` en esta referencia (regla DC05, "debe
+        // contener la información de la firma aplicada a todo el
+        // documento... URI=''"), y el estándar XMLDSig le da un significado
+        // COMPLETAMENTE distinto a una URI ausente (referencia a un objeto
+        // que la aplicación define, no resoluble) que a `URI=""` (el
+        // documento completo). `xmldsigjs` solo escribe el atributo si se
+        // le pasa explícitamente (`Reference.Uri` no tiene defaultValue,
+        // queda `undefined` y se omite al serializar).
+        //
+        // ESTA ERA LA CAUSA REAL DEL RECHAZO ZE02 ("Valor de la firma
+        // inválido"), encontrada 2026-09-10 tras 9 rechazos idénticos:
+        // nuestro XML salía con `<ds:Reference>` pelado, sin `URI`, así que
+        // la DIAN no podía resolver qué se firmó y daba la firma por
+        // inválida. Ninguna de nuestras verificaciones propias lo detectaba
+        // porque todas asumían "documento completo" sin mirar el atributo.
+        // Se encontró comparando byte a byte contra una factura real ya
+        // ACEPTADA por la DIAN (de otro software), que sí trae `URI=""`.
+        { id: `${keyInfoId.replace("-KeyInfo", "")}-ref0`, uri: "", hash: "SHA-256", transforms: ["enveloped"] },
+        { hash: "SHA-256", uri: `#${keyInfoId}` },
+      ],
       signingCertificate: certB64,
       signingTime: { value: new Date() },
       policy: {
@@ -116,6 +215,24 @@ export async function signInvoiceXml(input: SignInvoiceXmlInput): Promise<string
       signerRole: { claimed: ["supplier"] },
     },
   );
+
+  // RONDA 2026-09-10, revertida: se probó una hipótesis de que la DIAN
+  // esperaba SignedInfo/KeyInfo/SignedProperties canonicalizados como
+  // documentos independientes (namespaces mínimos, sin heredar nada de
+  // `Invoice`) en vez de la convención por defecto de `xmldsigjs`
+  // (namespaces de la raíz inyectados -- "atrae contexto de ancestros",
+  // avalado por el propio estándar: W3C XMLDSig Core 7.3). Se verificó
+  // DEFINITIVAMENTE contra una factura real ya ACEPTADA por la DIAN (de
+  // otro software, compartida por el usuario -- Jerónimo Martins Colombia)
+  // que la convención correcta es la que `xmldsigjs` ya usa por defecto
+  // ("atrae contexto"): tanto los digests de KeyInfo/SignedProperties como
+  // el valor final de la firma de ESA factura real coinciden exacto con
+  // "atrae contexto" y NO con la forma mínima -- por eso no hace falta (ni
+  // corresponde) recalcular nada acá, `Sign()` ya lo hace bien. El
+  // rechazo ZE02 persistente contra un envío real con esta misma
+  // convención (antes de probar -y descartar- la hipótesis mínima) sigue
+  // sin explicación -- la causa real todavía no se encontró, ver el
+  // comentario de cabecera del archivo para el estado de la investigación.
 
   // deno-lint-ignore no-explicit-any
   const signatureNode = (signedXml as any).XmlSignature.GetXml();

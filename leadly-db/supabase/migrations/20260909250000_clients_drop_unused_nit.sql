@@ -1,0 +1,11 @@
+-- `clients.nit` era un campo de texto suelto sin ningún lector real en toda
+-- la app (ni tickets, ni pickers, ni el tool-calling de la IA) -- una
+-- tercera forma de pedir "documento del cliente" además de document_type/
+-- document_number (genérico) y dian_document_type_code (catálogo real de
+-- la DIAN, el único que hace falta para facturar). Pedido explícito del
+-- usuario 2026-09-09: "se piden tipos de documentos y números de
+-- documentos varias veces" -- se consolidó el formulario (ContactDrawer.tsx)
+-- para pedir el documento una sola vez (dian_document_type_code +
+-- document_number), y este campo, verificado sin ningún consumidor, se
+-- elimina en vez de dejarlo como dato muerto.
+alter table public.clients drop column if exists nit;

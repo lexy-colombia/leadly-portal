@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
+import { GeoSelect } from '@/components/molecules'
 import { isNotBlank } from '../../../lib/validation'
 import { useLanguage } from '../../../contexts/LanguageContext'
 
@@ -41,6 +42,8 @@ export function AddressDrawer({
   const [line2, setLine2] = useState('')
   const [city, setCity] = useState('')
   const [stateProvince, setStateProvince] = useState('')
+  const [cityCode, setCityCode] = useState<string | null>(null)
+  const [stateCode, setStateCode] = useState<string | null>(null)
   const [postalCode, setPostalCode] = useState('')
   const [country, setCountry] = useState('Colombia')
   const [notes, setNotes] = useState('')
@@ -61,6 +64,8 @@ export function AddressDrawer({
     setLine2(address?.line2 ?? '')
     setCity(address?.city ?? '')
     setStateProvince(address?.state_province ?? '')
+    setCityCode(address?.city_code ?? null)
+    setStateCode(address?.state_code ?? null)
     setPostalCode(address?.postal_code ?? '')
     setCountry(address?.country ?? 'Colombia')
     setNotes(address?.notes ?? '')
@@ -70,6 +75,12 @@ export function AddressDrawer({
   }, [open, address])
 
   const line1Error = touched && !isNotBlank(line1) ? t('contacts.addressDrawer.errors.line1Required') : undefined
+  // El picker de departamento/ciudad (con código DANE real) solo tiene
+  // sentido para Colombia -- la DIAN solo valida esos códigos cuando
+  // Country/IdentificationCode="CO" (ver buildInvoiceXml.ts). Para
+  // cualquier otro país, ciudad/departamento se siguen escribiendo libres,
+  // como antes.
+  const isColombia = country.trim().toLowerCase() === 'colombia'
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -92,6 +103,8 @@ export function AddressDrawer({
         line2: line2.trim() || null,
         city: city.trim() || null,
         state_province: stateProvince.trim() || null,
+        city_code: isColombia ? cityCode : null,
+        state_code: isColombia ? stateCode : null,
         postal_code: postalCode.trim() || null,
         country: country.trim() || null,
         notes: notes.trim() || null,
@@ -159,16 +172,38 @@ export function AddressDrawer({
           <Input id="address-line2" value={line2} onChange={(e) => setLine2(e.target.value)} placeholder={t('contacts.addressDrawer.fields.line2Placeholder')} className={`mt-1 ${FIELD_CLASS}`} />
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <Label htmlFor="address-city">{t('contacts.addressDrawer.fields.city')}</Label>
-            <Input id="address-city" value={city} onChange={(e) => setCity(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
+        {isColombia ? (
+          // Elegidos de la lista real de la DIAN (DIVIPOLA) -- ya trae el
+          // código DANE que la factura electrónica necesita para esta
+          // dirección cuando es de facturación (reglas FAK09/FAK29/FAK32,
+          // ver buildInvoiceXml.ts), sin que nadie tenga que escribirlo a
+          // mano. `city`/`state_province` (el nombre legible que ya usaba
+          // el resto de la app) se completan solos desde la elección.
+          <GeoSelect
+            stateCode={stateCode}
+            cityCode={cityCode}
+            onChange={({ stateCode: nextState, cityCode: nextCity, stateName, cityName }) => {
+              setStateCode(nextState)
+              setCityCode(nextCity)
+              setStateProvince(stateName ?? '')
+              setCity(cityName ?? '')
+            }}
+            stateLabel={t('contacts.addressDrawer.fields.state')}
+            cityLabel={t('contacts.addressDrawer.fields.city')}
+            idPrefix="address-geo"
+          />
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="address-city">{t('contacts.addressDrawer.fields.city')}</Label>
+              <Input id="address-city" value={city} onChange={(e) => setCity(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
+            </div>
+            <div>
+              <Label htmlFor="address-state">{t('contacts.addressDrawer.fields.state')}</Label>
+              <Input id="address-state" value={stateProvince} onChange={(e) => setStateProvince(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
+            </div>
           </div>
-          <div>
-            <Label htmlFor="address-state">{t('contacts.addressDrawer.fields.state')}</Label>
-            <Input id="address-state" value={stateProvince} onChange={(e) => setStateProvince(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
-          </div>
-        </div>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <div>

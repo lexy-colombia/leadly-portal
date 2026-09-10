@@ -42,6 +42,12 @@ import { sendTestInvoiceToDian } from "../_shared/invoicing/sendToDian.ts";
 import { sendInvoiceToDian } from "../_shared/invoicing/sendInvoiceToDian.ts";
 import { sendCreditNoteToDian } from "../_shared/invoicing/sendCreditNoteToDian.ts";
 import { createInvoiceAttempt } from "../_shared/invoicing/queueInvoiceGeneration.ts";
+import { getTenantNumberingRangeFromDian } from "../_shared/invoicing/getNumberingRange.ts";
+import { loadTenantCertificate } from "../_shared/invoicing/dianClient.ts";
+import { buildInvoiceXml } from "../_shared/invoicing/buildInvoiceXml.ts";
+import { signInvoiceXml } from "../_shared/invoicing/signInvoiceXml.ts";
+import { queryDianTrackStatus } from "../_shared/invoicing/getDianStatus.ts";
+import { interpretDianStatus, applyInvoiceVerdict, applyCreditNoteVerdict } from "../_shared/invoicing/applyDianVerdict.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -84,6 +90,30 @@ Deno.serve(async (req) => {
 
   if (body.action === "retry_credit_note") {
     return await handleRetryCreditNote(req, body);
+  }
+
+  if (body.action === "sync_dian_numbering_range") {
+    return await handleSyncNumberingRange(req, body);
+  }
+
+  if (body.action === "check_invoice_status") {
+    return await handleCheckInvoiceStatus(req, body);
+  }
+
+  if (body.action === "check_credit_note_status") {
+    return await handleCheckCreditNoteStatus(req, body);
+  }
+
+  if (body.action === "check_certificate") {
+    return await handleCheckCertificate(req, body);
+  }
+
+  if (body.action === "debug_verify_signature") {
+    return await handleDebugVerifySignature(req, body);
+  }
+
+  if (body.action === "debug_dump_invoice_xml") {
+    return await handleDebugDumpInvoiceXml(req, body);
   }
 
   return await handleSendTestInvoice(req, body);
@@ -414,6 +444,355 @@ async function handleRetryCreditNote(req: Request, body: { credit_note_id?: stri
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
   try {
     const result = await sendCreditNoteToDian(adminClient, creditNoteRow.tenant_id, body.credit_note_id);
+    return jsonResponse(result);
+  } catch (err) {
+    return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+}
+
+/** Botón "Sincronizar con la DIAN" en Integraciones -- pedido explícito del
+ * usuario 2026-09-09: en vez de tipear a mano prefijo/rango/vigencia cada
+ * vez que cambia la resolución, consultarla directo de la DIAN
+ * (GetNumberingRangeAsync, ver getNumberingRange.ts) usando el certificado
+ * ya cargado. Deliberadamente manual (un botón, no un cron) -- decisión
+ * explícita del usuario por ahora. Solo LEE de la DIAN -- no escribe nada
+ * en tenant_dian_profile; el frontend precarga el formulario con el
+ * resultado y el usuario sigue teniendo que apretar "Guardar cambios" como
+ * con cualquier otro campo, para no pisar una configuración que funciona
+ * con un parseo todavía no verificado en vivo (ver el comentario de
+ * cabecera de getNumberingRange.ts). Tampoco toca `next_invoice_number` --
+ * saber "qué resolución está vigente" y saber "en qué consecutivo real voy"
+ * son dos preguntas distintas, la segunda sigue siendo una decisión manual. */
+async function handleSyncNumberingRange(req: Request, body: { tenant_id?: string }): Promise<Response> {
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) return jsonResponse({ error: "Missing Authorization header" }, 401);
+  if (!body.tenant_id) return jsonResponse({ error: "expected_tenant_id" }, 400);
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const callerClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } });
+
+  const {
+    data: { user: caller },
+    error: callerError,
+  } = await callerClient.auth.getUser();
+  if (callerError || !caller) return jsonResponse({ error: "Invalid session" }, 401);
+
+  const { data: profile } = await callerClient.from("profiles").select("role, tenant_id").eq("id", caller.id).maybeSingle();
+  const isSuperadmin = profile?.role === "superadmin";
+  const isOwnTenantAdmin = profile?.role === "tenant_admin" && profile.tenant_id === body.tenant_id;
+  if (!isSuperadmin && !isOwnTenantAdmin) {
+    return jsonResponse({ error: "Solo un administrador del tenant puede sincronizar la resolución DIAN." }, 403);
+  }
+
+  const adminClient = createClient(supabaseUrl, serviceRoleKey);
+  try {
+    const result = await getTenantNumberingRangeFromDian(adminClient, body.tenant_id);
+    return jsonResponse(result);
+  } catch (err) {
+    return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+}
+
+/** Diagnóstico puntual 2026-09-10, contra el rechazo real ZE02 ("Valida
+ * firma del documento") -- una causa frecuente y documentada de ese error
+ * en otros facturadores es un certificado vencido o cuyo período de
+ * vigencia no cubre la fecha real de la firma. Solo descarga/desencripta el
+ * .p12 ya guardado y devuelve su vigencia -- NUNCA firma ni manda nada a la
+ * DIAN, así que no consume ningún consecutivo ni intento del test set de
+ * habilitación. Mismo modelo de autorización que check_invoice_status
+ * (tenant_admin/superadmin del propio tenant vía RLS). */
+async function handleCheckCertificate(req: Request, body: { tenant_id?: string }): Promise<Response> {
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) return jsonResponse({ error: "Missing Authorization header" }, 401);
+  if (!body.tenant_id) return jsonResponse({ error: "expected_tenant_id" }, 400);
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const callerClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } });
+
+  const {
+    data: { user: caller },
+    error: callerError,
+  } = await callerClient.auth.getUser();
+  if (callerError || !caller) return jsonResponse({ error: "Invalid session" }, 401);
+
+  const { data: profile } = await callerClient.from("profiles").select("role, tenant_id").eq("id", caller.id).maybeSingle();
+  const isSuperadmin = profile?.role === "superadmin";
+  const isOwnTenantAdmin = profile?.role === "tenant_admin" && profile.tenant_id === body.tenant_id;
+  if (!isSuperadmin && !isOwnTenantAdmin) {
+    return jsonResponse({ error: "Solo un administrador del tenant puede revisar su certificado DIAN." }, 403);
+  }
+
+  const adminClient = createClient(supabaseUrl, serviceRoleKey);
+  try {
+    const cert = await loadTenantCertificate(adminClient, body.tenant_id);
+    const now = new Date();
+
+    // deno-lint-ignore no-explicit-any
+    const forge = (await import("npm:node-forge@1")).default as any;
+    let certBinary = "";
+    const certBytes = new Uint8Array(cert.certificateDer);
+    for (let i = 0; i < certBytes.length; i++) certBinary += String.fromCharCode(certBytes[i]);
+    const parsedCert = forge.pki.certificateFromAsn1(forge.asn1.fromDer(certBinary));
+    const issuerAttrs = parsedCert.issuer.attributes.map((a: { shortName?: string; name?: string; value: string }) => `${a.shortName ?? a.name}=${a.value}`).join(", ");
+    const subjectAttrs = parsedCert.subject.attributes.map((a: { shortName?: string; name?: string; value: string }) => `${a.shortName ?? a.name}=${a.value}`).join(", ");
+    const isSelfSigned = issuerAttrs === subjectAttrs;
+
+    return jsonResponse({
+      subjectCommonName: cert.subjectCommonName,
+      validFrom: cert.validFrom.toISOString(),
+      validTo: cert.validTo.toISOString(),
+      isCurrentlyValid: now >= cert.validFrom && now <= cert.validTo,
+      now: now.toISOString(),
+      issuer: issuerAttrs,
+      subject: subjectAttrs,
+      isSelfSigned,
+      serialNumber: parsedCert.serialNumber,
+      extensions: parsedCert.extensions.map((e: { name?: string; id?: string }) => e.name ?? e.id),
+    });
+  } catch (err) {
+    return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+}
+
+/** Diagnóstico 2026-09-10: devuelve el XML firmado EXACTO de una factura ya
+ * existente (mismo pipeline real de sendInvoiceToDian, con el certificado
+ * real del tenant) SIN mandarlo a la DIAN ni tocar la base -- hacía falta
+ * para poder comparar byte a byte lo que generamos contra una factura real
+ * ya aceptada, sin quemar otro consecutivo del test set de habilitación
+ * (van 9 rechazos idénticos por ZE02 con todo lo verificable ya verificado). */
+async function handleDebugDumpInvoiceXml(req: Request, body: { invoice_id?: string }): Promise<Response> {
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) return jsonResponse({ error: "Missing Authorization header" }, 401);
+  if (!body.invoice_id) return jsonResponse({ error: "expected_invoice_id" }, 400);
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const callerClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } });
+
+  const {
+    data: { user: caller },
+    error: callerError,
+  } = await callerClient.auth.getUser();
+  if (callerError || !caller) return jsonResponse({ error: "Invalid session" }, 401);
+
+  const { data: profile } = await callerClient.from("profiles").select("role").eq("id", caller.id).maybeSingle();
+  if (!profile || (profile.role !== "tenant_admin" && profile.role !== "superadmin")) {
+    return jsonResponse({ error: "Solo un administrador del tenant puede ejecutar este diagnóstico." }, 403);
+  }
+
+  // RLS aísla por tenant -- si la factura es de otro tenant, viene null.
+  const { data: invoiceRow } = await callerClient.from("sales_invoices").select("tenant_id").eq("id", body.invoice_id).maybeSingle();
+  if (!invoiceRow) return jsonResponse({ error: "Factura no encontrada." }, 404);
+
+  const adminClient = createClient(supabaseUrl, serviceRoleKey);
+  try {
+    const result = await sendInvoiceToDian(adminClient, invoiceRow.tenant_id, body.invoice_id, { dryRun: true });
+    return jsonResponse({ cufe: result.cufe, invoicePrefix: result.invoicePrefix, invoiceNumber: result.invoiceNumber, signedXml: result.signedXml });
+  } catch (err) {
+    return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+}
+
+/** Diagnóstico puntual 2026-09-10, contra el rechazo ZE02 persistente
+ * después de corregir dos causas estructurales distintas (referencia
+ * faltante a KeyInfo, canonicalización de SignedInfo) sin que ninguna
+ * cambiara el resultado real -- hipótesis más fundamental sin probar
+ * todavía: ¿la clave privada real de este tenant corresponde de verdad a
+ * la clave pública de SU PROPIO certificado? Si no corresponden (archivo
+ * .p12 equivocado, o parsePkcs12 extrayendo la clave de un bag distinto al
+ * certificado en un contenedor con más de un par), ninguna corrección de
+ * canonicalización iba a funcionar jamás. Firma un XML sintético con el
+ * certificado/clave REALES del tenant y lo verifica con la clave pública
+ * extraída de ESE MISMO certificado -- NUNCA manda nada a la DIAN, no
+ * consume ningún intento del test set de habilitación. */
+async function handleDebugVerifySignature(req: Request, body: { tenant_id?: string }): Promise<Response> {
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) return jsonResponse({ error: "Missing Authorization header" }, 401);
+  if (!body.tenant_id) return jsonResponse({ error: "expected_tenant_id" }, 400);
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const callerClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } });
+
+  const {
+    data: { user: caller },
+    error: callerError,
+  } = await callerClient.auth.getUser();
+  if (callerError || !caller) return jsonResponse({ error: "Invalid session" }, 401);
+
+  const { data: profile } = await callerClient.from("profiles").select("role, tenant_id").eq("id", caller.id).maybeSingle();
+  const isSuperadmin = profile?.role === "superadmin";
+  const isOwnTenantAdmin = profile?.role === "tenant_admin" && profile.tenant_id === body.tenant_id;
+  if (!isSuperadmin && !isOwnTenantAdmin) {
+    return jsonResponse({ error: "Solo un administrador del tenant puede ejecutar este diagnóstico." }, 403);
+  }
+
+  const adminClient = createClient(supabaseUrl, serviceRoleKey);
+  try {
+    const cert = await loadTenantCertificate(adminClient, body.tenant_id);
+
+    // deno-lint-ignore no-explicit-any
+    const forge = (await import("npm:node-forge@1")).default as any;
+    let certBinary = "";
+    const certBytes = new Uint8Array(cert.certificateDer);
+    for (let i = 0; i < certBytes.length; i++) certBinary += String.fromCharCode(certBytes[i]);
+    const parsedCert = forge.pki.certificateFromAsn1(forge.asn1.fromDer(certBinary));
+    const publicKeySpkiDer = forge.asn1.toDer(forge.pki.publicKeyToAsn1(parsedCert.publicKey)).getBytes();
+    const publicKeyBytes = new Uint8Array(publicKeySpkiDer.length);
+    for (let i = 0; i < publicKeySpkiDer.length; i++) publicKeyBytes[i] = publicKeySpkiDer.charCodeAt(i);
+    const publicKey = await crypto.subtle.importKey("spki", publicKeyBytes.buffer, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+
+    const { xml: unsignedXml } = await buildInvoiceXml({
+      invoiceId: "DEBUG000000001",
+      issueDate: "2026-01-01",
+      issueTime: "12:00:00-05:00",
+      currency: "COP",
+      environment: 2,
+      seller: { legalName: "DEBUG", documentTypeCode: "31", documentNumber: "900000000", addressLine: null, city: null, stateProvince: null, countryCode: "CO", taxLevelCode: "R-99-PN" },
+      buyer: { legalName: "DEBUG", documentTypeCode: "13", documentNumber: "1000000000", addressLine: null, city: null, stateProvince: null, countryCode: "CO", taxLevelCode: "R-99-PN" },
+      lines: [{ id: 1, description: "DEBUG", quantity: 1, unitPrice: 100, lineExtensionAmount: 100, tax: null }],
+      withholdings: [],
+      resolution: { number: "DEBUG", prefix: "DEBUG", rangeFrom: "1", rangeTo: "2", validFrom: "2026-01-01", validUntil: "2027-01-01" },
+      softwareId: "00000000-0000-0000-0000-000000000000",
+      softwarePin: "0000",
+      technicalKey: "debug",
+      authorizationProviderNit: "800197268",
+      payment: { meansId: "1", meansCode: "10" },
+    });
+    const signedXml = await signInvoiceXml({ unsignedXml, privateKey: cert.privateKey, certificateDer: cert.certificateDer });
+
+    const { DOMParser } = await import("npm:@xmldom/xmldom@0.8");
+    const xmldsig = await import("npm:xmldsigjs@2");
+    // deno-lint-ignore no-explicit-any
+    (xmldsig as any).Application.setEngine("Deno", crypto);
+    const doc = new (DOMParser as any)().parseFromString(signedXml, "text/xml");
+    const signedInfoEl = doc.getElementsByTagNameNS("http://www.w3.org/2000/09/xmldsig#", "SignedInfo")[0];
+    const signatureValueEl = doc.getElementsByTagNameNS("http://www.w3.org/2000/09/xmldsig#", "SignatureValue")[0];
+    const sigB64 = signatureValueEl.textContent.trim();
+    const sigBinary = atob(sigB64);
+    const sigBytes = new Uint8Array(sigBinary.length);
+    for (let i = 0; i < sigBinary.length; i++) sigBytes[i] = sigBinary.charCodeAt(i);
+
+    // deno-lint-ignore no-explicit-any
+    const canonicalizer = new (xmldsig as any).XmlCanonicalizer(false, false);
+    const canonicalSignedInfo = canonicalizer.Canonicalize(signedInfoEl);
+    const canonicalBytes = typeof canonicalSignedInfo === "string" ? new TextEncoder().encode(canonicalSignedInfo) : canonicalSignedInfo;
+
+    const verified = await crypto.subtle.verify({ name: "RSASSA-PKCS1-v1_5" }, publicKey, sigBytes, canonicalBytes);
+
+    return jsonResponse({
+      certificateSubject: cert.subjectCommonName,
+      certParsedSubjectCN: parsedCert.subject?.getField("CN")?.value ?? null,
+      signatureVerifiesAgainstOwnCertificate: verified,
+    });
+  } catch (err) {
+    return jsonResponse({ error: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined }, 500);
+  }
+}
+
+/** Botón "Verificar estado" -- respaldo MANUAL para cuando el polling
+ * síncrono de sendInvoiceToDian.ts (ver ese archivo, pedido explícito del
+ * usuario 2026-09-09: "el endpoint debe verificar el estado y devolverme
+ * si hubo error o no") se agotó sin una respuesta concluyente de la DIAN
+ * -- ya no es el paso obligatorio para saber si una factura se aceptó o
+ * rechazó, pero sigue haciendo falta para ese caso puntual (procesamiento
+ * más lento de lo que esa función puede esperar). Reusa
+ * interpretDianStatus/applyInvoiceVerdict (applyDianVerdict.ts) -- mismo
+ * código exacto que usa el camino síncrono, así que si esto resuelve a
+ * "accepted" también avanza next_invoice_number acá, no solo en el envío. */
+async function handleCheckInvoiceStatus(req: Request, body: { invoice_id?: string }): Promise<Response> {
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) return jsonResponse({ error: "Missing Authorization header" }, 401);
+  if (!body.invoice_id) return jsonResponse({ error: "expected_invoice_id" }, 400);
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const callerClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } });
+
+  const {
+    data: { user: caller },
+    error: callerError,
+  } = await callerClient.auth.getUser();
+  if (callerError || !caller) return jsonResponse({ error: "Invalid session" }, 401);
+
+  const { data: profile } = await callerClient.from("profiles").select("role").eq("id", caller.id).maybeSingle();
+  if (!profile || (profile.role !== "tenant_admin" && profile.role !== "superadmin")) {
+    return jsonResponse({ error: "Solo un administrador del tenant puede verificar el estado de una factura." }, 403);
+  }
+
+  // RLS de sales_invoices ya aísla por tenant -- si es de otro tenant, esto
+  // viene null, igual que "no existe".
+  const { data: invoiceRow } = await callerClient.from("sales_invoices").select("tenant_id, status, dian_tracking_id, invoice_number").eq("id", body.invoice_id).maybeSingle();
+  if (!invoiceRow) return jsonResponse({ error: "Factura no encontrada." }, 404);
+  if (invoiceRow.status !== "sent") {
+    return jsonResponse({ error: `Esta factura está en estado "${invoiceRow.status}" -- solo tiene sentido verificar una que quedó "enviada" sin confirmar todavía.` }, 409);
+  }
+  if (!invoiceRow.dian_tracking_id) {
+    return jsonResponse({ error: "Esta factura no tiene un identificador de seguimiento de la DIAN guardado." }, 409);
+  }
+
+  const adminClient = createClient(supabaseUrl, serviceRoleKey);
+  try {
+    const result = await queryDianTrackStatus(adminClient, invoiceRow.tenant_id, invoiceRow.dian_tracking_id);
+    if (!result.faultReason) {
+      const verdict = interpretDianStatus(result.statuses[0] ?? null);
+      await applyInvoiceVerdict(adminClient, invoiceRow.tenant_id, body.invoice_id, Number(invoiceRow.invoice_number ?? 0), verdict);
+    }
+    return jsonResponse(result);
+  } catch (err) {
+    return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+}
+
+/** Misma idea que handleCheckInvoiceStatus, para una nota crédito. */
+async function handleCheckCreditNoteStatus(req: Request, body: { credit_note_id?: string }): Promise<Response> {
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) return jsonResponse({ error: "Missing Authorization header" }, 401);
+  if (!body.credit_note_id) return jsonResponse({ error: "expected_credit_note_id" }, 400);
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const callerClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } });
+
+  const {
+    data: { user: caller },
+    error: callerError,
+  } = await callerClient.auth.getUser();
+  if (callerError || !caller) return jsonResponse({ error: "Invalid session" }, 401);
+
+  const { data: profile } = await callerClient.from("profiles").select("role").eq("id", caller.id).maybeSingle();
+  if (!profile || (profile.role !== "tenant_admin" && profile.role !== "superadmin")) {
+    return jsonResponse({ error: "Solo un administrador del tenant puede verificar el estado de una nota crédito." }, 403);
+  }
+
+  const { data: creditNoteRow } = await callerClient
+    .from("sales_credit_notes")
+    .select("tenant_id, status, dian_tracking_id, credit_note_number")
+    .eq("id", body.credit_note_id)
+    .maybeSingle();
+  if (!creditNoteRow) return jsonResponse({ error: "Nota crédito no encontrada." }, 404);
+  if (creditNoteRow.status !== "sent") {
+    return jsonResponse({ error: `Esta nota crédito está en estado "${creditNoteRow.status}" -- solo tiene sentido verificar una que quedó "enviada" sin confirmar todavía.` }, 409);
+  }
+  if (!creditNoteRow.dian_tracking_id) {
+    return jsonResponse({ error: "Esta nota crédito no tiene un identificador de seguimiento de la DIAN guardado." }, 409);
+  }
+
+  const adminClient = createClient(supabaseUrl, serviceRoleKey);
+  try {
+    const result = await queryDianTrackStatus(adminClient, creditNoteRow.tenant_id, creditNoteRow.dian_tracking_id);
+    if (!result.faultReason) {
+      const verdict = interpretDianStatus(result.statuses[0] ?? null);
+      await applyCreditNoteVerdict(adminClient, creditNoteRow.tenant_id, body.credit_note_id, Number(creditNoteRow.credit_note_number ?? 0), verdict);
+    }
     return jsonResponse(result);
   } catch (err) {
     return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 500);

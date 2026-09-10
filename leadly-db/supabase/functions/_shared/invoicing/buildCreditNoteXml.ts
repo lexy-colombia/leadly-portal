@@ -52,10 +52,22 @@ export interface CreditNoteXmlParty {
   legalName: string;
   documentTypeCode: string;
   documentNumber: string;
-  addressLine: string;
-  city: string;
-  stateProvince: string;
+  /** `null` cuando no hay dirección real -- ver buildInvoiceXml.ts para el
+   * porqué (el grupo se omite entero, nunca se manda un placeholder). */
+  addressLine: string | null;
+  city: string | null;
+  stateProvince: string | null;
   countryCode: string;
+  /** Ver el mismo campo en buildInvoiceXml.ts::InvoiceXmlParty -- misma
+   * regla (grupo de dirección con código DANE), corregido acá el
+   * 2026-09-09 junto con la factura tras el primer rechazo real de la
+   * DIAN sobre esa (no probado todavía puntualmente contra una nota
+   * crédito, pero la estructura de AccountingSupplierParty/
+   * AccountingCustomerParty es la misma en ambos documentos). */
+  cityCode?: string | null;
+  stateCode?: string | null;
+  organizationType?: "1" | "2";
+  taxLevelCode?: string;
 }
 
 export interface CreditNoteXmlTax {
@@ -101,48 +113,76 @@ function esc(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+/** Redondea, no trunca -- mismo motivo y misma corrección que
+ * buildInvoiceXml.ts::money (la DIAN compara con round(), ver ese
+ * comentario para el detalle). */
 function money(value: number): string {
-  const truncated = Math.trunc(value * 100) / 100;
-  return truncated.toFixed(2);
+  const rounded = Math.round(value * 100) / 100;
+  return rounded.toFixed(2);
 }
 
 function partyBlock(tag: "cac:AccountingSupplierParty" | "cac:AccountingCustomerParty", party: CreditNoteXmlParty, dv?: number): string {
   const companyIdAttrs = `schemeAgencyID="195" schemeAgencyName="CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)"${
     dv !== undefined ? ` schemeID="${dv}"` : ""
   } schemeName="${esc(party.documentTypeCode)}"`;
-  return `
-   <${tag}>
-      <cac:Party>
-         <cac:PartyName>
-            <cbc:Name>${esc(party.legalName)}</cbc:Name>
-         </cac:PartyName>
+  const organizationType = party.organizationType ?? (party.documentTypeCode === "31" ? "1" : "2");
+  const taxLevelCode = party.taxLevelCode ?? "R-99-PN";
+  const cityCodeXml = party.cityCode ? `\n               <cbc:ID>${esc(party.cityCode)}</cbc:ID>` : "";
+  const stateCodeXml = party.stateCode ? `\n               <cbc:CountrySubentityCode>${esc(party.stateCode)}</cbc:CountrySubentityCode>` : "";
+  // cac:PartyIdentification (reglas FAK61/FAK62/FAK63, ver el mismo fix en
+  // buildInvoiceXml.ts) -- obligatorio en el comprador cuando es persona
+  // natural.
+  const partyIdentificationXml =
+    tag === "cac:AccountingCustomerParty" && organizationType === "2"
+      ? `
+         <cac:PartyIdentification>
+            <cbc:ID ${companyIdAttrs}>${esc(party.documentNumber)}</cbc:ID>
+         </cac:PartyIdentification>`
+      : "";
+  // Grupos de dirección opcionales -- se omiten enteros sin dirección real
+  // (ver buildInvoiceXml.ts::partyBlock para el porqué exacto).
+  const hasAddress = Boolean(party.addressLine);
+  const physicalLocationXml = !hasAddress
+    ? ""
+    : `
          <cac:PhysicalLocation>
-            <cac:Address>
-               <cbc:CityName>${esc(party.city)}</cbc:CityName>
-               <cbc:CountrySubentity>${esc(party.stateProvince)}</cbc:CountrySubentity>
+            <cac:Address>${cityCodeXml}
+               <cbc:CityName>${esc(party.city ?? "")}</cbc:CityName>
+               <cbc:CountrySubentity>${esc(party.stateProvince ?? "")}</cbc:CountrySubentity>${stateCodeXml}
                <cac:AddressLine>
-                  <cbc:Line>${esc(party.addressLine)}</cbc:Line>
+                  <cbc:Line>${esc(party.addressLine ?? "")}</cbc:Line>
                </cac:AddressLine>
                <cac:Country>
                   <cbc:IdentificationCode>${esc(party.countryCode)}</cbc:IdentificationCode>
                   <cbc:Name languageID="es">Colombia</cbc:Name>
                </cac:Country>
             </cac:Address>
-         </cac:PhysicalLocation>
-         <cac:PartyTaxScheme>
-            <cbc:RegistrationName>${esc(party.legalName)}</cbc:RegistrationName>
-            <cbc:CompanyID ${companyIdAttrs}>${esc(party.documentNumber)}</cbc:CompanyID>
-            <cac:RegistrationAddress>
-               <cbc:CityName>${esc(party.city)}</cbc:CityName>
-               <cbc:CountrySubentity>${esc(party.stateProvince)}</cbc:CountrySubentity>
+         </cac:PhysicalLocation>`;
+  const registrationAddressXml = !hasAddress
+    ? ""
+    : `
+            <cac:RegistrationAddress>${cityCodeXml}
+               <cbc:CityName>${esc(party.city ?? "")}</cbc:CityName>
+               <cbc:CountrySubentity>${esc(party.stateProvince ?? "")}</cbc:CountrySubentity>${stateCodeXml}
                <cac:AddressLine>
-                  <cbc:Line>${esc(party.addressLine)}</cbc:Line>
+                  <cbc:Line>${esc(party.addressLine ?? "")}</cbc:Line>
                </cac:AddressLine>
                <cac:Country>
                   <cbc:IdentificationCode>${esc(party.countryCode)}</cbc:IdentificationCode>
                   <cbc:Name languageID="es">Colombia</cbc:Name>
                </cac:Country>
-            </cac:RegistrationAddress>
+            </cac:RegistrationAddress>`;
+  return `
+   <${tag}>
+      <cbc:AdditionalAccountID>${organizationType}</cbc:AdditionalAccountID>
+      <cac:Party>${partyIdentificationXml}
+         <cac:PartyName>
+            <cbc:Name>${esc(party.legalName)}</cbc:Name>
+         </cac:PartyName>${physicalLocationXml}
+         <cac:PartyTaxScheme>
+            <cbc:RegistrationName>${esc(party.legalName)}</cbc:RegistrationName>
+            <cbc:CompanyID ${companyIdAttrs}>${esc(party.documentNumber)}</cbc:CompanyID>
+            <cbc:TaxLevelCode>${esc(taxLevelCode)}</cbc:TaxLevelCode>${registrationAddressXml}
             <cac:TaxScheme>
                <cbc:ID>01</cbc:ID>
                <cbc:Name>IVA</cbc:Name>
@@ -198,28 +238,28 @@ export async function buildCreditNoteXml(input: BuildCreditNoteXmlInput): Promis
     `URL=${qrHost}/document/searchqr?documentkey=${cude}`,
   ].join("\n");
 
-  const taxTotalBlocks = (["01", "04", "03"] as const)
-    .map((code) => {
-      const amount = code === "01" ? ivaTotal : code === "04" ? incTotal : icaTotal;
-      const rate = tax?.code === code ? tax.rate : 0;
-      const taxable = tax?.code === code ? tax.taxableAmount : 0;
-      return `
+  // FAS01b (ver el mismo fix en buildInvoiceXml.ts): solo se emite un
+  // cac:TaxTotal para el código de impuesto que la única línea de esta
+  // nota crédito de verdad tiene -- antes se emitían los tres (IVA/INC/ICA)
+  // siempre, incluidos dos en $0 sin ninguna línea que los respaldara, que
+  // es exactamente lo que esa regla rechaza.
+  const taxTotalBlocks = !tax
+    ? ""
+    : `
    <cac:TaxTotal>
-      <cbc:TaxAmount currencyID="${input.currency}">${money(amount)}</cbc:TaxAmount>
+      <cbc:TaxAmount currencyID="${input.currency}">${money(taxAmount)}</cbc:TaxAmount>
       <cac:TaxSubtotal>
-         <cbc:TaxableAmount currencyID="${input.currency}">${money(taxable)}</cbc:TaxableAmount>
-         <cbc:TaxAmount currencyID="${input.currency}">${money(amount)}</cbc:TaxAmount>
+         <cbc:TaxableAmount currencyID="${input.currency}">${money(tax.taxableAmount)}</cbc:TaxableAmount>
+         <cbc:TaxAmount currencyID="${input.currency}">${money(taxAmount)}</cbc:TaxAmount>
          <cac:TaxCategory>
-            <cbc:Percent>${rate.toFixed(2)}</cbc:Percent>
+            <cbc:Percent>${tax.rate.toFixed(2)}</cbc:Percent>
             <cac:TaxScheme>
-               <cbc:ID>${code}</cbc:ID>
-               <cbc:Name>${TAX_SCHEME_NAME[code]}</cbc:Name>
+               <cbc:ID>${tax.code}</cbc:ID>
+               <cbc:Name>${TAX_SCHEME_NAME[tax.code]}</cbc:Name>
             </cac:TaxScheme>
          </cac:TaxCategory>
       </cac:TaxSubtotal>
    </cac:TaxTotal>`;
-    })
-    .join("");
 
   const lineTaxXml = tax
     ? `

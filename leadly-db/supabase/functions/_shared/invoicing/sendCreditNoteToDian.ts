@@ -11,6 +11,8 @@ import { buildInvoiceZip } from "./zip.ts";
 import { buildSignedSoapEnvelope } from "./wsSecuritySoap.ts";
 import { resolveTenantIntegrationCredential, makeIntegrationSecretGetter } from "../integrations/credentials.ts";
 import { loadTenantCertificate, createMtlsClient, uint8ToBase64 } from "./dianClient.ts";
+import { pollDianTrackStatus } from "./getDianStatus.ts";
+import { interpretDianStatus, applyCreditNoteVerdict } from "./applyDianVerdict.ts";
 
 const PROVIDER_KEY = "dian_directo";
 
@@ -18,23 +20,39 @@ interface BuyerSnapshot {
   document_type_code: string | null;
   document_number: string | null;
   full_name: string | null;
-  address: { line1: string | null; line2: string | null; city: string | null; state_province: string | null; country: string | null } | null;
+  applies_withholding?: boolean;
+  address: {
+    line1: string | null;
+    line2: string | null;
+    city: string | null;
+    state_province: string | null;
+    country: string | null;
+    city_code?: string | null;
+    state_code?: string | null;
+  } | null;
 }
 interface SellerSnapshot {
   legal_name: string | null;
   document_number: string | null;
   city: string | null;
+  city_code?: string | null;
+  state_code?: string | null;
   billing_address: string | null;
   country: string | null;
   state_province: string | null;
+  is_self_withholding_agent?: boolean;
 }
 
 export interface SendCreditNoteResult {
-  status: "sent" | "error";
+  /** Mismo criterio que SendInvoiceResult (ver sendInvoiceToDian.ts) --
+   * `accepted`/`rejected` ya son el veredicto real, resuelto dentro de esta
+   * misma llamada. */
+  status: "accepted" | "rejected" | "sent" | "error";
   httpStatus: number;
   cude: string | null;
   dianTrackingId: string | null;
   faultReason: string | null;
+  rejectionDetail: string | null;
   creditNotePrefix: string;
   creditNoteNumber: number;
 }
@@ -96,7 +114,6 @@ async function doSendCreditNoteToDian(adminClient: any, tenantId: string, credit
     .eq("tenant_id", tenantId)
     .maybeSingle();
   if (profileError || !profile) throw new Error("Este tenant no tiene perfil DIAN configurado.");
-  if (!profile.test_set_id) throw new Error("Falta el Test Set ID en la configuración DIAN de este tenant.");
   if (!profile.webservice_url) throw new Error("Falta la URL del web service en la configuración DIAN de este tenant.");
   if (!profile.software_id) throw new Error("Falta el Software ID en la configuración DIAN de este tenant.");
   if (!profile.credit_note_prefix) {
@@ -104,6 +121,10 @@ async function doSendCreditNoteToDian(adminClient: any, tenantId: string, credit
   }
 
   const credential = await resolveTenantIntegrationCredential(adminClient, tenantId, PROVIDER_KEY);
+  // Mismo criterio que sendInvoiceToDian.ts -- el ambiente sale del selector
+  // "Modo" de Integraciones, y el Test Set ID solo aplica en habilitación.
+  const isProduction = credential.mode === "production";
+  if (!isProduction && !profile.test_set_id) throw new Error("Falta el Test Set ID en la configuración DIAN de este tenant.");
   const getSecret = makeIntegrationSecretGetter(adminClient, credential.id);
   const softwarePin = await getSecret("software_pin");
   const technicalKey = await getSecret("technical_key"); // no se usa en el CUDE, sí en la firma WS-Security (mismo certificado)
@@ -116,6 +137,8 @@ async function doSendCreditNoteToDian(adminClient: any, tenantId: string, credit
   const seller = creditNote.seller_snapshot as SellerSnapshot;
   if (!buyer.document_type_code || !buyer.document_number) throw new Error("El comprador de la factura original no tiene documento fiscal completo.");
   if (!seller.legal_name || !seller.document_number) throw new Error("El vendedor (tenant) no tiene razón social/NIT completos.");
+  // NO se bloquea por falta de dirección/código DANE -- ver el mismo
+  // comentario en sendInvoiceToDian.ts (probado en vivo 2026-09-10).
 
   const creditNoteNumber = profile.next_credit_note_number ?? 1;
   const creditNotePrefix = profile.credit_note_prefix;
@@ -127,24 +150,30 @@ async function doSendCreditNoteToDian(adminClient: any, tenantId: string, credit
     issueDate: now.toISOString().slice(0, 10),
     issueTime: now.toISOString().slice(11, 19) + "-05:00",
     currency: creditNote.currency ?? "COP",
-    environment: 2,
+    environment: isProduction ? 1 : 2,
     seller: {
       legalName: seller.legal_name,
       documentTypeCode: "31",
       documentNumber: seller.document_number,
-      addressLine: seller.billing_address ?? "N/A",
-      city: seller.city ?? "N/A",
-      stateProvince: seller.state_province ?? "N/A",
+      addressLine: seller.billing_address ?? null,
+      city: seller.city ?? null,
+      stateProvince: seller.state_province ?? null,
       countryCode: seller.country ?? "CO",
+      cityCode: seller.city_code ?? null,
+      stateCode: seller.state_code ?? null,
+      taxLevelCode: seller.is_self_withholding_agent ? "O-15" : "R-99-PN",
     },
     buyer: {
       legalName: buyer.full_name ?? "N/A",
       documentTypeCode: buyer.document_type_code,
       documentNumber: buyer.document_number,
-      addressLine: buyer.address?.line1 ?? "N/A",
-      city: buyer.address?.city ?? "N/A",
-      stateProvince: buyer.address?.state_province ?? "N/A",
+      addressLine: buyer.address?.line1 ?? null,
+      city: buyer.address?.city ?? null,
+      stateProvince: buyer.address?.state_province ?? null,
       countryCode: buyer.address?.country ?? "CO",
+      cityCode: buyer.address?.city_code ?? null,
+      stateCode: buyer.address?.state_code ?? null,
+      taxLevelCode: buyer.applies_withholding ? "O-15" : "R-99-PN",
     },
     referencedInvoice: {
       id: `${invoice.invoice_prefix}${invoice.invoice_number}`,
@@ -172,10 +201,15 @@ async function doSendCreditNoteToDian(adminClient: any, tenantId: string, credit
   const zipBytes = buildInvoiceZip([{ fileName: `${creditNoteDocId}.xml`, content: new TextEncoder().encode(signedXml) }]);
   const zipBase64 = uint8ToBase64(zipBytes);
 
-  const bodyXml = `<wcf:SendTestSetAsync xmlns:wcf="http://wcf.dian.colombia"><wcf:fileName>${zipFileName}</wcf:fileName><wcf:contentFile>${zipBase64}</wcf:contentFile><wcf:testSetId>${profile.test_set_id}</wcf:testSetId></wcf:SendTestSetAsync>`;
+  // Ver sendInvoiceToDian.ts -- producción usa SendBillAsync (sin testSetId).
+  const operation = isProduction ? "SendBillAsync" : "SendTestSetAsync";
+  const soapAction = `http://wcf.dian.colombia/IWcfDianCustomerServices/${operation}`;
+  const bodyXml = isProduction
+    ? `<wcf:SendBillAsync xmlns:wcf="http://wcf.dian.colombia"><wcf:fileName>${zipFileName}</wcf:fileName><wcf:contentFile>${zipBase64}</wcf:contentFile></wcf:SendBillAsync>`
+    : `<wcf:SendTestSetAsync xmlns:wcf="http://wcf.dian.colombia"><wcf:fileName>${zipFileName}</wcf:fileName><wcf:contentFile>${zipBase64}</wcf:contentFile><wcf:testSetId>${profile.test_set_id}</wcf:testSetId></wcf:SendTestSetAsync>`;
 
   const envelope = await buildSignedSoapEnvelope({
-    action: "http://wcf.dian.colombia/IWcfDianCustomerServices/SendTestSetAsync",
+    action: soapAction,
     to: profile.webservice_url,
     bodyXml,
     privateKey: cert.privateKey,
@@ -191,7 +225,7 @@ async function doSendCreditNoteToDian(adminClient: any, tenantId: string, credit
       client,
       headers: {
         "Content-Type": "application/soap+xml; charset=utf-8",
-        SOAPAction: '"http://wcf.dian.colombia/IWcfDianCustomerServices/SendTestSetAsync"',
+        SOAPAction: `"${soapAction}"`,
       },
       body: envelope,
     });
@@ -208,36 +242,9 @@ async function doSendCreditNoteToDian(adminClient: any, tenantId: string, credit
   const faultReason = zipKey ? null : (faultMatch?.[1] ?? processedMessageMatch?.[1] ?? null);
 
   const nowIso = now.toISOString();
-  if (zipKey) {
-    await adminClient
-      .from("sales_credit_notes")
-      .update({
-        status: "sent",
-        status_detail: null,
-        credit_note_prefix: creditNotePrefix,
-        credit_note_number: creditNoteNumber,
-        issue_date: nowIso,
-        cude,
-        dian_tracking_id: zipKey,
-        dian_response: { httpStatus, responseBody },
-        sent_at: nowIso,
-      })
-      .eq("id", creditNoteId);
-    await adminClient
-      .from("tenant_dian_profile")
-      .update({ next_credit_note_number: Number(creditNoteNumber) + 1 })
-      .eq("tenant_id", tenantId);
-    // La factura original NUNCA cambia de estado acá, sin importar el
-    // motivo (incluido "2 - Anulación de factura electrónica") -- una
-    // factura DIAN no se anula, la nota crédito ES el mecanismo legal de
-    // corrección y la factura original se queda sent/accepted para
-    // siempre, como parte del historial de documentos emitidos del pedido
-    // (ver 20260909220000_sales_invoices_no_voided_reissue_after_credit.sql,
-    // que revierte un primer intento equivocado de esto mismo). Volver a
-    // facturar el pedido una vez que la vigente quedó acreditada del todo
-    // es responsabilidad del trigger guard_sales_invoice_live_attempt, no
-    // de este código.
-  } else {
+  if (!zipKey) {
+    // Falló el envío en sí -- el consecutivo (next_credit_note_number) NO
+    // se toca, mismo criterio que sendInvoiceToDian.ts.
     await adminClient
       .from("sales_credit_notes")
       .update({
@@ -248,14 +255,55 @@ async function doSendCreditNoteToDian(adminClient: any, tenantId: string, credit
         sent_at: nowIso,
       })
       .eq("id", creditNoteId);
+    return { status: "error", httpStatus, cude, dianTrackingId: null, faultReason, rejectionDetail: null, creditNotePrefix, creditNoteNumber: Number(creditNoteNumber) };
   }
 
+  // Mismo bug real que sendInvoiceToDian.ts (ver ese archivo, 2026-09-10):
+  // este UPDATE puede fallar (ej. choque contra el índice único de
+  // credit_note_number, migración 20260910040000) y hay que enterarse antes
+  // de seguir al polling con un estado que nunca se pudo guardar.
+  const { error: markSentError } = await adminClient
+    .from("sales_credit_notes")
+    .update({
+      status: "sent",
+      status_detail: null,
+      credit_note_prefix: creditNotePrefix,
+      credit_note_number: creditNoteNumber,
+      issue_date: nowIso,
+      cude,
+      dian_tracking_id: zipKey,
+      dian_response: { httpStatus, responseBody },
+      sent_at: nowIso,
+    })
+    .eq("id", creditNoteId);
+  if (markSentError) {
+    throw new Error(`La DIAN recibió la nota crédito (zipKey ${zipKey}) pero no se pudo guardar el resultado: ${markSentError.message}`);
+  }
+  // La factura original NUNCA cambia de estado acá, sin importar el
+  // motivo (incluido "2 - Anulación de factura electrónica") -- una
+  // factura DIAN no se anula, la nota crédito ES el mecanismo legal de
+  // corrección y la factura original se queda sent/accepted para
+  // siempre, como parte del historial de documentos emitidos del pedido
+  // (ver 20260909220000_sales_invoices_no_voided_reissue_after_credit.sql,
+  // que revierte un primer intento equivocado de esto mismo). Volver a
+  // facturar el pedido una vez que la vigente quedó acreditada del todo
+  // es responsabilidad del trigger guard_sales_invoice_live_attempt, no
+  // de este código.
+
+  // Mismo criterio que sendInvoiceToDian.ts -- este endpoint verifica el
+  // veredicto real antes de devolver, en vez de dejarlo en 'sent' a la
+  // espera de un "Verificar estado" manual.
+  const polled = await pollDianTrackStatus(adminClient, tenantId, zipKey);
+  const verdict = interpretDianStatus(polled.statuses[0] ?? null);
+  await applyCreditNoteVerdict(adminClient, tenantId, creditNoteId, Number(creditNoteNumber), verdict);
+
   return {
-    status: zipKey ? "sent" : "error",
+    status: verdict.outcome === "accepted" ? "accepted" : verdict.outcome === "rejected" ? "rejected" : "sent",
     httpStatus,
     cude,
     dianTrackingId: zipKey,
-    faultReason,
+    faultReason: null,
+    rejectionDetail: verdict.outcome === "rejected" ? verdict.detail : null,
     creditNotePrefix,
     creditNoteNumber: Number(creditNoteNumber),
   };

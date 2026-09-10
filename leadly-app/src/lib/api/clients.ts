@@ -8,7 +8,6 @@ export interface ClientInput {
   phone: string
   email?: string | null
   company?: string | null
-  nit?: string | null
   document_type?: TenantDocumentType | null
   document_number?: string | null
   dian_document_type_code?: string | null
@@ -19,6 +18,37 @@ export interface ClientInput {
   tags: string[]
   assigned_to?: string | null
   credit_enabled?: boolean
+}
+
+/** El formulario de cliente (ContactDrawer.tsx) ya no pide `document_type`
+ * (lista genérica NIT/CC/CE/RUC/RFC/PASAPORTE/OTRO) por separado -- pedido
+ * explícito del usuario 2026-09-09: "se piden tipos de documentos... varias
+ * veces". El catálogo DIAN (dian_document_type_code) es el único que se
+ * muestra ahora (es el que de verdad hace falta para facturar); esto deriva
+ * un valor razonable de `document_type` a partir de esa elección para que
+ * ClientPickerCard.tsx/PosReceiptTicket.tsx (que siguen leyendo
+ * `document_type` como etiqueta corta en tickets/buscadores) no se queden
+ * sin dato. */
+export function dianDocumentTypeCodeToGeneric(code: string | null): TenantDocumentType | null {
+  switch (code) {
+    case '11': // Registro civil
+    case '12': // Tarjeta de identidad
+    case '13': // Cédula de ciudadanía
+    case '91': // NUIP
+      return 'CC'
+    case '21': // Tarjeta de extranjería
+    case '22': // Cédula de extranjería
+      return 'CE'
+    case '31': // NIT
+    case '50': // NIT de otro país
+      return 'NIT'
+    case '41': // Pasaporte
+      return 'PASAPORTE'
+    case '42': // Documento de identificación extranjero
+      return 'OTRO'
+    default:
+      return null
+  }
 }
 
 export async function listClients(tenantId: string): Promise<Client[]> {

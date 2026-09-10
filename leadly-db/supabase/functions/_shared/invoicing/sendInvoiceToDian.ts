@@ -9,10 +9,19 @@
  * zip.ts -> wsSecuritySoap.ts (firma del sobre) -> mTLS fetch, formato SOAP
  * plano con el ZIP en base64 inline (ver sendToDian.ts para el porqué).
  *
- * Solo soporta SendTestSetAsync (habilitación) por ahora -- SendBillAsync
- * (producción) es la misma mecánica de transporte pero NUNCA se probó
- * contra el servidor real, así que queda explícitamente fuera hasta tener
- * al menos una factura de habilitación aceptada de punta a punta. */
+ * Soporta los DOS ambientes, según `tenant_dian_profile.environment`
+ * (migración 20260910160000):
+ * - `habilitacion`: `SendTestSetAsync` + `testSetId` + ProfileExecutionID=2.
+ *   Verificado de punta a punta el 2026-09-10 (factura SETP990000001 de
+ *   Barriles de la sexta, "Procesado Correctamente").
+ * - `produccion`: `SendBillAsync` (misma respuesta con ZipKey, sin
+ *   testSetId) + ProfileExecutionID=1. Hizo falta apenas la DIAN aceptó el
+ *   set de pruebas: a partir de ahí cierra ese set y rechaza todo envío
+ *   nuevo por ahí con "Set de prueba ... se encuentra Aceptado".
+ *   ⚠️ El transporte es idéntico, pero este camino todavía NO se probó
+ *   contra el servidor real de producción -- y exige que el tenant haya
+ *   cargado su resolución de facturación REAL (la de habilitación, prefijo
+ *   SETP / rango 990000000, no es válida en producción). */
 import { buildInvoiceXml, type BuildInvoiceXmlInput, type InvoiceXmlLine } from "./buildInvoiceXml.ts";
 import { signInvoiceXml } from "./signInvoiceXml.ts";
 import { buildInvoiceZip } from "./zip.ts";
@@ -20,6 +29,8 @@ import { buildSignedSoapEnvelope } from "./wsSecuritySoap.ts";
 import { resolveTenantIntegrationCredential, makeIntegrationSecretGetter } from "../integrations/credentials.ts";
 import { loadTenantCertificate, createMtlsClient, uint8ToBase64 } from "./dianClient.ts";
 import { refreshInvoiceSnapshot } from "./queueInvoiceGeneration.ts";
+import { pollDianTrackStatus } from "./getDianStatus.ts";
+import { interpretDianStatus, applyInvoiceVerdict } from "./applyDianVerdict.ts";
 
 const PROVIDER_KEY = "dian_directo";
 
@@ -29,25 +40,64 @@ interface BuyerSnapshot {
   document_number: string | null;
   full_name: string | null;
   applies_withholding: boolean;
-  address: { line1: string | null; line2: string | null; city: string | null; state_province: string | null; country: string | null } | null;
+  address: {
+    line1: string | null;
+    line2: string | null;
+    city: string | null;
+    state_province: string | null;
+    country: string | null;
+    city_code?: string | null;
+    state_code?: string | null;
+  } | null;
 }
 interface SellerSnapshot {
   legal_name: string | null;
   document_number: string | null;
   city: string | null;
+  city_code?: string | null;
+  state_code?: string | null;
   billing_address: string | null;
   country: string | null;
   state_province: string | null;
+  is_self_withholding_agent?: boolean;
 }
 
 export interface SendInvoiceResult {
-  status: "sent" | "error";
+  /** `accepted`/`rejected`: veredicto REAL ya confirmado por la DIAN, resuelto
+   * dentro de esta misma llamada (ver el polling más abajo) -- pedido
+   * explícito del usuario 2026-09-09: "el endpoint debe verificar el estado
+   * y devolverme si hubo error o no", para no depender de un botón aparte
+   * de "Verificar estado". `sent`: se mandó y la DIAN lo recibió, pero el
+   * procesamiento asíncrono no terminó dentro del tiempo de espera de esta
+   * función -- la fila queda igual que antes (`check_invoice_status` sigue
+   * disponible como respaldo manual para este caso, ya no como paso
+   * obligatorio). `error`: falló el ENVÍO en sí (fault SOAP, red, etc.),
+   * nunca llegó a manos de la DIAN para validar nada. */
+  status: "accepted" | "rejected" | "sent" | "error";
   httpStatus: number;
   cufe: string | null;
   dianTrackingId: string | null;
+  /** Fallo de ENVÍO (SOAP fault / rechazo del sobre) -- no confundir con
+   * `rejectionDetail`, que es un rechazo de VALIDACIÓN real de la DIAN
+   * sobre el contenido del documento. */
   faultReason: string | null;
+  /** Motivo real de rechazo (reglas FAxx) cuando `status === "rejected"`. */
+  rejectionDetail: string | null;
   invoicePrefix: string;
   invoiceNumber: number;
+  /** Solo se llena en modo diagnóstico (`dryRun`) -- el XML firmado tal cual
+   * se mandaría, para poder inspeccionarlo/compararlo sin gastar un intento
+   * real del test set de habilitación. */
+  signedXml?: string;
+}
+
+export interface SendInvoiceOptions {
+  /** Arma y firma el XML pero NO lo manda a la DIAN ni escribe nada en la
+   * base -- devuelve el documento en `signedXml` para diagnóstico. Agregado
+   * 2026-09-10 contra el rechazo ZE02 persistente: hacía falta ver los bytes
+   * exactos que se transmiten para compararlos contra una factura real ya
+   * aceptada, sin quemar otro consecutivo. */
+  dryRun?: boolean;
 }
 
 /** Envía la factura `invoiceId` (fila de sales_invoices, status debe ser
@@ -56,7 +106,8 @@ export interface SendInvoiceResult {
  * tanto en éxito como en fault -- así "Facturas" siempre refleja el último
  * intento real, no queda desactualizada si el caller no vuelve a leer. */
 // deno-lint-ignore no-explicit-any
-export async function sendInvoiceToDian(adminClient: any, tenantId: string, invoiceId: string): Promise<SendInvoiceResult> {
+export async function sendInvoiceToDian(adminClient: any, tenantId: string, invoiceId: string, options: SendInvoiceOptions = {}): Promise<SendInvoiceResult> {
+  const dryRun = options.dryRun === true;
   const { data: invoicePre, error: invoicePreError } = await adminClient
     .from("sales_invoices")
     .select("id, status, order_id")
@@ -64,7 +115,9 @@ export async function sendInvoiceToDian(adminClient: any, tenantId: string, invo
     .eq("tenant_id", tenantId)
     .maybeSingle();
   if (invoicePreError || !invoicePre) throw new Error("Factura no encontrada.");
-  if (invoicePre.status !== "pending") {
+  // En dry run se permite cualquier estado -- justamente sirve para inspeccionar
+  // el XML de una factura YA rechazada, sin crear un intento nuevo.
+  if (!dryRun && invoicePre.status !== "pending") {
     throw new Error(`Esta factura está en estado "${invoicePre.status}", no "pending" -- para reintentar hay que crear un intento nuevo (ver retry_invoice en dian-submit).`);
   }
 
@@ -75,7 +128,7 @@ export async function sendInvoiceToDian(adminClient: any, tenantId: string, invo
   // viejo: corregir un precio entre "confirmar" y "enviar" transmitía los
   // valores anteriores. Después de esto el pedido queda bloqueado, así que lo
   // enviado y lo que se ve en pantalla ya no pueden divergir.
-  await refreshInvoiceSnapshot(adminClient, tenantId, invoiceId, invoicePre.order_id);
+  if (!dryRun) await refreshInvoiceSnapshot(adminClient, tenantId, invoiceId, invoicePre.order_id);
 
   const { data: invoice, error: invoiceError } = await adminClient
     .from("sales_invoices")
@@ -87,7 +140,7 @@ export async function sendInvoiceToDian(adminClient: any, tenantId: string, invo
 
   const { data: items, error: itemsError } = await adminClient
     .from("sales_invoice_items")
-    .select("description:product_name, quantity, unit_price, subtotal, tax_type_code, tax_rate, tax_amount, taxable_base, display_order")
+    .select("description:product_name, sku, quantity, unit_price, subtotal, tax_type_code, tax_rate, tax_amount, taxable_base, display_order")
     .eq("invoice_id", invoiceId)
     .order("display_order");
   if (itemsError) throw new Error(itemsError.message);
@@ -99,7 +152,6 @@ export async function sendInvoiceToDian(adminClient: any, tenantId: string, invo
     .eq("tenant_id", tenantId)
     .maybeSingle();
   if (profileError || !profile) throw new Error("Este tenant no tiene perfil DIAN configurado.");
-  if (!profile.test_set_id) throw new Error("Falta el Test Set ID en la configuración DIAN de este tenant.");
   if (!profile.webservice_url) throw new Error("Falta la URL del web service en la configuración DIAN de este tenant.");
   if (!profile.software_id) throw new Error("Falta el Software ID en la configuración DIAN de este tenant.");
   if (!profile.resolution_prefix || !profile.resolution_range_from) {
@@ -107,6 +159,13 @@ export async function sendInvoiceToDian(adminClient: any, tenantId: string, invo
   }
 
   const credential = await resolveTenantIntegrationCredential(adminClient, tenantId, PROVIDER_KEY);
+  // El ambiente sale del selector "Modo" que ya tiene toda tarjeta de
+  // Integraciones (`integration_credentials.mode`), rotulado para la DIAN
+  // como "Habilitación (pruebas)" / "Producción" -- no hace falta un campo
+  // aparte. El Test Set ID solo aplica en habilitación: en producción la
+  // operación es SendBillAsync, que no lo recibe.
+  const isProduction = credential.mode === "production";
+  if (!isProduction && !profile.test_set_id) throw new Error("Falta el Test Set ID en la configuración DIAN de este tenant.");
   const getSecret = makeIntegrationSecretGetter(adminClient, credential.id);
   const softwarePin = await getSecret("software_pin");
   const technicalKey = await getSecret("technical_key");
@@ -119,15 +178,49 @@ export async function sendInvoiceToDian(adminClient: any, tenantId: string, invo
   const seller = invoice.seller_snapshot as SellerSnapshot;
   if (!buyer.document_type_code || !buyer.document_number) throw new Error("El comprador no tiene documento fiscal completo.");
   if (!seller.legal_name || !seller.document_number) throw new Error("El vendedor (tenant) no tiene razón social/NIT completos.");
+  // NO se bloquea el envío por falta de dirección/código DANE -- una venta
+  // de mostrador real a un cliente identificado (cédula) pero sin domicilio
+  // guardado es un caso legítimo y frecuente (probado en vivo 2026-09-10
+  // contra un pedido real del POS), no un dato faltante por error. Sin
+  // dirección, buildInvoiceXml.ts omite el grupo entero (a lo sumo genera
+  // una notificación blanda, FAK08/FAK28); con dirección pero sin código
+  // DANE, lo manda igual sin el código. Bloquear acá dejaría sin poder
+  // facturarse a cualquier venta de mostrador sin domicilio -- peor que la
+  // notificación blanda que se evita.
 
   const invoiceNumber = profile.next_invoice_number ?? profile.resolution_range_from;
   const invoicePrefix = profile.resolution_prefix;
   const invoiceDocId = `${invoicePrefix}${invoiceNumber}`;
   const now = new Date();
 
+  // cac:PaymentMeans (reglas FAN01/FAN02/FAN03 -- ver buildInvoiceXml.ts)
+  // se arma con el pago REAL más reciente de este pedido, nunca inventado:
+  // "1" contado / "2" crédito, y el código de medio de pago según el
+  // método real (catálogo UNCL4461 que usa la DIAN).
+  const { data: latestPayment } = await adminClient
+    .from("sales_order_payments")
+    .select("method")
+    .eq("order_id", invoicePre.order_id)
+    .is("deleted_at", null)
+    .order("paid_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const paymentMethod = latestPayment?.method ?? null;
+  const PAYMENT_MEANS_CODE: Record<string, string> = {
+    efectivo: "10",
+    transferencia: "42",
+    wompi: "42",
+    tarjeta: "48",
+  };
+  const xmlPayment = {
+    meansId: (paymentMethod === "credito" ? "2" : "1") as "1" | "2",
+    meansCode: (paymentMethod && PAYMENT_MEANS_CODE[paymentMethod]) || "1",
+  };
+
   const lines: InvoiceXmlLine[] = items.map((item: Record<string, unknown>, idx: number) => ({
     id: idx + 1,
     description: String(item.description ?? "Producto"),
+    sku: item.sku ? String(item.sku) : null,
     quantity: Number(item.quantity),
     unitPrice: Number(item.unit_price),
     lineExtensionAmount: Number(item.subtotal),
@@ -141,24 +234,30 @@ export async function sendInvoiceToDian(adminClient: any, tenantId: string, invo
     issueDate: now.toISOString().slice(0, 10),
     issueTime: now.toISOString().slice(11, 19) + "-05:00",
     currency: invoice.currency ?? "COP",
-    environment: 2,
+    environment: isProduction ? 1 : 2,
     seller: {
       legalName: seller.legal_name,
       documentTypeCode: "31", // los tenants (empresas) que facturan son NIT prácticamente siempre -- ver nota en sendToDian.ts
       documentNumber: seller.document_number,
-      addressLine: seller.billing_address ?? "N/A",
-      city: seller.city ?? "N/A",
-      stateProvince: seller.state_province ?? "N/A",
+      addressLine: seller.billing_address ?? null,
+      city: seller.city ?? null,
+      stateProvince: seller.state_province ?? null,
       countryCode: seller.country ?? "CO",
+      cityCode: seller.city_code ?? null,
+      stateCode: seller.state_code ?? null,
+      taxLevelCode: seller.is_self_withholding_agent ? "O-15" : "R-99-PN",
     },
     buyer: {
       legalName: buyer.full_name ?? "N/A",
       documentTypeCode: buyer.document_type_code,
       documentNumber: buyer.document_number,
-      addressLine: buyer.address?.line1 ?? "N/A",
-      city: buyer.address?.city ?? "N/A",
-      stateProvince: buyer.address?.state_province ?? "N/A",
+      addressLine: buyer.address?.line1 ?? null,
+      city: buyer.address?.city ?? null,
+      stateProvince: buyer.address?.state_province ?? null,
       countryCode: buyer.address?.country ?? "CO",
+      cityCode: buyer.address?.city_code ?? null,
+      stateCode: buyer.address?.state_code ?? null,
+      taxLevelCode: buyer.applies_withholding ? "O-15" : "R-99-PN",
     },
     lines,
     withholdings: [], // el cálculo real de retenciones (tenant_withholding_configs + applies_withholding) es trabajo futuro, ver plan
@@ -174,19 +273,44 @@ export async function sendInvoiceToDian(adminClient: any, tenantId: string, invo
     softwarePin,
     technicalKey,
     authorizationProviderNit: "800197268",
+    payment: xmlPayment,
   };
 
   const { xml: unsignedXml, cufe } = await buildInvoiceXml(xmlInput);
   const signedInvoiceXml = await signInvoiceXml({ unsignedXml, privateKey: cert.privateKey, certificateDer: cert.certificateDer });
 
+  if (dryRun) {
+    return {
+      status: "sent",
+      httpStatus: 0,
+      cufe,
+      dianTrackingId: null,
+      faultReason: null,
+      rejectionDetail: null,
+      invoicePrefix,
+      invoiceNumber: Number(invoiceNumber),
+      signedXml: signedInvoiceXml,
+    };
+  }
+
   const zipFileName = `${invoiceDocId}.zip`;
   const zipBytes = buildInvoiceZip([{ fileName: `${invoiceDocId}.xml`, content: new TextEncoder().encode(signedInvoiceXml) }]);
   const zipBase64 = uint8ToBase64(zipBytes);
 
-  const bodyXml = `<wcf:SendTestSetAsync xmlns:wcf="http://wcf.dian.colombia"><wcf:fileName>${zipFileName}</wcf:fileName><wcf:contentFile>${zipBase64}</wcf:contentFile><wcf:testSetId>${profile.test_set_id}</wcf:testSetId></wcf:SendTestSetAsync>`;
+  // Producción usa `SendBillAsync` (sin testSetId); habilitación usa
+  // `SendTestSetAsync` contra el set de pruebas. Una vez que la DIAN acepta
+  // el set de pruebas lo cierra, y cualquier envío posterior por ese camino
+  // falla con "Set de prueba ... se encuentra Aceptado" -- de ahí que el
+  // ambiente tenga que ser configurable por tenant (ver la migración
+  // 20260910160000).
+  const operation = isProduction ? "SendBillAsync" : "SendTestSetAsync";
+  const soapAction = `http://wcf.dian.colombia/IWcfDianCustomerServices/${operation}`;
+  const bodyXml = isProduction
+    ? `<wcf:SendBillAsync xmlns:wcf="http://wcf.dian.colombia"><wcf:fileName>${zipFileName}</wcf:fileName><wcf:contentFile>${zipBase64}</wcf:contentFile></wcf:SendBillAsync>`
+    : `<wcf:SendTestSetAsync xmlns:wcf="http://wcf.dian.colombia"><wcf:fileName>${zipFileName}</wcf:fileName><wcf:contentFile>${zipBase64}</wcf:contentFile><wcf:testSetId>${profile.test_set_id}</wcf:testSetId></wcf:SendTestSetAsync>`;
 
   const envelope = await buildSignedSoapEnvelope({
-    action: "http://wcf.dian.colombia/IWcfDianCustomerServices/SendTestSetAsync",
+    action: soapAction,
     to: profile.webservice_url,
     bodyXml,
     privateKey: cert.privateKey,
@@ -202,7 +326,7 @@ export async function sendInvoiceToDian(adminClient: any, tenantId: string, invo
       client,
       headers: {
         "Content-Type": "application/soap+xml; charset=utf-8",
-        SOAPAction: '"http://wcf.dian.colombia/IWcfDianCustomerServices/SendTestSetAsync"',
+        SOAPAction: `"${soapAction}"`,
       },
       body: envelope,
     });
@@ -225,34 +349,11 @@ export async function sendInvoiceToDian(adminClient: any, tenantId: string, invo
   const faultReason = zipKey ? null : (faultMatch?.[1] ?? processedMessageMatch?.[1] ?? null);
 
   const nowIso = now.toISOString();
-  if (zipKey) {
-    await adminClient
-      .from("sales_invoices")
-      .update({
-        status: "sent",
-        status_detail: null,
-        invoice_prefix: invoicePrefix,
-        invoice_number: invoiceNumber,
-        issue_date: nowIso,
-        cufe,
-        dian_tracking_id: zipKey,
-        dian_response: { httpStatus, responseBody },
-        sent_at: nowIso,
-      })
-      .eq("id", invoiceId);
-    await adminClient
-      .from("tenant_dian_profile")
-      .update({ next_invoice_number: Number(invoiceNumber) + 1 })
-      .eq("tenant_id", tenantId);
-    // Flag denormalizado para filtrar/sumar "Órdenes" sin joinear contra
-    // sales_invoices en cada carga -- ver get_sales_orders_summary. Solo se
-    // pone en true, nunca se revierte (no existe un flujo de anular una
-    // factura ya aceptada).
-    await adminClient
-      .from("sales_orders")
-      .update({ has_invoice: true })
-      .eq("id", invoicePre.order_id);
-  } else {
+  if (!zipKey) {
+    // Falló el ENVÍO en sí -- nunca llegó a manos de la DIAN para validar
+    // nada, así que el consecutivo (next_invoice_number) NO se toca: el
+    // mismo número queda libre para el próximo intento real (pedido
+    // explícito del usuario 2026-09-09).
     await adminClient
       .from("sales_invoices")
       .update({
@@ -263,14 +364,70 @@ export async function sendInvoiceToDian(adminClient: any, tenantId: string, invo
         sent_at: nowIso,
       })
       .eq("id", invoiceId);
+    return { status: "error", httpStatus, cufe, dianTrackingId: null, faultReason, rejectionDetail: null, invoicePrefix, invoiceNumber: Number(invoiceNumber) };
   }
 
+  // Acuse de recibo -- SendTestSetAsync es asíncrona, esto todavía no es
+  // el veredicto real. Se guarda como 'sent' primero (para no perder el
+  // tracking id si el polling de abajo revienta por lo que sea) y recién
+  // después se corrige a 'accepted'/'rejected' si el polling resuelve.
+  //
+  // Bug real encontrado en vivo 2026-09-10: este UPDATE puede fallar (ej.
+  // choque contra el índice único de invoice_number si dos intentos del
+  // mismo pedido terminan compitiendo por el mismo consecutivo -- ver la
+  // migración 20260910040000) y el código anterior nunca revisaba el
+  // resultado -- la DIAN ya había recibido y procesado la factura de
+  // verdad, pero cufe/dian_tracking_id/sent_at se perdían en silencio: el
+  // polling de abajo seguía corriendo con el zipKey en memoria y
+  // applyInvoiceVerdict SÍ lograba escribir "rejected" después (esos campos
+  // no chocan), dejando una fila contradictoria (rechazada pero sin
+  // registro de que en verdad se envió). Ahora se corta acá con un error
+  // claro apenas el guardado falla, antes de gastar tiempo/CPU en el
+  // polling con un estado que no se pudo persistir.
+  const { error: markSentError } = await adminClient
+    .from("sales_invoices")
+    .update({
+      status: "sent",
+      status_detail: null,
+      invoice_prefix: invoicePrefix,
+      invoice_number: invoiceNumber,
+      issue_date: nowIso,
+      cufe,
+      dian_tracking_id: zipKey,
+      dian_response: { httpStatus, responseBody },
+      sent_at: nowIso,
+    })
+    .eq("id", invoiceId);
+  if (markSentError) {
+    throw new Error(`La DIAN recibió la factura (zipKey ${zipKey}) pero no se pudo guardar el resultado: ${markSentError.message}`);
+  }
+  // Flag denormalizado para filtrar/sumar "Órdenes" sin joinear contra
+  // sales_invoices en cada carga -- ver get_sales_orders_summary. Solo se
+  // pone en true, nunca se revierte (no existe un flujo de anular una
+  // factura ya aceptada). Deliberadamente NO se mueve a "solo si
+  // accepted" -- eso es la misma decisión de "dejarlo para otra fase" que
+  // el usuario pidió para la descarga del PDF (isRemision usa este mismo
+  // criterio), no forma parte de este ajuste.
+  await adminClient.from("sales_orders").update({ has_invoice: true }).eq("id", invoicePre.order_id);
+
+  // Pedido explícito del usuario 2026-09-09: este mismo endpoint se
+  // encarga de verificar el estado real -- consulta GetStatusZip un par de
+  // veces seguidas (con pausas cortas) antes de devolver el resultado, en
+  // vez de dejar la factura en un "sent" ambiguo y obligar a un botón
+  // aparte. Si la DIAN no alcanza a resolver dentro de este tiempo de
+  // espera, la fila queda en 'sent' -- "Verificar estado" sigue existiendo
+  // como respaldo manual para ese caso puntual, ya no como paso obligatorio.
+  const polled = await pollDianTrackStatus(adminClient, tenantId, zipKey);
+  const verdict = interpretDianStatus(polled.statuses[0] ?? null);
+  await applyInvoiceVerdict(adminClient, tenantId, invoiceId, Number(invoiceNumber), verdict);
+
   return {
-    status: zipKey ? "sent" : "error",
+    status: verdict.outcome === "accepted" ? "accepted" : verdict.outcome === "rejected" ? "rejected" : "sent",
     httpStatus,
     cufe,
     dianTrackingId: zipKey,
-    faultReason,
+    faultReason: null,
+    rejectionDetail: verdict.outcome === "rejected" ? verdict.detail : null,
     invoicePrefix,
     invoiceNumber: Number(invoiceNumber),
   };

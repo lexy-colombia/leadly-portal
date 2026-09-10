@@ -91,18 +91,23 @@ export async function sendTestInvoiceToDian(
       legalName: tenant.legal_name,
       documentTypeCode: "31",
       documentNumber: tenant.document_number,
-      addressLine: "N/A",
-      city: profile.city ?? "N/A",
-      stateProvince: tenant.state_province ?? "N/A",
+      // Sin dirección real acá (este documento sintético no lee
+      // billing_address) -- se omite el grupo entero en vez de mandar
+      // "N/A" como si fuera un valor real (ver buildInvoiceXml.ts, ronda
+      // 2026-09-10: un placeholder de texto dispara rechazos de código
+      // inválido, la ausencia del grupo es a lo sumo una notificación).
+      addressLine: null,
+      city: profile.city ?? null,
+      stateProvince: tenant.state_province ?? null,
       countryCode: "CO",
     },
     buyer: {
       legalName: "Cliente de Prueba Habilitación",
       documentTypeCode: "13",
       documentNumber: "1000000000",
-      addressLine: "N/A",
-      city: "N/A",
-      stateProvince: "N/A",
+      addressLine: null,
+      city: null,
+      stateProvince: null,
       countryCode: "CO",
     },
     lines: [
@@ -128,6 +133,7 @@ export async function sendTestInvoiceToDian(
     softwarePin,
     technicalKey,
     authorizationProviderNit: "800197268",
+    payment: { meansId: "1", meansCode: "10" }, // documento sintético de prueba -- contado, efectivo
   };
 
   const { xml: unsignedXml, cufe } = await buildInvoiceXml(xmlInput);

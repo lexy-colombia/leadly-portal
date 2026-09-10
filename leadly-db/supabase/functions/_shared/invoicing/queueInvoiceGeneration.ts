@@ -214,7 +214,7 @@ async function buildOrderSnapshot(
 
   const { data: address } = order.billing_address_id
     ? await adminClient.from("contact_addresses").select(
-      "line1, line2, city, state_province, country, tax_id",
+      "line1, line2, city, state_province, country, tax_id, city_code, state_code",
     ).eq("id", order.billing_address_id).maybeSingle()
     : { data: null };
 
@@ -234,7 +234,7 @@ async function buildOrderSnapshot(
   const { data: dianProfile } = await adminClient
     .from("tenant_dian_profile")
     .select(
-      "fiscal_regime, is_self_withholding_agent, city, resolution_number, resolution_prefix, resolution_range_from, resolution_range_to, resolution_valid_from, resolution_valid_until, software_id",
+      "fiscal_regime, is_self_withholding_agent, city, city_code, state_code, resolution_number, resolution_prefix, resolution_range_from, resolution_range_to, resolution_valid_from, resolution_valid_until, software_id",
     )
     .eq("tenant_id", tenantId)
     .maybeSingle();
@@ -257,6 +257,8 @@ async function buildOrderSnapshot(
     fiscal_regime: dianProfile?.fiscal_regime ?? null,
     is_self_withholding_agent: dianProfile?.is_self_withholding_agent ?? false,
     city: dianProfile?.city ?? null,
+    city_code: dianProfile?.city_code ?? null,
+    state_code: dianProfile?.state_code ?? null,
     billing_address: tenant?.billing_address ?? null,
     country: tenant?.country ?? null,
     state_province: tenant?.state_province ?? null,

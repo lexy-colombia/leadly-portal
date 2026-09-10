@@ -10,6 +10,12 @@ export interface IntegrationCredential {
   id: string;
   providerKey: string;
   config: Record<string, unknown>;
+  /** 'sandbox' | 'production' -- el mismo selector "Modo" que ya muestra
+   * cada tarjeta de Integraciones. Para la DIAN la UI lo rotula
+   * "Habilitación (pruebas)" / "Producción" y es lo que decide si se manda
+   * SendTestSetAsync contra el set de pruebas o SendBillAsync real (ver
+   * sendInvoiceToDian.ts). */
+  mode: string;
 }
 
 export type SecretGetter = (secretName: string) => Promise<string | null>;
@@ -22,7 +28,7 @@ export async function resolveTenantIntegrationCredential(
 ): Promise<IntegrationCredential> {
   const { data, error } = await adminClient
     .from("integration_credentials")
-    .select("id, provider_key, config")
+    .select("id, provider_key, config, mode")
     .eq("tenant_id", tenantId)
     .eq("provider_key", providerKey)
     .eq("is_active", true)
@@ -31,7 +37,7 @@ export async function resolveTenantIntegrationCredential(
   if (error || !data) {
     throw new Error(`Este tenant no tiene "${providerKey}" conectado en Integraciones.`);
   }
-  return { id: data.id, providerKey: data.provider_key, config: data.config ?? {} };
+  return { id: data.id, providerKey: data.provider_key, config: data.config ?? {}, mode: data.mode ?? "sandbox" };
 }
 
 // deno-lint-ignore no-explicit-any

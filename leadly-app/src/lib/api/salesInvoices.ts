@@ -49,11 +49,20 @@ export async function listSalesInvoicesForOrder(orderId: string): Promise<SalesI
 }
 
 export interface SendSalesInvoiceResult {
-  status: 'sent' | 'error'
+  /** `accepted`/`rejected`: veredicto REAL ya confirmado por la DIAN --
+   * pedido explícito del usuario 2026-09-09, el propio envío consulta el
+   * estado antes de responder, ya no hace falta un paso aparte de
+   * "Verificar estado" para saber si una factura se aceptó o rechazó.
+   * `sent`: se mandó pero la DIAN no terminó de procesarla dentro del
+   * tiempo de espera -- "Verificar estado" sigue disponible como respaldo
+   * para ese caso. `error`: falló el envío en sí, nunca llegó a la DIAN. */
+  status: 'accepted' | 'rejected' | 'sent' | 'error'
   httpStatus: number
   cufe: string | null
   dianTrackingId: string | null
   faultReason: string | null
+  /** Motivo real de rechazo (reglas FAxx) cuando `status === 'rejected'`. */
+  rejectionDetail: string | null
   invoicePrefix: string
   invoiceNumber: number
 }
@@ -64,9 +73,10 @@ export interface SendSalesInvoiceResult {
  * sales_invoices server-side antes de responder -- refrescar la factura
  * después de llamar esto siempre refleja el resultado real.
  *
- * Un rechazo de la DIAN (ej. certificado vencido) NO es un error HTTP --
- * la función responde 200 con `status: 'error'` y `faultReason`, porque es
- * un resultado de negocio esperado (queda registrado en la factura), no una
+ * Un rechazo de la DIAN (ej. certificado vencido, o una regla de validación
+ * real) NO es un error HTTP -- la función responde 200 con
+ * `status: 'error'`/`'rejected'` y el detalle correspondiente, porque es un
+ * resultado de negocio esperado (queda registrado en la factura), no una
  * falla de la llamada. Solo se lanza excepción para fallas de la llamada
  * misma (sin sesión, sin permiso, factura inexistente) -- mismo patrón de
  * extracción de mensaje que createWompiPaymentLink en orderPayments.ts. */
@@ -153,11 +163,13 @@ export async function listCreditNotesForInvoice(invoiceId: string): Promise<Sale
 }
 
 export interface CreateCreditNoteResult {
-  status: 'sent' | 'error'
+  /** Mismo criterio que SendSalesInvoiceResult (ver ese comentario). */
+  status: 'accepted' | 'rejected' | 'sent' | 'error'
   httpStatus: number
   cude: string | null
   dianTrackingId: string | null
   faultReason: string | null
+  rejectionDetail: string | null
   creditNotePrefix: string
   creditNoteNumber: number
 }
@@ -225,6 +237,76 @@ export async function retryCreditNote(creditNoteId: string): Promise<CreateCredi
     throw error
   }
   return data as CreateCreditNoteResult
+}
+
+export interface DianTrackStatus {
+  isValid: boolean | null
+  statusCode: string | null
+  statusDescription: string | null
+  statusMessage: string | null
+  errorMessages: string[]
+  xmlDocumentKey: string | null
+  xmlFileName: string | null
+}
+
+export interface CheckDianStatusResult {
+  httpStatus: number
+  responseBody: string
+  faultReason: string | null
+  statuses: DianTrackStatus[]
+}
+
+/** Botón "Verificar estado" -- SendTestSetAsync es asíncrona: el acuse
+ * inicial (`dian_tracking_id`) no es la validación final. Pedido explícito
+ * del usuario 2026-09-09 ("en el portal de la DIAN no salen esas facturas
+ * por ningún lado, en habilitación deberían salir"): antes de esto,
+ * Leadly marcaba la factura como 'sent' apenas recibía el acuse y nunca
+ * volvía a preguntarle a la DIAN qué pasó después. Esto consulta
+ * GetStatusZip(trackId) de verdad (dian-submit, acción
+ * `check_invoice_status`) y, si la DIAN ya dio un veredicto, actualiza la
+ * fila server-side a 'accepted'/'rejected' antes de responder -- refrescar
+ * la factura después de llamar esto refleja el resultado real. */
+export async function checkInvoiceStatus(invoiceId: string): Promise<CheckDianStatusResult> {
+  const { data, error } = await supabase.functions.invoke<CheckDianStatusResult & { error?: string }>('dian-submit', {
+    body: { action: 'check_invoice_status', invoice_id: invoiceId },
+  })
+  if (error) {
+    const context = (error as { context?: Response }).context
+    if (context && typeof context.json === 'function') {
+      let specificMessage: string | undefined
+      try {
+        const body = await context.json()
+        specificMessage = body?.error
+      } catch {
+        /* fall through to generic error */
+      }
+      if (specificMessage) throw new Error(specificMessage)
+    }
+    throw error
+  }
+  return data as CheckDianStatusResult
+}
+
+/** Misma idea que checkInvoiceStatus, para una nota crédito. */
+export async function checkCreditNoteStatus(creditNoteId: string): Promise<CheckDianStatusResult> {
+  const { data, error } = await supabase.functions.invoke<CheckDianStatusResult & { error?: string }>('dian-submit', {
+    body: { action: 'check_credit_note_status', credit_note_id: creditNoteId },
+  })
+  if (error) {
+    const context = (error as { context?: Response }).context
+    if (context && typeof context.json === 'function') {
+      let specificMessage: string | undefined
+      try {
+        const body = await context.json()
+        specificMessage = body?.error
+      } catch {
+        /* fall through to generic error */
+      }
+      if (specificMessage) throw new Error(specificMessage)
+    }
+    throw error
+  }
+  return data as CheckDianStatusResult
 }
 
 interface InvoicePdfResponse {

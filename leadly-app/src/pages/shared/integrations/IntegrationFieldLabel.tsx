@@ -15,11 +15,17 @@ export function IntegrationFieldLabel({ htmlFor, label, badge }: { htmlFor?: str
 
 /** Groups related fields under a small uppercase heading inside a bordered
  * box -- same section-heading style as InvoiceDetailDrawer -- instead of a
- * flat pile of same-looking inputs. */
-export function IntegrationSection({ title, children }: { title: string; children: ReactNode }) {
+ * flat pile of same-looking inputs. `action` is an optional trailing node
+ * next to the title (ex: DianDirectoCredentialDrawer's "Sincronizar con la
+ * DIAN" button on the Resolución section) -- same right-aligned pairing as
+ * IntegrationFieldLabel's `badge`. */
+export function IntegrationSection({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
     <section className="rounded-xl border border-brand-100 p-3.5">
-      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-brand-400">{title}</h3>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-brand-400">{title}</h3>
+        {action}
+      </div>
       <div className="space-y-3">{children}</div>
     </section>
   )

@@ -16,8 +16,7 @@
  *
  * Deliberadamente NO incluye (quedan para cuando haya un caso real que lo
  * necesite, no se inventan ahora): AllowanceCharge, PrepaidPayment,
- * BillingReference, Delivery/DeliveryTerms, PaymentMeans detallado,
- * multi-moneda.
+ * BillingReference, Delivery/DeliveryTerms, multi-moneda.
  *
  * Este archivo construye el XML SIN FIRMAR, pero ya deja un
  * `<ext:UBLExtension><ext:ExtensionContent/></ext:UBLExtension>` VACÍO como
@@ -28,8 +27,144 @@
  * existir ANTES de firmar, no agregarse después por fuera. Ver
  * signInvoiceXml.ts, que llena ese hueco.
  *
- * Antes de poder mandar esto a la DIAN todavía falta el envío por SOAP al
- * web service -- eso no está construido todavía. */
+ * ⚠️ RONDA DE CORRECCIÓN 2026-09-09, contra el primer rechazo real de la
+ * DIAN (27 reglas distintas, ver conversación) -- se descargó el PDF
+ * oficial completo del Anexo Técnico v1.9 (753 páginas) y se releyó cada
+ * regla citada por el rechazo (tabla de reglas FAJ/FAK/FAN/FAS/FAU,
+ * páginas 389-438) para corregir contra el texto exacto, no adivinar de
+ * nuevo. Cambios reales, no cosméticos:
+ * 1. BUG DE FONDO: `cac:InvoiceLine/cbc:LineExtensionAmount` (y por lo
+ *    tanto `LegalMonetaryTotal/LineExtensionAmount`+`TaxExclusiveAmount`)
+ *    se estaban llenando con el subtotal de línea TAL CUAL viene de
+ *    `sales_invoice_items.subtotal` -- que en este sistema es el monto
+ *    CON impuesto incluido (ver CLAUDE.md: "el precio ya incluye el
+ *    impuesto, se extrae, no se suma"). Pero UBL/DIAN exige que
+ *    LineExtensionAmount sea el valor SIN impuesto (confirmado
+ *    carácter por carácter contra Generica.xml: en su línea 1,
+ *    LineExtensionAmount=12600.06 es EXACTAMENTE igual a
+ *    TaxSubtotal/TaxableAmount=12600.06 de esa misma línea) -- de ahí
+ *    la regla FAU04 ("Base Imponible es distinto a la suma de las bases
+ *    imponibles de las líneas") y probablemente también corrompía el CUFE
+ *    (`valFac` ya se documentaba como "LineExtensionAmount / suma de
+ *    taxable_base", pero se le pasaba el total CON impuesto). Ahora cada
+ *    línea usa su `taxableAmount` (ya extraído) para LineExtensionAmount Y
+ *    para Price/PriceAmount (dividido por cantidad) -- el monto CON
+ *    impuesto solo aparece al final, en TaxInclusiveAmount/PayableAmount.
+ * 2. `money()` truncaba (Math.trunc) en vez de redondear -- la DIAN compara
+ *    con `round()` (confirmado en el texto exacto de FAU04/FAU02/FAS02),
+ *    truncar podía desviar la cabecera de la suma de líneas en un
+ *    centavo. Se cambió a Math.round (el truncamiento sigue siendo
+ *    correcto y sin tocar en cufe.ts -- esa sí es la fórmula literal del
+ *    CUFE, un cálculo distinto).
+ * 3. `cbc:ProfileID` -- exigido como el literal exacto
+ *    "DIAN 2.1: Factura Electrónica de Venta" (regla FAD03), no solo
+ *    "DIAN 2.1". Mismo criterio ya usado en buildCreditNoteXml.ts, que
+ *    tenía el suyo bien desde el principio.
+ * 4. `cbc:AdditionalAccountID` (tipo de organización, reglas FAJ02a/b y
+ *    FAK02) faltaba por completo -- va como hijo directo de
+ *    AccountingSupplierParty/AccountingCustomerParty, ANTES de cac:Party
+ *    (confirmado contra Generica.xml). Valor "1" = persona jurídica, "2" =
+ *    persona natural (confirmado contra dos fuentes independientes -- ver
+ *    conversación -- Generica.xml usa "1" para dos entidades claramente
+ *    jurídicas).
+ * 5. `cbc:TaxLevelCode` (responsabilidad fiscal, reglas FAJ26/FAK26)
+ *    faltaba -- el catálogo vigente desde agosto 2020 (verificado, NO es
+ *    el "O-99" que usaba Generica.xml de 2019, que ya no es válido) es
+ *    O-13/O-15/O-23/O-47/R-99-PN. Sin un catálogo propio de
+ *    responsabilidades por tenant/cliente, se usa la única señal real que
+ *    ya se recolecta (`is_self_withholding_agent`/`applies_withholding`)
+ *    para O-15 (Autorretenedor), y R-99-PN (No responsable) como default
+ *    seguro en cualquier otro caso -- nunca se inventa O-13/O-23/O-47 sin
+ *    dato real detrás.
+ * 6. `cac:PartyLegalEntity/cac:CorporateRegistrationScheme` (reglas
+ *    FAB10a/FAJ50, "el prefijo debe corresponder al código de la sucursal
+ *    de este punto de facturación") faltaba en el emisor -- se agrega con
+ *    `cbc:ID` = el prefijo de la resolución vigente.
+ * 7. `cac:PaymentMeans` (reglas FAN01/FAN02/FAN03) faltaba por completo --
+ *    se agrega con `cbc:ID` "1" (contado) o "2" (crédito, si algún pago
+ *    real de la orden fue a crédito) y `cbc:PaymentMeansCode` derivado del
+ *    método de pago real más reciente (efectivo→10, transferencia/
+ *    wompi→42, tarjeta→48, resto→1 "instrumento no definido").
+ * 8. `cbc:ID`/`cbc:CountrySubentityCode` (código DANE de municipio/
+ *    departamento, reglas FAJ09/FAJ12/FAJ29/FAJ32, rechazo real para el
+ *    emisor) -- nuevo `tenant_dian_profile.city_code`/`state_code`
+ *    (campo manual, sin catálogo DIVIPOLA embebido -- ver la migración
+ *    20260909230000). Mismo campo para la dirección del comprador
+ *    (`contact_addresses.city_code`/`state_code`), opcional -- mientras
+ *    un cliente no lo tenga cargado, esos dos elementos simplemente no se
+ *    emiten para él (gap conocido, no silencioso: puede seguir generando
+ *    el rechazo puntual FAK29/FAK32 hasta que se cargue el dato).
+ * Pendiente explícito, fuera de esta ronda: ZE02 ("Valida firma del
+ * documento") -- ver el ajuste hecho en signInvoiceXml.ts (transforms),
+ * hipótesis razonable pero sin confirmar todavía contra un envío real.
+ *
+ * ⚠️ SEGUNDA RONDA 2026-09-09/10, contra un rechazo real posterior (FAU04,
+ * FAK09/29/32/61, FAS01a/b, FAZ09, entre otras -- ver la conversación):
+ * 9. FAU04 ("Base Imponible distinto a la suma de las bases imponibles de
+ *    las líneas"): el bug no era el valor en sí (ya se corregía en la
+ *    ronda anterior) sino EL ORDEN del redondeo -- se sumaban los montos
+ *    de línea SIN redondear y recién se redondeaba el total una sola vez,
+ *    mientras que cada línea en el XML ya sale redondeada a 2 decimales
+ *    por separado. Sumar N líneas redondeadas puede diferir en un centavo
+ *    de redondear la suma exacta (ej. tres líneas de 12600.005 cada una
+ *    redondean a 12600.01 = 37800.03, pero round(37800.015) puede dar
+ *    37800.02) -- la DIAN compara contra la suma de los valores YA
+ *    IMPRESOS en el XML, no contra el cálculo exacto interno. Ahora cada
+ *    línea se redondea PRIMERO (taxable, impuesto) y el header/los
+ *    TaxTotal se arman sumando esos valores ya redondeados, nunca al revés.
+ * 10. FAS01a/FAS01b ("TaxTotal de cabecera no coincide / impuesto informado
+ *    en cabecera sin ninguna línea que lo tenga"): el código anterior
+ *    emitía SIEMPRE los tres `cac:TaxTotal` (IVA/INC/ICA), incluso con
+ *    monto 0 para el impuesto que ninguna línea usaba -- eso es
+ *    exactamente lo que rechaza la regla ("debe existir un TaxTotal por
+ *    cada tipo de impuesto que se informa a nivel de línea", léase
+ *    también al revés: no debe existir uno para el que NO se informa en
+ *    ninguna línea). Ahora solo se emite un TaxTotal por código realmente
+ *    presente en al menos una línea, y si ese código aparece con más de
+ *    una tarifa (ej. IVA 19% y 5% en la misma factura), se agrupan en
+ *    varios `cac:TaxSubtotal` DENTRO del mismo TaxTotal (texto exacto de
+ *    FAS01a), no en TaxTotal separados.
+ * 11. FAK61 ("AdditionalAccountID=2 sin el grupo PartyIdentification"):
+ *    faltaba por completo `cac:PartyIdentification` en el comprador --
+ *    obligatorio cuando es persona natural (AdditionalAccountID="2",
+ *    FAK61/62/63). Se agrega con el mismo documento/tipo ya usado en
+ *    PartyTaxScheme/CompanyID. Solo aplica al comprador (el vendedor de
+ *    esta plataforma siempre es persona jurídica).
+ * 12. FAZ09 (notificación, "debe existir el grupo de identificación
+ *    estándar del bien"): el elemento que de verdad pide esa regla
+ *    (`cac:StandardItemIdentification`) exige un código de un estándar
+ *    EXTERNO acreditado (GTIN/UNSPSC/EAN, catálogo 13.3.5 con
+ *    schemeAgencyID/schemeID reales) que esta plataforma no tiene --
+ *    inventar un scheme ahí sería peor (dispara FAZ10/FAZ11, sí de
+ *    rechazo). En vez de eso se llena `cac:SellersItemIdentification`
+ *    (FAZ06/07, un grupo aparte para el código PROPIO del vendedor, sin
+ *    exigir ningún estándar externo) con el SKU real del producto cuando
+ *    existe -- deja la notificación de FAZ09 sin resolver a propósito
+ *    (dato que genuinamente no existe) pero aporta lo que sí es cierto.
+ * Sigue pendiente, no accionable desde código: FAJ43b (el nombre/razón
+ * social configurado debe coincidir carácter a carácter con el RUT de la
+ * DIAN para ese NIT -- es una validación contra un registro externo, no
+ * un bug de este archivo) y ZE02 (firma, ver arriba).
+ *
+ * ⚠️ TERCERA RONDA 2026-09-10, probando contra un pedido real del POS sin
+ * ninguna dirección guardada (venta de mostrador a un cliente identificado
+ * por cédula, sin domicilio cargado -- caso real y frecuente, no un dato
+ * faltante por error): `addressLine`/`city`/`stateProvince` pasan a ser
+ * NULLABLE en vez de recibir el placeholder de texto "N/A" que usaba el
+ * código anterior. Mandar "N/A" como si fuera el nombre real de una
+ * ciudad/dirección es justo lo que dispara los rechazos de código
+ * inválido (FAK09/FAK29/FAK32 del lado del comprador) -- el grupo de
+ * dirección (`cac:PhysicalLocation`, `cac:PartyTaxScheme/RegistrationAddress`)
+ * es EXPLÍCITAMENTE opcional en el Anexo ("grupo opcional, si se informa
+ * el grupo aplican las reglas del grupo", FAK07/FAK27) y su ausencia total
+ * es apenas una NOTIFICACIÓN (FAK08/FAK28), mucho más segura que rellenar
+ * con un valor inventado que sí puede rechazar la factura entera. Ahora,
+ * si no hay dirección real, el grupo completo se omite -- no se inventa
+ * nada. Si hay dirección pero sin código DANE, se manda igual (sin
+ * `cbc:ID`/`CountrySubentityCode`) y queda como esa misma notificación
+ * blanda, en vez de bloquear el envío por completo (decisión explícita:
+ * una venta real no debería quedar sin poder facturarse solo porque le
+ * falta el código DIVIPOLA de una dirección que si existe). */
 
 import { computeCufe, computeSoftwareSecurityCode } from "./cufe.ts";
 import { computeNitCheckDigit } from "./nit.ts";
@@ -38,18 +173,42 @@ import { computeNitCheckDigit } from "./nit.ts";
  * cac:TaxScheme/cbc:Name (ver Generica.xml: <cbc:Name>IVA</cbc:Name> etc). */
 const TAX_SCHEME_NAME: Record<string, string> = { "01": "IVA", "03": "ICA", "04": "INC" };
 
-/** dian_document_types.code -> schemeName que exige TipoIdFiscal-2.1.gc
+/** document_types.code -> schemeName que exige TipoIdFiscal-2.1.gc
  * (idéntico código, no hace falta traducir -- ambos catálogos usan los
  * mismos valores 11/12/13/21/22/31/41/42/50/91). */
 
 export interface InvoiceXmlParty {
   legalName: string;
-  documentTypeCode: string; // dian_document_types.code (ej. "31" = NIT)
+  documentTypeCode: string; // document_types.code (ej. "31" = NIT)
   documentNumber: string; // sin puntos ni guiones, sin DV
-  addressLine: string;
-  city: string;
-  stateProvince: string;
+  /** `null` cuando genuinamente no hay dirección cargada (ej. venta de
+   * mostrador a un cliente sin domicilio guardado) -- el grupo de
+   * dirección se omite entero en ese caso, nunca se manda un placeholder
+   * de texto (ver el comentario de cabecera, ronda 2026-09-10). */
+  addressLine: string | null;
+  city: string | null;
+  stateProvince: string | null;
   countryCode: string; // ISO alpha-2, ej. "CO"
+  /** Código DANE de municipio/departamento (DIVIPOLA) -- reglas
+   * FAJ09/FAJ12/FAJ29/FAJ32 (emisor, rechazo real) y FAK09/FAK29/FAK32
+   * (receptor). Opcional a propósito: sin este dato cargado (ver
+   * tenant_dian_profile.city_code/contact_addresses.city_code), esos
+   * elementos simplemente no se emiten -- nunca se inventa un código. */
+  cityCode?: string | null;
+  stateCode?: string | null;
+  /** "1" persona jurídica, "2" persona natural (cbc:AdditionalAccountID,
+   * reglas FAJ02a/b, FAK02) -- confirmado contra dos fuentes independientes
+   * que "1" = jurídica (Generica.xml usa "1" para dos entidades claramente
+   * jurídicas). Si no se pasa, se infiere de documentTypeCode ("31" NIT ->
+   * jurídica, cualquier otro -> natural) como mejor esfuerzo. */
+  organizationType?: "1" | "2";
+  /** Responsabilidad fiscal (cbc:TaxLevelCode, reglas FAJ26/FAK26) -- catálogo
+   * vigente desde agosto 2020: O-13/O-15/O-23/O-47/R-99-PN (el "O-99" que
+   * usaba la versión vieja de este archivo ya no es válido). Sin un
+   * catálogo propio de responsabilidades, default "R-99-PN" (No
+   * responsable) si no se especifica -- nunca se inventa O-13/O-23/O-47
+   * sin dato real. */
+  taxLevelCode?: string;
 }
 
 export interface InvoiceXmlLineTax {
@@ -66,6 +225,9 @@ export interface InvoiceXmlLine {
   unitPrice: number; // sin impuesto (BaseQuantity=1 implícito)
   lineExtensionAmount: number; // subtotal de la línea sin impuesto
   tax: InvoiceXmlLineTax | null;
+  /** cac:Item/cac:StandardItemIdentification, regla FAZ09 (notificación) --
+   * opcional, se omite si el producto no tiene SKU cargado. */
+  sku?: string | null;
 }
 
 export interface InvoiceXmlWithholding {
@@ -97,54 +259,116 @@ export interface BuildInvoiceXmlInput {
   softwarePin: string;
   technicalKey: string;
   authorizationProviderNit: string; // NIT de la DIAN como proveedor de autorización, fijo: "800197268"
+  /** cac:PaymentMeans (reglas FAN01/FAN02/FAN03, faltaba por completo) --
+   * meansId "1" contado / "2" crédito (cbc:PaymentMeans/cbc:ID, confirmado
+   * contra el Anexo Técnico y Generica.xml), meansCode el medio de pago
+   * real (cbc:PaymentMeansCode, catálogo UNCL4461 que usa la DIAN: "10"
+   * efectivo, "42" transferencia, "48" tarjeta, "1" instrumento no
+   * definido -- fallback seguro para crédito/saldo a favor, que no son un
+   * "medio" físico de pago real). */
+  payment: {
+    meansId: "1" | "2";
+    meansCode: string;
+  };
 }
 
 function esc(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+/** Redondea a 2 decimales -- la DIAN compara con round() (confirmado en el
+ * texto exacto de las reglas FAU02/FAU04/FAS02: "round(X) es distinto de
+ * round(Y)"), truncar podía desalinear la cabecera de la suma de líneas por
+ * un centavo. Distinto, a propósito, del truncamiento de cufe.ts -- esa es
+ * la fórmula LITERAL del CUFE, un cálculo separado que si exige truncar. */
 function money(value: number): string {
-  const truncated = Math.trunc(value * 100) / 100;
-  return truncated.toFixed(2);
+  const rounded = Math.round(value * 100) / 100;
+  return rounded.toFixed(2);
 }
 
-function partyBlock(tag: "cac:AccountingSupplierParty" | "cac:AccountingCustomerParty", party: InvoiceXmlParty, dv?: number): string {
+function partyBlock(
+  tag: "cac:AccountingSupplierParty" | "cac:AccountingCustomerParty",
+  party: InvoiceXmlParty,
+  dv?: number,
+  /** Prefijo de facturación del punto de venta -- reglas FAB10a/FAJ50,
+   * "el prefijo debe corresponder al código de la sucursal de este punto
+   * de facturación". Solo aplica al emisor (Xpath confirmado:
+   * …//AccountingSupplierParty/.../PartyLegalEntity/CorporateRegistrationScheme),
+   * por eso es un parámetro aparte y no un campo de InvoiceXmlParty (que
+   * comparten emisor y receptor). */
+  branchPrefix?: string,
+): string {
   const companyIdAttrs = `schemeAgencyID="195" schemeAgencyName="CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)"${
     dv !== undefined ? ` schemeID="${dv}"` : ""
   } schemeName="${esc(party.documentTypeCode)}"`;
-  return `
-   <${tag}>
-      <cac:Party>
-         <cac:PartyName>
-            <cbc:Name>${esc(party.legalName)}</cbc:Name>
-         </cac:PartyName>
+  const organizationType = party.organizationType ?? (party.documentTypeCode === "31" ? "1" : "2");
+  const taxLevelCode = party.taxLevelCode ?? "R-99-PN";
+  const cityCodeXml = party.cityCode ? `\n               <cbc:ID>${esc(party.cityCode)}</cbc:ID>` : "";
+  const stateCodeXml = party.stateCode ? `\n               <cbc:CountrySubentityCode>${esc(party.stateCode)}</cbc:CountrySubentityCode>` : "";
+  // Grupos de dirección (FAK07/FAK27, "opcional, si se informa el grupo
+  // aplican las reglas del grupo") -- se omiten ENTEROS si no hay una
+  // dirección real, en vez de rellenar con "N/A" (ver el comentario de
+  // cabecera, ronda 2026-09-10). Ambos grupos comparten la misma fuente de
+  // datos en este archivo, así que una sola condición alcanza para los dos.
+  const hasAddress = Boolean(party.addressLine);
+  const physicalLocationXml = !hasAddress
+    ? ""
+    : `
          <cac:PhysicalLocation>
-            <cac:Address>
-               <cbc:CityName>${esc(party.city)}</cbc:CityName>
-               <cbc:CountrySubentity>${esc(party.stateProvince)}</cbc:CountrySubentity>
+            <cac:Address>${cityCodeXml}
+               <cbc:CityName>${esc(party.city ?? "")}</cbc:CityName>
+               <cbc:CountrySubentity>${esc(party.stateProvince ?? "")}</cbc:CountrySubentity>${stateCodeXml}
                <cac:AddressLine>
-                  <cbc:Line>${esc(party.addressLine)}</cbc:Line>
+                  <cbc:Line>${esc(party.addressLine ?? "")}</cbc:Line>
                </cac:AddressLine>
                <cac:Country>
                   <cbc:IdentificationCode>${esc(party.countryCode)}</cbc:IdentificationCode>
                   <cbc:Name languageID="es">Colombia</cbc:Name>
                </cac:Country>
             </cac:Address>
-         </cac:PhysicalLocation>
-         <cac:PartyTaxScheme>
-            <cbc:RegistrationName>${esc(party.legalName)}</cbc:RegistrationName>
-            <cbc:CompanyID ${companyIdAttrs}>${esc(party.documentNumber)}</cbc:CompanyID>
-            <cac:RegistrationAddress>
-               <cbc:CityName>${esc(party.city)}</cbc:CityName>
-               <cbc:CountrySubentity>${esc(party.stateProvince)}</cbc:CountrySubentity>
+         </cac:PhysicalLocation>`;
+  const registrationAddressXml = !hasAddress
+    ? ""
+    : `
+            <cac:RegistrationAddress>${cityCodeXml}
+               <cbc:CityName>${esc(party.city ?? "")}</cbc:CityName>
+               <cbc:CountrySubentity>${esc(party.stateProvince ?? "")}</cbc:CountrySubentity>${stateCodeXml}
                <cac:AddressLine>
-                  <cbc:Line>${esc(party.addressLine)}</cbc:Line>
+                  <cbc:Line>${esc(party.addressLine ?? "")}</cbc:Line>
                </cac:AddressLine>
                <cac:Country>
                   <cbc:IdentificationCode>${esc(party.countryCode)}</cbc:IdentificationCode>
                   <cbc:Name languageID="es">Colombia</cbc:Name>
                </cac:Country>
-            </cac:RegistrationAddress>
+            </cac:RegistrationAddress>`;
+  const corporateRegistrationSchemeXml = branchPrefix
+    ? `
+            <cac:CorporateRegistrationScheme>
+               <cbc:ID>${esc(branchPrefix)}</cbc:ID>
+            </cac:CorporateRegistrationScheme>`
+    : "";
+  // cac:PartyIdentification (reglas FAK61/FAK62/FAK63) -- obligatorio SOLO
+  // en el comprador (AccountingCustomerParty) cuando es persona natural
+  // (AdditionalAccountID="2"); el vendedor de esta plataforma siempre es
+  // persona jurídica, así que nunca aplica del lado del emisor.
+  const partyIdentificationXml =
+    tag === "cac:AccountingCustomerParty" && organizationType === "2"
+      ? `
+         <cac:PartyIdentification>
+            <cbc:ID ${companyIdAttrs}>${esc(party.documentNumber)}</cbc:ID>
+         </cac:PartyIdentification>`
+      : "";
+  return `
+   <${tag}>
+      <cbc:AdditionalAccountID>${organizationType}</cbc:AdditionalAccountID>
+      <cac:Party>${partyIdentificationXml}
+         <cac:PartyName>
+            <cbc:Name>${esc(party.legalName)}</cbc:Name>
+         </cac:PartyName>${physicalLocationXml}
+         <cac:PartyTaxScheme>
+            <cbc:RegistrationName>${esc(party.legalName)}</cbc:RegistrationName>
+            <cbc:CompanyID ${companyIdAttrs}>${esc(party.documentNumber)}</cbc:CompanyID>
+            <cbc:TaxLevelCode>${esc(taxLevelCode)}</cbc:TaxLevelCode>${registrationAddressXml}
             <cac:TaxScheme>
                <cbc:ID>01</cbc:ID>
                <cbc:Name>IVA</cbc:Name>
@@ -152,25 +376,55 @@ function partyBlock(tag: "cac:AccountingSupplierParty" | "cac:AccountingCustomer
          </cac:PartyTaxScheme>
          <cac:PartyLegalEntity>
             <cbc:RegistrationName>${esc(party.legalName)}</cbc:RegistrationName>
-            <cbc:CompanyID ${companyIdAttrs}>${esc(party.documentNumber)}</cbc:CompanyID>
+            <cbc:CompanyID ${companyIdAttrs}>${esc(party.documentNumber)}</cbc:CompanyID>${corporateRegistrationSchemeXml}
          </cac:PartyLegalEntity>
       </cac:Party>
    </${tag}>`;
 }
 
 export async function buildInvoiceXml(input: BuildInvoiceXmlInput): Promise<{ xml: string; cufe: string }> {
-  const subtotal = input.lines.reduce((sum, l) => sum + l.lineExtensionAmount, 0);
-  const taxByCode: Record<string, { taxable: number; amount: number; rate: number }> = {};
+  // Monto SIN impuesto de cada línea -- ver el bug de fondo documentado en
+  // el comentario de cabecera del archivo: line.lineExtensionAmount viene
+  // CON impuesto incluido (mismo criterio que sales_invoice_items.subtotal
+  // en toda la plataforma), pero cac:InvoiceLine/cbc:LineExtensionAmount
+  // (y por lo tanto LegalMonetaryTotal/LineExtensionAmount+TaxExclusiveAmount)
+  // tienen que ser el valor SIN impuesto -- para una línea con impuesto,
+  // ese valor YA está calculado en line.tax.taxableAmount.
+  const netLineAmount = (line: InvoiceXmlLine) => (line.tax ? line.tax.taxableAmount : line.lineExtensionAmount);
+  const round2 = (value: number) => Math.round(value * 100) / 100;
+  // FAU04 (ronda 2026-09-10): sumar los valores YA REDONDEADOS de cada
+  // línea -- exactamente los que van impresos en cac:InvoiceLine -- en vez
+  // de sumar los montos crudos y redondear una sola vez al final (ver el
+  // comentario de cabecera del archivo para el porqué exacto).
+  const subtotal = input.lines.reduce((sum, l) => sum + round2(netLineAmount(l)), 0);
+
+  // Agrupado por código DE IMPUESTO + TARIFA (no solo código) -- una
+  // factura con dos tarifas del mismo impuesto (ej. IVA 19% y 5%) necesita
+  // un cac:TaxSubtotal por tarifa DENTRO de un único cac:TaxTotal por
+  // código (regla FAS01a), nunca promediarlas en una ni separarlas en
+  // TaxTotal distintos. Y solo se agrupan los códigos que de verdad
+  // aparecen en alguna línea (FAS01b) -- emitir un TaxTotal en 0 para un
+  // impuesto que ninguna línea usa es justo lo que rechazaba esa regla.
+  const taxByCodeAndRate = new Map<string, { code: string; rate: number; taxable: number; amount: number }>();
   for (const line of input.lines) {
     if (!line.tax || line.tax.taxAmount === 0) continue;
-    const entry = taxByCode[line.tax.code] ?? { taxable: 0, amount: 0, rate: line.tax.rate };
-    entry.taxable += line.tax.taxableAmount;
-    entry.amount += line.tax.taxAmount;
-    taxByCode[line.tax.code] = entry;
+    const key = `${line.tax.code}|${line.tax.rate}`;
+    const entry = taxByCodeAndRate.get(key) ?? { code: line.tax.code, rate: line.tax.rate, taxable: 0, amount: 0 };
+    entry.taxable += round2(line.tax.taxableAmount);
+    entry.amount += round2(line.tax.taxAmount);
+    taxByCodeAndRate.set(key, entry);
   }
-  const ivaTotal = taxByCode["01"]?.amount ?? 0;
-  const incTotal = taxByCode["04"]?.amount ?? 0;
-  const icaTotal = taxByCode["03"]?.amount ?? 0;
+  const TAX_CODE_ORDER = ["01", "04", "03"];
+  const taxGroupsByCode = new Map<string, { code: string; rate: number; taxable: number; amount: number }[]>();
+  for (const entry of taxByCodeAndRate.values()) {
+    const list = taxGroupsByCode.get(entry.code) ?? [];
+    list.push(entry);
+    taxGroupsByCode.set(entry.code, list);
+  }
+  const totalForCode = (code: string) => (taxGroupsByCode.get(code) ?? []).reduce((sum, g) => sum + g.amount, 0);
+  const ivaTotal = totalForCode("01");
+  const incTotal = totalForCode("04");
+  const icaTotal = totalForCode("03");
   const taxTotal = ivaTotal + incTotal + icaTotal;
   const taxInclusiveAmount = subtotal + taxTotal;
   const withholdingTotal = input.withholdings.reduce((sum, w) => sum + w.amount, 0);
@@ -211,23 +465,30 @@ export async function buildInvoiceXml(input: BuildInvoiceXmlInput): Promise<{ xm
     `URL=${qrHost}/document/searchqr?documentkey=${cufe}`,
   ].join("\n");
 
-  const taxTotalBlocks = (["01", "04", "03"] as const)
+  const taxTotalBlocks = Array.from(taxGroupsByCode.keys())
+    .sort((a, b) => TAX_CODE_ORDER.indexOf(a) - TAX_CODE_ORDER.indexOf(b))
     .map((code) => {
-      const entry = taxByCode[code] ?? { taxable: 0, amount: 0, rate: 0 };
-      return `
-   <cac:TaxTotal>
-      <cbc:TaxAmount currencyID="${input.currency}">${money(entry.amount)}</cbc:TaxAmount>
+      const groups = taxGroupsByCode.get(code)!;
+      const codeAmount = groups.reduce((sum, g) => sum + g.amount, 0);
+      const subtotalsXml = groups
+        .map(
+          (g) => `
       <cac:TaxSubtotal>
-         <cbc:TaxableAmount currencyID="${input.currency}">${money(entry.taxable)}</cbc:TaxableAmount>
-         <cbc:TaxAmount currencyID="${input.currency}">${money(entry.amount)}</cbc:TaxAmount>
+         <cbc:TaxableAmount currencyID="${input.currency}">${money(g.taxable)}</cbc:TaxableAmount>
+         <cbc:TaxAmount currencyID="${input.currency}">${money(g.amount)}</cbc:TaxAmount>
          <cac:TaxCategory>
-            <cbc:Percent>${entry.rate.toFixed(2)}</cbc:Percent>
+            <cbc:Percent>${g.rate.toFixed(2)}</cbc:Percent>
             <cac:TaxScheme>
                <cbc:ID>${code}</cbc:ID>
                <cbc:Name>${TAX_SCHEME_NAME[code]}</cbc:Name>
             </cac:TaxScheme>
          </cac:TaxCategory>
-      </cac:TaxSubtotal>
+      </cac:TaxSubtotal>`,
+        )
+        .join("");
+      return `
+   <cac:TaxTotal>
+      <cbc:TaxAmount currencyID="${input.currency}">${money(codeAmount)}</cbc:TaxAmount>${subtotalsXml}
    </cac:TaxTotal>`;
     })
     .join("");
@@ -274,16 +535,33 @@ export async function buildInvoiceXml(input: BuildInvoiceXmlInput): Promise<{ xm
          </cac:TaxSubtotal>
       </cac:TaxTotal>`
         : "";
+      // Precio unitario SIN impuesto -- se deriva del mismo monto neto ya
+      // usado arriba (netAmount/cantidad), no de line.unitPrice (que viene
+      // CON impuesto incluido) ni de una segunda extracción de impuesto
+      // independiente -- evita que Price/PriceAmount y LineExtensionAmount
+      // queden calculados por dos caminos que puedan desalinearse por
+      // redondeo.
+      const netAmount = netLineAmount(line);
+      const netUnitPrice = line.quantity > 0 ? netAmount / line.quantity : netAmount;
+      // cac:SellersItemIdentification (FAZ06/07) -- código PROPIO del
+      // vendedor, no exige ningún estándar externo acreditado (ver el
+      // comentario de cabecera sobre por qué no se usa StandardItemIdentification).
+      const sellersItemIdentificationXml = line.sku
+        ? `
+         <cac:SellersItemIdentification>
+            <cbc:ID>${esc(line.sku)}</cbc:ID>
+         </cac:SellersItemIdentification>`
+        : "";
       return `
    <cac:InvoiceLine>
       <cbc:ID>${line.id}</cbc:ID>
       <cbc:InvoicedQuantity unitCode="EA">${line.quantity.toFixed(6)}</cbc:InvoicedQuantity>
-      <cbc:LineExtensionAmount currencyID="${input.currency}">${money(line.lineExtensionAmount)}</cbc:LineExtensionAmount>${lineTax}
+      <cbc:LineExtensionAmount currencyID="${input.currency}">${money(netAmount)}</cbc:LineExtensionAmount>${lineTax}
       <cac:Item>
-         <cbc:Description>${esc(line.description)}</cbc:Description>
+         <cbc:Description>${esc(line.description)}</cbc:Description>${sellersItemIdentificationXml}
       </cac:Item>
       <cac:Price>
-         <cbc:PriceAmount currencyID="${input.currency}">${money(line.unitPrice)}</cbc:PriceAmount>
+         <cbc:PriceAmount currencyID="${input.currency}">${money(netUnitPrice)}</cbc:PriceAmount>
          <cbc:BaseQuantity unitCode="EA">1.000000</cbc:BaseQuantity>
       </cac:Price>
    </cac:InvoiceLine>`;
@@ -326,7 +604,7 @@ export async function buildInvoiceXml(input: BuildInvoiceXmlInput): Promise<{ xm
    </ext:UBLExtensions>
    <cbc:UBLVersionID>UBL 2.1</cbc:UBLVersionID>
    <cbc:CustomizationID>10</cbc:CustomizationID>
-   <cbc:ProfileID>DIAN 2.1</cbc:ProfileID>
+   <cbc:ProfileID>DIAN 2.1: Factura Electrónica de Venta</cbc:ProfileID>
    <cbc:ProfileExecutionID>${input.environment}</cbc:ProfileExecutionID>
    <cbc:ID>${esc(input.invoiceId)}</cbc:ID>
    <cbc:UUID schemeID="2" schemeName="CUFE-SHA384">${cufe}</cbc:UUID>
@@ -334,7 +612,11 @@ export async function buildInvoiceXml(input: BuildInvoiceXmlInput): Promise<{ xm
    <cbc:IssueTime>${input.issueTime}</cbc:IssueTime>
    <cbc:InvoiceTypeCode>01</cbc:InvoiceTypeCode>
    <cbc:DocumentCurrencyCode listAgencyID="6" listAgencyName="United Nations Economic Commission for Europe" listID="ISO 4217 Alpha">${input.currency}</cbc:DocumentCurrencyCode>
-   <cbc:LineCountNumeric>${input.lines.length}</cbc:LineCountNumeric>${partyBlock("cac:AccountingSupplierParty", input.seller, sellerDv)}${partyBlock("cac:AccountingCustomerParty", input.buyer, buyerDv)}${taxTotalBlocks}${withholdingBlock}
+   <cbc:LineCountNumeric>${input.lines.length}</cbc:LineCountNumeric>${partyBlock("cac:AccountingSupplierParty", input.seller, sellerDv, input.resolution.prefix)}${partyBlock("cac:AccountingCustomerParty", input.buyer, buyerDv)}
+   <cac:PaymentMeans>
+      <cbc:ID>${esc(input.payment.meansId)}</cbc:ID>
+      <cbc:PaymentMeansCode>${esc(input.payment.meansCode)}</cbc:PaymentMeansCode>
+   </cac:PaymentMeans>${taxTotalBlocks}${withholdingBlock}
    <cac:LegalMonetaryTotal>
       <cbc:LineExtensionAmount currencyID="${input.currency}">${money(subtotal)}</cbc:LineExtensionAmount>
       <cbc:TaxExclusiveAmount currencyID="${input.currency}">${money(subtotal)}</cbc:TaxExclusiveAmount>

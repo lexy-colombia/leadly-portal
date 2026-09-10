@@ -66,11 +66,12 @@ export function CreditNoteDrawer({
         reasonCode,
         reasonDescription: description.trim(),
       })
-      if (result.status === 'error') {
-        setError(result.faultReason ?? t('einvoicing.creditNote.error'))
-        // La nota quedó creada igual (status 'error', ver
-        // sales_credit_notes) -- se avisa al padre para que refresque el
-        // listado, no solo cuando sale bien.
+      if (result.status === 'error' || result.status === 'rejected') {
+        // 'rejected' ya es el veredicto real de la DIAN (el propio envío
+        // lo consulta antes de responder, ver sendCreditNoteToDian.ts).
+        setError((result.status === 'rejected' ? result.rejectionDetail : result.faultReason) ?? t('einvoicing.creditNote.error'))
+        // La nota quedó creada igual -- se avisa al padre para que
+        // refresque el listado, no solo cuando sale bien.
         onCreated({ status: 'error' })
         return
       }
