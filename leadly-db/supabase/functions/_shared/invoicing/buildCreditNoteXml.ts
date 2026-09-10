@@ -251,15 +251,22 @@ function partyBlock(tag: "cac:AccountingSupplierParty" | "cac:AccountingCustomer
 }
 
 export async function buildCreditNoteXml(input: BuildCreditNoteXmlInput): Promise<{ xml: string; cude: string }> {
-  const tax = input.line.tax;
-  const taxAmount = tax?.taxAmount ?? 0;
+  // FAU04/CAU04 (ronda 2026-09-10, mismo arreglo que buildInvoiceXml.ts):
+  // una nota crédito sobre una línea sin impuesto configurado no emitía
+  // ningún grupo `cac:TaxTotal`, así que la base imponible de cabecera
+  // (= el monto de la nota) no tenía contra qué cuadrar en el detalle. Una
+  // línea sin impuesto se informa como IVA 0.00% con su base completa, tal
+  // como el ejemplo oficial "Exento de IVA.xml".
+  const tax: CreditNoteXmlTax = input.line.tax ??
+    { code: "01", rate: 0, taxableAmount: Math.round(input.line.amount * 100) / 100, taxAmount: 0 };
+  const taxAmount = tax.taxAmount;
   const subtotal = input.line.amount - taxAmount;
   const taxInclusiveAmount = input.line.amount;
   const payableAmount = taxInclusiveAmount;
 
-  const ivaTotal = tax?.code === "01" ? taxAmount : 0;
-  const incTotal = tax?.code === "04" ? taxAmount : 0;
-  const icaTotal = tax?.code === "03" ? taxAmount : 0;
+  const ivaTotal = tax.code === "01" ? taxAmount : 0;
+  const incTotal = tax.code === "04" ? taxAmount : 0;
+  const icaTotal = tax.code === "03" ? taxAmount : 0;
 
   const sellerDv = computeNitCheckDigit(input.seller.documentNumber);
   const buyerDv = computeNitCheckDigit(input.buyer.documentNumber);
@@ -297,9 +304,7 @@ export async function buildCreditNoteXml(input: BuildCreditNoteXmlInput): Promis
   // nota crédito de verdad tiene -- antes se emitían los tres (IVA/INC/ICA)
   // siempre, incluidos dos en $0 sin ninguna línea que los respaldara, que
   // es exactamente lo que esa regla rechaza.
-  const taxTotalBlocks = !tax
-    ? ""
-    : `
+  const taxTotalBlocks = `
    <cac:TaxTotal>
       <cbc:TaxAmount currencyID="${input.currency}">${money(taxAmount)}</cbc:TaxAmount>
       <cac:TaxSubtotal>
@@ -315,8 +320,7 @@ export async function buildCreditNoteXml(input: BuildCreditNoteXmlInput): Promis
       </cac:TaxSubtotal>
    </cac:TaxTotal>`;
 
-  const lineTaxXml = tax
-    ? `
+  const lineTaxXml = `
       <cac:TaxTotal>
          <cbc:TaxAmount currencyID="${input.currency}">${money(tax.taxAmount)}</cbc:TaxAmount>
          <cac:TaxSubtotal>
@@ -330,8 +334,7 @@ export async function buildCreditNoteXml(input: BuildCreditNoteXmlInput): Promis
                </cac:TaxScheme>
             </cac:TaxCategory>
          </cac:TaxSubtotal>
-      </cac:TaxTotal>`
-    : "";
+      </cac:TaxTotal>`;
 
   const lineXml = `
    <cac:CreditNoteLine>

@@ -42,6 +42,7 @@
  *   la resuelve sola contra la DIAN justamente porque usar la de
  *   habilitación produce un FAD06 indescifrable. */
 import { buildInvoiceXml, type BuildInvoiceXmlInput, type InvoiceXmlLine } from "./buildInvoiceXml.ts";
+import { findInvalidTaxRate } from "./taxRates.ts";
 import { signInvoiceXml } from "./signInvoiceXml.ts";
 import { buildInvoiceZip } from "./zip.ts";
 import { buildSignedSoapEnvelope } from "./wsSecuritySoap.ts";
@@ -272,6 +273,12 @@ export async function sendInvoiceToDian(adminClient: any, tenantId: string, invo
       ? { code: String(item.tax_type_code), rate: Number(item.tax_rate), taxableAmount: Number(item.taxable_base), taxAmount: Number(item.tax_amount) }
       : null,
   }));
+
+  // FAX14: se para ACÁ, antes de firmar y transmitir, una combinación de
+  // tipo de impuesto + tarifa que la DIAN no admite (ver taxRates.ts) --
+  // el error es del producto, no del XML, y el mensaje dice cuál corregir.
+  const invalidRate = findInvalidTaxRate(lines);
+  if (invalidRate) throw new Error(invalidRate);
 
   const xmlInput: BuildInvoiceXmlInput = {
     invoiceId: invoiceDocId,

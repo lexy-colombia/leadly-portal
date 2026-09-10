@@ -17,6 +17,7 @@
  * append-only: un reenvío es una fila nueva, nunca una edición. Esa
  * bitácora es la evidencia de cumplimiento de la entrega. */
 import { renderInvoicePdfForOrder, bytesToBase64 } from "./renderInvoicePdf.ts";
+import { renderCreditNotePdf } from "./renderCreditNotePdf.ts";
 import { fetchStoredXml } from "./storeSignedXml.ts";
 import { sendEmail, platformFromAddress, type EmailAttachment } from "../email/resend.ts";
 import { buildDocumentEmailHtml, documentEmailSubject, type DocumentKind } from "./documentEmailTemplate.ts";
@@ -115,18 +116,34 @@ async function doSend(adminClient: any, tenantId: string, target: Target, trigge
     .is("deleted_at", null)
     .maybeSingle();
 
-  // El PDF siempre sale del PEDIDO (ver renderInvoicePdf.ts) -- una nota
-  // crédito cuelga de su factura, y esa de su pedido.
-  let orderId: string | null = isInvoice ? row.order_id : null;
-  if (!isInvoice) {
-    const { data: invoice } = await adminClient.from("sales_invoices").select("order_id").eq("id", row.invoice_id).maybeSingle();
-    orderId = invoice?.order_id ?? null;
-  }
-
+  // La representación gráfica adjunta es la del DOCUMENTO que se está
+  // entregando, no la del pedido: una factura sale del pedido (sigue vivo
+  // y editable hasta que la DIAN la acepta) y una nota crédito de su propio
+  // snapshot.
+  //
+  // Bug real corregido acá (2026-09-10, reportado por el usuario: "al
+  // generar nota crédito se envía por email es la factura"): esta rama
+  // usaba `renderInvoicePdfForOrder` para los DOS casos, resolviendo el
+  // pedido de la nota a través de su factura -- así que el comprador
+  // recibía el PDF de la factura junto al XML de la nota crédito, dos
+  // documentos distintos en el mismo correo, sin ninguna representación
+  // gráfica de lo que en realidad se le estaba entregando.
   const attachments: EmailAttachment[] = [];
-  if (orderId) {
-    const pdf = await renderInvoicePdfForOrder(adminClient, orderId);
-    attachments.push({ filename: pdf.filename, content: bytesToBase64(pdf.bytes) });
+  if (isInvoice) {
+    if (row.order_id) {
+      const pdf = await renderInvoicePdfForOrder(adminClient, row.order_id);
+      attachments.push({ filename: pdf.filename, content: bytesToBase64(pdf.bytes) });
+    }
+  } else {
+    // Nunca tumba la entrega: si el PDF no se puede armar, el XML firmado
+    // adjunto sigue cumpliendo el numeral 9.3 por sí solo (y si tampoco
+    // hay XML, más abajo se corta antes de mandar un correo vacío).
+    try {
+      const pdf = await renderCreditNotePdf(adminClient, target.id);
+      attachments.push({ filename: pdf.filename, content: bytesToBase64(pdf.bytes) });
+    } catch (err) {
+      console.error(`[sendDocumentEmail] PDF de nota crédito ${target.id}:`, err instanceof Error ? err.message : String(err));
+    }
   }
 
   const fiscalCode = (isInvoice ? row.cufe : row.cude) ?? null;

@@ -195,7 +195,34 @@
  *    DISTINTO para ese NIT, el rechazo persiste hasta que el tenant lo
  *    actualice en el portal de la DIAN (o hasta que coincida con
  *    `contact_email`); esa parte no es accionable desde este código, es un
- *    dato de la cuenta DIAN del tenant, no del XML. */
+ *    dato de la cuenta DIAN del tenant, no del XML.
+ *
+ * ⚠️ QUINTA RONDA 2026-09-10, factura MIXTA de producción (Barriles de la
+ * sexta, pedido #28197: una línea con INC 8% y otra con el impuesto SIN
+ * configurar en el producto):
+ * 15. FAU04 otra vez, pero por una causa distinta a la de la ronda 9 (que
+ *    era el orden del redondeo y sigue vigente y correcta): una línea sin
+ *    `tax` no emitía NINGÚN `cac:TaxTotal` de línea, así que su monto
+ *    entraba a `LineExtensionAmount`/`TaxExclusiveAmount` de cabecera pero
+ *    quedaba fuera de la suma de bases imponibles de las líneas -- los dos
+ *    lados de la igualdad que compara esa regla. Con el pedido real: bases
+ *    de línea 47222.22 vs. TaxExclusiveAmount 64222.22 (los 17000 de la
+ *    línea sin impuesto), diferencia exacta del rechazo.
+ *    Arreglo: toda línea declara su grupo de impuesto, y una sin impuesto
+ *    configurado se informa como IVA 0.00% con su base completa -- que es
+ *    literalmente lo que hace el ejemplo oficial `dian-reference/
+ *    ejemplos-xml/Exento de IVA.xml`. De paso se quitó el filtro
+ *    `taxAmount === 0` de la agregación de cabecera, que reintroducía la
+ *    misma asimetría por otro camino (una línea al 0% emitía su TaxSubtotal
+ *    pero no sumaba en cabecera), y `TaxExclusiveAmount` pasó a calcularse
+ *    como la suma real de bases en vez de reutilizar el subtotal.
+ * 16. FAX14 ("reporta una tarifa diferente para uno de los tributos de la
+ *    tabla 13.3.9") NO se arregla acá: es un dato inválido en la ficha del
+ *    producto (esa factura llevaba "IVA 8%", tarifa que existe para INC
+ *    pero no para IVA). Se agregó `taxRates.ts` con la tabla oficial y una
+ *    validación previa a firmar/transmitir, para que una combinación
+ *    imposible falle con un mensaje accionable en vez de quemar un envío
+ *    real contra la DIAN. */
 
 import { computeCufe, computeSoftwareSecurityCode } from "./cufe.ts";
 import { computeNitCheckDigit } from "./nit.ts";
@@ -440,8 +467,26 @@ export async function buildInvoiceXml(input: BuildInvoiceXmlInput): Promise<{ xm
   // (y por lo tanto LegalMonetaryTotal/LineExtensionAmount+TaxExclusiveAmount)
   // tienen que ser el valor SIN impuesto -- para una línea con impuesto,
   // ese valor YA está calculado en line.tax.taxableAmount.
-  const netLineAmount = (line: InvoiceXmlLine) => (line.tax ? line.tax.taxableAmount : line.lineExtensionAmount);
   const round2 = (value: number) => Math.round(value * 100) / 100;
+  // FAU04, TERCERA RONDA (2026-09-10, rechazo real de Barriles de la sexta
+  // con una factura mixta INC 8% + una línea SIN impuesto configurado):
+  // una línea sin `tax` no emitía ningún `cac:TaxTotal` de línea, así que
+  // su monto entraba a LineExtensionAmount/TaxExclusiveAmount de cabecera
+  // pero NO a la suma de bases imponibles de las líneas -- que es
+  // exactamente lo que compara FAU04 ("Base Imponible es distinto a la
+  // suma de los valores de las bases imponibles de todas líneas de
+  // detalle").
+  //
+  // El arreglo NO es sacar esa línea del total: la DIAN quiere que TODA
+  // línea declare su grupo de impuesto, y una línea sin impuesto se
+  // informa como IVA al 0.00% con su base completa -- es literalmente lo
+  // que hace el ejemplo oficial `dian-reference/ejemplos-xml/Exento de
+  // IVA.xml` (TaxTotal con TaxAmount 0.00 y TaxableAmount = valor de la
+  // línea). Así la igualdad de FAU04 se cumple por construcción y no
+  // depende de que ningún producto quede sin impuesto cargado.
+  const lineTaxOf = (line: InvoiceXmlLine): InvoiceXmlLineTax =>
+    line.tax ?? { code: "01", rate: 0, taxableAmount: round2(line.lineExtensionAmount), taxAmount: 0 };
+  const netLineAmount = (line: InvoiceXmlLine) => lineTaxOf(line).taxableAmount;
   // FAU04 (ronda 2026-09-10): sumar los valores YA REDONDEADOS de cada
   // línea -- exactamente los que van impresos en cac:InvoiceLine -- en vez
   // de sumar los montos crudos y redondear una sola vez al final (ver el
@@ -456,12 +501,20 @@ export async function buildInvoiceXml(input: BuildInvoiceXmlInput): Promise<{ xm
   // aparecen en alguna línea (FAS01b) -- emitir un TaxTotal en 0 para un
   // impuesto que ninguna línea usa es justo lo que rechazaba esa regla.
   const taxByCodeAndRate = new Map<string, { code: string; rate: number; taxable: number; amount: number }>();
+  //
+  // Se agrupan TODAS las líneas, incluidas las de impuesto 0 -- antes se
+  // salteaba cualquier grupo con `taxAmount === 0`, que reintroducía la
+  // misma asimetría de FAU04 por otro camino: una línea al 0% sí emitía su
+  // TaxSubtotal de línea (porque `line.tax` existía) pero quedaba fuera de
+  // la cabecera. Esto no contradice FAS01b: un código al 0% declarado por
+  // una línea real SÍ está informado a nivel de línea; lo que esa regla
+  // prohíbe es un TaxTotal de cabecera para un código que ninguna línea usa.
   for (const line of input.lines) {
-    if (!line.tax || line.tax.taxAmount === 0) continue;
-    const key = `${line.tax.code}|${line.tax.rate}`;
-    const entry = taxByCodeAndRate.get(key) ?? { code: line.tax.code, rate: line.tax.rate, taxable: 0, amount: 0 };
-    entry.taxable += round2(line.tax.taxableAmount);
-    entry.amount += round2(line.tax.taxAmount);
+    const tax = lineTaxOf(line);
+    const key = `${tax.code}|${tax.rate}`;
+    const entry = taxByCodeAndRate.get(key) ?? { code: tax.code, rate: tax.rate, taxable: 0, amount: 0 };
+    entry.taxable += round2(tax.taxableAmount);
+    entry.amount += round2(tax.taxAmount);
     taxByCodeAndRate.set(key, entry);
   }
   const TAX_CODE_ORDER = ["01", "04", "03"];
@@ -476,6 +529,18 @@ export async function buildInvoiceXml(input: BuildInvoiceXmlInput): Promise<{ xm
   const incTotal = totalForCode("04");
   const icaTotal = totalForCode("03");
   const taxTotal = ivaTotal + incTotal + icaTotal;
+  // FAU04 compara este valor contra la suma de las bases imponibles de las
+  // líneas, así que se calcula como esa suma exacta en vez de reutilizar
+  // `subtotal` (que es lo que exige FAU01 para LineExtensionAmount). Hoy
+  // los dos dan igual porque toda línea declara su grupo de impuesto, pero
+  // atarlo a la suma real de bases es lo que impide que un caso futuro
+  // (una línea que legítimamente quede fuera del cálculo de impuestos)
+  // vuelva a desalinearlos en silencio.
+  const taxExclusiveAmount = Array.from(taxByCodeAndRate.values()).reduce((sum, g) => sum + g.taxable, 0);
+  // TaxInclusiveAmount sale de LineExtensionAmount + impuestos, NO de
+  // TaxExclusiveAmount (confirmado contra el ejemplo oficial Generica.xml:
+  // LineExtension 12600.06 + TaxTotal 2424.01 = TaxInclusive 15024.07,
+  // mientras TaxExclusive vale 12787.56, un valor distinto).
   const taxInclusiveAmount = subtotal + taxTotal;
   const withholdingTotal = input.withholdings.reduce((sum, w) => sum + w.amount, 0);
   // Nota DIAN (Anexo 11.9.1, observación 21/06/2019): la validación previa
@@ -568,23 +633,25 @@ export async function buildInvoiceXml(input: BuildInvoiceXmlInput): Promise<{ xm
 
   const linesXml = input.lines
     .map((line) => {
-      const lineTax = line.tax
-        ? `
+      // Siempre se emite el grupo de impuesto de la línea -- una línea sin
+      // impuesto configurado va como IVA 0.00% con su base completa (ver
+      // lineTaxOf arriba y el ejemplo oficial "Exento de IVA.xml").
+      const tax = lineTaxOf(line);
+      const lineTax = `
       <cac:TaxTotal>
-         <cbc:TaxAmount currencyID="${input.currency}">${money(line.tax.taxAmount)}</cbc:TaxAmount>
+         <cbc:TaxAmount currencyID="${input.currency}">${money(tax.taxAmount)}</cbc:TaxAmount>
          <cac:TaxSubtotal>
-            <cbc:TaxableAmount currencyID="${input.currency}">${money(line.tax.taxableAmount)}</cbc:TaxableAmount>
-            <cbc:TaxAmount currencyID="${input.currency}">${money(line.tax.taxAmount)}</cbc:TaxAmount>
+            <cbc:TaxableAmount currencyID="${input.currency}">${money(tax.taxableAmount)}</cbc:TaxableAmount>
+            <cbc:TaxAmount currencyID="${input.currency}">${money(tax.taxAmount)}</cbc:TaxAmount>
             <cac:TaxCategory>
-               <cbc:Percent>${line.tax.rate.toFixed(2)}</cbc:Percent>
+               <cbc:Percent>${tax.rate.toFixed(2)}</cbc:Percent>
                <cac:TaxScheme>
-                  <cbc:ID>${line.tax.code}</cbc:ID>
-                  <cbc:Name>${TAX_SCHEME_NAME[line.tax.code]}</cbc:Name>
+                  <cbc:ID>${tax.code}</cbc:ID>
+                  <cbc:Name>${TAX_SCHEME_NAME[tax.code]}</cbc:Name>
                </cac:TaxScheme>
             </cac:TaxCategory>
          </cac:TaxSubtotal>
-      </cac:TaxTotal>`
-        : "";
+      </cac:TaxTotal>`;
       // Precio unitario SIN impuesto -- se deriva del mismo monto neto ya
       // usado arriba (netAmount/cantidad), no de line.unitPrice (que viene
       // CON impuesto incluido) ni de una segunda extracción de impuesto
@@ -669,7 +736,7 @@ export async function buildInvoiceXml(input: BuildInvoiceXmlInput): Promise<{ xm
    </cac:PaymentMeans>${taxTotalBlocks}${withholdingBlock}
    <cac:LegalMonetaryTotal>
       <cbc:LineExtensionAmount currencyID="${input.currency}">${money(subtotal)}</cbc:LineExtensionAmount>
-      <cbc:TaxExclusiveAmount currencyID="${input.currency}">${money(subtotal)}</cbc:TaxExclusiveAmount>
+      <cbc:TaxExclusiveAmount currencyID="${input.currency}">${money(taxExclusiveAmount)}</cbc:TaxExclusiveAmount>
       <cbc:TaxInclusiveAmount currencyID="${input.currency}">${money(taxInclusiveAmount)}</cbc:TaxInclusiveAmount>
       <cbc:PayableAmount currencyID="${input.currency}">${money(payableAmount)}</cbc:PayableAmount>
    </cac:LegalMonetaryTotal>${linesXml}

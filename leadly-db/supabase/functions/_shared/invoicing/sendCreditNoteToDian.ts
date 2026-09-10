@@ -243,6 +243,16 @@ async function doSendCreditNoteToDian(adminClient: any, tenantId: string, credit
     authorizationProviderNit: "800197268",
   };
 
+  // ⚠️ ACÁ NO VA la validación de tarifas de taxRates.ts que sí corre en
+  // sendInvoiceToDian.ts, y es a propósito: una nota crédito tiene que
+  // declarar EL MISMO impuesto que el documento que corrige, aunque esa
+  // combinación tipo+tarifa sea inválida -- si no, no cuadra contra la
+  // factura que anula. Caso real que lo obligó (Barriles de la sexta,
+  // 2026-09-10): la factura FE-13 quedó ACEPTADA declarando INC al 19%
+  // (FAX14 es notificación, no rechazo, así que pasó igual), y la única
+  // forma de corregirla es una nota crédito que también diga INC 19%.
+  // Bloquearla acá dejaría al tenant sin manera de arreglar una factura
+  // ya emitida -- peor que la notificación que la validación evita.
   const { xml: unsignedXml, cude } = await buildCreditNoteXml(xmlInput);
   const signedXml = await signInvoiceXml({ unsignedXml, privateKey: cert.privateKey, certificateDer: cert.certificateDer });
   // Misma conservación que la factura -- ver storeSignedXml.ts.
