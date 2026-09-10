@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { FileTextIcon, RefreshCwIcon, ScanLineIcon, UploadIcon, XIcon } from 'lucide-react'
+import { FileTextIcon, MailIcon, RefreshCwIcon, ScanLineIcon, UploadIcon, XIcon } from 'lucide-react'
 import {
   calculateOrder,
   deleteOrder,
@@ -40,6 +40,7 @@ import {
   retryCreditNote,
   getCreditNotePdf,
   checkInvoiceStatus,
+  sendDocumentEmail,
   checkCreditNoteStatus,
 } from '../../lib/api/salesInvoices'
 import type { SalesInvoice, SalesInvoiceStatus, SalesCreditNote } from '../../types/domain'
@@ -51,6 +52,7 @@ import type { TaskWithRelations } from '../../lib/api/tasks'
 import type { ContactAddress, SalesOrderPayment, OrderStatus, DeliveryStatus, ProductCategory, Brand, Warehouse } from '../../types/domain'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
+import { useToast } from '../../contexts/ToastContext'
 import { isNotBlank } from '../../lib/validation'
 import { formatDate, formatDateTime } from '../../lib/dates'
 import { formatPhoneDisplay } from '../../lib/phone'
@@ -186,6 +188,7 @@ export function OrderDetail() {
   const navigate = useNavigate()
   const { profile, enabledModules } = useAuth()
   const { t, language } = useLanguage()
+  const toast = useToast()
   const isNew = !id
 
   // ----- loaded order (edit mode only) -----
@@ -339,6 +342,10 @@ export function OrderDetail() {
   // por ningún lado, en habilitación deberían salir"): sin esto, Leadly
   // nunca volvía a preguntarle a la DIAN qué pasó después del acuse.
   const [checkingStatusId, setCheckingStatusId] = useState<string | null>(null)
+  // Reenvío del documento al correo del adquiriente (Anexo Técnico 9.3).
+  // El envío automático ya sale solo al aceptar la DIAN -- esto cubre "no
+  // me llegó" y "le corregí el correo al cliente después de emitir".
+  const [emailingId, setEmailingId] = useState<string | null>(null)
   const [checkStatusError, setCheckStatusError] = useState<string | null>(null)
 
   // Solo una factura sent/accepted es un documento fiscal REAL (con cufe/
@@ -418,6 +425,22 @@ export function OrderDetail() {
       setCheckStatusError(err instanceof Error ? err.message : t('einvoicing.detail.checkStatusError'))
     } finally {
       setCheckingStatusId(null)
+    }
+  }
+
+  async function handleSendDocumentEmail(target: { invoiceId?: string; creditNoteId?: string }) {
+    const id = (target.invoiceId ?? target.creditNoteId)!
+    setEmailingId(id)
+    try {
+      const result = await sendDocumentEmail(target)
+      toast.success(t('einvoicing.detail.emailSent'), result.recipient ?? undefined)
+    } catch (err) {
+      // El backend distingue "el cliente no tiene correo" (409, accionable)
+      // de un fallo real del proveedor (502) -- los dos llegan acá como el
+      // mensaje que ya viene redactado del servidor, sin reinterpretarlo.
+      toast.error(t('einvoicing.detail.emailError'), err instanceof Error ? err.message : undefined)
+    } finally {
+      setEmailingId(null)
     }
   }
 
@@ -1423,6 +1446,12 @@ export function OrderDetail() {
                         {checkingStatusId === inv.id ? t('einvoicing.detail.checkingStatus') : t('einvoicing.detail.checkStatus')}
                       </Button>
                     )}
+                    {isCurrent && (inv.status === 'accepted' || inv.status === 'sent') && isInvoiceAdmin && (
+                      <Button type="button" size="sm" variant="outline" onClick={() => handleSendDocumentEmail({ invoiceId: inv.id })} disabled={emailingId === inv.id}>
+                        <MailIcon className="size-3.5" />
+                        {emailingId === inv.id ? t('einvoicing.detail.emailSending') : t('einvoicing.detail.emailResend')}
+                      </Button>
+                    )}
                     {isCurrent && canIssueCreditNote && (
                       <Button type="button" size="sm" variant="outline" onClick={() => setCreditNoteDrawerOpen(true)}>
                         {t('einvoicing.creditNote.button')}
@@ -1465,6 +1494,12 @@ export function OrderDetail() {
                             {cn.status_detail && <p className="mt-0.5 text-[11px] text-amber-700">{cn.status_detail}</p>}
                           </div>
                           <div className="flex shrink-0 items-center gap-1.5">
+                            {(cn.status === 'accepted' || cn.status === 'sent') && isInvoiceAdmin && (
+                              <Button type="button" size="sm" variant="outline" onClick={() => handleSendDocumentEmail({ creditNoteId: cn.id })} disabled={emailingId === cn.id}>
+                                <MailIcon className="size-3.5" />
+                                {emailingId === cn.id ? t('einvoicing.detail.emailSending') : t('einvoicing.detail.emailResend')}
+                              </Button>
+                            )}
                             {cn.status === 'sent' && isInvoiceAdmin && (
                               <Button type="button" size="sm" variant="outline" onClick={() => handleCheckCreditNoteStatus(cn.id)} disabled={checkingStatusId === cn.id}>
                                 <RefreshCwIcon className="size-3.5" />

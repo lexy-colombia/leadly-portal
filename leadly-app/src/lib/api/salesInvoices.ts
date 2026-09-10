@@ -377,3 +377,42 @@ export async function getCreditNotePdf(creditNoteId: string): Promise<{ pdfBase6
   }
   return { pdfBase64: data!.pdf_base64, filename: data!.filename }
 }
+
+export interface SendDocumentEmailResult {
+  outcome: 'sent' | 'skipped' | 'error'
+  recipient: string | null
+  detail: string | null
+}
+
+/** Reenvía el documento electrónico al correo del adquiriente (Anexo
+ * Técnico DIAN, numeral 9.3 -- el correo es uno de los medios autorizados
+ * de entrega). El envío automático ya sale solo al aceptar la DIAN; esto
+ * es la salida para cuando el cliente dice que no le llegó o se corrigió
+ * su correo después de emitir. Pasar `invoiceId` o `creditNoteId`, nunca
+ * los dos. */
+export async function sendDocumentEmail(target: { invoiceId?: string; creditNoteId?: string }): Promise<SendDocumentEmailResult> {
+  // Edge Function propia, no una acción de dian-submit: esa función carga
+  // la pila de firma XML, que es incompatible con pdf-lib en el runtime
+  // real (ver el comentario de cabecera de send-document-email/index.ts).
+  const { data, error } = await supabase.functions.invoke<SendDocumentEmailResult & { error?: string }>('send-document-email', {
+    body: {
+      ...(target.invoiceId ? { invoice_id: target.invoiceId } : {}),
+      ...(target.creditNoteId ? { credit_note_id: target.creditNoteId } : {}),
+    },
+  })
+  if (error) {
+    const context = (error as { context?: Response }).context
+    if (context && typeof context.json === 'function') {
+      let specificMessage: string | undefined
+      try {
+        const body = await context.json()
+        specificMessage = body?.error
+      } catch {
+        /* fall through to generic error */
+      }
+      if (specificMessage) throw new Error(specificMessage)
+    }
+    throw error
+  }
+  return data as SendDocumentEmailResult
+}

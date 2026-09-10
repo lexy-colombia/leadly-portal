@@ -52,6 +52,7 @@ import { pollDianTrackStatus, parseOneStatus } from "./getDianStatus.ts";
 import { interpretDianStatus, applyInvoiceVerdict } from "./applyDianVerdict.ts";
 import { resolveTechnicalKey } from "./resolveTechnicalKey.ts";
 import { colombiaIssueMoment } from "./colombiaTime.ts";
+import { storeSignedXml } from "./storeSignedXml.ts";
 
 const PROVIDER_KEY = "dian_directo";
 
@@ -336,6 +337,17 @@ export async function sendInvoiceToDian(adminClient: any, tenantId: string, invo
       signedXml: signedInvoiceXml,
     };
   }
+
+  // Conservación del documento electrónico de generación, ANTES de
+  // transmitir -- ver storeSignedXml.ts para el porqué del momento y de
+  // que no bloquee.
+  await storeSignedXml(adminClient, {
+    tenantId,
+    table: "sales_invoices",
+    rowId: invoiceId,
+    documentName: invoiceDocId,
+    xml: signedInvoiceXml,
+  });
 
   const zipFileName = `${invoiceDocId}.zip`;
   const zipBytes = buildInvoiceZip([{ fileName: `${invoiceDocId}.xml`, content: new TextEncoder().encode(signedInvoiceXml) }]);

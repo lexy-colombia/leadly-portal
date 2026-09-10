@@ -17,6 +17,7 @@ import { loadTenantCertificate, createMtlsClient, uint8ToBase64 } from "./dianCl
 import { pollDianTrackStatus, parseOneStatus } from "./getDianStatus.ts";
 import { interpretDianStatus, applyCreditNoteVerdict } from "./applyDianVerdict.ts";
 import { colombiaIssueMoment } from "./colombiaTime.ts";
+import { storeSignedXml } from "./storeSignedXml.ts";
 
 const PROVIDER_KEY = "dian_directo";
 
@@ -244,6 +245,15 @@ async function doSendCreditNoteToDian(adminClient: any, tenantId: string, credit
 
   const { xml: unsignedXml, cude } = await buildCreditNoteXml(xmlInput);
   const signedXml = await signInvoiceXml({ unsignedXml, privateKey: cert.privateKey, certificateDer: cert.certificateDer });
+  // Misma conservación que la factura -- ver storeSignedXml.ts.
+  await storeSignedXml(adminClient, {
+    tenantId,
+    table: "sales_credit_notes",
+    rowId: creditNoteId,
+    documentName: creditNoteDocId,
+    xml: signedXml,
+  });
+
 
   const zipFileName = `${creditNoteDocId}.zip`;
   const zipBytes = buildInvoiceZip([{ fileName: `${creditNoteDocId}.xml`, content: new TextEncoder().encode(signedXml) }]);
