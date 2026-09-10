@@ -46,7 +46,7 @@ import { getTenantNumberingRangeFromDian } from "../_shared/invoicing/getNumberi
 import { loadTenantCertificate } from "../_shared/invoicing/dianClient.ts";
 import { buildInvoiceXml } from "../_shared/invoicing/buildInvoiceXml.ts";
 import { signInvoiceXml } from "../_shared/invoicing/signInvoiceXml.ts";
-import { queryDianTrackStatus } from "../_shared/invoicing/getDianStatus.ts";
+import { queryDianTrackStatus, type DianStatusOperation } from "../_shared/invoicing/getDianStatus.ts";
 import { interpretDianStatus, applyInvoiceVerdict, applyCreditNoteVerdict } from "../_shared/invoicing/applyDianVerdict.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 
@@ -69,6 +69,7 @@ Deno.serve(async (req) => {
     reason_code?: string;
     reason_description?: string;
     credit_note_id?: string;
+    track_id?: string;
   };
   try {
     body = await req.json();
@@ -98,6 +99,10 @@ Deno.serve(async (req) => {
 
   if (body.action === "check_invoice_status") {
     return await handleCheckInvoiceStatus(req, body);
+  }
+
+  if (body.action === "lookup_dian_document") {
+    return await handleLookupDianDocument(req, body);
   }
 
   if (body.action === "check_credit_note_status") {
@@ -706,6 +711,17 @@ async function handleDebugVerifySignature(req: Request, body: { tenant_id?: stri
  * interpretDianStatus/applyInvoiceVerdict (applyDianVerdict.ts) -- mismo
  * código exacto que usa el camino síncrono, así que si esto resuelve a
  * "accepted" también avanza next_invoice_number acá, no solo en el envío. */
+/** `dian_tracking_id` guarda dos cosas distintas según cómo se envió el
+ * documento, y cada una se consulta con una operación distinta (ver
+ * getDianStatus.ts): el `zipKey` de un envío asíncrono (habilitación,
+ * `SendTestSetAsync`) va con `GetStatusZip`, mientras que en producción
+ * (`SendBillSync`) no hay zipKey y lo guardado es el CUFE, que va con
+ * `GetStatus`. Se distinguen comparando contra el CUFE de la propia fila
+ * en vez de adivinar por formato -- los dos son cadenas hex largas. */
+function statusOperationFor(trackingId: string, cufe: string | null): DianStatusOperation {
+  return cufe && trackingId === cufe ? "GetStatus" : "GetStatusZip";
+}
+
 async function handleCheckInvoiceStatus(req: Request, body: { invoice_id?: string }): Promise<Response> {
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) return jsonResponse({ error: "Missing Authorization header" }, 401);
@@ -729,7 +745,7 @@ async function handleCheckInvoiceStatus(req: Request, body: { invoice_id?: strin
 
   // RLS de sales_invoices ya aísla por tenant -- si es de otro tenant, esto
   // viene null, igual que "no existe".
-  const { data: invoiceRow } = await callerClient.from("sales_invoices").select("tenant_id, status, dian_tracking_id, invoice_number").eq("id", body.invoice_id).maybeSingle();
+  const { data: invoiceRow } = await callerClient.from("sales_invoices").select("tenant_id, status, dian_tracking_id, invoice_number, cufe").eq("id", body.invoice_id).maybeSingle();
   if (!invoiceRow) return jsonResponse({ error: "Factura no encontrada." }, 404);
   if (invoiceRow.status !== "sent") {
     return jsonResponse({ error: `Esta factura está en estado "${invoiceRow.status}" -- solo tiene sentido verificar una que quedó "enviada" sin confirmar todavía.` }, 409);
@@ -740,12 +756,94 @@ async function handleCheckInvoiceStatus(req: Request, body: { invoice_id?: strin
 
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
   try {
-    const result = await queryDianTrackStatus(adminClient, invoiceRow.tenant_id, invoiceRow.dian_tracking_id);
+    const result = await queryDianTrackStatus(
+      adminClient,
+      invoiceRow.tenant_id,
+      invoiceRow.dian_tracking_id,
+      undefined,
+      statusOperationFor(invoiceRow.dian_tracking_id, invoiceRow.cufe),
+    );
     if (!result.faultReason) {
       const verdict = interpretDianStatus(result.statuses[0] ?? null);
       await applyInvoiceVerdict(adminClient, invoiceRow.tenant_id, body.invoice_id, Number(invoiceRow.invoice_number ?? 0), verdict);
     }
     return jsonResponse(result);
+  } catch (err) {
+    return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+}
+
+/** Consulta de SOLO LECTURA del estado real de una factura en la DIAN, sin
+ * importar en qué estado la tenga la base y sin escribir nada.
+ *
+ * Distinta de `check_invoice_status`, que existe para resolver una factura
+ * que quedó colgada en `sent` y por eso exige ese estado y aplica el
+ * veredicto sobre la fila. Esta es para responder "¿la DIAN de verdad tiene
+ * este documento?" -- típicamente cuando la factura figura aceptada acá
+ * pero el usuario no la encuentra en el portal. Pregunta y devuelve lo que
+ * la DIAN conteste, tal cual, sin tocar `sales_invoices`: si hubiera una
+ * discrepancia real entre lo que dice la DIAN y lo guardado, hay que verla
+ * antes de que algo la sobrescriba. */
+async function handleLookupDianDocument(req: Request, body: { invoice_id?: string; track_id?: string; tenant_id?: string }): Promise<Response> {
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) return jsonResponse({ error: "Missing Authorization header" }, 401);
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const callerClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } });
+
+  const {
+    data: { user: caller },
+    error: callerError,
+  } = await callerClient.auth.getUser();
+  if (callerError || !caller) return jsonResponse({ error: "Invalid session" }, 401);
+
+  const { data: profile } = await callerClient.from("profiles").select("role, tenant_id").eq("id", caller.id).maybeSingle();
+  if (!profile || (profile.role !== "tenant_admin" && profile.role !== "superadmin")) {
+    return jsonResponse({ error: "Solo un administrador del tenant puede consultar el estado de un documento en la DIAN." }, 403);
+  }
+
+  let tenantId: string | null = null;
+  let trackId: string | null = null;
+  let cufe: string | null = null;
+  let stored: Record<string, unknown> | null = null;
+
+  if (body.invoice_id) {
+    // RLS de sales_invoices aísla por tenant -- una factura ajena vuelve
+    // null, igual que una inexistente.
+    const { data: row } = await callerClient
+      .from("sales_invoices")
+      .select("tenant_id, status, status_detail, invoice_prefix, invoice_number, cufe, dian_tracking_id, sent_at")
+      .eq("id", body.invoice_id)
+      .maybeSingle();
+    if (!row) return jsonResponse({ error: "Factura no encontrada." }, 404);
+    tenantId = row.tenant_id;
+    cufe = row.cufe;
+    trackId = row.dian_tracking_id ?? row.cufe;
+    stored = row;
+  } else if (body.track_id) {
+    // Consulta suelta por CUFE/trackId, para un documento que ni siquiera
+    // tenga fila acá. Un superadmin debe decir de qué tenant sale el
+    // certificado; un tenant_admin solo puede usar el suyo.
+    tenantId = profile.role === "superadmin" ? (body.tenant_id ?? null) : profile.tenant_id;
+    trackId = body.track_id;
+    cufe = body.track_id;
+    if (!tenantId) return jsonResponse({ error: "expected_tenant_id" }, 400);
+  } else {
+    return jsonResponse({ error: "expected_invoice_id_or_track_id" }, 400);
+  }
+
+  if (!trackId) {
+    return jsonResponse({ error: "Esta factura no tiene CUFE ni identificador de seguimiento guardado -- nunca llegó a enviarse." }, 409);
+  }
+  if (!tenantId) return jsonResponse({ error: "expected_tenant_id" }, 400);
+
+  const adminClient = createClient(supabaseUrl, serviceRoleKey);
+  try {
+    const operation = statusOperationFor(trackId, cufe);
+    const result = await queryDianTrackStatus(adminClient, tenantId, trackId, undefined, operation);
+    return jsonResponse({ operation, trackId, stored, dian: result });
   } catch (err) {
     return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 500);
   }
@@ -775,7 +873,7 @@ async function handleCheckCreditNoteStatus(req: Request, body: { credit_note_id?
 
   const { data: creditNoteRow } = await callerClient
     .from("sales_credit_notes")
-    .select("tenant_id, status, dian_tracking_id, credit_note_number")
+    .select("tenant_id, status, dian_tracking_id, credit_note_number, cude")
     .eq("id", body.credit_note_id)
     .maybeSingle();
   if (!creditNoteRow) return jsonResponse({ error: "Nota crédito no encontrada." }, 404);
@@ -788,7 +886,13 @@ async function handleCheckCreditNoteStatus(req: Request, body: { credit_note_id?
 
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
   try {
-    const result = await queryDianTrackStatus(adminClient, creditNoteRow.tenant_id, creditNoteRow.dian_tracking_id);
+    const result = await queryDianTrackStatus(
+      adminClient,
+      creditNoteRow.tenant_id,
+      creditNoteRow.dian_tracking_id,
+      undefined,
+      statusOperationFor(creditNoteRow.dian_tracking_id, creditNoteRow.cude ?? null),
+    );
     if (!result.faultReason) {
       const verdict = interpretDianStatus(result.statuses[0] ?? null);
       await applyCreditNoteVerdict(adminClient, creditNoteRow.tenant_id, body.credit_note_id, Number(creditNoteRow.credit_note_number ?? 0), verdict);

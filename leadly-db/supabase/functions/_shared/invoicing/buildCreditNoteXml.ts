@@ -111,7 +111,41 @@ export interface BuildCreditNoteXmlInput {
   softwareId: string;
   softwarePin: string;
   authorizationProviderNit: string;
+  /** cac:PaymentMeans (CAN01: grupo OBLIGATORIO, 1..N -- faltaba por
+   * completo, rechazo real 2026-09-10 "Rechazo si grupo no informado").
+   * `meansId` "1" contado / "2" crédito (CAN02); `meansCode` es el medio
+   * de pago del catálogo UNCL4461 (CAN03, obligatorio). Se arma con el
+   * pago REAL de la venta que esta nota corrige, igual que la factura --
+   * ver sendCreditNoteToDian.ts. Ojo CAN04: con `meansId` "2" la DIAN
+   * exige además PaymentDueDate, por eso el caller nunca manda "2" sin
+   * tenerla. */
+  payment: { meansId: "1" | "2"; meansCode: string; dueDate?: string | null };
 }
+
+/** Descripción canónica por código de concepto de corrección
+ * (`cac:DiscrepancyResponse/cbc:ResponseCode`). La regla CBF04 exige que
+ * `cbc:Description` "corresponda al código informado en el elemento
+ * anterior" -- se estaba mandando el texto libre que escribe el usuario en
+ * el drawer, que por definición no está en la lista, de ahí la
+ * notificación "La Descripción informada no se encuentra en la lista"
+ * (rechazo real 2026-09-10). El texto que escribe el usuario NO se pierde:
+ * sigue yendo en la descripción de la línea (`cac:Item/cbc:Description`),
+ * que es texto libre legítimo.
+ *
+ * ⚠️ La tabla oficial (13.2.4) NO está en el PDF del Anexo Técnico -- vive
+ * en un xlsx aparte de la "Caja de Herramientas" de la DIAN. Estas cadenas
+ * son las mismas que ya muestra el selector del frontend
+ * (`einvoicing.creditNote.reason.*`), así que XML y UI dicen lo mismo; los
+ * textos de 5 y 6 conviene confirmarlos contra ese xlsx si la notificación
+ * CBF04 persiste. */
+const REASON_DESCRIPTION: Record<string, string> = {
+  "1": "Devolución parcial de bienes o no aceptación parcial del servicio",
+  "2": "Anulación de factura electrónica",
+  "3": "Rebaja o descuento parcial o total",
+  "4": "Ajuste de precio",
+  "5": "Descuento",
+  "6": "Otros",
+};
 
 function esc(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -143,11 +177,17 @@ function partyBlock(tag: "cac:AccountingSupplierParty" | "cac:AccountingCustomer
             <cbc:ID ${companyIdAttrs}>${esc(party.documentNumber)}</cbc:ID>
          </cac:PartyIdentification>`
       : "";
-  // cac:Contact/cbc:ElectronicMail (regla FAJ71) -- solo el emisor, mismo
-  // criterio y mismo orden (después de PartyLegalEntity) que
-  // buildInvoiceXml.ts::partyBlock.
+  // cac:Contact/cbc:ElectronicMail. En la factura esto solo aplica al
+  // emisor (FAJ71), pero en la NOTA CRÉDITO la tabla de reglas lo pide
+  // también para el comprador (CAK55, `/CreditNote/cac:AccountingCustomer
+  // Party/cac:Party/cac:Contact/cbc:ElectronicMail`) -- rechazo real
+  // reportado en vivo 2026-09-10 como "Correo electrónico no informado".
+  // Por eso acá se emite para cualquiera de las dos partes que tenga
+  // correo, no solo para el emisor. Se omite el grupo entero si el dato no
+  // existe (un cliente de mostrador puede no tener correo cargado): mejor
+  // la notificación blanda que un valor inventado.
   const contactXml =
-    tag === "cac:AccountingSupplierParty" && party.electronicMail
+    party.electronicMail
       ? `
          <cac:Contact>
             <cbc:ElectronicMail>${esc(party.electronicMail)}</cbc:ElectronicMail>
@@ -339,10 +379,11 @@ export async function buildCreditNoteXml(input: BuildCreditNoteXmlInput): Promis
    <cbc:IssueTime>${input.issueTime}</cbc:IssueTime>
    <cbc:CreditNoteTypeCode>91</cbc:CreditNoteTypeCode>
    <cbc:DocumentCurrencyCode listAgencyID="6" listAgencyName="United Nations Economic Commission for Europe" listID="ISO 4217 Alpha">${input.currency}</cbc:DocumentCurrencyCode>
-   <cbc:LineCountNumeric>1</cbc:LineCountNumeric>${partyBlock("cac:AccountingSupplierParty", input.seller, sellerDv)}${partyBlock("cac:AccountingCustomerParty", input.buyer, buyerDv)}${taxTotalBlocks}
+   <cbc:LineCountNumeric>1</cbc:LineCountNumeric>
    <cac:DiscrepancyResponse>
+      <cbc:ReferenceID>${esc(input.referencedInvoice.id)}</cbc:ReferenceID>
       <cbc:ResponseCode>${esc(input.reasonCode)}</cbc:ResponseCode>
-      <cbc:Description>${esc(input.reasonDescription)}</cbc:Description>
+      <cbc:Description>${esc(REASON_DESCRIPTION[input.reasonCode] ?? input.reasonDescription)}</cbc:Description>
    </cac:DiscrepancyResponse>
    <cac:BillingReference>
       <cac:InvoiceDocumentReference>
@@ -350,7 +391,13 @@ export async function buildCreditNoteXml(input: BuildCreditNoteXmlInput): Promis
          <cbc:UUID schemeName="CUFE-SHA384">${input.referencedInvoice.cufe}</cbc:UUID>
          <cbc:IssueDate>${input.referencedInvoice.issueDate}</cbc:IssueDate>
       </cac:InvoiceDocumentReference>
-   </cac:BillingReference>
+   </cac:BillingReference>${partyBlock("cac:AccountingSupplierParty", input.seller, sellerDv)}${partyBlock("cac:AccountingCustomerParty", input.buyer, buyerDv)}
+   <cac:PaymentMeans>
+      <cbc:ID>${input.payment.meansId}</cbc:ID>
+      <cbc:PaymentMeansCode>${esc(input.payment.meansCode)}</cbc:PaymentMeansCode>${
+        input.payment.meansId === "2" && input.payment.dueDate ? `\n      <cbc:PaymentDueDate>${esc(input.payment.dueDate)}</cbc:PaymentDueDate>` : ""
+      }
+   </cac:PaymentMeans>${taxTotalBlocks}
    <cac:LegalMonetaryTotal>
       <cbc:LineExtensionAmount currencyID="${input.currency}">${money(subtotal)}</cbc:LineExtensionAmount>
       <cbc:TaxExclusiveAmount currencyID="${input.currency}">${money(subtotal)}</cbc:TaxExclusiveAmount>

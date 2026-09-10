@@ -25,6 +25,11 @@ interface BuyerSnapshot {
   document_number: string | null;
   full_name: string | null;
   applies_withholding?: boolean;
+  /** Correo del cliente -- ya viene en el snapshot desde
+   * queueInvoiceGeneration.ts. Lo exige la regla CAK55 de la NOTA CRÉDITO
+   * (en la factura el correo obligatorio es el del emisor, FAJ71; acá es
+   * también el del comprador). */
+  email?: string | null;
   address: {
     line1: string | null;
     line2: string | null;
@@ -106,7 +111,7 @@ export async function sendCreditNoteToDian(adminClient: any, tenantId: string, c
 async function doSendCreditNoteToDian(adminClient: any, tenantId: string, creditNoteId: string, creditNote: any): Promise<SendCreditNoteResult> {
   const { data: invoice, error: invoiceError } = await adminClient
     .from("sales_invoices")
-    .select("invoice_prefix, invoice_number, cufe, issue_date, status")
+    .select("invoice_prefix, invoice_number, cufe, issue_date, status, order_id")
     .eq("id", creditNote.invoice_id)
     .eq("tenant_id", tenantId)
     .maybeSingle();
@@ -155,6 +160,30 @@ async function doSendCreditNoteToDian(adminClient: any, tenantId: string, credit
   const creditNotePrefix = profile.credit_note_prefix;
   const creditNoteDocId = `${creditNotePrefix}${creditNoteNumber}`;
   const now = new Date();
+
+  // cac:PaymentMeans (CAN01, grupo obligatorio) -- mismo criterio y mismo
+  // catálogo UNCL4461 que sendInvoiceToDian.ts: se refleja el pago REAL de
+  // la venta que esta nota corrige, nunca un valor inventado. Nota sobre
+  // CAN04: con "2" (crédito) la DIAN exige PaymentDueDate, un dato que
+  // esta plataforma no guarda por pago -- por eso una venta a crédito se
+  // informa igual como "1" (contado) acá; la nota crédito no es el
+  // documento que fija el plazo de pago de nada, y mandar "2" sin la fecha
+  // sería un rechazo seguro.
+  const { data: latestPayment } = await adminClient
+    .from("sales_order_payments")
+    .select("method")
+    .eq("order_id", invoice.order_id)
+    .is("deleted_at", null)
+    .order("paid_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const PAYMENT_MEANS_CODE: Record<string, string> = {
+    efectivo: "10",
+    transferencia: "42",
+    wompi: "42",
+    tarjeta: "48",
+  };
+  const paymentMethod = latestPayment?.method ?? null;
   // Hora REAL de Colombia -- ver colombiaTime.ts.
   const { issueDate, issueTime } = colombiaIssueMoment(now);
 
@@ -188,6 +217,7 @@ async function doSendCreditNoteToDian(adminClient: any, tenantId: string, credit
       cityCode: buyer.address?.city_code ?? null,
       stateCode: buyer.address?.state_code ?? null,
       taxLevelCode: buyer.applies_withholding ? "O-15" : "R-99-PN",
+      electronicMail: buyer.email ?? null,
     },
     referencedInvoice: {
       id: `${invoice.invoice_prefix}${invoice.invoice_number}`,
@@ -202,6 +232,10 @@ async function doSendCreditNoteToDian(adminClient: any, tenantId: string, credit
       tax: creditNote.tax_type_code
         ? { code: creditNote.tax_type_code, rate: creditNote.tax_rate, taxableAmount: creditNote.subtotal, taxAmount: creditNote.tax_total }
         : null,
+    },
+    payment: {
+      meansId: "1",
+      meansCode: (paymentMethod && PAYMENT_MEANS_CODE[paymentMethod]) || "1",
     },
     softwareId: profile.software_id,
     softwarePin,

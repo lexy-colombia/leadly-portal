@@ -35,7 +35,24 @@ import { buildSignedSoapEnvelope } from "./wsSecuritySoap.ts";
 import { loadTenantCertificate, createMtlsClient, type TenantCertificate } from "./dianClient.ts";
 import { interpretDianStatus } from "./applyDianVerdict.ts";
 
-const ACTION = "http://wcf.dian.colombia/IWcfDianCustomerServices/GetStatusZip";
+/** Las DOS operaciones de consulta del Anexo Técnico, que NO son
+ * intercambiables porque esperan identificadores distintos:
+ * - `GetStatusZip` (numeral 7.12) recibe el `zipKey` que devolvió un envío
+ *   ASÍNCRONO (`SendTestSetAsync`/`SendBillAsync`) y responde un array de
+ *   `DianResponse`, uno por documento dentro de ese ZIP.
+ * - `GetStatus` (numeral 7.11) recibe "el valor del CUFE o TrackId del
+ *   documento consultado" y responde por UN documento. Es la que aplica a
+ *   una factura mandada con `SendBillSync` (producción, ver
+ *   sendInvoiceToDian.ts): ese camino nunca produce un zipKey, así que lo
+ *   que queda guardado en `dian_tracking_id` es el CUFE.
+ * Consultar un CUFE con `GetStatusZip` no encuentra nada -- ahí no hay
+ * ningún ZIP con esa llave. */
+export type DianStatusOperation = "GetStatusZip" | "GetStatus";
+
+const ACTION_BY_OPERATION: Record<DianStatusOperation, string> = {
+  GetStatusZip: "http://wcf.dian.colombia/IWcfDianCustomerServices/GetStatusZip",
+  GetStatus: "http://wcf.dian.colombia/IWcfDianCustomerServices/GetStatus",
+};
 
 export interface DianTrackStatus {
   isValid: boolean | null;
@@ -60,7 +77,13 @@ export interface GetDianStatusResult {
  * DIAN misma NO lanza, vuelve como `faultReason` (mismo criterio que el
  * resto de esta integración). */
 // deno-lint-ignore no-explicit-any
-export async function queryDianTrackStatus(adminClient: any, tenantId: string, trackId: string, preloadedCert?: TenantCertificate): Promise<GetDianStatusResult> {
+export async function queryDianTrackStatus(
+  adminClient: any,
+  tenantId: string,
+  trackId: string,
+  preloadedCert?: TenantCertificate,
+  operation: DianStatusOperation = "GetStatusZip",
+): Promise<GetDianStatusResult> {
   const { data: profile, error: profileError } = await adminClient
     .from("tenant_dian_profile")
     .select("webservice_url")
@@ -83,9 +106,10 @@ export async function queryDianTrackStatus(adminClient: any, tenantId: string, t
   // (`"CPU Time exceeded"`, HTTP 546), tirando abajo el envío entero.
   const cert = preloadedCert ?? (await loadTenantCertificate(adminClient, tenantId));
 
-  const bodyXml = `<wcf:GetStatusZip xmlns:wcf="http://wcf.dian.colombia"><wcf:trackId>${escapeXml(trackId)}</wcf:trackId></wcf:GetStatusZip>`;
+  const action = ACTION_BY_OPERATION[operation];
+  const bodyXml = `<wcf:${operation} xmlns:wcf="http://wcf.dian.colombia"><wcf:trackId>${escapeXml(trackId)}</wcf:trackId></wcf:${operation}>`;
   const envelope = await buildSignedSoapEnvelope({
-    action: ACTION,
+    action,
     to: profile.webservice_url,
     bodyXml,
     privateKey: cert.privateKey,
@@ -101,7 +125,7 @@ export async function queryDianTrackStatus(adminClient: any, tenantId: string, t
       client,
       headers: {
         "Content-Type": "application/soap+xml; charset=utf-8",
-        SOAPAction: `"${ACTION}"`,
+        SOAPAction: `"${action}"`,
       },
       body: envelope,
     });
