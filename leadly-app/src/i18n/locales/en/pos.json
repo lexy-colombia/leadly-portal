@@ -40,6 +40,7 @@
   "pos.errors.checkout": "Could not record the sale.",
   "pos.errors.emptyCart": "The sale has no products.",
   "pos.tabs.backToList": "Back to open tabs",
+  "pos.tabs.openedAt": "Opened on",
   "pos.tabs.pointsTitle": "Points",
   "pos.tabs.unassignedTitle": "No point",
   "pos.tabs.newAccount": "New tab",

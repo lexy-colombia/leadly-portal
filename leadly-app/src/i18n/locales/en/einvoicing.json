@@ -27,6 +27,7 @@
   "einvoicing.detail.emailSent": "Document sent to the customer",
   "einvoicing.detail.emailError": "Could not send the document",
   "einvoicing.detail.unconfirmed": "Unconfirmed with DIAN",
+  "einvoicing.detail.rejectionReason": "Rejection reason",
   "einvoicing.history.title": "Issued documents history",
   "einvoicing.detail.downloadPdf": "Download PDF",
   "einvoicing.detail.downloading": "Generating...",

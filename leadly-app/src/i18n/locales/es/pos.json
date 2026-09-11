@@ -40,6 +40,7 @@
   "pos.errors.checkout": "No se pudo registrar la venta.",
   "pos.errors.emptyCart": "La venta no tiene productos.",
   "pos.tabs.backToList": "Volver a cuentas abiertas",
+  "pos.tabs.openedAt": "Abierta el",
   "pos.tabs.pointsTitle": "Puntos",
   "pos.tabs.unassignedTitle": "Sin punto",
   "pos.tabs.newAccount": "Nueva cuenta",

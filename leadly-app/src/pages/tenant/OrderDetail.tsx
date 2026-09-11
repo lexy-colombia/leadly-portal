@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { FileTextIcon, MailIcon, RefreshCwIcon, ScanLineIcon, UploadIcon, XIcon } from 'lucide-react'
+import { CircleAlertIcon, FileTextIcon, MailIcon, RefreshCwIcon, ScanLineIcon, Undo2Icon, UploadIcon, XIcon } from 'lucide-react'
 import {
   calculateOrder,
   deleteOrder,
@@ -66,6 +66,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { OrderItemsEditor } from './orders/OrderItemsEditor'
 import { PaymentDrawer } from './orders/PaymentDrawer'
 import { usePosReceiptPrinter } from '../../lib/usePosReceiptPrinter'
@@ -109,7 +111,7 @@ const INVOICE_STATUS_VARIANT: Record<SalesInvoiceStatus, string> = {
  * a third page adopting the same shape would be the point to share it. */
 function StatCard({ title, action, children, className = '' }: { title: string; action?: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <div className={`rounded-xl border border-brand-100 p-4 ${className}`}>
+    <div className={`min-w-0 rounded-xl border border-brand-100 p-4 ${className}`}>
       <div className="mb-3 flex items-center justify-between gap-2">
         <h3 className="text-xs font-semibold text-brand-800">{title}</h3>
         {action}
@@ -123,6 +125,53 @@ function StatCard({ title, action, children, className = '' }: { title: string; 
  * OrderDetail.tsx) to mark something the AI created on its own. */
 function AiBadge({ label }: { label: string }) {
   return <span className="shrink-0 rounded-full bg-accent-50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-accent-700">{label}</span>
+}
+
+/** Botón de acción solo-ícono con tooltip -- el historial de documentos
+ * vive en el panel lateral (1/3 del ancho), donde un botón con texto al
+ * lado del ícono (Enviar por correo, Nota crédito, Reenviar a la DIAN)
+ * competía con el título del documento por el mismo ancho angosto
+ * (feedback del usuario, 2026-09-11). El tooltip conserva la etiqueta sin
+ * gastar espacio en la fila. */
+function IconActionButton({ icon, label, onClick, disabled }: { icon: ReactNode; label: string; onClick: () => void; disabled?: boolean }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button type="button" size="icon-sm" variant="outline" onClick={onClick} disabled={disabled} aria-label={label}>
+          {icon}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+/** Motivo de rechazo/error de la DIAN, como ícono en vez de texto inline --
+ * feedback directo del usuario (2026-09-11): en la fila angosta del
+ * historial de documentos, un mensaje largo (ej. "el producto X está
+ * configurado como INC 19%...") competía por ancho con los botones de
+ * acción y terminaba partiéndose una palabra por renglón durante cientos de
+ * px de alto. El texto completo sigue disponible, solo que recién al
+ * hacer clic. */
+function RejectionReasonButton({ message }: { message: string }) {
+  const { t } = useLanguage()
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex shrink-0 items-center text-amber-600 hover:text-amber-700"
+          aria-label={t('einvoicing.detail.rejectionReason')}
+          title={t('einvoicing.detail.rejectionReason')}
+        >
+          <CircleAlertIcon className="size-3.5" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="text-amber-700">
+        {message}
+      </PopoverContent>
+    </Popover>
+  )
 }
 
 /** One half of the "4. Notas y comentarios" card -- Notas and Comentarios
@@ -152,7 +201,7 @@ function ThreadColumn({
 }) {
   const { t, language } = useLanguage()
   return (
-    <div>
+    <div className="min-w-0">
       <div className="mb-2 flex items-center justify-between gap-2">
         <Label>{label}</Label>
         <Button type="button" variant="default" size="icon-sm" onClick={onToggleAdd} aria-label={addAria}>
@@ -1376,28 +1425,30 @@ export function OrderDetail() {
           más reciente del historial de abajo, sin esta franja aparte. */}
       {latestInvoice.status !== 'sent' && latestInvoice.status !== 'accepted' && (
         <div>
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <Badge variant="outline" className={`border-transparent ${INVOICE_STATUS_VARIANT[latestInvoice.status]}`}>
               {t(`einvoicing.status.${latestInvoice.status}`)}
             </Badge>
             <div className="flex shrink-0 items-center gap-1.5">
+              {/* El motivo del rechazo es justamente lo que hace falta para
+                  poder corregir y reintentar -- sigue disponible, solo que
+                  recién al hacer clic en el ícono (ver RejectionReasonButton). */}
+              {latestInvoice.status_detail && <RejectionReasonButton message={latestInvoice.status_detail} />}
               {canSendInvoice && (
                 <Button type="button" size="sm" onClick={() => handleSendInvoice()} disabled={sendingInvoice}>
                   {sendingInvoice ? t('einvoicing.detail.sending') : t('einvoicing.detail.send')}
                 </Button>
               )}
               {canRetryInvoice && (
-                <Button type="button" size="sm" onClick={() => handleSendInvoice(true)} disabled={sendingInvoice}>
-                  <RefreshCwIcon className="size-3.5" />
-                  {sendingInvoice ? t('einvoicing.detail.retrying') : t('einvoicing.detail.retry')}
-                </Button>
+                <IconActionButton
+                  icon={<RefreshCwIcon className="size-3.5" />}
+                  label={sendingInvoice ? t('einvoicing.detail.retrying') : t('einvoicing.detail.retry')}
+                  onClick={() => handleSendInvoice(true)}
+                  disabled={sendingInvoice}
+                />
               )}
             </div>
           </div>
-          {/* El motivo del rechazo es justamente lo que hace falta para
-              poder corregir y reintentar -- es el único dato del fracaso
-              que se conserva a la vista. */}
-          {latestInvoice.status_detail && <p className="mt-1.5 text-xs text-amber-700">{latestInvoice.status_detail}</p>}
           {invoiceBlockedByBalance && <p className="mt-1.5 text-xs text-amber-700">{t('einvoicing.detail.balancePending', { amount: formatCurrency(balance, order?.currency) })}</p>}
           {sendInvoiceError && <FieldError message={sendInvoiceError} />}
         </div>
@@ -1419,7 +1470,14 @@ export function OrderDetail() {
             const cns = creditNotesByInvoice[inv.id] ?? []
             return (
               <div key={inv.id} className="rounded-lg border border-brand-100 p-2.5">
-                <div className="flex items-center justify-between gap-2">
+                {/* Título (con fecha/monto en su propia línea debajo) a la
+                    izquierda, acciones agrupadas a la derecha -- vuelve a
+                    caber en una sola fila ahora que las acciones son solo
+                    ícono (antes competían por ancho como botones de texto,
+                    ver el comentario que tenía este bloque). `flex-wrap`
+                    queda como resguardo si algún día hay más íconos de los
+                    que entran. */}
+                <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1.5">
                   {/* No se muestra el CUFE (un hash sin significado hasta
                       que la DIAN lo acepta, pedido explícito del usuario) ni
                       un tag de estado -- una vez que el documento aparece
@@ -1429,46 +1487,43 @@ export function OrderDetail() {
                       el acuse inicial de SendTestSetAsync no es la
                       validación final de la DIAN. */}
                   <div className="min-w-0">
-                    <span className="text-xs font-medium text-brand-700">
+                    <p className="text-xs font-medium text-brand-700">
                       {t('einvoicing.detail.invoiceNumber')}: {inv.invoice_prefix ?? ''}
                       {inv.invoice_number ?? ''}
-                    </span>
-                    <span className="ml-1.5 text-[11px] text-brand-400">
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-brand-400">
                       {inv.issue_date ? `${formatDate(inv.issue_date)} — ` : ''}
                       {formatCurrency(inv.total, inv.currency)}
-                    </span>
-                    {inv.status === 'sent' && <span className="ml-1.5 text-[11px] font-medium text-amber-600">{t('einvoicing.detail.unconfirmed')}</span>}
+                      {inv.status === 'sent' && <span className="ml-1.5 font-medium text-amber-600">{t('einvoicing.detail.unconfirmed')}</span>}
+                    </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
                     {isCurrent && inv.status === 'sent' && isInvoiceAdmin && (
-                      <Button type="button" size="sm" variant="outline" onClick={() => handleCheckInvoiceStatus(inv.id)} disabled={checkingStatusId === inv.id}>
-                        <RefreshCwIcon className="size-3.5" />
-                        {checkingStatusId === inv.id ? t('einvoicing.detail.checkingStatus') : t('einvoicing.detail.checkStatus')}
-                      </Button>
+                      <IconActionButton
+                        icon={<RefreshCwIcon className="size-3.5" />}
+                        label={checkingStatusId === inv.id ? t('einvoicing.detail.checkingStatus') : t('einvoicing.detail.checkStatus')}
+                        onClick={() => handleCheckInvoiceStatus(inv.id)}
+                        disabled={checkingStatusId === inv.id}
+                      />
                     )}
                     {isCurrent && (inv.status === 'accepted' || inv.status === 'sent') && isInvoiceAdmin && (
-                      <Button type="button" size="sm" variant="outline" onClick={() => handleSendDocumentEmail({ invoiceId: inv.id })} disabled={emailingId === inv.id}>
-                        <MailIcon className="size-3.5" />
-                        {emailingId === inv.id ? t('einvoicing.detail.emailSending') : t('einvoicing.detail.emailResend')}
-                      </Button>
+                      <IconActionButton
+                        icon={<MailIcon className="size-3.5" />}
+                        label={emailingId === inv.id ? t('einvoicing.detail.emailSending') : t('einvoicing.detail.emailResend')}
+                        onClick={() => handleSendDocumentEmail({ invoiceId: inv.id })}
+                        disabled={emailingId === inv.id}
+                      />
                     )}
                     {isCurrent && canIssueCreditNote && (
-                      <Button type="button" size="sm" variant="outline" onClick={() => setCreditNoteDrawerOpen(true)}>
-                        {t('einvoicing.creditNote.button')}
-                      </Button>
+                      <IconActionButton icon={<Undo2Icon className="size-3.5" />} label={t('einvoicing.creditNote.button')} onClick={() => setCreditNoteDrawerOpen(true)} />
                     )}
                     {isCurrent && (
-                      <Button
-                        type="button"
-                        size="icon-sm"
-                        variant="outline"
+                      <IconActionButton
+                        icon={<FileTextIcon className="size-3.5" />}
+                        label={t('einvoicing.detail.downloadPdf')}
                         onClick={handleDownloadInvoicePdf}
                         disabled={downloadingInvoiceId !== null}
-                        aria-label={t('einvoicing.detail.downloadPdf')}
-                        title={t('einvoicing.detail.downloadPdf')}
-                      >
-                        <FileTextIcon className="size-3.5" />
-                      </Button>
+                      />
                     )}
                   </div>
                 </div>
@@ -1482,8 +1537,8 @@ export function OrderDetail() {
                       // (pendiente/en camino/rechazada/con error).
                       const cnIsIssued = cn.status === 'sent' || cn.status === 'accepted'
                       return (
-                        <div key={cn.id} className="flex items-center justify-between gap-2 rounded-lg bg-brand-50/60 px-2.5 py-1.5 text-xs">
-                          <div className="min-w-0 flex-1">
+                        <div key={cn.id} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 rounded-lg bg-brand-50/60 px-2.5 py-1.5 text-xs">
+                          <div className="min-w-0">
                             <span className="font-medium text-brand-700">
                               {cn.credit_note_prefix && cn.credit_note_number != null
                                 ? `${t('einvoicing.creditNote.number')} ${cn.credit_note_prefix}${cn.credit_note_number}`
@@ -1491,39 +1546,40 @@ export function OrderDetail() {
                             </span>
                             <span className="text-brand-400"> — {formatCurrency(cn.total, cn.currency)}</span>
                             {cn.status === 'sent' && <span className="ml-1.5 text-[11px] font-medium text-amber-600">{t('einvoicing.detail.unconfirmed')}</span>}
-                            {cn.status_detail && <p className="mt-0.5 text-[11px] text-amber-700">{cn.status_detail}</p>}
                           </div>
                           <div className="flex shrink-0 items-center gap-1.5">
+                            {cn.status_detail && <RejectionReasonButton message={cn.status_detail} />}
                             {(cn.status === 'accepted' || cn.status === 'sent') && isInvoiceAdmin && (
-                              <Button type="button" size="sm" variant="outline" onClick={() => handleSendDocumentEmail({ creditNoteId: cn.id })} disabled={emailingId === cn.id}>
-                                <MailIcon className="size-3.5" />
-                                {emailingId === cn.id ? t('einvoicing.detail.emailSending') : t('einvoicing.detail.emailResend')}
-                              </Button>
+                              <IconActionButton
+                                icon={<MailIcon className="size-3.5" />}
+                                label={emailingId === cn.id ? t('einvoicing.detail.emailSending') : t('einvoicing.detail.emailResend')}
+                                onClick={() => handleSendDocumentEmail({ creditNoteId: cn.id })}
+                                disabled={emailingId === cn.id}
+                              />
                             )}
                             {cn.status === 'sent' && isInvoiceAdmin && (
-                              <Button type="button" size="sm" variant="outline" onClick={() => handleCheckCreditNoteStatus(cn.id)} disabled={checkingStatusId === cn.id}>
-                                <RefreshCwIcon className="size-3.5" />
-                                {checkingStatusId === cn.id ? t('einvoicing.detail.checkingStatus') : t('einvoicing.detail.checkStatus')}
-                              </Button>
+                              <IconActionButton
+                                icon={<RefreshCwIcon className="size-3.5" />}
+                                label={checkingStatusId === cn.id ? t('einvoicing.detail.checkingStatus') : t('einvoicing.detail.checkStatus')}
+                                onClick={() => handleCheckCreditNoteStatus(cn.id)}
+                                disabled={checkingStatusId === cn.id}
+                              />
                             )}
                             {(cn.status === 'error' || cn.status === 'rejected') && isInvoiceAdmin && (
-                              <Button type="button" size="sm" variant="outline" onClick={() => handleRetryCreditNote(cn.id)} disabled={retryingCreditNoteId === cn.id}>
-                                <RefreshCwIcon className="size-3.5" />
-                                {retryingCreditNoteId === cn.id ? t('einvoicing.detail.retrying') : t('einvoicing.detail.retry')}
-                              </Button>
+                              <IconActionButton
+                                icon={<RefreshCwIcon className="size-3.5" />}
+                                label={retryingCreditNoteId === cn.id ? t('einvoicing.detail.retrying') : t('einvoicing.detail.retry')}
+                                onClick={() => handleRetryCreditNote(cn.id)}
+                                disabled={retryingCreditNoteId === cn.id}
+                              />
                             )}
                             {cnIsIssued && (
-                              <Button
-                                type="button"
-                                size="icon-sm"
-                                variant="outline"
+                              <IconActionButton
+                                icon={<FileTextIcon className="size-3.5" />}
+                                label={t('einvoicing.detail.downloadPdf')}
                                 onClick={() => handleDownloadCreditNotePdf(cn.id)}
                                 disabled={downloadingCreditNoteId === cn.id}
-                                aria-label={t('einvoicing.detail.downloadPdf')}
-                                title={t('einvoicing.detail.downloadPdf')}
-                              >
-                                <FileTextIcon className="size-3.5" />
-                              </Button>
+                              />
                             )}
                             {!cnIsIssued && (
                               <Badge variant="outline" className={`border-transparent ${INVOICE_STATUS_VARIANT[cn.status]}`}>
@@ -1608,7 +1664,7 @@ export function OrderDetail() {
         <StatCard title={t('orders.detail.sections.clientAndAddresses')} className={hasSidePanel ? 'lg:col-span-2' : ''}>
           <div className={`grid grid-cols-1 gap-y-4 ${showShipping ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} sm:gap-x-6`}>
             {/* Columna 1: Cliente + Facturación */}
-            <div className="space-y-4">
+            <div className="min-w-0 space-y-4">
               <div>
                 <ClientPickerCard
                   tenantId={profile?.tenant_id ?? ''}
@@ -1627,7 +1683,7 @@ export function OrderDetail() {
             {/* Columna 2: Envío + Estado de envío -- no existe en un pedido
                 de mostrador (ver showShipping). */}
             {showShipping && (
-            <div className="space-y-4 sm:border-l sm:border-brand-100 sm:pl-4">
+            <div className="min-w-0 space-y-4 sm:border-l sm:border-brand-100 sm:pl-4">
               {addressField('shipping')}
               {/* Estado de envío -- solo edición + venta confirmada (concepto
                   aparte del estado comercial, ver DeliveryStatus). No aplica
@@ -1683,7 +1739,7 @@ export function OrderDetail() {
             {/* Columna 3: Oportunidad + Estado (solo al crear) + Válida
                 hasta (solo cotización -- no aplica a una venta ya
                 confirmada, se oculta entera en vez de mostrarla deshabilitada). */}
-            <div className="space-y-4 sm:border-l sm:border-brand-100 sm:pl-4">
+            <div className="min-w-0 space-y-4 sm:border-l sm:border-brand-100 sm:pl-4">
               <div>
                 <Label>{t('orders.drawer.fields.opportunity')}</Label>
                 <ComboboxFilter
@@ -1736,7 +1792,7 @@ export function OrderDetail() {
         </StatCard>
 
         {hasSidePanel && (
-          <div className="space-y-4">
+          <div className="min-w-0 space-y-4">
             {showPayments && paymentsCard}
             {showInvoiceCard && invoiceCard}
             {showTasks && (

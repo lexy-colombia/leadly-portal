@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLanguage } from '../../../contexts/LanguageContext'
+import { formatDate, formatTime } from '../../../lib/dates'
 import { usePermission } from '../../../contexts/AuthContext'
 import { saveCartDraft, listChargesFromCart, createOrderFromCart, closeCart, deleteCart, getCart } from '../../../lib/api/carts'
 import type { CartCharge } from '../../../lib/api/carts'
@@ -49,7 +50,7 @@ function formatCurrency(value: number, currency = 'COP'): string {
  * previa en el cliente en ningún paso -- se llama al backend y se
  * muestra el error que devuelva, tal cual. */
 export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { tenantId: string; cartId: string; points: PosPoint[]; onBack: () => void; onClosed: () => void }) {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const canCheckout = usePermission('pos.checkout')
   const receiptPrinter = usePosReceiptPrinter(tenantId)
 
@@ -58,6 +59,7 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
   const [customer, setCustomer] = useState<Client | null>(null)
   const [posPointId, setPosPointId] = useState('')
   const [label, setLabel] = useState('')
+  const [createdAt, setCreatedAt] = useState<string | null>(null)
   const [items, setItems] = useState<OrderItemInput[]>([])
 
   const [products, setProducts] = useState<ProductWithImages[]>([])
@@ -155,6 +157,7 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
         setContactId(cart.contact_id ?? '')
         setPosPointId(cart.pos_point_id ?? '')
         setLabel(cart.label ?? '')
+        setCreatedAt(cart.created_at)
         setItems(
           cart.items.map((i) => ({
             product_id: i.product_id,
@@ -472,9 +475,16 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
 
   return (
     <div className="space-y-4">
-      <button type="button" onClick={onBack} className="flex items-center gap-1 text-xs font-medium text-brand-500 hover:text-brand-700">
-        <ChevronLeftIcon width={14} height={14} /> {t('pos.tabs.backToList')}
-      </button>
+      <div className="flex items-center justify-between gap-2">
+        <button type="button" onClick={onBack} className="flex items-center gap-1 text-xs font-medium text-brand-500 hover:text-brand-700">
+          <ChevronLeftIcon width={14} height={14} /> {t('pos.tabs.backToList')}
+        </button>
+        {createdAt && (
+          <p className="text-[11px] text-brand-400">
+            {t('pos.tabs.openedAt')} {formatDate(createdAt)} · {formatTime(createdAt, language)}
+          </p>
+        )}
+      </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
