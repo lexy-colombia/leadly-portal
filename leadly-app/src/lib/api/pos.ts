@@ -231,10 +231,19 @@ export async function searchPosClients(tenantId: string, term: string, limit = 8
  * selección manual del cajero. */
 export type PosPaymentMethod = Exclude<OrderPaymentMethod, 'wompi'>
 
+export interface PosCheckoutPayment {
+  method: PosPaymentMethod
+  amount: number
+  amount_tendered?: number
+}
+
 export interface PosCheckoutInput {
   contact_id?: string | null
   items: { product_id: string; variant_id?: string | null; quantity: number }[]
-  payment: { method: PosPaymentMethod; amount: number; amount_tendered?: number }
+  /** Uno o varios métodos de pago para la misma venta (pago dividido,
+   * 2026-09-11) -- la suma de los montos tiene que dar EXACTO el total de
+   * la venta, el servidor lo rechaza si no calza (ver pos-checkout). */
+  payments: PosCheckoutPayment[]
   /** Idempotencia: mismo uuid en cada reintento del mismo intento de cobro
    * -- si el primer intento ya creó (y quizás confirmó/cobró) el pedido pero
    * la respuesta nunca llegó a buen puerto, el servidor retoma esa MISMA

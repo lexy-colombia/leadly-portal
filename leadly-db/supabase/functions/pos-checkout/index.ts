@@ -56,10 +56,26 @@ interface PosCheckoutItem {
   quantity: number;
 }
 
+interface PosCheckoutPayment {
+  method?: string;
+  amount?: number;
+  amount_tendered?: number;
+}
+
 interface PosCheckoutBody {
   contact_id?: string | null;
   items?: PosCheckoutItem[];
-  payment?: { method?: string; amount?: number; amount_tendered?: number };
+  /** Uno o varios métodos de pago para la misma venta (pago dividido) --
+   * pedido explícito del usuario 2026-09-11: antes de esto, dividir un
+   * cobro entre dos métodos obligaba a cobrar todo con uno y después ir a
+   * Ventas a buscar el pedido para agregar el resto -- esta pantalla no
+   * tiene concepto de "saldo pendiente" para cuadrar después, así que la
+   * suma de los montos tiene que dar EXACTO el total real de la venta
+   * (calculado acá, nunca el que mande el cliente). */
+  payments?: PosCheckoutPayment[];
+  /** @deprecated usar `payments` -- se sigue aceptando por compatibilidad
+   * hacia atrás, se normaliza a `payments: [payment]` antes de validar. */
+  payment?: PosCheckoutPayment;
   checkout_token?: string | null;
 }
 
@@ -97,10 +113,13 @@ Deno.serve(async (req) => {
   // al insertar, no este código -- un tenant_agent no puede saltárselo
   // mandando el body a mano.
   const VALID_METHODS = ["efectivo", "transferencia", "tarjeta", "credito", "saldo_favor"];
-  const method = body.payment?.method;
-  if (!method || !VALID_METHODS.includes(method)) return json({ error: "Método de pago inválido." }, 400);
-  const paymentAmount = body.payment?.amount;
-  if (!Number.isFinite(paymentAmount) || (paymentAmount as number) <= 0) return json({ error: "Monto de pago inválido." }, 400);
+  const rawPayments: PosCheckoutPayment[] = body.payments && body.payments.length > 0 ? body.payments : body.payment ? [body.payment] : [];
+  if (rawPayments.length === 0) return json({ error: "Falta el pago." }, 400);
+  for (const p of rawPayments) {
+    if (!p.method || !VALID_METHODS.includes(p.method)) return json({ error: "Método de pago inválido." }, 400);
+    if (!Number.isFinite(p.amount) || (p.amount as number) <= 0) return json({ error: "Monto de pago inválido." }, 400);
+  }
+  const paymentsTotal = rawPayments.reduce((sum, p) => sum + (p.amount as number), 0);
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -265,19 +284,31 @@ Deno.serve(async (req) => {
     .limit(1);
   if (existingPaymentsError) return json({ error: existingPaymentsError.message }, 500);
   if (!existingPayments || existingPayments.length === 0) {
+    // El total real recién se conoce después de persistOrderItems/confirmar
+    // (esta pantalla no tiene selector de bodega/descuentos que el cajero
+    // pueda desalinear, pero el impuesto sí lo recalcula el servidor) --
+    // nunca se confía en la suma que mande el cliente sin comparar contra
+    // lo que de verdad quedó guardado. Sin concepto de "saldo pendiente"
+    // acá (a diferencia de calculate-order/PaymentDrawer): o los pagos
+    // suman el total exacto, o se rechaza el cobro entero.
+    const { data: orderForTotal, error: orderForTotalError } = await adminClient.from("sales_orders").select("total").eq("id", resolvedOrderId).single();
+    if (orderForTotalError) return json({ error: orderForTotalError.message }, 500);
+    const realTotal = Number(orderForTotal.total);
+    if (Math.abs(paymentsTotal - realTotal) > 0.01) {
+      return json({ error: `La suma de los pagos (${paymentsTotal}) no coincide con el total de la venta (${realTotal}).` }, 400);
+    }
+
     const paidAt = new Date().toISOString().slice(0, 10);
-    const notes = body.payment?.amount_tendered
-      ? `Recibido: ${body.payment.amount_tendered} · Vuelto: ${Math.max(0, body.payment.amount_tendered - (paymentAmount as number))}`
-      : null;
-    const { error: paymentError } = await adminClient.from("sales_order_payments").insert({
+    const rows = rawPayments.map((p) => ({
       tenant_id: tenantId,
       order_id: resolvedOrderId,
-      method,
-      amount: paymentAmount,
+      method: p.method,
+      amount: p.amount,
       paid_at: paidAt,
-      notes,
+      notes: p.amount_tendered ? `Recibido: ${p.amount_tendered} · Vuelto: ${Math.max(0, p.amount_tendered - (p.amount as number))}` : null,
       created_by: caller.id,
-    });
+    }));
+    const { error: paymentError } = await adminClient.from("sales_order_payments").insert(rows);
     if (paymentError) return json({ error: paymentError.message }, 500);
   }
 

@@ -4,6 +4,7 @@ import { CheckIcon, PackageIcon, SearchIcon, XIcon } from 'lucide-react'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import { getWalkInClient, lookupPosBarcode, posCheckout, searchPosClients, searchPosProducts, type PosCheckoutResult, type PosPaymentMethod, type PosProduct, type PosVariantOption } from '../../../lib/api/pos'
+import { PlusIcon } from '@/components/atoms/icons'
 import { PAYMENT_METHOD_LABEL_KEY } from '../../../lib/api/orderPayments'
 import type { OrderItemInput, OrderTotalsBreakdown } from '../../../lib/api/orders'
 import { useOrderTotalsPreview } from '../../../lib/useOrderTotalsPreview'
@@ -37,6 +38,28 @@ interface CartLine {
 
 function lineKey(l: Pick<CartLine, 'product_id' | 'variant_id'>): string {
   return `${l.product_id}:${l.variant_id ?? ''}`
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100
+}
+
+/** Una fila de pago -- por default hay UNA sola (comportamiento idéntico
+ * al de siempre: cobrar el total completo con un método), y su `amount`
+ * se mantiene sincronizado con el total del carrito en silencio (ver el
+ * useEffect que la actualiza) mientras sea la única. Pedido explícito del
+ * usuario (2026-09-11): "si en una cuenta me dan varios pagos, me toca
+ * darle clic al pedido y volver a agregar los otros" -- con más de una
+ * fila, el cajero reparte el total entre varios métodos ANTES de cobrar,
+ * en una sola llamada a pos-checkout, en vez de cobrar todo con uno y
+ * tener que ir a Ventas después a agregar el resto. */
+interface PaymentLine {
+  key: string
+  method: PosPaymentMethod
+  amount: string
+  /** Solo aplica con method === 'efectivo' -- cuánto entregó el cliente
+   * PARA ESTA fila puntual, para poder calcular su vuelto. */
+  tendered: string
 }
 
 /** Punto de venta de mostrador -- escanear/buscar, armar el carrito en
@@ -79,8 +102,7 @@ export function PosFastCheckout() {
   const [creditBalance, setCreditBalance] = useState(0)
   const [storeCreditBalance, setStoreCreditBalance] = useState(0)
 
-  const [method, setMethod] = useState<PosPaymentMethod>('efectivo')
-  const [tendered, setTendered] = useState('')
+  const [paymentLines, setPaymentLines] = useState<PaymentLine[]>([{ key: crypto.randomUUID(), method: 'efectivo', amount: '', tendered: '' }])
   const [charging, setCharging] = useState(false)
   const [chargeError, setChargeError] = useState<string | null>(null)
   const [result, setResult] = useState<PosCheckoutResult | null>(null)
@@ -131,14 +153,28 @@ export function PosFastCheckout() {
     }
   }, [customer])
 
-  // Si el método elegido deja de estar disponible (se cambió a un cliente
-  // sin crédito, o al consumidor final) vuelve a efectivo -- nunca se
-  // manda un método que ya no aparece en el select.
+  // Si el método elegido en CUALQUIER fila deja de estar disponible (se
+  // cambió a un cliente sin crédito, o al consumidor final) esa fila
+  // vuelve a efectivo -- nunca se manda un método que ya no aparece en el
+  // select.
   useEffect(() => {
-    if (method === 'credito' && !customer?.credit_enabled) setMethod('efectivo')
-    if (method === 'saldo_favor' && storeCreditBalance <= 0) setMethod('efectivo')
+    setPaymentLines((prev) =>
+      prev.map((l) => {
+        if (l.method === 'credito' && !customer?.credit_enabled) return { ...l, method: 'efectivo' }
+        if (l.method === 'saldo_favor' && storeCreditBalance <= 0) return { ...l, method: 'efectivo' }
+        return l
+      }),
+    )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customer, storeCreditBalance])
+
+  function removePaymentLine(key: string) {
+    setPaymentLines((prev) => (prev.length > 1 ? prev.filter((l) => l.key !== key) : prev))
+  }
+
+  function updatePaymentLine(key: string, patch: Partial<PaymentLine>) {
+    setPaymentLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)))
+  }
 
   // Alta libre, sin ningún chequeo acá -- pedido explícito del usuario
   // 2026-09-06: "no debo hacer validaciones en front de nada en estos
@@ -242,20 +278,50 @@ export function PosFastCheckout() {
   // impuesto (está incluido en el precio), solo su reparto entre base e
   // impuesto -- que es justo lo que se espera del servidor.
   const total = totals?.total ?? cart.reduce((sum, l) => sum + l.price * l.quantity, 0)
-  const tenderedNumber = Number(tendered) || 0
-  const change = method === 'efectivo' ? Math.max(0, tenderedNumber - total) : 0
-  const insufficientCash = method === 'efectivo' && tendered.trim() !== '' && tenderedNumber < total
+
+  // Mientras haya una sola fila de pago, su monto es siempre el total del
+  // carrito -- ni se muestra el campo ni el cajero lo toca, mismo
+  // comportamiento de siempre. Recién al "dividir el pago" (agregar una
+  // segunda fila) el monto de cada una pasa a ser editable.
+  useEffect(() => {
+    setPaymentLines((prev) => (prev.length === 1 ? [{ ...prev[0], amount: String(total) }] : prev))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [total])
+
+  function addPaymentLine() {
+    setPaymentLines((prev) => {
+      const assigned = prev.reduce((sum, l) => sum + (Number(l.amount) || 0), 0)
+      const remaining = round2(total - assigned)
+      return [...prev, { key: crypto.randomUUID(), method: 'efectivo', amount: remaining > 0 ? String(remaining) : '', tendered: '' }]
+    })
+  }
+
+  const isSplitPayment = paymentLines.length > 1
+  const assignedTotal = round2(paymentLines.reduce((sum, l) => sum + (Number(l.amount) || 0), 0))
+  const remainingToAssign = round2(total - assignedTotal)
+  // Vuelto total: suma del vuelto de cada fila en efectivo -- normalmente
+  // hay una sola, pero nada impide que el cliente pague dos montos en
+  // efectivo por separado (poco común, pero no se le pone un candado
+  // artificial a eso).
+  const totalChange = paymentLines.reduce((sum, l) => {
+    if (l.method !== 'efectivo') return sum
+    return sum + Math.max(0, (Number(l.tendered) || 0) - (Number(l.amount) || 0))
+  }, 0)
+  const cashLineInsufficient = (l: PaymentLine) => l.method === 'efectivo' && l.tendered.trim() !== '' && (Number(l.tendered) || 0) < (Number(l.amount) || 0)
+  const cashLineMissing = (l: PaymentLine) => l.method === 'efectivo' && (l.tendered.trim() === '' || (Number(l.tendered) || 0) < (Number(l.amount) || 0))
   // 'saldo_favor' nunca puede cubrir más de lo que el cliente tiene a favor
-  // -- mismo tope que PaymentDrawer.tsx (ahí es un máximo por pago parcial,
-  // acá el pago siempre es por el total porque el POS no admite pagos
-  // divididos en esta primera ronda).
-  const storeCreditExceeded = method === 'saldo_favor' && total > storeCreditBalance
+  // -- mismo tope que PaymentDrawer.tsx, sumado entre todas las filas que
+  // usen ese método (lo normal es que haya una sola, pero se suma por las
+  // dudas en vez de asumirlo).
+  const saldoFavorAssigned = paymentLines.filter((l) => l.method === 'saldo_favor').reduce((sum, l) => sum + (Number(l.amount) || 0), 0)
+  const storeCreditExceeded = saldoFavorAssigned > storeCreditBalance
   const canCharge =
     cart.length > 0 &&
     !charging &&
     !storeCreditExceeded &&
     stockShortfalls.length === 0 &&
-    !(method === 'efectivo' && (tendered.trim() === '' || tenderedNumber < total))
+    Math.abs(remainingToAssign) < 0.01 &&
+    paymentLines.every((l) => (Number(l.amount) || 0) > 0 && !cashLineMissing(l))
 
   async function handleCharge() {
     if (cart.length === 0) {
@@ -268,11 +334,11 @@ export function PosFastCheckout() {
       const response = await posCheckout({
         contact_id: customer?.id ?? null,
         items: cart.map((l) => ({ product_id: l.product_id, variant_id: l.variant_id, quantity: l.quantity })),
-        payment: {
-          method,
-          amount: total,
-          amount_tendered: method === 'efectivo' ? tenderedNumber : undefined,
-        },
+        payments: paymentLines.map((l) => ({
+          method: l.method,
+          amount: Number(l.amount) || 0,
+          amount_tendered: l.method === 'efectivo' ? Number(l.tendered) || 0 : undefined,
+        })),
         checkout_token: checkoutTokenRef.current,
       })
       setResult(response)
@@ -287,8 +353,7 @@ export function PosFastCheckout() {
   function resetForNewSale() {
     setCart([])
     setCustomer(null)
-    setMethod('efectivo')
-    setTendered('')
+    setPaymentLines([{ key: crypto.randomUUID(), method: 'efectivo', amount: '', tendered: '' }])
     setResult(null)
     setChargeError(null)
     setQuery('')
@@ -334,7 +399,7 @@ export function PosFastCheckout() {
         {resultTotals && (
           <OrderTotalsSummary totals={resultTotals} currency={result.order.currency} className="mx-auto max-w-[260px] text-left" />
         )}
-        {change > 0 && <p className="text-xs text-brand-600">{t('pos.success.change', { amount: formatCurrency(change, result.order.currency) })}</p>}
+        {totalChange > 0 && <p className="text-xs text-brand-600">{t('pos.success.change', { amount: formatCurrency(totalChange, result.order.currency) })}</p>}
         {result.invoice?.status === 'pending' && <p className="text-xs text-amber-600">{t('pos.success.invoicePending')}</p>}
         <div className="flex justify-center gap-2 pt-2">
           <Button variant="outline" onClick={() => navigate(`/app/sales/${result.order.id}`)}>
@@ -579,37 +644,91 @@ export function PosFastCheckout() {
           )}
 
           <h3 className="mb-1.5 text-xs font-semibold text-brand-500 uppercase">{t('pos.payment.method')}</h3>
-          {/* Mismo catálogo y mismo filtro que PaymentDrawer.tsx (órdenes) --
-              'credito' solo si el cliente elegido tiene crédito habilitado,
-              'saldo_favor' solo si tiene saldo a favor real, 'wompi' nunca
-              se ofrece acá (solo lo escribe el webhook cuando se paga un
-              link, ver PosPaymentMethod). */}
-          <Select value={method} onValueChange={(v) => setMethod(v as PosPaymentMethod)}>
-            <SelectTrigger className="mb-3 w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {(Object.keys(PAYMENT_METHOD_LABEL_KEY) as OrderPaymentMethod[])
-                .filter((m) => m !== 'wompi' && (m !== 'credito' || customer?.credit_enabled) && (m !== 'saldo_favor' || storeCreditBalance > 0))
-                .map((m) => (
-                  <SelectItem key={m} value={m}>
-                    {t(PAYMENT_METHOD_LABEL_KEY[m])}
-                  </SelectItem>
-                ))}
-            </SelectContent>
-          </Select>
+          {/* Una fila por método -- con una sola (el caso normal), es
+              idéntico a como era antes: un Select y, si es efectivo, el
+              campo de recibido/vuelto, sin ningún monto editable (siempre
+              el total). Recién con 2+ filas (después de "Agregar otro
+              método") aparece el monto de cada una, editable, con un
+              indicador de cuánto falta asignar. */}
+          <div className="mb-2 space-y-2">
+            {paymentLines.map((line) => {
+              const lineAmount = Number(line.amount) || 0
+              const lineTendered = Number(line.tendered) || 0
+              const lineChange = Math.max(0, lineTendered - lineAmount)
+              const lineInsufficient = cashLineInsufficient(line)
+              return (
+                <div key={line.key} className={isSplitPayment ? 'rounded-lg border border-brand-100 p-2.5' : ''}>
+                  <div className="flex items-center gap-1.5">
+                    {/* Mismo catálogo y mismo filtro que PaymentDrawer.tsx
+                        (órdenes) -- 'credito' solo si el cliente elegido
+                        tiene crédito habilitado, 'saldo_favor' solo si
+                        tiene saldo a favor real, 'wompi' nunca se ofrece
+                        acá (solo lo escribe el webhook cuando se paga un
+                        link, ver PosPaymentMethod). */}
+                    <Select value={line.method} onValueChange={(v) => updatePaymentLine(line.key, { method: v as PosPaymentMethod })}>
+                      <SelectTrigger className="flex-1">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(Object.keys(PAYMENT_METHOD_LABEL_KEY) as OrderPaymentMethod[])
+                          .filter((m) => m !== 'wompi' && (m !== 'credito' || customer?.credit_enabled) && (m !== 'saldo_favor' || storeCreditBalance > 0))
+                          .map((m) => (
+                            <SelectItem key={m} value={m}>
+                              {t(PAYMENT_METHOD_LABEL_KEY[m])}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                    {isSplitPayment && (
+                      <CurrencyInput
+                        value={line.amount}
+                        onChange={(e) => updatePaymentLine(line.key, { amount: e.target.value })}
+                        className="h-9 w-28 shrink-0 text-right text-xs"
+                      />
+                    )}
+                    {isSplitPayment && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        className="shrink-0"
+                        onClick={() => removePaymentLine(line.key)}
+                        aria-label={t('pos.payment.removeMethod')}
+                        title={t('pos.payment.removeMethod')}
+                      >
+                        <TrashIcon width={12} height={12} />
+                      </Button>
+                    )}
+                  </div>
 
-          {method === 'efectivo' && (
-            <div className="mb-3 space-y-1.5">
-              <label className="block text-xs font-medium text-brand-500">{t('pos.payment.tendered')}</label>
-              <CurrencyInput value={tendered} onChange={(e) => setTendered(e.target.value)} className="h-9 text-right text-xs" />
-              {insufficientCash && <p className="text-xs font-medium text-red-600">{t('pos.payment.insufficient')}</p>}
-              {!insufficientCash && change > 0 && (
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-brand-500">{t('pos.payment.change')}</span>
-                  <span className="font-semibold text-emerald-600">{formatCurrency(change)}</span>
+                  {line.method === 'efectivo' && (
+                    <div className="mt-1.5 space-y-1">
+                      <label className="block text-xs font-medium text-brand-500">{t('pos.payment.tendered')}</label>
+                      <CurrencyInput value={line.tendered} onChange={(e) => updatePaymentLine(line.key, { tendered: e.target.value })} className="h-9 text-right text-xs" />
+                      {lineInsufficient && <p className="text-xs font-medium text-red-600">{t('pos.payment.insufficient')}</p>}
+                      {!lineInsufficient && lineChange > 0 && (
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-brand-500">{t('pos.payment.change')}</span>
+                          <span className="font-semibold text-emerald-600">{formatCurrency(lineChange)}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-              )}
+              )
+            })}
+          </div>
+
+          <button type="button" onClick={addPaymentLine} className="mb-3 flex items-center gap-1 text-xs font-medium text-accent-600 hover:text-accent-700">
+            <PlusIcon width={12} height={12} /> {t('pos.payment.addMethod')}
+          </button>
+
+          {isSplitPayment && (
+            <div className={`mb-3 flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium ${Math.abs(remainingToAssign) < 0.01 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+              <span>{t('pos.payment.assigned')}</span>
+              <span>
+                {formatCurrency(assignedTotal)} / {formatCurrency(total)}
+              </span>
             </div>
           )}
 
