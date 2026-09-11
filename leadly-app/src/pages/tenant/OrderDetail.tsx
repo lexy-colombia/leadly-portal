@@ -1349,12 +1349,14 @@ export function OrderDetail() {
 
   async function handleDeletePayment() {
     if (!deletePaymentId) return
+    setActionError(null)
     try {
       await deletePayment(deletePaymentId)
       setDeletePaymentId(null)
       reloadPayments()
-    } catch {
+    } catch (err) {
       setDeletePaymentId(null)
+      setActionError(err instanceof Error ? err.message : t('orders.detail.errors.deletePayment'))
     }
   }
 

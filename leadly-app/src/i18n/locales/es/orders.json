@@ -133,6 +133,7 @@
   "orders.detail.deleteTitle": "Eliminar cotización",
   "orders.detail.deleteBody": "Se cancela y se quita del listado. Esta acción no se puede deshacer desde la aplicación.",
   "orders.detail.errors.delete": "No se pudo eliminar la cotización.",
+  "orders.detail.errors.deletePayment": "No se pudo eliminar el pago.",
   "orders.detail.errors.create": "No se pudo crear la orden.",
   "orders.detail.errors.cancelDraft": "No se pudo cancelar el borrador.",
   "orders.detail.errors.stockShortfallTitle": "No hay stock suficiente para confirmar esta venta",

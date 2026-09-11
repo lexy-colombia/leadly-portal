@@ -4,6 +4,16 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.8] - 2026-09-11
+
+### Added
+- Pago dividido también en el drawer de pagos (cuentas abiertas y "Agregar pago" de un pedido), reusando el mismo `PaymentLinesEditor` de la venta rápida -- antes solo estaba en Venta Rápida.
+- Al agregar otra línea de pago, el monto arranca solo con lo que queda por asignar (en vez de vacío), y cambiar de método o tipear un monto se recorta en el momento para nunca superar el saldo pendiente (o el saldo a favor disponible, si el método es ese) -- mismo candado que tenía el campo único antes de poder dividir el pago.
+
+### Fixed
+- Registrar un pago en efectivo sin escribir "Recibido" no guardaba nada (ese campo siempre fue opcional, una validación de más lo empezó a bloquear en silencio al agregar el pago dividido al drawer).
+- Eliminar un pago de un pedido ya confirmado no hacía nada: un trigger de base de datos de antes de que existiera el permiso `sales.edit_invoiced_order` seguía bloqueando cualquier cambio a un pago fuera de cotización, sin enterarse de ese permiso nuevo -- ahora usa el mismo criterio que ya aplicaba la RLS. El error, si lo hay, también se muestra en vez de fallar en silencio.
+
 ## [1.0.7] - 2026-09-11
 
 ### Added

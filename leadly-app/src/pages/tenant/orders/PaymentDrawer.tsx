@@ -6,14 +6,20 @@ import { sendPosInvoiceForOrder } from '../../../lib/api/salesInvoices'
 import type { Client, OrderPaymentMethod, SalesOrder } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import { FieldError } from '@/components/atoms'
-import { CurrencyInput, OrderTotalsSummary } from '@/components/molecules'
+import {
+  OrderTotalsSummary,
+  PaymentLinesEditor,
+  createPaymentLine,
+  sumPaymentLines,
+  sumPaymentLinesChange,
+  type PaymentLineDraft,
+} from '@/components/molecules'
 import { Drawer } from '@/components/organisms'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Copy } from 'lucide-react'
 import { ClientPickerCard } from '../clients/ClientPickerCard'
 
@@ -21,14 +27,24 @@ function formatCurrency(value: number, currency = 'COP'): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 }
 
-/** Creation only. Correcting the METHOD of an existing payment (2026-09-11
- * feedback: "puede que me equivocara en el método de pago") has its own,
- * much smaller editor in OrderDetail.tsx (`PaymentMethodEditor`) instead of
- * reusing this drawer -- this form's amount/Wompi/DIAN-invoicing/order
- * creation logic is all specific to registering a NEW payment against a
- * pending balance, none of which applies to fixing one field of a payment
- * that's already recorded. Deleting and re-creating (via this drawer) is
- * still the only way to correct the amount. */
+/** Pago dividido (2026-09-11, pedido explícito del usuario): se puede
+ * cargar más de un método de pago (ej. parte en efectivo, parte con
+ * tarjeta) y registrarlos todos en un solo "Guardar", en vez de guardar
+ * uno y tener que reabrir este mismo drawer con "Agregar pago" para cada
+ * método siguiente. Editor de filas compartido con PosFastCheckout.tsx
+ * (components/molecules/PaymentLinesEditor.tsx) -- a diferencia de ahí,
+ * acá el monto SIEMPRE es editable (incluso con una sola línea): este
+ * drawer admite pago PARCIAL contra el saldo pendiente, cosa que la venta
+ * rápida del POS no tiene (ahí siempre se cobra el 100%).
+ *
+ * Corregir el MÉTODO de un pago ya registrado (feedback del mismo día:
+ * "puede que me equivocara en el método de pago") tiene su propio editor
+ * chico en OrderDetail.tsx (`PaymentMethodEditor`) en vez de reusar este
+ * drawer -- toda la lógica de acá (montos, Wompi, factura DIAN, creación
+ * del pedido) es específica de registrar pagos NUEVOS contra un saldo
+ * pendiente, nada de eso aplica a corregir un campo de un pago que ya
+ * existe. Corregir el MONTO de un pago ya registrado sigue siendo borrar
+ * y volver a crearlo (ver OrderDetail.tsx). */
 export function PaymentDrawer({
   open,
   onClose,
@@ -107,13 +123,7 @@ export function PaymentDrawer({
 }) {
   const { t } = useLanguage()
   const currencyCode = order?.currency ?? currency
-  const [method, setMethod] = useState<OrderPaymentMethod>('efectivo')
-  const [amount, setAmount] = useState('')
-  // Solo efectivo: cuánto entregó el cliente, para poder decirle al cajero
-  // el vuelto. No es el monto del pago (ese sigue siendo `amount`) -- queda
-  // registrado en las notas, mismo formato que usa pos-checkout para la
-  // venta rápida.
-  const [tendered, setTendered] = useState('')
+  const [paymentLines, setPaymentLines] = useState<PaymentLineDraft[]>([createPaymentLine()])
   const [paidAt, setPaidAt] = useState('')
   const [notes, setNotes] = useState('')
   const [touched, setTouched] = useState(false)
@@ -145,9 +155,7 @@ export function PaymentDrawer({
 
   useEffect(() => {
     if (!open) return
-    setMethod('efectivo')
-    setAmount(pendingAmount > 0 ? String(pendingAmount) : '')
-    setTendered('')
+    setPaymentLines([createPaymentLine('efectivo', pendingAmount > 0 ? String(pendingAmount) : '')])
     setPaidAt(new Date().toISOString().slice(0, 10))
     setNotes('')
     setTouched(false)
@@ -208,75 +216,88 @@ export function PaymentDrawer({
     setTimeout(() => setWompiCopied(false), 2000)
   }
 
-  const amountValue = Number(amount)
-  // Vuelto = lo recibido menos lo que se está cobrando. Solo aplica a
-  // efectivo (una transferencia o una tarjeta se cobran por el monto
-  // exacto), y solo se muestra una vez que el cajero tipeó algo.
-  const tenderedValue = Number(tendered) || 0
-  const showCashFields = method === 'efectivo'
-  const changeDue = showCashFields && tendered.trim() !== '' ? tenderedValue - amountValue : null
-  // 'saldo_favor' has a second, tighter cap on top of pendingAmount -- can
-  // never redeem more store credit than the client actually has.
-  const maxAmount = method === 'saldo_favor' ? Math.min(pendingAmount, storeCreditBalance) : pendingAmount
-
-  /** Nunca se puede tipear más que el saldo pendiente (o que el saldo a
-   * favor disponible, si el método es ese) -- el valor se recorta al tope
-   * en el momento, en vez de dejar registrar de más. */
-  function handleAmountChange(next: string) {
-    if (next === '') {
-      setAmount('')
-      return
-    }
-    const parsed = Number(next)
-    if (!Number.isFinite(parsed)) return
-    setAmount(parsed > maxAmount ? String(maxAmount) : next)
-  }
-
-
-  // Re-clamps the prefilled amount when switching into a method with a
-  // lower cap (e.g. pendingAmount is bigger than the client's store
-  // credit) -- otherwise the field silently opens already over the limit.
-  useEffect(() => {
-    if (Number(amount) > maxAmount) setAmount(maxAmount > 0 ? String(maxAmount) : '')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [method])
+  const assignedTotal = sumPaymentLines(paymentLines)
+  const totalChange = sumPaymentLinesChange(paymentLines)
+  // A diferencia de PosFastCheckout (donde "recibido" es obligatorio porque
+  // se cobra el 100% en el momento), acá "Recibido" es informativo/opcional
+  // -- el comportamiento de siempre, antes de este refactor, era poder
+  // guardar sin tipearlo. Solo bloquea si el cajero SÍ tipeó un recibido y
+  // quedó por debajo del monto (insuficiente de verdad), nunca por dejarlo
+  // vacío -- ese caso ya lo señaliza PaymentLinesEditor por fila.
+  const insufficientCash = paymentLines.some((l) => l.method === 'efectivo' && l.tendered.trim() !== '' && (Number(l.tendered) || 0) < (Number(l.amount) || 0))
+  // 'saldo_favor' nunca puede cubrir más de lo que el cliente tiene a
+  // favor -- sumado entre todas las filas que usen ese método (lo normal
+  // es que haya una sola).
+  const saldoFavorAssigned = paymentLines.filter((l) => l.method === 'saldo_favor').reduce((sum, l) => sum + (Number(l.amount) || 0), 0)
+  const storeCreditExceeded = saldoFavorAssigned > storeCreditBalance + 0.01
+  const exceedsPending = assignedTotal > pendingAmount + 0.01
+  const linesValid = paymentLines.length > 0 && paymentLines.every((l) => (Number(l.amount) || 0) > 0)
   const amountError = touched
-    ? !(amountValue > 0)
+    ? !linesValid
       ? t('orders.paymentDrawer.errors.amountInvalid')
-      : amountValue > maxAmount
-        ? t('orders.paymentDrawer.errors.amountExceedsBalance', { amount: formatCurrency(maxAmount, currencyCode) })
-        : undefined
+      : exceedsPending
+        ? t('orders.paymentDrawer.errors.amountExceedsBalance', { amount: formatCurrency(pendingAmount, currencyCode) })
+        : storeCreditExceeded
+          ? t('orders.paymentDrawer.errors.amountExceedsBalance', { amount: formatCurrency(storeCreditBalance, currencyCode) })
+          : undefined
     : undefined
+
+  // 'wompi' nunca se ofrece acá (solo lo registra el webhook al pagar un
+  // link generado); 'credito'/'saldo_favor' solo si el cliente califica.
+  const availableMethods = (Object.keys(PAYMENT_METHOD_LABEL_KEY) as OrderPaymentMethod[]).filter(
+    (m) => m !== 'wompi' && (m !== 'credito' || creditEnabled) && (m !== 'saldo_favor' || storeCreditBalance > 0),
+  )
+
+  function handlePayFull() {
+    if (paymentLines.length !== 1) return
+    const line = paymentLines[0]
+    const cap = line.method === 'saldo_favor' ? Math.min(pendingAmount, storeCreditBalance) : pendingAmount
+    setPaymentLines([{ ...line, amount: cap > 0 ? String(cap) : '' }])
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setTouched(true)
     setFormError(null)
-    if (!(amountValue > 0) || amountValue > maxAmount) return
+    if (!linesValid || exceedsPending || storeCreditExceeded || insufficientCash) return
 
     setSubmitting(true)
     try {
-      // El recibido/vuelto queda en las notas del pago, mismo formato que
-      // deja pos-checkout en la venta rápida (sales_order_payments no tiene
-      // columnas propias para esto y no hacía falta inventarlas: es
-      // información del momento del cobro, no un dato con vida propia).
-      const cashNote = showCashFields && tendered.trim() !== '' ? t('orders.paymentDrawer.cash.note', { tendered: formatCurrency(tenderedValue, currencyCode), change: formatCurrency(Math.max(0, changeDue ?? 0), currencyCode) }) : null
-      const finalNotes = [cashNote, notes.trim() || null].filter(Boolean).join(' · ') || null
-
       // Acá es donde el cobro se hace real: si el pedido todavía no existe
       // (POS), se crea y confirma recién ahora -- cerrar este drawer sin
       // guardar no deja nada hecho.
       const target = order ?? (createOrder ? await createOrder(wantsInvoice ? (invoiceBuyer?.id ?? null) : undefined) : null)
       if (!target) throw new Error(t('orders.paymentDrawer.errors.save'))
 
-      await createPayment({
-        tenant_id: tenantId,
-        order_id: target.id,
-        method,
-        amount: amountValue,
-        paid_at: paidAt || undefined,
-        notes: finalNotes,
-      })
+      // Inserción SECUENCIAL, no Promise.all: triggers como
+      // apply_credit_payment_charge/apply_store_credit_redemption validan
+      // el saldo acumulado contra lo ya insertado -- en paralelo, dos filas
+      // podrían leer el mismo saldo parcial y las dos pasar el tope.
+      for (const [index, line] of paymentLines.entries()) {
+        const lineAmount = Number(line.amount) || 0
+        // El recibido/vuelto queda en las notas del pago, mismo formato que
+        // deja pos-checkout en la venta rápida (sales_order_payments no
+        // tiene columnas propias para esto: es información del momento del
+        // cobro, no un dato con vida propia). El texto libre del cajero solo
+        // va en la primera fila -- no tiene sentido repetirlo en cada una.
+        const cashNote =
+          line.method === 'efectivo' && line.tendered.trim() !== ''
+            ? t('orders.paymentDrawer.cash.note', {
+                tendered: formatCurrency(Number(line.tendered) || 0, currencyCode),
+                change: formatCurrency(Math.max(0, (Number(line.tendered) || 0) - lineAmount), currencyCode),
+              })
+            : null
+        const finalNotes = [cashNote, index === 0 ? notes.trim() || null : null].filter(Boolean).join(' · ') || null
+
+        await createPayment({
+          tenant_id: tenantId,
+          order_id: target.id,
+          method: line.method,
+          amount: lineAmount,
+          paid_at: paidAt || undefined,
+          notes: finalNotes,
+        })
+      }
 
       // Envío a la DIAN, SIEMPRE después del pago -- un rechazo acá nunca
       // revierte el cobro, la plata ya entró independientemente de si el
@@ -284,7 +305,7 @@ export function PaymentDrawer({
       // pago deja el saldo en $0 -- una venta parcial no se factura todavía
       // (mismo candado que ya aplica el servidor, ver dian-submit).
       let einvoicing: { attempted: boolean; error: string | null } | undefined
-      if (wantsInvoice && pendingAmount - amountValue <= 0) {
+      if (wantsInvoice && pendingAmount - assignedTotal <= 0) {
         setSendingInvoice(true)
         try {
           // Un rechazo de la DIAN NO es un error HTTP -- dian-submit
@@ -323,64 +344,54 @@ export function PaymentDrawer({
         <Input id="payment-date" type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} className="mt-1" />
       </div>
 
+      {/* Método(s) y monto(s) -- con una sola línea (el caso normal) el
+          monto ya viene precargado con el saldo pendiente, sin nada más que
+          decidir; "+ Agregar otro método" (dentro del editor) es lo que
+          habilita el pago dividido. */}
       <div className="mb-4">
-        <Label htmlFor="payment-method">{t('orders.paymentDrawer.fields.method')}</Label>
-        <Select value={method} onValueChange={(v) => setMethod(v as OrderPaymentMethod)}>
-          <SelectTrigger id="payment-method" className="mt-1 w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {(Object.keys(PAYMENT_METHOD_LABEL_KEY) as OrderPaymentMethod[])
-              // 'wompi' never shows here -- it's only ever recorded
-              // automatically by payment-webhook-wompi once a customer
-              // actually pays a generated link (see the section above),
-              // never picked and typed in manually.
-              .filter((m) => m !== 'wompi' && (m !== 'credito' || creditEnabled) && (m !== 'saldo_favor' || storeCreditBalance > 0))
-              .map((m) => (
-                <SelectItem key={m} value={m}>
-                  {t(PAYMENT_METHOD_LABEL_KEY[m])}
-                </SelectItem>
-              ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Qué se está cobrando -- el desglose real (base gravable, cada
-          impuesto con su tarifa, envío) sale de sales_order_items, nunca de
-          una cuenta hecha acá. El saldo a cobrar es editable en el propio
-          resumen (se puede cobrar parcial) y está topado al pendiente: no
-          hay forma de tipear de más. */}
-      <div className="mb-4">
-        <p className="mb-1.5 text-xs font-semibold tracking-wide text-brand-500 uppercase">{t('orders.paymentDrawer.summaryTitle')}</p>
-        <OrderTotalsSummary
-          totals={totals}
-          currency={currencyCode}
-          paid={order ? order.total - pendingAmount : 0}
-          pending={pendingAmount}
-          emphasis="pending"
-          pendingSlot={
-            <CurrencyInput
-              id="payment-amount"
-              value={amount}
-              invalid={!!amountError}
-              onChange={(e) => handleAmountChange(e.target.value)}
-              aria-label={t('orders.paymentDrawer.fields.amountLabel')}
-              className="h-10 w-40 bg-white text-right text-xs font-bold tabular-nums"
-            />
-          }
-        />
+        <Label>{t('orders.paymentDrawer.fields.method')}</Label>
+        <div className="mt-1">
+          <PaymentLinesEditor
+            lines={paymentLines}
+            onChange={setPaymentLines}
+            availableMethods={availableMethods}
+            currency={currencyCode}
+            showAmountAlways
+            totalTarget={pendingAmount}
+            storeCreditBalance={storeCreditBalance}
+          />
+        </div>
         <div className="mt-1 flex items-center justify-between gap-2">
           <FieldError message={amountError} />
-          {amountValue !== maxAmount && maxAmount > 0 && (
+          {paymentLines.length === 1 && assignedTotal !== pendingAmount && pendingAmount > 0 && (
             <button
               type="button"
-              onClick={() => setAmount(String(maxAmount))}
+              onClick={handlePayFull}
               className="ml-auto rounded-full bg-accent-50 px-2 py-0.5 text-[11px] font-medium text-accent-700 transition-colors hover:bg-accent-100"
             >
               {t('orders.paymentDrawer.fields.payFull')}
             </button>
           )}
         </div>
+      </div>
+
+      {/* Qué se está cobrando -- el desglose real (base gravable, cada
+          impuesto con su tarifa, envío) sale de sales_order_items, nunca de
+          una cuenta hecha acá. El saldo pendiente queda de solo lectura acá
+          (es editable arriba, en las líneas de pago); con más de una línea
+          se suma "Asignado" para que quede claro cuánto de ese saldo ya
+          quedó cubierto. */}
+      <div className="mb-4">
+        <p className="mb-1.5 text-xs font-semibold tracking-wide text-brand-500 uppercase">{t('orders.paymentDrawer.summaryTitle')}</p>
+        <OrderTotalsSummary totals={totals} currency={currencyCode} paid={order ? order.total - pendingAmount : 0} pending={pendingAmount} emphasis="pending" />
+        {paymentLines.length > 1 && (
+          <div className="mt-1.5 flex items-center justify-between px-1 text-xs">
+            <span className="font-medium text-brand-500">{t('pos.payment.assigned')}</span>
+            <span className={`font-semibold tabular-nums ${exceedsPending ? 'text-red-600' : 'text-brand-800'}`}>
+              {formatCurrency(assignedTotal, currencyCode)} / {formatCurrency(pendingAmount, currencyCode)}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Facturación electrónica DIAN al cobrar (2026-09-08) -- solo
@@ -440,31 +451,13 @@ export function PaymentDrawer({
       )}
 
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
-        {/* Efectivo: recibido -> vuelto. No aparece con ningún otro método
-            (una transferencia o una tarjeta entran por el monto exacto).
-            Mismo campo y mismo formato que el saldo a cobrar de arriba. */}
-        {showCashFields && (
-          <div className="rounded-xl border border-brand-100 bg-brand-50/40 px-3 py-2.5 text-xs">
-            <div className="flex items-center justify-between gap-3">
-              <Label htmlFor="payment-tendered" className="text-xs font-semibold text-brand-800">
-                {t('orders.paymentDrawer.cash.tendered')}
-              </Label>
-              <CurrencyInput
-                id="payment-tendered"
-                value={tendered}
-                onChange={(e) => setTendered(e.target.value)}
-                className="h-10 w-40 bg-white text-right text-xs font-bold tabular-nums"
-              />
-            </div>
-            {changeDue !== null &&
-              (changeDue < 0 ? (
-                <p className="mt-2 border-t border-brand-100 pt-2 text-xs font-medium text-red-600">{t('orders.paymentDrawer.cash.insufficient')}</p>
-              ) : (
-                <div className="mt-2 flex items-baseline justify-between gap-3 border-t border-brand-100 pt-2">
-                  <span className="text-xs font-semibold text-brand-800">{t('orders.paymentDrawer.cash.change')}</span>
-                  <span className="text-xs font-bold tabular-nums text-emerald-600">{formatCurrency(changeDue, currencyCode)}</span>
-                </div>
-              ))}
+        {/* Vuelto total (suma del vuelto de cada línea en efectivo) -- ya lo
+            resuelve PaymentLinesEditor por fila, esto es solo un resumen
+            cuando hay más de un método involucrado. */}
+        {paymentLines.length > 1 && totalChange > 0 && (
+          <div className="flex items-baseline justify-between gap-3 rounded-xl border border-brand-100 bg-brand-50/40 px-3 py-2.5 text-xs">
+            <span className="font-semibold text-brand-800">{t('orders.paymentDrawer.cash.change')}</span>
+            <span className="font-bold tabular-nums text-emerald-600">{formatCurrency(totalChange, currencyCode)}</span>
           </div>
         )}
 
