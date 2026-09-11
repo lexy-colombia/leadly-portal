@@ -77,6 +77,7 @@
   "orders.detail.pendingBalance": "Pendiente: {amount}",
   "orders.detail.fullyPaid": "Pagado en su totalidad",
   "orders.detail.deletePaymentAria": "Eliminar pago",
+  "orders.detail.editPaymentMethodAria": "Corregir método de pago",
   "orders.detail.paymentLocked": "No se puede eliminar: la venta ya está cerrada.",
   "orders.detail.noPayments": "Sin pagos registrados.",
   "orders.detail.commentPlaceholder": "Agrega un comentario...",

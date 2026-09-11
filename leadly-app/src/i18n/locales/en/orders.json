@@ -77,6 +77,7 @@
   "orders.detail.pendingBalance": "Pending: {amount}",
   "orders.detail.fullyPaid": "Fully paid",
   "orders.detail.deletePaymentAria": "Delete payment",
+  "orders.detail.editPaymentMethodAria": "Correct payment method",
   "orders.detail.paymentLocked": "Can't delete: this sale is already closed.",
   "orders.detail.noPayments": "No payments logged.",
   "orders.detail.commentPlaceholder": "Add a comment...",

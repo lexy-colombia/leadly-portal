@@ -258,12 +258,48 @@ Deno.serve(async (req) => {
     const dianLocked = latestInvoice?.status === "sent" || latestInvoice?.status === "accepted";
     const dispatchLocked = !!dispatchRow || existingOrder.delivery_status !== "pendiente";
     const cancelledLocked = existingOrder.status === "cancelada";
-    if (dianLocked || dispatchLocked || cancelledLocked) {
-      return json({ error: "Este pedido ya no se puede modificar (factura DIAN enviada/aceptada, despachado, o anulado)." }, 409);
+    // Despachado o anulado: sin excepción para nadie, ni siquiera con el
+    // permiso de abajo -- pedido explícito del usuario 2026-09-11.
+    if (dispatchLocked || cancelledLocked) {
+      return json({ error: "Este pedido ya no se puede modificar (despachado o anulado)." }, 409);
+    }
+
+    // El TITULAR (contact_id) tiene su PROPIO candado, más amplio que el
+    // de ítems/precios de más abajo: se bloquea apenas el pedido deja de
+    // ser cotización -- confirmada, con o sin factura -- no solo cuando la
+    // DIAN ya lo validó. Ampliado 2026-09-11 (segunda ronda, pedido
+    // explícito del usuario tras probarlo contra un pedido real
+    // confirmado pero sin facturar todavía, que seguía bloqueado igual):
+    // el permiso `sales.edit_invoiced_order` ahora cubre las dos
+    // situaciones con el mismo criterio, ver la migración
+    // 20260911193000. Cotización sigue 100% libre para cualquiera, sin
+    // permiso -- nunca lo necesitó.
+    const contactLocked = existingOrder.status !== "cotizacion";
+    if (body.contact_id !== undefined && contactLocked) {
+      const { data: canEditConfirmed } = await callerClient.rpc("has_permission", { p_action_key: "sales.edit_invoiced_order" });
+      if (!canEditConfirmed) {
+        return json({ error: "El cliente de este pedido ya no se puede cambiar (el pedido ya está confirmado) -- hace falta el permiso para editar pedidos confirmados." }, 409);
+      }
+      const { error: contactPatchError } = await adminClient.from("sales_orders").update({ contact_id: body.contact_id }).eq("id", orderId);
+      if (contactPatchError) return json({ error: contactPatchError.message }, 500);
+    }
+
+    // Ítems/precios y el resto de la cabecera: candado SIN CAMBIOS
+    // respecto a antes -- factura DIAN ya enviada/aceptada bloquea sin
+    // excepción (desalinearía un documento fiscal ya transmitido); una
+    // venta confirmada que todavía no se facturó sigue siendo 100%
+    // editable para cualquiera, como siempre.
+    if (dianLocked) {
+      const { data: updatedOrder, error: reloadError } = await adminClient.from("sales_orders").select("*").eq("id", orderId).single();
+      if (reloadError) return json({ error: reloadError.message }, 500);
+      return json({ ...updatedOrder, stock_shortfalls: [] });
     }
 
     const headerPatch: Record<string, unknown> = {};
-    if (body.contact_id !== undefined) headerPatch.contact_id = body.contact_id;
+    // contact_id ya se resolvió arriba (candado propio) cuando estaba
+    // bloqueado; en cotización (nunca bloqueado) se aplica acá igual que
+    // siempre.
+    if (body.contact_id !== undefined && !contactLocked) headerPatch.contact_id = body.contact_id;
     if (body.opportunity_id !== undefined) headerPatch.opportunity_id = body.opportunity_id;
     if (body.notes !== undefined) headerPatch.notes = body.notes;
     if (body.valid_until !== undefined) headerPatch.valid_until = body.valid_until;

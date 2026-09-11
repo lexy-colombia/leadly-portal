@@ -30,7 +30,7 @@ import type { ProductWarehouseStockRow } from '../../lib/api/stockMovements'
 import { listProductCategories } from '../../lib/api/productCategories'
 import { listBrands } from '../../lib/api/brands'
 import { listWarehouses } from '../../lib/api/warehouses'
-import { listPaymentsForOrder, deletePayment, PAYMENT_METHOD_LABEL_KEY } from '../../lib/api/orderPayments'
+import { listPaymentsForOrder, deletePayment, updatePaymentMethod, PAYMENT_METHOD_LABEL_KEY } from '../../lib/api/orderPayments'
 import {
   listSalesInvoicesForOrder,
   getSalesOrderPdf,
@@ -49,8 +49,8 @@ import { listCommentsForOrder, createComment } from '../../lib/api/orderComments
 import type { OrderCommentWithAuthor } from '../../lib/api/orderComments'
 import { listTasksForOpportunity } from '../../lib/api/tasks'
 import type { TaskWithRelations } from '../../lib/api/tasks'
-import type { ContactAddress, SalesOrderPayment, OrderStatus, DeliveryStatus, ProductCategory, Brand, Warehouse } from '../../types/domain'
-import { useAuth } from '../../contexts/AuthContext'
+import type { ContactAddress, SalesOrderPayment, OrderPaymentMethod, OrderStatus, DeliveryStatus, ProductCategory, Brand, Warehouse } from '../../types/domain'
+import { useAuth, usePermission } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import { useToast } from '../../contexts/ToastContext'
 import { isNotBlank } from '../../lib/validation'
@@ -174,6 +174,106 @@ function RejectionReasonButton({ message }: { message: string }) {
   )
 }
 
+/** Corrige el método de un pago YA registrado sin borrarlo/recrearlo --
+ * pedido explícito del usuario (2026-09-11): "puede que me equivocara en
+ * el método de pago". Solo el método -- el monto sigue siendo
+ * borrar+recrear (ver PaymentDrawer.tsx). Mismo candado que el borrado
+ * (RLS de sales_order_payments), este componente ni siquiera se monta si
+ * `disabled` -- el caller decide con el mismo criterio que ya usa para el
+ * ícono de borrar. */
+function PaymentMethodEditor({
+  payment,
+  creditEnabled,
+  storeCreditBalance,
+  onSaved,
+}: {
+  payment: SalesOrderPayment
+  /** Mismo criterio que PaymentDrawer.tsx: 'credito'/'saldo_favor' no se
+   * ofrecen si el cliente no los tiene habilitados/con saldo -- bug real
+   * encontrado en vivo (2026-09-11): sin esto, "Cliente Final" (sin cuenta
+   * de crédito ni saldo a favor) igual mostraba las dos opciones acá,
+   * aunque `PaymentDrawer` ya las escondía correctamente al REGISTRAR un
+   * pago nuevo. */
+  creditEnabled: boolean
+  storeCreditBalance: number
+  onSaved: (updated: SalesOrderPayment) => void
+}) {
+  const { t } = useLanguage()
+  const [open, setOpen] = useState(false)
+  const [method, setMethod] = useState<OrderPaymentMethod>(payment.method)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (next) {
+          setMethod(payment.method)
+          setError(null)
+        }
+      }}
+    >
+      <PopoverTrigger asChild>
+        <button type="button" className="text-brand-300 hover:text-accent-600" aria-label={t('orders.detail.editPaymentMethodAria')} title={t('orders.detail.editPaymentMethodAria')}>
+          <PencilIcon width={11} height={11} />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-56">
+        <Label className="text-xs">{t('orders.paymentDrawer.fields.method')}</Label>
+        <Select value={method} onValueChange={(v) => setMethod(v as OrderPaymentMethod)}>
+          <SelectTrigger className="mt-1 w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {/* Mismo filtro EXACTO que PaymentDrawer.tsx: 'wompi' nunca se
+                tipea a mano (solo lo registra el webhook), 'credito' exige
+                que el cliente tenga cuenta de crédito, 'saldo_favor' exige
+                saldo real > 0. El método ACTUAL del pago siempre queda en
+                la lista aunque ya no califique (ej. el saldo a favor se
+                gastó después) -- para no dejar el Select sin un valor
+                válido seleccionado. */}
+            {(Object.keys(PAYMENT_METHOD_LABEL_KEY) as OrderPaymentMethod[])
+              .filter(
+                (m) =>
+                  m === payment.method ||
+                  (m !== 'wompi' && (m !== 'credito' || creditEnabled) && (m !== 'saldo_favor' || storeCreditBalance > 0)),
+              )
+              .map((m) => (
+                <SelectItem key={m} value={m}>
+                  {t(PAYMENT_METHOD_LABEL_KEY[m])}
+                </SelectItem>
+              ))}
+          </SelectContent>
+        </Select>
+        {error && <FieldError message={error} />}
+        <Button
+          type="button"
+          size="sm"
+          className="mt-2 w-full"
+          disabled={saving || method === payment.method}
+          onClick={async () => {
+            setSaving(true)
+            setError(null)
+            try {
+              const updated = await updatePaymentMethod(payment.id, method)
+              onSaved(updated)
+              setOpen(false)
+            } catch (err) {
+              setError(err instanceof Error ? err.message : t('orders.paymentDrawer.errors.save'))
+            } finally {
+              setSaving(false)
+            }
+          }}
+        >
+          {saving ? t('common.actions.saving') : t('common.actions.save')}
+        </Button>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 /** One half of the "4. Notas y comentarios" card -- Notas and Comentarios
  * are the same shape (content + author + date, newest first, like a
  * conversation) since both now live in sales_order_comments split by
@@ -236,6 +336,7 @@ export function OrderDetail() {
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
   const { profile, enabledModules } = useAuth()
+  const canEditInvoicedOrder = usePermission('sales.edit_invoiced_order')
   const { t, language } = useLanguage()
   const toast = useToast()
   const isNew = !id
@@ -352,6 +453,50 @@ export function OrderDetail() {
   // qué acción mostrar (enviar/reintentar/nota crédito/reemitir).
   const [invoices, setInvoices] = useState<SalesInvoice[]>([])
   const latestInvoice = invoices[0] ?? null
+  // Reglas explícitas del usuario 2026-09-04 -- ya no es "apenas se
+  // confirma": una venta confirmada que TODAVÍA no salió (sin despachar) y
+  // cuya factura TODAVÍA no se envió/aceptó por la DIAN sigue siendo
+  // corregible (typo en el precio antes de que el cliente reciba el
+  // pedido). Se bloquea recién cuando pasa alguna de estas dos cosas
+  // reales e irreversibles -- y en esos dos casos también se bloquea
+  // Anular, no solo la composición del pedido:
+  // - la factura electrónica ya fue enviada/aceptada por la DIAN (un
+  //   documento fiscal ya transmitido no se puede pisar por debajo; si la
+  //   DIAN la RECHAZÓ sigue editable a propósito, para poder corregir y
+  //   reintentar);
+  // - el pedido ya tiene algún movimiento de despacho (delivery_status
+  //   distinto de 'pendiente', ya sea vía el select simple o el módulo de
+  //   Despachos, que mantiene este mismo campo sincronizado).
+  // Un pedido anulado también queda bloqueado, pero eso ya es automático:
+  // el botón "Anular" solo existe mientras status === 'confirmada', así
+  // que una vez anulado no hay ninguna acción de composición que mostrar
+  // de todos modos.
+  //
+  // Declarados acá arriba (no junto al resto de candados más abajo en el
+  // render) porque el efecto de autoguardado los necesita y un `const`
+  // no se puede leer antes de su propia declaración -- moverlos generó
+  // un "Cannot access before initialization" real la primera vez que se
+  // dejaron más abajo (2026-09-11).
+  const dianLocksOrder = !!latestInvoice && (latestInvoice.status === 'sent' || latestInvoice.status === 'accepted')
+  // Hallazgo real al probar: con el módulo de Despachos habilitado,
+  // sales_orders.delivery_status NUNCA se sincroniza (confirmado leyendo
+  // log_dispatch_status_change() -- solo escribe dispatch_status_history,
+  // no toca delivery_status) -- la única señal real ahí es que exista una
+  // fila en `dispatches` para este pedido, sin importar en qué estado
+  // (dispatchStatus !== null, ver reloadDispatchStatus). Sin el módulo, la
+  // única vía es el select simple, que sí escribe delivery_status
+  // directo. Hay que chequear las dos.
+  const dispatchLocksOrder = !!order && (dispatchStatus !== null || order.delivery_status !== 'pendiente')
+  // Excepción angosta a los candados de arriba (pedido explícito del
+  // usuario, 2026-09-11, segunda ronda): quien tenga
+  // `sales.edit_invoiced_order` puede cambiar el cliente y gestionar los
+  // pagos de CUALQUIER pedido ya confirmado -- tenga factura DIAN o no --
+  // el backend (calculate-order para el titular, RLS de
+  // sales_order_payments para los pagos) exige exactamente el mismo
+  // permiso. Despachado o anulado siguen bloqueando siempre, sin
+  // excepción para nadie -- por eso NUNCA se activa si `dispatchLocksOrder`
+  // es true o el pedido está cancelado.
+  const canOverrideConfirmedLock = !dispatchLocksOrder && order?.status !== 'cancelada' && canEditInvoicedOrder
   const [sendingInvoice, setSendingInvoice] = useState(false)
   const [sendInvoiceError, setSendInvoiceError] = useState<string | null>(null)
   const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null)
@@ -837,8 +982,15 @@ export function OrderDetail() {
     // Ya no es cotización -- venta real, nada de esto se autoguarda más
     // (mismo candado que calculate-order/index.ts aplica del lado del
     // servidor; esto es solo para no ni siquiera intentar el viaje de red
-    // si por lo que sea un control quedó habilitado).
-    if (isNew || !order || !itemsLoaded || order.status !== 'cotizacion') return
+    // si por lo que sea un control quedó habilitado). Única excepción,
+    // mismo criterio que `clientPickerDisabled`: quien tenga
+    // `sales.edit_invoiced_order` sí puede disparar este efecto en un
+    // pedido ya confirmado (con o sin factura, sin despacho ni anulación)
+    // -- el único campo que en la práctica cambia ahí es `contactId` (los
+    // demás siguen deshabilitados en pantalla), y el servidor de por sí
+    // ignora todo lo que no sea contact_id en ese caso puntual (ver
+    // calculate-order).
+    if (isNew || !order || !itemsLoaded || (order.status !== 'cotizacion' && !canOverrideConfirmedLock)) return
     const snapshot = currentDraftSnapshot()
 
     if (primedOrderIdRef.current !== order.id) {
@@ -1250,33 +1402,6 @@ export function OrderDetail() {
 
   const balance = order ? Math.max(0, order.total - totalPaid) : 0
   const selectedContact = contacts.find((c) => c.id === contactId)
-  // Reglas explícitas del usuario 2026-09-04 -- ya no es "apenas se
-  // confirma": una venta confirmada que TODAVÍA no salió (sin despachar) y
-  // cuya factura TODAVÍA no se envió/aceptó por la DIAN sigue siendo
-  // corregible (typo en el precio antes de que el cliente reciba el
-  // pedido). Se bloquea recién cuando pasa alguna de estas dos cosas
-  // reales e irreversibles -- y en esos dos casos también se bloquea
-  // Anular, no solo la composición del pedido:
-  // - la factura electrónica ya fue enviada/aceptada por la DIAN (un
-  //   documento fiscal ya transmitido no se puede pisar por debajo; si la
-  //   DIAN la RECHAZÓ sigue editable a propósito, para poder corregir y
-  //   reintentar);
-  // - el pedido ya tiene algún movimiento de despacho (delivery_status
-  //   distinto de 'pendiente', ya sea vía el select simple o el módulo de
-  //   Despachos, que mantiene este mismo campo sincronizado).
-  // Un pedido anulado también queda bloqueado, pero eso ya es automático:
-  // el botón "Anular" solo existe mientras status === 'confirmada' (ver
-  // más abajo), así que una vez anulado no hay ninguna acción de
-  // composición que mostrar de todos modos.
-  const dianLocksOrder = !!latestInvoice && (latestInvoice.status === 'sent' || latestInvoice.status === 'accepted')
-  // Hallazgo real al probar: con el módulo de Despachos habilitado,
-  // sales_orders.delivery_status NUNCA se sincroniza (confirmado leyendo
-  // log_dispatch_status_change() -- solo escribe dispatch_status_history,
-  // no toca delivery_status) -- la única señal real ahí es que exista una
-  // fila en `dispatches` para este pedido, sin importar en qué estado
-  // (dispatchStatus !== null, ver reloadDispatchStatus). Sin el módulo, la
-  // única vía es el select simple, que sí escribe delivery_status
-  // directo. Hay que chequear las dos.
   /** Un pedido de mostrador (POS) no tiene nada que enviar: ni dirección de
    * envío, ni estado de entrega, ni despachos, ni costo de envío. En vez de
    * una segunda pantalla de detalle para el POS, es el mismo componente con
@@ -1285,7 +1410,9 @@ export function OrderDetail() {
    * requisito de direcciones cuando sales_channel = 'pos'. */
   const showShipping = !order || order.sales_channel !== 'pos'
 
-  const dispatchLocksOrder = !!order && (dispatchStatus !== null || order.delivery_status !== 'pendiente')
+  // dianLocksOrder/dispatchLocksOrder están declarados arriba, junto a
+  // `latestInvoice` -- el efecto de autoguardado los necesita antes de
+  // este punto del render.
   const locked = !isNew && !!order && (dianLocksOrder || dispatchLocksOrder || order.status === 'cancelada')
   // Bug real reportado por el usuario: cliente/direcciones/oportunidad/
   // envío/ítems se editaban igual (sin ningún candado visual) en un pedido
@@ -1297,6 +1424,17 @@ export function OrderDetail() {
   // (mismos 7 campos de currentDraftSnapshot) -- `locked` a secas sigue
   // existiendo solo para el botón "Anular", que es un caso aparte.
   const draftLocked = locked || (!!order && order.status !== 'cotizacion')
+  // Excepción angosta al candado de arriba (pedido explícito del usuario,
+  // 2026-09-11 -- ampliada en una segunda ronda el mismo día a CUALQUIER
+  // pedido confirmado, no solo el ya facturado): quien tenga
+  // `sales.edit_invoiced_order` puede cambiar el cliente de un pedido ya
+  // confirmado -- el backend (calculate-order) exige exactamente el mismo
+  // permiso, así que esto solo evita que el frontend deshabilite el
+  // control sin necesidad; el candado real sigue siendo el del servidor.
+  // NUNCA se aplica si además está despachado o anulado (ver
+  // `canOverrideConfirmedLock`) -- esos bloquean siempre, sin excepción
+  // para nadie, ni a los ítems/precios del resto del borrador.
+  const clientPickerDisabled = draftLocked && !canOverrideConfirmedLock
 
   const addressField = (kind: 'shipping' | 'billing') => {
     const value = kind === 'shipping' ? shippingAddressId : billingAddressId
@@ -1633,7 +1771,15 @@ export function OrderDetail() {
                 </span>
                 <span className="flex shrink-0 items-center gap-1.5">
                   <span className="font-medium text-brand-800">{formatCurrency(p.amount, p.currency)}</span>
-                  {order.status === 'cotizacion' ? (
+                  {(order.status === 'cotizacion' || canOverrideConfirmedLock) && p.method !== 'wompi' && (
+                    <PaymentMethodEditor
+                      payment={p}
+                      creditEnabled={contacts.find((c) => c.id === order.contact_id)?.credit_enabled ?? false}
+                      storeCreditBalance={storeCreditBalance}
+                      onSaved={reloadPayments}
+                    />
+                  )}
+                  {order.status === 'cotizacion' || canOverrideConfirmedLock ? (
                     <button type="button" onClick={() => setDeletePaymentId(p.id)} className="text-brand-300 hover:text-red-600" aria-label={t('orders.detail.deletePaymentAria')}>
                       <TrashIcon width={11} height={11} />
                     </button>
@@ -1672,7 +1818,7 @@ export function OrderDetail() {
                   onSelect={handleClientPicked}
                   onSearch={searchOrderContacts}
                   emptyLabel={t('orders.drawer.fields.selectPlaceholder')}
-                  disabled={draftLocked}
+                  disabled={clientPickerDisabled}
                   bare
                 />
                 <FieldError message={contactError} />

@@ -47,14 +47,29 @@ export async function createPayment(input: OrderPaymentInput): Promise<SalesOrde
   return data
 }
 
-/** Soft delete -- a payment logged by mistake is removed and re-created,
- * never edited in place (see plan for the reasoning). */
+/** Soft delete. */
 export async function deletePayment(id: string): Promise<void> {
   const {
     data: { user },
   } = await supabase.auth.getUser()
   const { error } = await supabase.from('sales_order_payments').update({ deleted_at: new Date().toISOString(), deleted_by: user?.id ?? null }).eq('id', id)
   if (error) throw error
+}
+
+/** Corrige el MÉTODO de un pago ya registrado (ej. se cargó "efectivo" por
+ * error y era "transferencia") sin borrarlo y recrearlo -- pedido
+ * explícito del usuario 2026-09-11: quiere poder editar en el lugar,
+ * además de poder borrar+recrear. Solo el método, nunca el monto (eso
+ * sigue afectando el saldo pendiente del pedido, con una lógica de tope
+ * distinta que no vale la pena reabrir acá sin un pedido concreto).
+ * Gateado del lado del servidor por la misma RLS que ya protege
+ * insert/delete (`can_edit_confirmed_sales_order`, ver la migración
+ * 20260911193000) -- en cotización cualquiera puede, en confirmada hace
+ * falta `sales.edit_invoiced_order`. */
+export async function updatePaymentMethod(id: string, method: OrderPaymentMethod): Promise<SalesOrderPayment> {
+  const { data, error } = await supabase.from('sales_order_payments').update({ method }).eq('id', id).select().single()
+  if (error) throw error
+  return data
 }
 
 /** Generates a real Wompi checkout link for this order's exact remaining

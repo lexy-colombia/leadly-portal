@@ -21,10 +21,14 @@ function formatCurrency(value: number, currency = 'COP'): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 }
 
-/** Creation only -- a payment logged by mistake is deleted and re-created
- * from OrderDetail.tsx, never edited in place (see the plan's reasoning:
- * keeps this consistent with the rest of the CRM's "simple by default"
- * criterion instead of adding an edit path nothing else needs yet). */
+/** Creation only. Correcting the METHOD of an existing payment (2026-09-11
+ * feedback: "puede que me equivocara en el método de pago") has its own,
+ * much smaller editor in OrderDetail.tsx (`PaymentMethodEditor`) instead of
+ * reusing this drawer -- this form's amount/Wompi/DIAN-invoicing/order
+ * creation logic is all specific to registering a NEW payment against a
+ * pending balance, none of which applies to fixing one field of a payment
+ * that's already recorded. Deleting and re-creating (via this drawer) is
+ * still the only way to correct the amount. */
 export function PaymentDrawer({
   open,
   onClose,
