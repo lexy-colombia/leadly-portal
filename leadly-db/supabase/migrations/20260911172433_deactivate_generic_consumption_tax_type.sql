@@ -1,0 +1,16 @@
+-- El catálogo `tax_types` tiene dos filas que suenan a lo mismo en el
+-- selector de la ficha de producto: '02' "Impuesto al Consumo (genérico)"
+-- y '04' "Impuesto Nacional al Consumo (INC)". Ninguna tarifa de '02'
+-- está validada en `_shared/invoicing/taxRates.ts` (VALID_TAX_RATES solo
+-- tiene '01'/'04') ni tiene nombre corto en OrderTotalsSummary.tsx
+-- (TAX_TYPE_SHORT_NAME) -- nunca se terminó de construir soporte real
+-- para ese código, es puro resabio del catálogo original.
+--
+-- Encontrado por el usuario viendo el resumen de totales del POS con dos
+-- líneas de impuesto para la misma tarifa (una con nombre "INC", otra
+-- genérica) -- confirmado que ningún producto usa '02' hoy (ver
+-- verificación previa a esta migración), así que desactivarlo es seguro
+-- y `listTaxTypes()` (lib/api/tenantDianProfile.ts) ya filtra
+-- `is_active = true`, así que esto alcanza para sacarlo del selector sin
+-- tocar código de frontend.
+update tax_types set is_active = false where code = '02';

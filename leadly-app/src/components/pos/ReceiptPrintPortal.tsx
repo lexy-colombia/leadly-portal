@@ -172,7 +172,16 @@ export function ReceiptPrintPortal({ children, paperWidth, onDone }: { children:
         .pos-receipt-total-line { display: flex; justify-content: space-between; font-weight: 800; font-size: 1.15em; margin-top: 2px; }
         .pos-receipt-fiscal { text-align: center; }
         .pos-receipt-cufe { word-break: break-all; }
-        .pos-receipt-qr { display: block; width: 100%; height: auto; margin: 5px auto; }
+        /* Antes: width:100% -- en 80mm de papel eso imprimía un QR de ~78mm
+           de lado (cuadrado), el bloque más alto de todo el ticket por
+           lejos. Reportado por el usuario (2026-09-11): con un tamaño de
+           papel fijo configurado en el driver de la Epson, la factura (que
+           lleva este QR + CUFE, a diferencia de la "Cuenta" sin datos
+           fiscales) se cortaba y la "Cuenta" no -- la causa real era este
+           QR ocupando la mayor parte del alto. 30mm sigue siendo
+           perfectamente escaneable (un QR de recibo típico va entre 2 y
+           3cm) y libera ~48mm de alto en papel de 80mm. */
+        .pos-receipt-qr { display: block; width: 30mm; height: 30mm; margin: 5px auto; }
         .pos-receipt-footer { text-align: center; margin-top: 6px; font-weight: 600; }
         .pos-receipt-disclaimer { text-align: center; margin-top: 4px; font-size: 0.85em; }
         @media print {
