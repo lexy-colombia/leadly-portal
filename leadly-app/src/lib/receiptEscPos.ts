@@ -1,4 +1,5 @@
 import { EscPosBuilder } from './escpos'
+import { rasterizeLogoForEscPos } from './escposImage'
 import { formatMoney } from '../components/pos/PosReceiptTicket'
 import type { PosReceiptData } from './api/posReceipt'
 import type { PosPendingReceiptData } from '../components/pos/PosPendingReceiptTicket'
@@ -9,13 +10,30 @@ import type { TranslationKey, Language } from '../i18n/translations'
 
 type T = (key: TranslationKey, params?: Record<string, string | number>) => string
 
+// Ancho máximo y alto objetivo del logo rasterizado, por ancho de papel --
+// el ancho es el área imprimible real de la TM-T20 (72mm≈512pt a 80mm de
+// papel, proporcional a 58mm), el alto es a ojo pero deliberadamente mayor
+// a lo que mide el nombre del negocio en doble tamaño (pedido explícito
+// del usuario ya documentado en ReceiptPrintPortal.tsx: el logo tiene que
+// verse más grande que el nombre).
+const LOGO_MAX_WIDTH_PX: Record<58 | 80, number> = { 58: 372, 80: 512 }
+const LOGO_TARGET_HEIGHT_PX: Record<58 | 80, number> = { 58: 110, 80: 160 }
+
 /** Cabecera del negocio -- mismo orden de campos que
  * `.pos-receipt-header`/`.pos-receipt-doc` en PosReceiptTicket.tsx/
- * PosPendingReceiptTicket.tsx, sin el logo (rasterizarlo como bitmap ESC/
- * POS queda para una vuelta futura si hace falta -- el nombre del negocio
- * en doble tamaño ya lo deja bien visible). */
-function writeHeader(b: EscPosBuilder, tenant: PosReceiptData['tenant']) {
+ * PosPendingReceiptTicket.tsx, logo incluido (rasterizado a 1 bit, ver
+ * escposImage.ts). Si el logo no existe o falla al cargar, sigue de largo
+ * con el nombre en texto -- mismo criterio que el `<img>` del ticket HTML,
+ * que tampoco corta la impresión si no carga. */
+async function writeHeader(b: EscPosBuilder, tenant: PosReceiptData['tenant'], paperWidthMm: 58 | 80) {
   b.align('center')
+  if (tenant.logo_url) {
+    const raster = await rasterizeLogoForEscPos(tenant.logo_url, LOGO_MAX_WIDTH_PX[paperWidthMm], LOGO_TARGET_HEIGHT_PX[paperWidthMm])
+    if (raster) {
+      b.raster(raster)
+      b.feed(1)
+    }
+  }
   b.bold(true).doubleSize(true).line(tenant.name).doubleSize(false).bold(false)
   if (tenant.legal_name && tenant.legal_name !== tenant.name) b.line(tenant.legal_name)
   if (tenant.document_number) b.line(`${tenant.document_type ?? 'NIT'} ${tenant.document_number}`)
@@ -57,12 +75,12 @@ function writeTotals(
  * con el QR nativo de la impresora en vez de rasterizar el PNG que ya
  * genera `posReceipt.ts` (se reusa el mismo `qrVerificationUrl`, la
  * impresora arma el símbolo ella misma desde ese string). */
-export function buildChargedReceiptEscPos(data: PosReceiptData, t: T, language: Language, paperWidthMm: 58 | 80): Uint8Array {
+export async function buildChargedReceiptEscPos(data: PosReceiptData, t: T, language: Language, paperWidthMm: 58 | 80): Promise<Uint8Array> {
   const { tenant, order, items, payments, totals, fiscal, posPointName } = data
   const currency = order.currency
   const b = new EscPosBuilder(paperWidthMm)
 
-  writeHeader(b, tenant)
+  await writeHeader(b, tenant, paperWidthMm)
   b.rule()
 
   b.align('center')
@@ -131,12 +149,12 @@ export function buildChargedReceiptEscPos(data: PosReceiptData, t: T, language: 
 /** Vista previa de "lo que tengo cargado", antes de cobrar -- mismo campo
  * por campo que PosPendingReceiptTicket.tsx. Nunca lleva QR/CUFE/
  * resolución: no existe pedido ni pago todavía. */
-export function buildPendingReceiptEscPos(data: PosPendingReceiptData, t: T, language: Language, paperWidthMm: 58 | 80): Uint8Array {
+export async function buildPendingReceiptEscPos(data: PosPendingReceiptData, t: T, language: Language, paperWidthMm: 58 | 80): Promise<Uint8Array> {
   const { tenant, items, totals, posPointName, customerName } = data
   const currency = 'COP'
   const b = new EscPosBuilder(paperWidthMm)
 
-  writeHeader(b, tenant)
+  await writeHeader(b, tenant, paperWidthMm)
   b.rule()
 
   b.align('center')

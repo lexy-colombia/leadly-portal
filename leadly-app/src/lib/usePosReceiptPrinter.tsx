@@ -49,7 +49,7 @@ export function usePosReceiptPrinter(tenantId: string | null | undefined) {
       if (!data) throw new Error(t('pos.receipt.errors.load'))
       if (data.tenant.pos_receipt_use_webusb) {
         const widthMm = data.tenant.pos_receipt_paper_width === '58mm' ? 58 : 80
-        await printRaw(buildChargedReceiptEscPos(data, t, language, widthMm))
+        await printRaw(await buildChargedReceiptEscPos(data, t, language, widthMm))
         return
       }
       setPortal(
@@ -80,7 +80,7 @@ export function usePosReceiptPrinter(tenantId: string | null | undefined) {
     if (resolvedTenant.pos_receipt_use_webusb) {
       const widthMm = resolvedTenant.pos_receipt_paper_width === '58mm' ? 58 : 80
       try {
-        await printRaw(buildPendingReceiptEscPos(pendingData, t, language, widthMm))
+        await printRaw(await buildPendingReceiptEscPos(pendingData, t, language, widthMm))
       } catch (err) {
         setError(err instanceof Error ? err.message : t('pos.receipt.errors.load'))
       }

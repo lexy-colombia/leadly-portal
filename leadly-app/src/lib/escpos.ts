@@ -74,6 +74,15 @@ export class EscPosBuilder {
     return this.push(encodeCp858(value))
   }
 
+  /** Imagen 1 bit (GS v 0, modo normal) -- para el logo del tenant, ya
+   * convertido y empaquetado por `escposImage.ts`. `align('center')` antes
+   * de llamarla, igual que con el texto. */
+  raster(image: { widthPx: number; heightPx: number; data: Uint8Array }): this {
+    const rowBytes = Math.ceil(image.widthPx / 8)
+    this.push([0x1d, 0x76, 0x30, 0x00, rowBytes & 0xff, (rowBytes >> 8) & 0xff, image.heightPx & 0xff, (image.heightPx >> 8) & 0xff])
+    return this.push(Array.from(image.data))
+  }
+
   /** Una línea de texto simple, con salto al final. */
   line(value = ''): this {
     this.text(value)
