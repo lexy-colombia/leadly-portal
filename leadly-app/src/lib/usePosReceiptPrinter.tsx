@@ -7,6 +7,8 @@ import { ReceiptPrintPortal } from '../components/pos/ReceiptPrintPortal'
 import { PosReceiptTicket } from '../components/pos/PosReceiptTicket'
 import { PosPendingReceiptTicket, type PosPendingReceiptItem } from '../components/pos/PosPendingReceiptTicket'
 import { useLanguage } from '../contexts/LanguageContext'
+import { buildChargedReceiptEscPos, buildPendingReceiptEscPos } from './receiptEscPos'
+import { printRaw } from './webUsbPrinter'
 
 /** Único punto de entrada para imprimir un ticket POS desde cualquier
  * pantalla (venta rápida, cuenta abierta, listado, detalle de la orden) --
@@ -21,7 +23,7 @@ import { useLanguage } from '../contexts/LanguageContext'
  * `portal` una vez en su JSX y listo -- no necesita saber nada de cómo se
  * arma ninguno de los dos tickets. */
 export function usePosReceiptPrinter(tenantId: string | null | undefined) {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const [printing, setPrinting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [portal, setPortal] = useState<ReactNode>(null)
@@ -45,6 +47,11 @@ export function usePosReceiptPrinter(tenantId: string | null | undefined) {
     try {
       const data = await loadPosReceiptData(tenantId, orderId, posPointName)
       if (!data) throw new Error(t('pos.receipt.errors.load'))
+      if (data.tenant.pos_receipt_use_webusb) {
+        const widthMm = data.tenant.pos_receipt_paper_width === '58mm' ? 58 : 80
+        await printRaw(buildChargedReceiptEscPos(data, t, language, widthMm))
+        return
+      }
       setPortal(
         <ReceiptPrintPortal paperWidth={data.tenant.pos_receipt_paper_width} onDone={() => setPortal(null)}>
           <PosReceiptTicket data={data} />
@@ -69,11 +76,19 @@ export function usePosReceiptPrinter(tenantId: string | null | undefined) {
       setError(t('pos.receipt.errors.load'))
       return
     }
+    const pendingData = { tenant: resolvedTenant, items, totals, posPointName: opts.posPointName ?? null, customerName: opts.customerName ?? null }
+    if (resolvedTenant.pos_receipt_use_webusb) {
+      const widthMm = resolvedTenant.pos_receipt_paper_width === '58mm' ? 58 : 80
+      try {
+        await printRaw(buildPendingReceiptEscPos(pendingData, t, language, widthMm))
+      } catch (err) {
+        setError(err instanceof Error ? err.message : t('pos.receipt.errors.load'))
+      }
+      return
+    }
     setPortal(
       <ReceiptPrintPortal paperWidth={resolvedTenant.pos_receipt_paper_width} onDone={() => setPortal(null)}>
-        <PosPendingReceiptTicket
-          data={{ tenant: resolvedTenant, items, totals, posPointName: opts.posPointName ?? null, customerName: opts.customerName ?? null }}
-        />
+        <PosPendingReceiptTicket data={pendingData} />
       </ReceiptPrintPortal>,
     )
   }

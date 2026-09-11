@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { updateTenantPosSettings } from '../../../lib/api/tenants'
 import type { Tenant } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
+import { isWebUsbSupported, getPairedPrinter, requestPrinter } from '../../../lib/webUsbPrinter'
 import { Switch } from '@/components/atoms'
 import { Card, CardSection } from '@/components/molecules'
 import { Label } from '@/components/ui/label'
@@ -19,10 +20,38 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
  * "Guardar", deshabilitado mientras no haya nada distinto de lo guardado. */
 export function DocumentsSection({ tenant, onSaved }: { tenant: Tenant; onSaved: (tenant: Tenant) => void }) {
   const { t } = useLanguage()
-  const [savingToggle, setSavingToggle] = useState<'width' | 'autoPrint' | null>(null)
+  const [savingToggle, setSavingToggle] = useState<'width' | 'autoPrint' | 'webusb' | null>(null)
   const [footerDraft, setFooterDraft] = useState(tenant.pos_receipt_footer_message ?? '')
   const [savingFooter, setSavingFooter] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [pairedPrinterName, setPairedPrinterName] = useState<string | null>(null)
+  const [connecting, setConnecting] = useState(false)
+
+  // Se resuelve al montar (y no requiere gesto del usuario, a diferencia de
+  // emparejar una nueva) -- así el cajero ve de entrada si ya hay una
+  // impresora conectada de una sesión anterior, sin tener que tocar nada.
+  useEffect(() => {
+    if (!tenant.pos_receipt_use_webusb || !isWebUsbSupported()) return
+    getPairedPrinter()
+      .then((device) => setPairedPrinterName(device?.productName ?? (device ? 'USB' : null)))
+      .catch(() => setPairedPrinterName(null))
+  }, [tenant.pos_receipt_use_webusb])
+
+  // Solo se puede llamar desde el click del botón -- WebUSB exige un gesto
+  // real del usuario para abrir el selector del navegador (ver
+  // lib/webUsbPrinter.ts).
+  async function handleConnectPrinter() {
+    setConnecting(true)
+    setError(null)
+    try {
+      const device = await requestPrinter()
+      setPairedPrinterName(device.productName ?? 'USB')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('settings.pos.printing.errors.connect'))
+    } finally {
+      setConnecting(false)
+    }
+  }
 
   async function save(input: Parameters<typeof updateTenantPosSettings>[1], which: typeof savingToggle) {
     setSavingToggle(which)
@@ -81,6 +110,35 @@ export function DocumentsSection({ tenant, onSaved }: { tenant: Tenant; onSaved:
             </div>
             <Switch checked={tenant.pos_auto_print} disabled={savingToggle === 'autoPrint'} onChange={(v) => save({ pos_auto_print: v }, 'autoPrint')} />
           </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-brand-700">{t('settings.pos.printing.webusbLabel')}</p>
+              <p className="text-xs text-brand-400">{t('settings.pos.printing.webusbDescription')}</p>
+            </div>
+            <Switch
+              checked={tenant.pos_receipt_use_webusb}
+              disabled={savingToggle === 'webusb' || !isWebUsbSupported()}
+              onChange={(v) => save({ pos_receipt_use_webusb: v }, 'webusb')}
+            />
+          </div>
+
+          {tenant.pos_receipt_use_webusb && (
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-brand-100 bg-brand-50/40 px-3 py-2">
+              {!isWebUsbSupported() ? (
+                <p className="text-xs text-amber-700">{t('settings.pos.printing.webusbUnsupported')}</p>
+              ) : (
+                <p className="text-xs text-brand-500">
+                  {pairedPrinterName ? t('settings.pos.printing.printerConnected', { name: pairedPrinterName }) : t('settings.pos.printing.printerNotConnected')}
+                </p>
+              )}
+              {isWebUsbSupported() && (
+                <Button type="button" size="sm" variant="outline" disabled={connecting} onClick={handleConnectPrinter}>
+                  {connecting ? t('settings.pos.printing.connecting') : t('settings.pos.printing.connectPrinter')}
+                </Button>
+              )}
+            </div>
+          )}
 
           <div>
             <Label htmlFor="receipt-footer">{t('settings.pos.printing.footerLabel')}</Label>

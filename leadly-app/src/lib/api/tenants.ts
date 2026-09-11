@@ -72,6 +72,7 @@ export interface TenantPosSettingsInput {
   pos_receipt_paper_width?: '58mm' | '80mm'
   pos_auto_print?: boolean
   pos_receipt_footer_message?: string | null
+  pos_receipt_use_webusb?: boolean
 }
 
 export async function updateTenantPosSettings(id: string, input: TenantPosSettingsInput): Promise<Tenant> {

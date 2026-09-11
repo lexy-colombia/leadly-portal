@@ -43,6 +43,12 @@ export interface Tenant {
   pos_auto_print: boolean
   /** Texto libre al pie del ticket. null = se usa un mensaje genérico. */
   pos_receipt_footer_message: string | null
+  /** true = el ticket se imprime por WebUSB con comandos ESC/POS crudos
+   * (ver lib/receiptEscPos.ts + lib/webUsbPrinter.ts), sin pasar por
+   * window.print()/el diálogo del sistema -- ver la migración
+   * 20260911180000 para el porqué. Requiere Chrome/Edge y haber
+   * emparejado la impresora una vez desde Configuración. */
+  pos_receipt_use_webusb: boolean
   created_at: string
   updated_at: string
 }
