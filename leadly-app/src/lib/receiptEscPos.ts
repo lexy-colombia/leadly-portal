@@ -17,7 +17,11 @@ type T = (key: TranslationKey, params?: Record<string, string | number>) => stri
 // del usuario ya documentado en ReceiptPrintPortal.tsx: el logo tiene que
 // verse más grande que el nombre).
 const LOGO_MAX_WIDTH_PX: Record<58 | 80, number> = { 58: 372, 80: 512 }
-const LOGO_TARGET_HEIGHT_PX: Record<58 | 80, number> = { 58: 110, 80: 160 }
+// Doblado (2026-09-11, feedback del usuario probando contra la impresora
+// real: "se ve muy pequeño") -- en 80mm el ancho de página (512pt) sigue
+// siendo el techo real si el logo es más ancho que alto, ver el fallback
+// en rasterizeLogoForEscPos.
+const LOGO_TARGET_HEIGHT_PX: Record<58 | 80, number> = { 58: 220, 80: 320 }
 
 /** Cabecera del negocio -- mismo orden de campos que
  * `.pos-receipt-header`/`.pos-receipt-doc` en PosReceiptTicket.tsx/

@@ -18,11 +18,25 @@ const CP858_MAP: Record<string, number> = {
   '€': 0xd5, '°': 0xf8,
 }
 
+// `Intl.NumberFormat('es-CO', { style: 'currency', ... })` (formatMoney)
+// mete un espacio angosto/de no separar entre el símbolo y el número --
+// ej. "$ 19.000", no "$19.000" -- ninguno de esos dos es ASCII ni
+// está en CP858, así que sin esto caían al "?" genérico y todo monto
+// salía como "$?19.000" (bug real reportado, 2026-09-11). Un espacio
+// visible es lo correcto acá, no un "?".
+const UNICODE_SPACES = new Set([0xa0, 0x2009, 0x202f, 0x2007, 0x2002, 0x2003])
+
 function encodeCp858(text: string): number[] {
   const bytes: number[] = []
   for (const ch of text) {
     const code = ch.codePointAt(0) ?? 63
-    bytes.push(code < 128 ? code : (CP858_MAP[ch] ?? 63))
+    if (code < 128) {
+      bytes.push(code)
+    } else if (UNICODE_SPACES.has(code)) {
+      bytes.push(0x20)
+    } else {
+      bytes.push(CP858_MAP[ch] ?? 63)
+    }
   }
   return bytes
 }
