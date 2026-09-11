@@ -1,33 +1,39 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
-// Referencia de la spec de CSS (1 px = 1/96 de pulgada, sea cual sea el DPI
-// físico de la pantalla o de la impresora) -- el navegador usa esta misma
-// equivalencia para pasar el layout en píxeles a las unidades absolutas
-// (mm) que declara `@page`, tanto en pantalla como al imprimir. Es lo que
-// permite medir el alto en píxeles y confiar en que da el mismo alto real
-// en papel.
-const PX_PER_MM = 96 / 25.4
-
-/** Imprime UN ticket a la vez: se monta con el contenido ya armado
- * -- fuera de pantalla pero completamente renderizado, con el mismo ancho y
- * tipografía que va a usar el papel real --, mide su alto real, recién ahí
- * arma el `@page` con las dos medidas fijas y dispara el diálogo de
- * impresión del sistema. Se desmonta solo cuando el diálogo se cierra (se
- * imprima o se cancele). Nunca imprime en silencio -- ver el comentario de
- * la migración 20260904190000 sobre por qué eso requeriría un agente local
- * aparte.
+/** Imprime UN ticket a la vez: se monta con el contenido ya armado -- fuera
+ * de pantalla pero completamente renderizado, con el mismo ancho y
+ * tipografía que va a usar el papel real --, arma el `@page` con las dos
+ * medidas fijas y dispara el diálogo de impresión del sistema. Se desmonta
+ * solo cuando el diálogo se cierra (se imprima o se cancele). Nunca imprime
+ * en silencio -- ver el comentario de la migración 20260904190000 sobre por
+ * qué eso requeriría un agente local aparte.
  *
- * Por qué la medición en dos fases (y no `@page { size: 80mm auto }` como
- * antes): la spec de CSS Paged Media no permite mezclar una medida fija con
- * `auto` en `size` -- solo `auto` solo (que significa "el tamaño de la
- * hoja del destino", no "lo que mida el contenido") o dos medidas fijas.
- * `80mm auto` es inválido, así que el navegador descartaba la regla
- * entera y caía en su hoja por defecto -- el bug real detrás de "siempre me
- * sale una hoja tamaño carta" (2026-09-05, reportado por el usuario). Con
- * las dos medidas fijas (ancho del papel configurado + alto real del
- * ticket + un margen de corte) el navegador arma una página angosta a
- * medida en vez de una Carta/A4 completa.
+ * Por qué el alto es un número FIJO y no se mide por ticket (2026-09-11,
+ * regresión real encontrada en vivo): hasta acá el alto se calculaba del
+ * contenido real de cada ticket (una factura con QR+CUFE mide mucho más que
+ * una cuenta de 2 ítems). El problema no es de nuestro CSS -- es que muchas
+ * impresoras térmicas (esta, una Epson TM-T20 vía APD5) se configuran con UN
+ * ÚNICO "papel definido por el usuario" de medidas FIJAS (acá, 80x160mm). Un
+ * `@page` que pide un tamaño que coincide EXACTO con ese papel registrado
+ * imprime perfecto en las dos dimensiones; uno que pide cualquier otro alto
+ * (por más que el ancho sea el mismo 80mm) hace que el driver no encuentre
+ * el papel exacto en su lista y el trabajo salga con el ANCHO real
+ * corrompido, cortando contenido por el costado -- el síntoma real
+ * reportado ("la factura sale bien pero la cuenta se corta al costado"), no
+ * un problema de margen. La única forma de garantizar que el driver siempre
+ * encuentre una coincidencia exacta es pedir siempre EL MISMO alto, sin
+ * importar cuánto mida el contenido. `RECEIPT_PAGE_HEIGHT_MM` es ese valor
+ * -- si algún día hace falta uno distinto por impresora, tiene que salir de
+ * una config por tenant, no de medir el contenido (ya se probó y regresiona
+ * esto mismo).
+ *
+ * Por qué NO es simplemente `@page { size: 80mm auto }`: la spec de CSS
+ * Paged Media no permite mezclar una medida fija con `auto` en `size` --
+ * `80mm auto` es inválido y el navegador descarta la regla entera, cayendo
+ * en su hoja por defecto (el bug real detrás de "siempre me sale una hoja
+ * tamaño carta", 2026-09-05). Con dos medidas fijas arma una página angosta
+ * a medida en vez de una Carta/A4 completa.
  *
  * Genérico a propósito: no sabe nada de `PosReceiptData` -- recibe
  * `children` ya armado, así que el mismo portal (y el mismo CSS de
@@ -38,15 +44,14 @@ const PX_PER_MM = 96 / 25.4
  * Truco de "imprimir solo esto": el contenido se monta vía createPortal
  * directo en document.body (hermano de #root, no un hijo). Mientras la app
  * está en uso vive fuera de pantalla (`position: fixed; left: -10000px`,
- * no `display:none` -- necesita estar realmente dispuesto en el layout
- * para poder medirlo); recién bajo `@media print` vuelve a flujo normal, a
+ * no `display:none`); recién bajo `@media print` vuelve a flujo normal, a
  * la vez que el mismo bloque oculta el resto de la SPA (`#root`). Así no
  * hace falta ningún iframe ni ventana aparte, y el resto de la app sigue
  * viva e intacta detrás. */
+const RECEIPT_PAGE_HEIGHT_MM = 160
+
 export function ReceiptPrintPortal({ children, paperWidth, onDone }: { children: ReactNode; paperWidth: '58mm' | '80mm'; onDone: () => void }) {
-  const contentRef = useRef<HTMLDivElement>(null)
   const printedRef = useRef(false)
-  const [pageHeightMm, setPageHeightMm] = useState<number | null>(null)
 
   const widthMm = paperWidth === '58mm' ? 58 : 80
   // Margen lateral real: sin esto el contenido llega borde a borde y la
@@ -62,56 +67,29 @@ export function ReceiptPrintPortal({ children, paperWidth, onDone }: { children:
   const sideMarginMm = 1
   const fontSizePx = widthMm === 58 ? 11 : 12
 
-  // Fase 1: medir. Un tick para que el contenido (ya con su ancho y
-  // tipografía final, solo que fuera de pantalla) termine de pintar antes
-  // de leer su alto real -- mismo motivo que el tick que antes precedía a
-  // `window.print()` directamente.
+  // Dispara el diálogo de impresión una sola vez, apenas el <style> (con el
+  // alto FIJO de @page, ver el comentario de cabecera) ya está montado --
+  // el tick es para que el navegador termine de aplicar el <style> antes de
+  // abrir el diálogo, sin eso se arriesga a capturar el layout a medio
+  // commitear.
   useEffect(() => {
-    const timer = setTimeout(() => {
-      const contentPx = contentRef.current?.scrollHeight ?? 0
-      // +4mm de margen de cortina: que la última línea nunca quede al ras
-      // del corte del rollo, y que un redondeo mínimo entre la medición en
-      // pantalla y el layout real de impresión (que sí puede diferir un par
-      // de px por hinting de fuente) nunca deje el cálculo justo corto. No
-      // hace falta más que esto -- el break-inside:avoid de abajo ya es la
-      // protección real contra una segunda página si el cálculo fallara,
-      // este margen es solo estético. Piso de 30mm para no terminar con una
-      // página absurdamente chica si por lo que sea el contenido midiera ~0.
-      // Ojo: el espacio que una Epson TM-T-series deja arriba/abajo del
-      // rollo NO sale de acá -- es el margen no imprimible que el driver
-      // reporta como límite físico del cabezal, `@page { margin: 0 }` ya le
-      // pide al navegador el mínimo posible, pero no puede pedirle menos de
-      // lo que el propio driver dice que el hardware permite.
-      setPageHeightMm(Math.max(30, Math.ceil(contentPx / PX_PER_MM) + 4))
-    }, 50)
-    return () => clearTimeout(timer)
-  }, [])
-
-  // Fase 2: recién cuando el alto real ya quedó aplicado al <style> (el
-  // `@page` de abajo depende de `pageHeightMm`), se dispara el diálogo de
-  // impresión del sistema.
-  useEffect(() => {
-    if (pageHeightMm == null || printedRef.current) return
+    if (printedRef.current) return
     printedRef.current = true
     function handleAfterPrint() {
       onDone()
     }
     window.addEventListener('afterprint', handleAfterPrint)
-    // Otro tick para que el navegador termine de aplicar el <style> ya
-    // actualizado (con las dos medidas del `@page`) antes de abrir el
-    // diálogo -- sin esto se arriesga a capturar el layout a medio commitear.
     const timer = setTimeout(() => window.print(), 30)
     return () => {
       window.removeEventListener('afterprint', handleAfterPrint)
       clearTimeout(timer)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pageHeightMm])
+  }, [])
 
   return createPortal(
     <>
       <style>{`
-        @page { size: ${widthMm}mm ${pageHeightMm ?? 200}mm; margin: 0; }
+        @page { size: ${widthMm}mm ${RECEIPT_PAGE_HEIGHT_MM}mm; margin: 0; }
         .pos-receipt-print-portal {
           position: fixed;
           top: 0;
@@ -189,7 +167,7 @@ export function ReceiptPrintPortal({ children, paperWidth, onDone }: { children:
           .pos-receipt-print-portal { position: static; left: auto; pointer-events: auto; }
         }
       `}</style>
-      <div ref={contentRef} className="pos-receipt-print-portal" aria-hidden="true">
+      <div className="pos-receipt-print-portal" aria-hidden="true">
         {children}
       </div>
     </>,
