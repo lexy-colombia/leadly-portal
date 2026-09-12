@@ -207,6 +207,9 @@ export type OrderWithRelations = SalesOrder & {
   // -- embebido ahí para que la columna "Método de pago" no necesite un
   // fetch de sales_order_payments aparte, ver OrderTableCells.tsx.
   payments?: { method: OrderPaymentMethod; amount: number }[]
+  // Solo presente en las filas de listOrdersPage: nombre del punto de venta
+  // (mesa) para mostrarlo en la lista en vez del genérico "Punto de venta".
+  pos_point?: { name: string } | null
 }
 
 const ORDER_SELECT =
@@ -250,7 +253,11 @@ export interface OrdersSummary {
   invoicedCount: number
   invoicedTotal: number
   byMethod: Partial<Record<OrderPaymentMethod, number>>
-  topTables: { table: string; count: number; total: number }[]
+  /** Cuentas abiertas del POS todavía sin cobrar (no son pedidos todavía,
+   * por eso NO están sumadas en count/total/pending) -- la pantalla las
+   * suma aparte para que lo digitado sin cobrar no quede invisible. */
+  openCartsCount: number
+  openCartsTotal: number
 }
 
 export interface ListOrdersPageParams {
@@ -280,7 +287,7 @@ export interface ListOrdersPageResult {
  * real ya tiene 23.051 pedidos). Paginación real con offset en la DB
  * (Edge Function list-sales-orders, que usa .range()) en vez de traer todo
  * y cortar en el navegador -- el resumen (total vendido/pagado/pendiente/
- * por método/ranking de mesas) también se calcula server-side ahí mismo,
+ * por método/cuentas abiertas) también se calcula server-side ahí mismo,
  * por la misma razón: sumarlo en el cliente exigiría tener todas las filas
  * en algún momento. */
 export async function listOrdersPage(params: ListOrdersPageParams): Promise<ListOrdersPageResult> {
@@ -298,7 +305,8 @@ export async function listOrdersPage(params: ListOrdersPageParams): Promise<List
       invoiced_count: number
       invoiced_total: number
       by_method: Record<string, number>
-      top_tables: { table: string; count: number; total: number }[]
+      open_carts_count: number
+      open_carts_total: number
     }
     error?: string
   }>('list-sales-orders', {
@@ -343,7 +351,8 @@ export async function listOrdersPage(params: ListOrdersPageParams): Promise<List
       invoicedCount: data.summary.invoiced_count,
       invoicedTotal: data.summary.invoiced_total,
       byMethod: data.summary.by_method as Partial<Record<OrderPaymentMethod, number>>,
-      topTables: data.summary.top_tables,
+      openCartsCount: Number(data.summary.open_carts_count ?? 0),
+      openCartsTotal: Number(data.summary.open_carts_total ?? 0),
     },
   }
 }

@@ -1907,7 +1907,7 @@ export function OrderDetail() {
                   StatCard propia para esto -- pedido explícito del usuario. */}
               {posPointName && (
                 <p className="text-xs text-brand-400">
-                  {t('orders.detail.pos.table')}: {posPointName}
+                  {t('orders.channel.pos')}: <span className="font-medium text-brand-700">{posPointName}</span>
                 </p>
               )}
               {isNew && (

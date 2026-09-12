@@ -239,8 +239,6 @@
   "orders.filters.clear": "Borrar filtros",
   "orders.detail.sections.posDetail": "2. Punto de venta",
   "orders.detail.pos.table": "Mesa",
-  "orders.summary.topTables": "Mesas con más ventas",
-  "orders.summary.tableLabel": "Mesa {table}",
-  "orders.summary.tableSaleCount.singular": "{count} venta",
-  "orders.summary.tableSaleCount.plural": "{count} ventas"
+  "orders.summary.openCarts": "Cuentas abiertas",
+  "orders.summary.totalWithOpen": "Total digitado"
 }

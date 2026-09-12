@@ -239,8 +239,6 @@
   "orders.filters.clear": "Clear filters",
   "orders.detail.sections.posDetail": "2. Point of sale",
   "orders.detail.pos.table": "Table",
-  "orders.summary.topTables": "Top-selling tables",
-  "orders.summary.tableLabel": "Table {table}",
-  "orders.summary.tableSaleCount.singular": "{count} sale",
-  "orders.summary.tableSaleCount.plural": "{count} sales"
+  "orders.summary.openCarts": "Open tabs",
+  "orders.summary.totalWithOpen": "Total entered"
 }

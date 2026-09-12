@@ -4,6 +4,18 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.9] - 2026-09-12
+
+### Added
+- El resumen de Órdenes suma las cuentas abiertas del POS todavía sin cobrar: tarjeta nueva "Cuentas abiertas", "Total digitado" (pedidos + cuentas abiertas) y "Pendiente por cobrar" incluyéndolas, más su fila en el desglose por método de pago -- antes solo contaba lo ya cobrado, así que con mesas abiertas el comercio veía menos ventas de las reales y $0 por cobrar.
+- La lista de Órdenes muestra el nombre del punto de venta (ej. "Mesa 16") debajo del número de orden, en vez del genérico "Punto de venta"; el detalle del pedido lo muestra como "Punto de venta: Mesa 16".
+
+### Removed
+- Bloque "Mesas con más ventas" del resumen de Órdenes.
+
+### Fixed
+- El filtro de fechas de Órdenes interpretaba el día en UTC en vez de hora de Colombia: "hoy" iba de las 7 p. m. de ayer a las 7 p. m. de hoy, así que las ventas de la noche caían en el día siguiente.
+
 ## [1.0.8] - 2026-09-11
 
 ### Added

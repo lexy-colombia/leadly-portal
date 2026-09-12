@@ -20,13 +20,14 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/cors.ts";
+import { COLOMBIA_OFFSET_SUFFIX } from "../_shared/invoicing/colombiaTime.ts";
 
 // Mismos joins que el ORDER_SELECT de lib/api/orders.ts, más `payments`
 // embebido (method/amount por orden) para que la columna "Método de pago"
 // de la tabla no necesite un fetch aparte de sales_order_payments -- acotado
 // a la página actual (PAGE_SIZE filas), no al tenant completo como antes.
 const ORDER_SELECT =
-  "*, contact:clients(full_name, phone_prefix, phone), opportunity:opportunities(title), shipping_address:contact_addresses!shipping_address_id(label, line1, city, state_province), billing_address:contact_addresses!billing_address_id(label, line1, city), items:sales_order_items(count), payments:sales_order_payments(method, amount)";
+  "*, contact:clients(full_name, phone_prefix, phone), opportunity:opportunities(title), shipping_address:contact_addresses!shipping_address_id(label, line1, city, state_province), billing_address:contact_addresses!billing_address_id(label, line1, city), items:sales_order_items(count), payments:sales_order_payments(method, amount), pos_point:pos_points(name)";
 
 interface ListSalesOrdersBody {
   page?: number;
@@ -54,7 +55,10 @@ interface OrdersSummaryRow {
   invoiced_count: number;
   invoiced_total: number;
   by_method: Record<string, number>;
-  top_tables: { table: string; count: number; total: number }[];
+  /** Cuentas abiertas del POS (carts sin cobrar) dentro del mismo filtro --
+   * ver migración 20260912183000. */
+  open_carts_count: number;
+  open_carts_total: number;
 }
 
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
@@ -115,8 +119,12 @@ Deno.serve(async (req) => {
   }
   const searchHasNoMatch = search.length > 0 && searchNumber === null && (searchContactIds?.length ?? 0) === 0;
 
-  const dateFrom = body.date_from ? new Date(`${body.date_from}T00:00:00`).toISOString() : null;
-  const dateTo = body.date_to ? new Date(new Date(`${body.date_to}T00:00:00`).getTime() + 24 * 60 * 60 * 1000).toISOString() : null;
+  // El día que elige el usuario es un día de Colombia, no de UTC. Sin el
+  // offset explícito, `new Date("YYYY-MM-DDT00:00:00")` se interpreta en la
+  // zona del runtime (UTC), así que "hoy" iba de 19:00 de ayer a 19:00 de
+  // hoy hora local -- las ventas de la noche caían en el día siguiente.
+  const dateFrom = body.date_from ? new Date(`${body.date_from}T00:00:00${COLOMBIA_OFFSET_SUFFIX}`).toISOString() : null;
+  const dateTo = body.date_to ? new Date(new Date(`${body.date_to}T00:00:00${COLOMBIA_OFFSET_SUFFIX}`).getTime() + 24 * 60 * 60 * 1000).toISOString() : null;
 
   if (searchHasNoMatch) {
     return json({
@@ -125,7 +133,7 @@ Deno.serve(async (req) => {
       page,
       page_size: pageSize,
       total_pages: 1,
-      summary: { count: 0, total: 0, currency: "COP", paid: 0, pending: 0, average: 0, invoiced_count: 0, invoiced_total: 0, by_method: {}, top_tables: [] },
+      summary: { count: 0, total: 0, currency: "COP", paid: 0, pending: 0, average: 0, invoiced_count: 0, invoiced_total: 0, by_method: {}, open_carts_count: 0, open_carts_total: 0 },
     });
   }
 

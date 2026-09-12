@@ -154,7 +154,6 @@ export function Orders() {
   const [confirmError, setConfirmError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [summaryOpen, setSummaryOpen] = useState(true)
-  const [topTablesOpen, setTopTablesOpen] = useState(false)
 
   // Debounced so escribir en el buscador no dispara una llamada al servidor
   // por cada tecla -- mismo criterio que Products.tsx.
@@ -167,7 +166,7 @@ export function Orders() {
   // en la DB) -- reemplaza el viejo listOrders(tenantId) sin límite, que
   // traía TODO el historial del tenant (un tenant real ya tiene 23.051
   // pedidos) para filtrar/paginar recién en el navegador. El resumen
-  // (total vendido/pagado/pendiente/por método/ranking de mesas) viene
+  // (total vendido/pagado/pendiente/por método/cuentas abiertas) viene
   // calculado server-side en la misma respuesta, por la misma razón.
   function reload() {
     if (!profile?.tenant_id) return
@@ -208,6 +207,13 @@ export function Orders() {
 
   const pageItems = orders
   const salesSummary = summary
+  // Las cuentas abiertas del POS todavía no son pedidos, pero son venta
+  // digitada: se suman al total y a lo pendiente por cobrar para que el
+  // comercio vea todo lo que tiene en mostrador, no solo lo ya cobrado
+  // (reporte real: "8 órdenes" y "$0 por cobrar" con 7 mesas abiertas).
+  const openCartsTotal = salesSummary?.openCartsTotal ?? 0
+  const totalWithOpen = (salesSummary?.total ?? 0) + openCartsTotal
+  const pendingWithOpen = (salesSummary?.pending ?? 0) + openCartsTotal
 
   const allPageSelected = !!pageItems && pageItems.length > 0 && pageItems.every((o) => selectedIds.has(o.id))
   const somePageSelected = !!pageItems && pageItems.some((o) => selectedIds.has(o.id))
@@ -393,16 +399,17 @@ export function Orders() {
         </Button>
       </div>
 
-      {salesSummary && salesSummary.count > 0 && (
+      {salesSummary && (salesSummary.count > 0 || salesSummary.openCartsCount > 0) && (
         <div className="space-y-2">
           {/* Siempre visibles, nunca detrás del toggle -- pedido explícito
               del usuario, a diferencia del desglose por método (ver abajo),
               que sí es "el detalle" que se abre/cierra. */}
-          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4 lg:grid-cols-7">
+          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4 lg:grid-cols-8">
             <SummaryTile label={t('orders.summary.count')} value={String(salesSummary.count)} />
-            <SummaryTile label={t('orders.summary.total')} value={formatCurrency(salesSummary.total, salesSummary.currency)} />
+            <SummaryTile label={t('orders.summary.openCarts')} value={String(salesSummary.openCartsCount)} />
+            <SummaryTile label={t('orders.summary.totalWithOpen')} value={formatCurrency(totalWithOpen, salesSummary.currency)} />
             <SummaryTile label={t('orders.summary.paid')} value={formatCurrency(salesSummary.paid, salesSummary.currency)} />
-            <SummaryTile label={t('orders.summary.pending')} value={formatCurrency(salesSummary.pending, salesSummary.currency)} />
+            <SummaryTile label={t('orders.summary.pending')} value={formatCurrency(pendingWithOpen, salesSummary.currency)} />
             <SummaryTile label={t('orders.summary.average')} value={formatCurrency(salesSummary.average, salesSummary.currency)} />
             <SummaryTile label={t('orders.summary.invoicedCount')} value={String(salesSummary.invoicedCount)} />
             <SummaryTile label={t('orders.summary.invoicedTotal')} value={formatCurrency(salesSummary.invoicedTotal, salesSummary.currency)} />
@@ -424,16 +431,19 @@ export function Orders() {
                 {(Object.keys(PAYMENT_METHOD_LABEL_KEY) as OrderPaymentMethod[])
                   .filter((m) => m !== 'saldo_favor' && (salesSummary.byMethod[m] ?? 0) > 0)
                   .map((m) => (
-                    <PaymentMethodRow key={m} label={t(PAYMENT_METHOD_LABEL_KEY[m])} amount={salesSummary.byMethod[m] ?? 0} total={salesSummary.total} currency={salesSummary.currency} />
+                    <PaymentMethodRow key={m} label={t(PAYMENT_METHOD_LABEL_KEY[m])} amount={salesSummary.byMethod[m] ?? 0} total={totalWithOpen} currency={salesSummary.currency} />
                   ))}
                 {salesSummary.pending > 0 && (
-                  <PaymentMethodRow label={t('orders.summary.pending')} amount={salesSummary.pending} total={salesSummary.total} currency={salesSummary.currency} />
+                  <PaymentMethodRow label={t('orders.summary.pending')} amount={salesSummary.pending} total={totalWithOpen} currency={salesSummary.currency} />
+                )}
+                {openCartsTotal > 0 && (
+                  <PaymentMethodRow label={t('orders.summary.openCarts')} amount={openCartsTotal} total={totalWithOpen} currency={salesSummary.currency} />
                 )}
                 {(salesSummary.byMethod.saldo_favor ?? 0) > 0 && (
                   <PaymentMethodRow
                     label={t('orders.summary.storeCreditApplied')}
                     amount={salesSummary.byMethod.saldo_favor ?? 0}
-                    total={salesSummary.total}
+                    total={totalWithOpen}
                     currency={salesSummary.currency}
                   />
                 )}
@@ -441,25 +451,6 @@ export function Orders() {
             )}
           </div>
 
-          {salesSummary.topTables.length > 0 && (
-            <div className="overflow-hidden rounded-2xl border border-brand-100 bg-white">
-              <button type="button" onClick={() => setTopTablesOpen((v) => !v)} className="flex w-full items-center justify-between bg-brand-50/40 px-4 py-2.5 text-left">
-                <span className="text-xs font-semibold tracking-wide text-brand-700 uppercase">{t('orders.summary.topTables')}</span>
-                <ChevronLeftIcon width={11} height={11} className={`text-brand-400 transition-transform ${topTablesOpen ? 'rotate-90' : '-rotate-90'}`} />
-              </button>
-              {topTablesOpen && (
-                <div className="space-y-1.5 border-t border-brand-100 px-4 py-3">
-                  {salesSummary.topTables.map((row) => (
-                    <div key={row.table} className="flex items-center justify-between text-xs">
-                      <span className="text-brand-600">{t('orders.summary.tableLabel', { table: row.table })}</span>
-                      <span className="text-brand-400">{t(row.count === 1 ? 'orders.summary.tableSaleCount.singular' : 'orders.summary.tableSaleCount.plural', { count: row.count })}</span>
-                      <span className="font-medium text-brand-700">{formatCurrency(row.total, salesSummary?.currency ?? 'COP')}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
         </div>
       )}
 
@@ -507,8 +498,13 @@ export function Orders() {
                     </TableCell>
                     <TableCell className="text-xs font-medium text-brand-800">
                       ORD-{order.number}
-                      {order.sales_channel && (
-                        <p className="text-[11px] font-normal text-brand-400">{t(SALES_CHANNEL_LABEL_KEY[order.sales_channel])}</p>
+                      {/* El nombre del punto de venta (ej. "Mesa 5") dice más
+                          que el canal genérico "Punto de venta" -- pedido
+                          explícito del usuario. Sin punto, se muestra el canal. */}
+                      {(order.pos_point?.name || order.sales_channel) && (
+                        <p className="text-[11px] font-normal text-brand-400">
+                          {order.pos_point?.name ?? (order.sales_channel ? t(SALES_CHANNEL_LABEL_KEY[order.sales_channel]) : '')}
+                        </p>
                       )}
                     </TableCell>
                     <TableCell className="text-xs text-brand-700">
