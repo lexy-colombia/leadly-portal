@@ -4,6 +4,12 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.11] - 2026-09-12
+
+### Fixed
+- La DIAN rechazaba algunas facturas con "Valor del CUFE no está calculado correctamente" (FAD06), siempre las mismas en cada reintento: el CUFE truncaba sumas con error de coma flotante (ej. 74074.06999… en vez de 74074.07) y quedaba un centavo distinto del valor impreso en el XML. Dependía de los montos y el orden de las líneas, por eso unas facturas pasaban y otras no. Afecta también el CUDE de notas crédito.
+- Un pedido confirmado podía quedar sin productos y en $0 (con su pago y el inventario ya descontados): el autoguardado del detalle del pedido reescribía los ítems en bucle y, en una carrera con su propia recarga, llegó a guardar la lista vacía. Ahora una venta confirmada no acepta cambios de productos/precios/envío desde el servidor, y el detalle solo autoguarda el cliente en ese caso.
+
 ## [1.0.10] - 2026-09-12
 
 ### Fixed

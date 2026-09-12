@@ -943,6 +943,14 @@ export function OrderDetail() {
   const lastSyncedSnapshotRef = useRef<string>('')
 
   function currentDraftSnapshot(): string {
+    // En un pedido confirmado el autoguardado solo existe para cambiar el
+    // cliente (permiso `sales.edit_invoiced_order`), así que solo eso cuenta
+    // como edición. Incidente real 2026-09-12 (pedido #28245): con los ítems
+    // dentro del snapshot, cada recarga de ítems después de guardar parecía
+    // un cambio nuevo y volvía a guardar en bucle; una de esas recargas leyó
+    // la lista vacía a mitad del reemplazo y la guardó -- el pedido quedó
+    // sin productos.
+    if (order && order.status !== 'cotizacion') return JSON.stringify({ contactId })
     return JSON.stringify({ contactId, opportunityId, validUntil, shippingAddressId, billingAddressId, shippingDraft, items })
   }
 
@@ -954,16 +962,23 @@ export function OrderDetail() {
     setActionError(null)
     setSavingDraft(true)
     try {
-      const { stockShortfalls: shortfalls } = await calculateOrder({
-        order_id: orderId,
-        contact_id: contactId,
-        opportunity_id: opportunityId || null,
-        valid_until: validUntil || null,
-        shipping_address_id: shippingAddressId || null,
-        billing_address_id: billingAddressId || null,
-        shipping: Number(shippingDraft) || 0,
-        items,
-      })
+      // Pedido confirmado: solo viaja el cliente -- nunca los ítems, que
+      // el servidor igual rechaza reescribir ahí (ver calculate-order).
+      const confirmedOrder = !!order && order.status !== 'cotizacion'
+      const { stockShortfalls: shortfalls } = await calculateOrder(
+        confirmedOrder
+          ? { order_id: orderId, contact_id: contactId, shipping: 0, items: [] }
+          : {
+              order_id: orderId,
+              contact_id: contactId,
+              opportunity_id: opportunityId || null,
+              valid_until: validUntil || null,
+              shipping_address_id: shippingAddressId || null,
+              billing_address_id: billingAddressId || null,
+              shipping: Number(shippingDraft) || 0,
+              items,
+            },
+      )
       // Mismo estado que el chequeo pre-confirmar de más abajo -- ahora se
       // mantiene al día con cada autoguardado, no solo justo antes de
       // confirmar.

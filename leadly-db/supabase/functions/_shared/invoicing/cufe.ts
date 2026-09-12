@@ -55,8 +55,20 @@ export interface CufeInput {
  * separadores de miles, ni símbolo pesos" -- truncar, no redondear, es
  * importante: Math.trunc, no Math.round, para no desviarse un centavo del
  * valor que espera la DIAN. */
+//
+// ⚠️ Bug real corregido 2026-09-12 (FAD06 intermitente en Barriles de la
+// sexta, pedidos #28211/#28233/#28245 rechazados en TODOS sus reintentos):
+// los montos que llegan acá son sumas en coma flotante de valores de 2
+// decimales -- 52777.78 + 17592.59 + 3703.70 da 74074.06999999999, no
+// 74074.07. Truncar eso directo producía "74074.06" en el CUFE mientras el
+// XML imprimía "74074.07", así que la DIAN recalculaba otro hash y
+// rechazaba. Dependía del orden de las líneas y de los montos, por eso
+// unas facturas pasaban y otras no. Se limpia el ruido de coma flotante
+// (redondeo a 6 decimales, muy por debajo del centavo) ANTES de truncar:
+// el truncado sigue aplicando a valores con más de 2 decimales reales.
 function formatMonetary(value: number): string {
-  const truncated = Math.trunc(value * 100) / 100;
+  const cents = Number((value * 100).toFixed(6));
+  const truncated = Math.trunc(cents) / 100;
   return truncated.toFixed(2);
 }
 

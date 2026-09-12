@@ -289,7 +289,18 @@ Deno.serve(async (req) => {
     // excepción (desalinearía un documento fiscal ya transmitido); una
     // venta confirmada que todavía no se facturó sigue siendo 100%
     // editable para cualquiera, como siempre.
-    if (dianLocked) {
+    //
+    // ⚠️ Ampliado 2026-09-12 por un incidente real (Barriles, pedido
+    // #28245): una venta CONFIRMADA ya no acepta cambios de ítems/precios/
+    // envío por esta vía, esté facturada o no. Antes solo `dianLocked`
+    // cortaba acá, así que con la factura rechazada un autoguardado del
+    // detalle (que en un pedido confirmado solo existe para cambiar el
+    // cliente) reescribió los ítems -- y en una carrera con su propia
+    // recarga llegó a mandar la lista vacía: el pedido quedó en $0, sin
+    // productos, con el pago de $79.000 y el stock ya descontados. Una
+    // venta confirmada ya se cobró y ya movió inventario; corregir su
+    // composición es una devolución/nota crédito, no reescribir la fila.
+    if (dianLocked || existingOrder.status !== "cotizacion") {
       const { data: updatedOrder, error: reloadError } = await adminClient.from("sales_orders").select("*").eq("id", orderId).single();
       if (reloadError) return json({ error: reloadError.message }, 500);
       return json({ ...updatedOrder, stock_shortfalls: [] });
