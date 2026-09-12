@@ -10,8 +10,12 @@ import { useOrderTotalsPreview } from '../../../lib/useOrderTotalsPreview'
 import { usePosReceiptPrinter } from '../../../lib/usePosReceiptPrinter'
 import { getClientCreditSummary } from '../../../lib/api/credit'
 import { getStoreCreditBalance } from '../../../lib/api/returns'
+import { isDianDirectoConnected } from '../../../lib/api/integrations'
+import { sendPosInvoiceForOrder } from '../../../lib/api/salesInvoices'
 import type { Client, OrderPaymentMethod } from '../../../types/domain'
 import { PageSpinner } from '@/components/atoms'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Label } from '@/components/ui/label'
 import {
   OrderTotalsSummary,
   ProductSearchBox,
@@ -108,9 +112,23 @@ export function PosFastCheckout() {
   const [chargeError, setChargeError] = useState<string | null>(null)
   const [result, setResult] = useState<PosCheckoutResult | null>(null)
 
+  // Facturación electrónica al cobrar (pedido explícito del usuario
+  // 2026-09-11: "eso no puede desaparecer... no había forma de generarla" --
+  // hasta ahora Venta Rápida solo RESERVABA la factura (el trigger de
+  // confirmación lo hace solo, ver pos-checkout/index.ts) pero nunca la
+  // enviaba a la DIAN, y no hay ningún cron que la retome sola -- la única
+  // forma de emitirla era ir después al detalle del pedido. Mismo criterio
+  // que PaymentDrawer.tsx (cuentas abiertas): queda 100% inerte para
+  // cualquier tenant sin 'dian_directo' conectado.
+  const [dianConnected, setDianConnected] = useState(false)
+  const [wantsInvoice, setWantsInvoice] = useState(false)
+  const [sendingInvoice, setSendingInvoice] = useState(false)
+  const [einvoicingError, setEinvoicingError] = useState<string | null>(null)
+
   useEffect(() => {
     if (!tenantId) return
     getWalkInClient(tenantId).then(setWalkIn).catch(() => setWalkIn(null))
+    isDianDirectoConnected(tenantId).then(setDianConnected).catch(() => setDianConnected(false))
   }, [tenantId])
 
   // El input de escaneo se mantiene enfocado todo el tiempo -- un lector
@@ -307,6 +325,7 @@ export function PosFastCheckout() {
     }
     setCharging(true)
     setChargeError(null)
+    setEinvoicingError(null)
     try {
       const response = await posCheckout({
         contact_id: customer?.id ?? null,
@@ -323,6 +342,24 @@ export function PosFastCheckout() {
       })
       setResult(response)
       if (receiptPrinter.autoPrintEnabled) receiptPrinter.print(response.order.id)
+
+      // Envío a la DIAN, SIEMPRE después del cobro -- un rechazo acá nunca
+      // revierte la venta, ya está cobrada. pos-checkout solo RESERVA la
+      // fila de sales_invoices (queda 'pending'), nunca la transmite; sin
+      // este paso explícito, la única forma de emitirla era ir después al
+      // detalle del pedido -- mismo criterio que PaymentDrawer.tsx.
+      if (wantsInvoice) {
+        setSendingInvoice(true)
+        try {
+          const invoiceResult = await sendPosInvoiceForOrder(response.order.id)
+          const failureDetail = invoiceResult.status === 'error' ? invoiceResult.faultReason : invoiceResult.status === 'rejected' ? invoiceResult.rejectionDetail : null
+          if (failureDetail !== null) setEinvoicingError(failureDetail || t('orders.paymentDrawer.einvoicing.errors.send'))
+        } catch (err) {
+          setEinvoicingError(err instanceof Error ? err.message : t('orders.paymentDrawer.einvoicing.errors.send'))
+        } finally {
+          setSendingInvoice(false)
+        }
+      }
     } catch (err) {
       setChargeError(err instanceof Error ? err.message : t('pos.errors.checkout'))
     } finally {
@@ -336,6 +373,8 @@ export function PosFastCheckout() {
     setPaymentLines([createPaymentLine()])
     setResult(null)
     setChargeError(null)
+    setWantsInvoice(false)
+    setEinvoicingError(null)
     setQuery('')
     setScanError(null)
     // Venta nueva -- nuevo token, para que no quede pegado al intento de
@@ -380,7 +419,13 @@ export function PosFastCheckout() {
           <OrderTotalsSummary totals={resultTotals} currency={result.order.currency} className="mx-auto max-w-[260px] text-left" />
         )}
         {totalChange > 0 && <p className="text-xs text-brand-600">{t('pos.success.change', { amount: formatCurrency(totalChange, result.order.currency) })}</p>}
-        {result.invoice?.status === 'pending' && <p className="text-xs text-amber-600">{t('pos.success.invoicePending')}</p>}
+        {sendingInvoice && <p className="text-xs text-brand-500">{t('orders.paymentDrawer.einvoicing.sending')}</p>}
+        {einvoicingError && <p className="text-xs font-medium text-red-600">{einvoicingError}</p>}
+        {/* Sin checkbox marcado (o si el envío falló), el pedido queda con
+            su factura reservada en 'pending' -- este aviso genérico solo
+            aplica ahí, para no duplicar el mensaje de arriba cuando ya se
+            intentó enviar acá mismo. */}
+        {!wantsInvoice && result.invoice?.status === 'pending' && <p className="text-xs text-amber-600">{t('pos.success.invoicePending')}</p>}
         <div className="flex justify-center gap-2 pt-2">
           <Button variant="outline" onClick={() => navigate(`/app/sales/${result.order.id}`)}>
             {t('pos.actions.viewOrder')}
@@ -661,10 +706,30 @@ export function PosFastCheckout() {
             <p className="mb-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-700">{t('pos.tabs.errors.stockShortfall')}</p>
           )}
 
+          {/* Facturación electrónica DIAN al cobrar -- solo existe si el
+              tenant tiene 'dian_directo' conectado (ver dianConnected).
+              El comprador de la factura es el cliente ya elegido arriba
+              (o el de mostrador, si quedó en blanco): a diferencia de
+              PaymentDrawer.tsx acá no hace falta un selector aparte, la
+              venta ya tiene su propio picker de cliente. */}
+          {dianConnected && (
+            <div className="mb-3 rounded-xl border border-brand-100 bg-brand-50/40 p-3">
+              <div className="flex items-center gap-2">
+                <Checkbox id="pos-generate-invoice" checked={wantsInvoice} onCheckedChange={(v) => setWantsInvoice(!!v)} />
+                <Label htmlFor="pos-generate-invoice" className="text-xs font-semibold text-brand-800">
+                  {t('orders.paymentDrawer.einvoicing.checkbox')}
+                </Label>
+              </div>
+              {wantsInvoice && customer && (!customer.dian_document_type_code || !customer.document_number) && (
+                <p className="mt-1 text-[11px] text-amber-700">{t('orders.paymentDrawer.einvoicing.missingDocWarning')}</p>
+              )}
+            </div>
+          )}
+
           {chargeError && <p className="mb-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-700">{chargeError}</p>}
 
           <Button type="button" size="lg" className="w-full" disabled={!canCharge} onClick={handleCharge}>
-            {charging ? t('pos.actions.charging') : t('pos.actions.charge', { amount: formatCurrency(total) })}
+            {sendingInvoice ? t('orders.paymentDrawer.einvoicing.sending') : charging ? t('pos.actions.charging') : t('pos.actions.charge', { amount: formatCurrency(total) })}
           </Button>
         </div>
       </div>

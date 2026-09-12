@@ -9,6 +9,7 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 ### Added
 - Pago dividido también en el drawer de pagos (cuentas abiertas y "Agregar pago" de un pedido), reusando el mismo `PaymentLinesEditor` de la venta rápida -- antes solo estaba en Venta Rápida.
 - Al agregar otra línea de pago, el monto arranca solo con lo que queda por asignar (en vez de vacío), y cambiar de método o tipear un monto se recorta en el momento para nunca superar el saldo pendiente (o el saldo a favor disponible, si el método es ese) -- mismo candado que tenía el campo único antes de poder dividir el pago.
+- Checkbox de "generar factura electrónica" al cobrar en la venta rápida del POS (para tenants con DIAN conectada), igual que ya existía en cuentas abiertas -- sin esto, una venta de venta rápida solo reservaba la factura como pendiente y había que ir después al detalle del pedido para poder emitirla.
 
 ### Fixed
 - Registrar un pago en efectivo sin escribir "Recibido" no guardaba nada (ese campo siempre fue opcional, una validación de más lo empezó a bloquear en silencio al agregar el pago dividido al drawer).
