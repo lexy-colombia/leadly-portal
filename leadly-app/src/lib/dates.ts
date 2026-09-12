@@ -8,6 +8,12 @@ import type { Language } from '../i18n/translations'
  * fixed regardless of language. */
 export function formatDate(iso: string | null | undefined): string {
   if (!iso) return '—'
+  // Una columna `date` de Postgres llega como "YYYY-MM-DD", sin hora. Pasarla
+  // por `new Date` la interpreta como medianoche UTC, que en Colombia (UTC-5)
+  // son las 7 p. m. del día anterior -- la fecha se mostraba un día antes.
+  // Es un día de calendario, no un instante: se arma tal cual llega.
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
+  if (dateOnly) return `${dateOnly[3]}-${dateOnly[2]}-${dateOnly[1]}`
   const d = new Date(iso)
   const day = String(d.getDate()).padStart(2, '0')
   const month = String(d.getMonth() + 1).padStart(2, '0')
