@@ -143,7 +143,10 @@ export interface AddExpenseInventoryEntryInput {
   product_id: string
   warehouse_id: string
   quantity: number
-  unit_cost: number
+  /** Costo TOTAL de la línea (lo que dice la factura del proveedor). El
+   * unitario lo calcula la función de base de datos -- así el subtotal es
+   * exactamente la cifra de la factura, sin desvíos por división. */
+  total_cost: number
   variant_id?: string | null
   notes?: string | null
 }
@@ -160,7 +163,8 @@ export async function addExpenseInventoryEntry(input: AddExpenseInventoryEntryIn
     p_product_id: input.product_id,
     p_warehouse_id: input.warehouse_id,
     p_quantity: input.quantity,
-    p_unit_cost: input.unit_cost,
+    p_unit_cost: null,
+    p_total_cost: input.total_cost,
     p_variant_id: input.variant_id ?? null,
     p_notes: input.notes ?? null,
   })

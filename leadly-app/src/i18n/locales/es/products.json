@@ -202,6 +202,7 @@
   "products.drawer.fields.wholesalePrice": "Precio mayorista",
   "products.drawer.fields.retailPrice": "Precio al público",
   "products.drawer.fields.taxType": "Tipo de impuesto",
+  "products.drawer.fields.taxTypeLoadError": "No se pudieron cargar los tipos de impuesto.",
   "products.drawer.fields.taxRate": "Tasa (%)",
   "products.drawer.fields.taxHint": "El precio al público ya incluye el impuesto. Esto solo afecta el desglose de la factura electrónica -- no cambia lo que paga el cliente.",
   "products.drawer.fields.trackInventory": "Controlar inventario",

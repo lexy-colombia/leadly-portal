@@ -28,13 +28,15 @@ import { listCreditClients, type ClientCreditSummary } from '../../lib/api/credi
 import type { PipelineStage, OpportunityPriority, Dispatch } from '../../types/domain'
 import { getAgentActivitySummary, type AgentActivitySummary } from '../../lib/api/agentActivity'
 import { formatDate } from '../../lib/dates'
-import { Badge, PageSpinner, Select } from '@/components/atoms'
+import { Badge, PageSpinner } from '@/components/atoms'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Card, EmptyState } from '@/components/molecules'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { CalendarIcon, DollarIcon, InfoIcon, ReceiptIcon, RefreshIcon, TruckIcon, WalletIcon } from '@/components/atoms/icons'
 
 const PRIORITY_TONE: Record<OpportunityPriority, 'neutral' | 'warning' | 'danger'> = { baja: 'neutral', media: 'warning', alta: 'danger' }
 type RangeDays = 7 | 14 | 30
+const RANGE_OPTIONS: RangeDays[] = [7, 14, 30]
 
 function formatCompactCurrency(value: number): string {
   if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
@@ -501,10 +503,17 @@ export function Dashboard() {
         </div>
         <div className="flex items-center gap-1.5 rounded-lg border border-brand-100 bg-white px-2.5 py-1">
           <CalendarIcon width={14} height={14} className="shrink-0 text-brand-400" />
-          <Select value={kpiRangeDays} onChange={(e) => setKpiRangeDays(Number(e.target.value) as RangeDays)} className="!w-auto !border-0 !p-0 text-xs font-medium text-brand-600 focus:!ring-0">
-            <option value={7}>{t('dashboard.conversations.range.7')}</option>
-            <option value={14}>{t('dashboard.conversations.range.14')}</option>
-            <option value={30}>{t('dashboard.conversations.range.30')}</option>
+          <Select value={String(kpiRangeDays)} onValueChange={(v) => setKpiRangeDays(Number(v) as RangeDays)}>
+            <SelectTrigger className="!h-6 !w-auto !border-0 !bg-transparent !p-0 text-xs font-medium text-brand-600 focus-visible:!ring-0">
+              <SelectValue>{t(`dashboard.conversations.range.${kpiRangeDays}`)}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {RANGE_OPTIONS.map((days) => (
+                <SelectItem key={days} value={String(days)} className="text-xs">
+                  {t(`dashboard.conversations.range.${days}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
           </Select>
         </div>
       </div>
@@ -561,9 +570,18 @@ export function Dashboard() {
         <Card className="!p-3.5">
           <div className="mb-2.5 flex items-center justify-between gap-2">
             <h2 className="text-xs font-semibold text-brand-800">{t('dashboard.pipeline.title')}</h2>
-            <Select value={pipelineMetric} onChange={(e) => setPipelineMetric(e.target.value as 'value' | 'count')} className="!w-auto !py-1 text-xs">
-              <option value="value">{t('dashboard.pipeline.metric.value')}</option>
-              <option value="count">{t('dashboard.pipeline.metric.count')}</option>
+            <Select value={pipelineMetric} onValueChange={(v) => setPipelineMetric(v as 'value' | 'count')}>
+              <SelectTrigger className="!h-7 !w-auto !rounded-lg !text-xs">
+                <SelectValue>{t(`dashboard.pipeline.metric.${pipelineMetric}`)}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="value" className="text-xs">
+                  {t('dashboard.pipeline.metric.value')}
+                </SelectItem>
+                <SelectItem value="count" className="text-xs">
+                  {t('dashboard.pipeline.metric.count')}
+                </SelectItem>
+              </SelectContent>
             </Select>
           </div>
           {stages.length === 0 && opportunities === null && <PageSpinner />}
@@ -587,10 +605,17 @@ export function Dashboard() {
         <Card className="!p-3.5">
           <div className="mb-2.5 flex items-center justify-between gap-2">
             <h2 className="text-xs font-semibold text-brand-800">{t('dashboard.conversations.title', { days: rangeDays })}</h2>
-            <Select value={rangeDays} onChange={(e) => setRangeDays(Number(e.target.value) as RangeDays)} className="!w-auto !py-1 text-xs">
-              <option value={7}>{t('dashboard.conversations.range.7')}</option>
-              <option value={14}>{t('dashboard.conversations.range.14')}</option>
-              <option value={30}>{t('dashboard.conversations.range.30')}</option>
+            <Select value={String(rangeDays)} onValueChange={(v) => setRangeDays(Number(v) as RangeDays)}>
+              <SelectTrigger className="!h-7 !w-auto !rounded-lg !text-xs">
+                <SelectValue>{t(`dashboard.conversations.range.${rangeDays}`)}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {RANGE_OPTIONS.map((days) => (
+                  <SelectItem key={days} value={String(days)} className="text-xs">
+                    {t(`dashboard.conversations.range.${days}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
             </Select>
           </div>
           {!conversations && <PageSpinner />}

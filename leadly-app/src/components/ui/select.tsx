@@ -6,10 +6,34 @@ import { Select as SelectPrimitive } from "radix-ui"
 import { cn } from "@/lib/utils"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
 
+/** ⚠️ Defensa contra un reseteo fantasma a "" (bug real 2026-09-13, ficha de
+ * producto: el tipo de impuesto se borraba solo y no se podía cambiar).
+ *
+ * Dentro de un <form>, Radix renderiza un <select> nativo oculto para la
+ * semántica de formulario. Si el Select se monta con un valor que todavía no
+ * existe como <option> -- típico cuando las opciones llegan por fetch unos
+ * milisegundos después -- el navegador deja ese campo nativo vacío y Radix
+ * devuelve "" por onValueChange, pisando el valor real sin que el usuario
+ * haya tocado nada.
+ *
+ * Un "" nunca puede venir de una elección real: Radix prohíbe items con
+ * valor vacío. Así que se ignora cuando el control ya tenía un valor. */
 function Select({
+  value,
+  onValueChange,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Root>) {
-  return <SelectPrimitive.Root data-slot="select" {...props} />
+  return (
+    <SelectPrimitive.Root
+      data-slot="select"
+      value={value}
+      onValueChange={(next) => {
+        if (next === "" && value) return
+        onValueChange?.(next)
+      }}
+      {...props}
+    />
+  )
 }
 
 function SelectGroup({

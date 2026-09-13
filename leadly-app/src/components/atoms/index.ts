@@ -1,7 +1,6 @@
 export { Button, type ButtonVariant } from './Button'
 export { Input } from './Input'
 export { Textarea } from './Textarea'
-export { Select } from './Select'
 export { Label, FieldError } from './Field'
 export { Badge, type BadgeTone } from './Badge'
 export { PageSpinner } from './PageSpinner'

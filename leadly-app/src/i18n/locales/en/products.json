@@ -202,6 +202,7 @@
   "products.drawer.fields.wholesalePrice": "Wholesale price",
   "products.drawer.fields.retailPrice": "Retail price",
   "products.drawer.fields.taxType": "Tax type",
+  "products.drawer.fields.taxTypeLoadError": "Couldn't load the tax types.",
   "products.drawer.fields.taxRate": "Rate (%)",
   "products.drawer.fields.taxHint": "The retail price already includes tax. This only affects the electronic invoice breakdown -- it doesn't change what the customer pays.",
   "products.drawer.fields.trackInventory": "Track inventory",

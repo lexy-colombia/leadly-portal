@@ -1,4 +1,5 @@
-import { FieldError, Input, Label, Select } from '@/components/atoms'
+import { FieldError, Input, Label } from '@/components/atoms'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { Tenant } from '../../types/domain'
 import type { WhatsappLineFormState } from './useWhatsappLineForm'
 import { useLanguage } from '../../contexts/LanguageContext'
@@ -14,18 +15,19 @@ export function WhatsappLineFormFields({ form, tenants }: { form: WhatsappLineFo
       {tenants && (
         <div>
           <Label htmlFor="line-tenant">{t('backoffice.whatsappLineForm.tenant')}</Label>
-          <Select
-            id="line-tenant"
-            value={form.tenantId}
-            invalid={!!form.tenantIdError}
-            onChange={(e) => form.setTenantId(e.target.value)}
-          >
-            <option value="">{t('backoffice.whatsappLineForm.tenant.placeholder')}</option>
-            {tenants.map((tenant) => (
-              <option key={tenant.id} value={tenant.id}>
-                {tenant.name}
-              </option>
-            ))}
+          <Select value={form.tenantId} onValueChange={form.setTenantId}>
+            <SelectTrigger id="line-tenant" className="mt-1 w-full !h-7 !rounded-lg !text-xs" aria-invalid={!!form.tenantIdError}>
+              <SelectValue placeholder={t('backoffice.whatsappLineForm.tenant.placeholder')}>
+                {tenants.find((tenant) => tenant.id === form.tenantId)?.name}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {tenants.map((tenant) => (
+                <SelectItem key={tenant.id} value={tenant.id} className="text-xs">
+                  {tenant.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
           </Select>
           <FieldError message={form.tenantIdError} />
         </div>

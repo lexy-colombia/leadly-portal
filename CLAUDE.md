@@ -651,4 +651,12 @@ Todas desplegadas y probadas end-to-end (webhook simulado con payload de Meta fi
 
 ## 9. Cómo se trackea el trabajo
 
+### Migraciones: siempre por archivo + `supabase db push` (decisión explícita del usuario, 2026-09-13)
+
+**Todo cambio de esquema/datos se escribe como archivo en `leadly-db/supabase/migrations/` y se aplica con `supabase db push`** — nunca aplicándolo directo contra la base (ni por el MCP de Supabase, ni con SQL suelto). El motivo es trazabilidad: el repo tiene que poder responder qué cambió, cuándo y por qué, y eso solo se cumple si cada cambio aplicado tiene su archivo con el mismo nombre y la misma versión que la fila de `supabase_migrations.schema_migrations`.
+
+Qué pasó cuando no se respetó (y cómo se reparó): 7 migraciones se aplicaron con el MCP (`apply_migration`), que asigna su PROPIA marca de tiempo al registrarlas. El archivo local quedó con otra versión aunque el contenido y el nombre fueran idénticos, así que `supabase db push` empezó a fallar con "Remote migration versions not found in local migrations directory" y proponía `migration repair`. Se reparó **renombrando los archivos locales a la versión que quedó registrada en el servidor** (no con `repair`, que solo miente en la tabla y deja el archivo huérfano). Verificado con `supabase db push --dry-run` → "Remote database is up to date".
+
+Usar `execute_sql` del MCP para LEER (auditorías, diagnósticos) sigue siendo correcto y es lo esperable; lo que no se hace es escribir esquema o datos por ahí.
+
 **Este `CLAUDE.md` es la fuente de verdad tanto de arquitectura/decisiones como de backlog** (evita reprocesos si se usa otra IA o si el usuario avanza manualmente): el roadmap por fases (sección 8) y las notas de "pendiente"/"fuera de alcance" repartidas en cada sección numerada son el estado real del qué falta. Antes de empezar a implementar cualquier tarea, revisar si ya figura como hecha (`[x]`) en este documento — si el código no coincide con lo que dice acá, confiar en el código y corregir el documento, no al revés (ver notas de "desfase" repartidas en el historial de "Estado actual").

@@ -247,6 +247,11 @@ export function ProductDrawer({
   const [taxTypeCode, setTaxTypeCode] = useState('01')
   const [taxRate, setTaxRate] = useState('19')
   const [taxTypes, setTaxTypes] = useState<TaxType[]>([])
+  // Si el catálogo de impuestos no carga, el selector quedaba vacío y SIN
+  // opciones, sin ningún aviso (el .catch lo tragaba) -- bug real reportado
+  // 2026-09-13: no había forma de setear el tipo de impuesto de un producto
+  // y no se entendía por qué. Ahora el error se ve y se puede reintentar.
+  const [taxTypesError, setTaxTypesError] = useState(false)
   const [touched, setTouched] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -268,7 +273,10 @@ export function ProductDrawer({
     setLowStockThreshold(product ? String(product.low_stock_threshold) : '5')
     setIsActive(product?.is_active ?? true)
     setVisibleInCatalog(product?.is_visible_in_catalog ?? false)
-    setTaxTypeCode(product?.tax_type_code ?? '01')
+    // Un producto que hoy NO tiene tipo de impuesto arranca vacío, no en
+    // IVA: con el default anterior, abrir su ficha y guardar cualquier otro
+    // campo le escribía '01' en silencio, sin que nadie lo eligiera.
+    setTaxTypeCode(product ? (product.tax_type_code ?? '') : '01')
     setTaxRate(product ? String(product.tax_rate) : '19')
     setTouched(false)
     setFormError(null)
@@ -279,10 +287,16 @@ export function ProductDrawer({
     listProductCategories(tenantId).then(setCategories).catch(() => {})
     listSuppliers(tenantId).then(setSuppliers).catch(() => {})
     listBrands(tenantId).then(setBrands).catch(() => {})
+    loadTaxTypes()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, tenantId])
+
+  function loadTaxTypes() {
+    setTaxTypesError(false)
     listTaxTypes()
       .then((types) => setTaxTypes(types.filter((tx) => tx.category === 'impuesto')))
-      .catch(() => {})
-  }, [open, tenantId])
+      .catch(() => setTaxTypesError(true))
+  }
 
   const nameError = touched && !isNotBlank(name) ? t('products.drawer.errors.nameRequired') : undefined
 
@@ -449,23 +463,49 @@ export function ProductDrawer({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="product-tax-type">{t('products.drawer.fields.taxType')}</Label>
-              <Select value={taxTypeCode} onValueChange={setTaxTypeCode}>
-                <SelectTrigger id="product-tax-type" className={`mt-1 w-full ${FIELD_CLASS}`}>
-                  {/* Radix only learns an item's label once SelectContent has
-                   * mounted (i.e. after the dropdown has been opened once),
-                   * so an empty <SelectValue /> renders blank on first paint
-                   * even though taxTypeCode already has a real value -- pass
-                   * the matched label explicitly instead of relying on that. */}
-                  <SelectValue>{taxTypes.find((tx) => tx.code === taxTypeCode)?.name}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {taxTypes.map((tx) => (
-                    <SelectItem key={tx.code} value={tx.code} className="text-xs">
-                      {tx.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {/* ⚠️ El Select NO se monta hasta tener el catálogo cargado.
+               * Bug real (2026-09-13): el tipo de impuesto de un producto no
+               * se podía cambiar y "se perdía" al guardar. Causa: este Select
+               * vive dentro de un <form>, así que Radix renderiza un <select>
+               * nativo oculto para la semántica de formulario. Montado con un
+               * valor ('04') que todavía no existe como <option> (el catálogo
+               * llega por fetch, milisegundos después), el navegador deja ese
+               * campo nativo en "" y Radix devuelve ese "" por onValueChange
+               * -- pisando el valor real del producto sin que nadie tocara
+               * nada. Se veía como un selector en blanco. */}
+              {taxTypes.length === 0 ? (
+                <div className={`mt-1 flex w-full items-center rounded-lg border border-input px-2.5 text-xs text-brand-400 ${FIELD_CLASS}`}>
+                  {taxTypesError ? '—' : t('common.status.loading')}
+                </div>
+              ) : (
+                <Select value={taxTypeCode} onValueChange={setTaxTypeCode}>
+                  <SelectTrigger id="product-tax-type" className={`mt-1 w-full ${FIELD_CLASS}`}>
+                    {/* Radix only learns an item's label once SelectContent has
+                     * mounted (i.e. after the dropdown has been opened once),
+                     * so an empty <SelectValue /> renders blank on first paint
+                     * even though taxTypeCode already has a real value -- pass
+                     * the matched label explicitly instead of relying on that. */}
+                    <SelectValue>
+                      {taxTypes.find((tx) => tx.code === taxTypeCode)?.name ?? (taxTypeCode || undefined)}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {taxTypes.map((tx) => (
+                      <SelectItem key={tx.code} value={tx.code} className="text-xs">
+                        {tx.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              {taxTypesError && (
+                <p className="mt-1 flex items-center gap-2 text-[11px] text-red-700">
+                  {t('products.drawer.fields.taxTypeLoadError')}
+                  <button type="button" onClick={loadTaxTypes} className="underline">
+                    {t('common.actions.retry')}
+                  </button>
+                </p>
+              )}
             </div>
             <div>
               <Label htmlFor="product-tax-rate">{t('products.drawer.fields.taxRate')}</Label>

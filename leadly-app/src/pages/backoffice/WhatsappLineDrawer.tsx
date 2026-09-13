@@ -10,7 +10,8 @@ import {
 } from '../../lib/api/whatsappLines'
 import { getMaxWhatsappLinesForTenant } from '../../lib/api/billing'
 import type { WhatsappLine, WhatsappLineStatus } from '../../types/domain'
-import { Button, FieldError, Input, Label, Select } from '@/components/atoms'
+import { Button, FieldError, Input, Label } from '@/components/atoms'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Drawer } from '@/components/organisms'
 import { useWhatsappLineForm } from './useWhatsappLineForm'
 import { WhatsappLineFormFields } from './WhatsappLineFormFields'
@@ -172,17 +173,22 @@ export function WhatsappLineDrawer({
         {isEdit && line && (
           <div>
             <Label htmlFor="line-status">{t('backoffice.whatsappLineDrawer.verificationStatus')}</Label>
-            <Select
-              id="line-status"
-              value={status}
-              disabled={statusSaving}
-              onChange={(e) => handleStatusChange(e.target.value as WhatsappLineStatus)}
-            >
-              {Object.entries(STATUS_LABEL_KEY).map(([value, labelKey]) => (
-                <option key={value} value={value} disabled={value === 'active' && atLineCapacity && status !== 'active'}>
-                  {t(labelKey)}
-                </option>
-              ))}
+            <Select value={status} disabled={statusSaving} onValueChange={(v) => handleStatusChange(v as WhatsappLineStatus)}>
+              <SelectTrigger id="line-status" className="mt-1 w-full !h-7 !rounded-lg !text-xs">
+                <SelectValue>{t(STATUS_LABEL_KEY[status])}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(STATUS_LABEL_KEY).map(([value, labelKey]) => (
+                  <SelectItem
+                    key={value}
+                    value={value}
+                    className="text-xs"
+                    disabled={value === 'active' && atLineCapacity && status !== 'active'}
+                  >
+                    {t(labelKey)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
             </Select>
             {atLineCapacity && status !== 'active' && (
               <p className="mt-1 text-xs text-amber-600">{t('backoffice.whatsappLineDrawer.atCapacity', { max: maxLines ?? 0 })}</p>

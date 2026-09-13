@@ -4,6 +4,16 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.12] - 2026-09-13
+
+### Changed
+- Gastos: al dar entrada de inventario desde un gasto ahora se informa el **costo total** de la línea (lo que dice la factura del proveedor) y el sistema calcula el unitario, en vez de obligar a dividir a mano. El unitario se muestra como referencia debajo del campo.
+- Un solo componente de selector en toda la app: se eliminaron el `<select>` nativo de `atoms` y el `IconSelect` de `molecules` (este último no se usaba en ningún lado), y se migraron a shadcn los 5 selectores que quedaban (Dashboard y las dos pantallas de Líneas de WhatsApp del backoffice).
+
+### Fixed
+- El tipo de impuesto de un producto no se podía cambiar y se borraba solo al guardar: el selector vive dentro de un formulario, así que la librería mantiene un `<select>` nativo oculto; montado con un valor que todavía no existe como opción (el catálogo llega por consulta), el navegador lo dejaba vacío y ese vacío pisaba el valor real. Corregido en el componente `Select` compartido, así que cubre las ~17 pantallas con ese mismo patrón.
+- Ficha de producto: el selector de impuesto no se dibuja hasta tener el catálogo cargado, si el catálogo falla ahora se ve el error con "Reintentar" (antes se ignoraba en silencio), y un producto sin tipo de impuesto ya no arranca en IVA por defecto.
+
 ## [1.0.11] - 2026-09-12
 
 ### Fixed

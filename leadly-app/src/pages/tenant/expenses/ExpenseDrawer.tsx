@@ -86,7 +86,7 @@ export function ExpenseDrawer({
   const [entryVariantId, setEntryVariantId] = useState('')
   const [entryWarehouseId, setEntryWarehouseId] = useState('')
   const [entryQuantity, setEntryQuantity] = useState('')
-  const [entryUnitCost, setEntryUnitCost] = useState('')
+  const [entryTotalCost, setEntryTotalCost] = useState('')
   const [entryTouched, setEntryTouched] = useState(false)
   const [addingEntry, setAddingEntry] = useState(false)
   const [entryError, setEntryError] = useState<string | null>(null)
@@ -110,7 +110,7 @@ export function ExpenseDrawer({
     setEntryVariantId('')
     setEntryWarehouseId('')
     setEntryQuantity('')
-    setEntryUnitCost('')
+    setEntryTotalCost('')
     setEntryTouched(false)
     setEntryError(null)
 
@@ -180,9 +180,9 @@ export function ExpenseDrawer({
   const activeVariants = selectedProduct?.variants.filter((v) => v.is_active) ?? []
 
   const entryQuantityNumber = Number(entryQuantity)
-  const entryUnitCostNumber = toNumberOrNull(entryUnitCost)
+  const entryTotalCostNumber = toNumberOrNull(entryTotalCost)
   const entryQuantityError = entryTouched && !(entryQuantityNumber > 0) ? t('expenses.list.entries.errors.quantityRequired') : undefined
-  const entryCostError = entryTouched && !(entryUnitCostNumber !== null && entryUnitCostNumber >= 0) ? t('expenses.list.entries.errors.costRequired') : undefined
+  const entryCostError = entryTouched && !(entryTotalCostNumber !== null && entryTotalCostNumber >= 0) ? t('expenses.list.entries.errors.costRequired') : undefined
   const entryProductError = entryTouched && !entryProductId ? t('expenses.list.entries.errors.productRequired') : undefined
   const entryVariantError = entryTouched && !!selectedProduct?.has_variants && !entryVariantId ? t('expenses.list.entries.errors.variantRequired') : undefined
   const entryWarehouseError = entryTouched && !entryWarehouseId ? t('expenses.list.entries.errors.warehouseRequired') : undefined
@@ -194,7 +194,7 @@ export function ExpenseDrawer({
     if (!savedExpense) return
     if (!entryProductId || !entryWarehouseId) return
     if (!(entryQuantityNumber > 0)) return
-    if (entryUnitCostNumber === null || entryUnitCostNumber < 0) return
+    if (entryTotalCostNumber === null || entryTotalCostNumber < 0) return
     if (selectedProduct?.has_variants && !entryVariantId) return
 
     setAddingEntry(true)
@@ -206,13 +206,13 @@ export function ExpenseDrawer({
         variant_id: selectedProduct?.has_variants ? entryVariantId : null,
         warehouse_id: entryWarehouseId,
         quantity: entryQuantityNumber,
-        unit_cost: entryUnitCostNumber,
+        total_cost: entryTotalCostNumber,
       })
       reloadEntries(savedExpense.id)
       setEntryProductId('')
       setEntryVariantId('')
       setEntryQuantity('')
-      setEntryUnitCost('')
+      setEntryTotalCost('')
       setEntryTouched(false)
     } catch (err) {
       setEntryError(err instanceof Error ? err.message : t('expenses.list.entries.errors.save'))
@@ -435,14 +435,26 @@ export function ExpenseDrawer({
                     />
                   </div>
                   <div>
-                    <Label htmlFor="entry-cost">{t('expenses.list.entries.fields.unitCost')}</Label>
+                    {/* El costo que trae la factura del proveedor es el TOTAL
+                        de la línea -- pedir el unitario obligaba a dividir a
+                        mano (pedido explícito del usuario). El unitario lo
+                        calcula add_expense_inventory_entry; acá solo se
+                        muestra como referencia. */}
+                    <Label htmlFor="entry-cost">{t('expenses.list.entries.fields.totalCost')}</Label>
                     <CurrencyInput
                       id="entry-cost"
-                      value={entryUnitCost}
+                      value={entryTotalCost}
                       aria-invalid={!!entryCostError}
-                      onChange={(e) => setEntryUnitCost(e.target.value)}
+                      onChange={(e) => setEntryTotalCost(e.target.value)}
                       className={`mt-1 ${FIELD_CLASS}`}
                     />
+                    {entryQuantityNumber > 0 && entryTotalCostNumber !== null && entryTotalCostNumber > 0 && (
+                      <p className="mt-1 text-[11px] text-brand-400">
+                        {t('expenses.list.entries.unitCostHint', {
+                          cost: formatCurrency(entryTotalCostNumber / entryQuantityNumber, savedExpense.currency),
+                        })}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <FieldError message={entryQuantityError ?? entryCostError} />
