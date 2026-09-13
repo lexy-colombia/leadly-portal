@@ -4,6 +4,14 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.13] - 2026-09-13
+
+### Added
+- Los filtros, la búsqueda y la página de las listas quedan en la URL (`?status=&from=&page=...`), así que entrar al detalle de una fila y volver con "atrás" ya no los pierde, y el enlace se puede guardar o compartir con la vista ya filtrada. Aplica a Órdenes, Productos, Clientes y Gastos. Lo que está en su valor por defecto no se escribe, y el historial se reemplaza en vez de apilarse (el botón "atrás" no deshace letra por letra lo tipeado en el buscador).
+
+### Fixed
+- Barriles de la sexta: las ventas de septiembre que quedaron sin ningún pago cargado ahora tienen su pago en efectivo registrado (29 pedidos, $1.212.000, todos del 5 de septiembre), con la fecha del pago igual al día de la venta. Se excluyeron los pedidos en $0, los de pago parcial y los anulados.
+
 ## [1.0.12] - 2026-09-13
 
 ### Changed

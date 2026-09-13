@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useResetOnFilterChange, useUrlFilterSync } from '../../lib/urlFilters'
 import { MoreHorizontalIcon } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
@@ -67,6 +68,43 @@ function defaultOrderFilters(): OrderFilters {
   return { status: null, channel: null, contact: null, hasInvoice: null, dateFrom: todayIso(), dateTo: todayIso() }
 }
 
+/** Filtros + búsqueda + página viven en la URL (?status=&from=&page=...).
+ * Los nombres de los parámetros van en inglés, igual que el resto del código
+ * (columnas, props, claves de i18n) -- lo que se traduce es la interfaz, no
+ * los identificadores.
+ * Pedido explícito del usuario (2026-09-13): buscar algo, entrar a un pedido
+ * y volver con el botón "atrás" perdía todos los filtros. En la URL, además,
+ * el enlace se puede guardar o compartir con la vista ya filtrada.
+ *
+ * Lo que está en su valor por defecto NO se escribe, para no llenar la barra
+ * de direcciones con ruido: una URL sin parámetros es "hoy, sin filtros". */
+function filtersFromParams(params: URLSearchParams): OrderFilters {
+  const base = defaultOrderFilters()
+  const invoiced = params.get('invoiced')
+  return {
+    status: (params.get('status') as OrderStatus | null) || base.status,
+    channel: (params.get('channel') as SalesOrder['sales_channel']) || base.channel,
+    contact: params.get('contact') || base.contact,
+    hasInvoice: invoiced === null ? base.hasInvoice : invoiced === 'yes',
+    dateFrom: params.get('from') || base.dateFrom,
+    dateTo: params.get('to') || base.dateTo,
+  }
+}
+
+function paramsFromState(filters: OrderFilters, search: string, page: number): Record<string, string | null> {
+  const base = defaultOrderFilters()
+  return {
+    status: filters.status,
+    channel: filters.channel,
+    contact: filters.contact,
+    invoiced: filters.hasInvoice === null ? null : filters.hasInvoice ? 'yes' : 'no',
+    from: filters.dateFrom === base.dateFrom ? null : filters.dateFrom,
+    to: filters.dateTo === base.dateTo ? null : filters.dateTo,
+    q: search || null,
+    page: page > 1 ? String(page) : null,
+  }
+}
+
 function formatCurrency(value: number, currency: string): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 }
@@ -126,18 +164,21 @@ export function Orders() {
   const [summary, setSummary] = useState<OrdersSummary | null>(null)
   const [contacts, setContacts] = useState<Client[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [search, setSearch] = useState('')
-  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [searchParams] = useSearchParams()
+  // Estado inicial tomado de la URL (ver filtersFromParams) -- volver desde
+  // el detalle de un pedido reconstruye la vista tal cual estaba.
+  const [search, setSearch] = useState(() => searchParams.get('q') ?? '')
+  const [debouncedSearch, setDebouncedSearch] = useState(() => searchParams.get('q') ?? '')
   // Los filtros se editan en un borrador y no afectan la tabla hasta tocar
   // "Aplicar" (pedido explícito del usuario: nada de refiltrar en cada
   // click). Mismo criterio que el drawer de filtros de la tienda pública.
   // `channel` es por dónde entró el pedido (sales_channel): mostrador,
   // portal, IA de WhatsApp o tienda pública.
-  const [draft, setDraft] = useState<OrderFilters>(defaultOrderFilters)
-  const [filters, setFilters] = useState<OrderFilters>(defaultOrderFilters)
+  const [draft, setDraft] = useState<OrderFilters>(() => filtersFromParams(searchParams))
+  const [filters, setFilters] = useState<OrderFilters>(() => filtersFromParams(searchParams))
   const filtersDirty = JSON.stringify(draft) !== JSON.stringify(filters)
   const filtersActive = JSON.stringify(filters) !== JSON.stringify(defaultOrderFilters())
-  const [page, setPage] = useState(1)
+  const [page, setPage] = useState(() => Math.max(1, Number(searchParams.get('page')) || 1))
   // First column, prep for a future bulk-actions bar -- no toolbar wired up
   // yet, just the ability to check rows. Selection is page-scoped: cleared
   // whenever the filtered set changes so it never holds an id that has
@@ -200,10 +241,12 @@ export function Orders() {
     listClients(profile.tenant_id).then(setContacts).catch(() => {})
   }, [profile?.tenant_id])
 
-  useEffect(() => {
+  useResetOnFilterChange(JSON.stringify([filters, debouncedSearch]), () => {
     setPage(1)
     setSelectedIds(new Set())
-  }, [filters, debouncedSearch])
+  })
+
+  useUrlFilterSync(paramsFromState(filters, debouncedSearch, page))
 
   const pageItems = orders
   const salesSummary = summary

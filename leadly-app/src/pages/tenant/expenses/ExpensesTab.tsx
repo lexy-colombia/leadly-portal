@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { useResetOnFilterChange, useUrlFilterSync } from '../../../lib/urlFilters'
 import { deleteExpense, listExpensesPage, type ExpensesSummary, type ExpenseWithRelations } from '../../../lib/api/expenses'
 import { listExpenseCategories } from '../../../lib/api/expenseCategories'
 import { listSuppliers } from '../../../lib/api/suppliers'
@@ -51,6 +53,18 @@ function defaultExpenseFilters(): ExpenseFilters {
   return { supplierId: null, categoryId: null, dateFrom: todayIso(), dateTo: todayIso() }
 }
 
+/** Lo aplicado vive en la URL (?supplier=&from=&page=...), ver
+ * lib/urlFilters.ts -- lo que está en su valor por defecto no se escribe. */
+function expenseFiltersFromParams(params: URLSearchParams): ExpenseFilters {
+  const base = defaultExpenseFilters()
+  return {
+    supplierId: params.get('supplier') || base.supplierId,
+    categoryId: params.get('category') || base.categoryId,
+    dateFrom: params.get('from') || base.dateFrom,
+    dateTo: params.get('to') || base.dateTo,
+  }
+}
+
 function formatCurrency(value: number, currency: string): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 }
@@ -75,11 +89,13 @@ export function ExpensesTab({ tenantId }: { tenantId: string }) {
   const [categories, setCategories] = useState<ExpenseCategory[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [page, setPage] = useState(1)
+  const [searchParams] = useSearchParams()
+  const [page, setPage] = useState(() => Math.max(1, Number(searchParams.get('page')) || 1))
   // Borrador editable aparte de lo aplicado -- no refiltra en cada click,
-  // solo al tocar "Aplicar" (mismo criterio que Orders.tsx).
-  const [draft, setDraft] = useState<ExpenseFilters>(defaultExpenseFilters)
-  const [filters, setFilters] = useState<ExpenseFilters>(defaultExpenseFilters)
+  // solo al tocar "Aplicar" (mismo criterio que Orders.tsx). Lo aplicado
+  // arranca de la URL y se espeja ahí.
+  const [draft, setDraft] = useState<ExpenseFilters>(() => expenseFiltersFromParams(searchParams))
+  const [filters, setFilters] = useState<ExpenseFilters>(() => expenseFiltersFromParams(searchParams))
   const filtersDirty = JSON.stringify(draft) !== JSON.stringify(filters)
   const filtersActive = JSON.stringify(filters) !== JSON.stringify(defaultExpenseFilters())
   const [drawer, setDrawer] = useState<{ open: boolean; expense: ExpenseWithRelations | null }>({ open: false, expense: null })
@@ -114,9 +130,15 @@ export function ExpensesTab({ tenantId }: { tenantId: string }) {
 
   useEffect(reload, [tenantId, page, filters])
 
-  useEffect(() => {
-    setPage(1)
-  }, [filters])
+  useResetOnFilterChange(JSON.stringify(filters), () => setPage(1))
+
+  useUrlFilterSync({
+    supplier: filters.supplierId,
+    category: filters.categoryId,
+    from: filters.dateFrom === todayIso() ? null : filters.dateFrom,
+    to: filters.dateTo === todayIso() ? null : filters.dateTo,
+    page: page > 1 ? String(page) : null,
+  })
 
   useEffect(() => {
     listSuppliers(tenantId).then(setSuppliers).catch(() => setSuppliers([]))

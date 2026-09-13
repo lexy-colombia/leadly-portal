@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import { useHeaderSearchSlot } from '@/contexts/HeaderSearchSlotContext'
@@ -9,6 +9,7 @@ import type { ProductWithImages } from '../../lib/api/products'
 import { listStockByWarehouse, listStockTotalsByTenant, recordStockMovement } from '../../lib/api/stockMovements'
 import type { ProductStockTotal, ProductWarehouseStockRow } from '../../lib/api/stockMovements'
 import { descendantIds, listProductCategories } from '../../lib/api/productCategories'
+import { useResetOnFilterChange, useUrlFilterSync } from '../../lib/urlFilters'
 import { listBrands } from '../../lib/api/brands'
 import { listWarehouses } from '../../lib/api/warehouses'
 import type { Brand, ProductCategory, Warehouse } from '../../types/domain'
@@ -243,13 +244,17 @@ export function Products() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const [search, setSearch] = useState('')
-  const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [categoryId, setCategoryId] = useState<string | null>(null)
-  const [brandId, setBrandId] = useState<string | null>(null)
-  const [warehouseId, setWarehouseId] = useState<string | null>(null)
-  const [lowStockOnly, setLowStockOnly] = useState(false)
-  const [page, setPage] = useState(1)
+  // Filtros, búsqueda y página arrancan de la URL y se espejan ahí (ver
+  // lib/urlFilters.ts): volver desde la ficha de un producto reconstruye la
+  // vista tal cual estaba.
+  const [searchParams] = useSearchParams()
+  const [search, setSearch] = useState(() => searchParams.get('q') ?? '')
+  const [debouncedSearch, setDebouncedSearch] = useState(() => searchParams.get('q') ?? '')
+  const [categoryId, setCategoryId] = useState<string | null>(() => searchParams.get('category'))
+  const [brandId, setBrandId] = useState<string | null>(() => searchParams.get('brand'))
+  const [warehouseId, setWarehouseId] = useState<string | null>(() => searchParams.get('warehouse'))
+  const [lowStockOnly, setLowStockOnly] = useState(() => searchParams.get('lowStock') === '1')
+  const [page, setPage] = useState(() => Math.max(1, Number(searchParams.get('page')) || 1))
 
   const [drawer, setDrawer] = useState<{ open: boolean; product: ProductWithImages | null }>({ open: false, product: null })
   const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -285,9 +290,16 @@ export function Products() {
 
   const hasActiveFilters = Boolean(debouncedSearch || categoryId || brandId || warehouseId || lowStockOnly)
 
-  useEffect(() => {
-    setPage(1)
-  }, [debouncedSearch, categoryIds, brandId, warehouseId, lowStockOnly])
+  useResetOnFilterChange(JSON.stringify([debouncedSearch, categoryIds, brandId, warehouseId, lowStockOnly]), () => setPage(1))
+
+  useUrlFilterSync({
+    q: debouncedSearch || null,
+    category: categoryId,
+    brand: brandId,
+    warehouse: warehouseId,
+    lowStock: lowStockOnly ? '1' : null,
+    page: page > 1 ? String(page) : null,
+  })
 
   function reload() {
     if (!tenantId) return

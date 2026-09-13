@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { useLanguage } from "../../contexts/LanguageContext";
 import { useHeaderSearchSlot } from "@/contexts/HeaderSearchSlotContext";
 import type { Language } from "../../i18n/translations";
 import { formatDate } from "../../lib/dates";
+import { useResetOnFilterChange, useUrlFilterSync } from "../../lib/urlFilters";
 import { formatClientPhoneDisplay } from "../../lib/phone";
 import { deleteClient, listClients } from "../../lib/api/clients";
 import { listLastContactTimesByTenant } from "../../lib/api/conversations";
@@ -69,10 +70,14 @@ export function Clients() {
     new Map(),
   );
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [tagFilter, setTagFilter] = useState<string | null>(null);
-  const [agentFilter, setAgentFilter] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
+  // Filtros, búsqueda y página arrancan de la URL y se espejan ahí (ver
+  // lib/urlFilters.ts): volver desde la ficha de un cliente reconstruye la
+  // vista tal cual estaba.
+  const [searchParams] = useSearchParams();
+  const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
+  const [tagFilter, setTagFilter] = useState<string | null>(() => searchParams.get("tag"));
+  const [agentFilter, setAgentFilter] = useState<string | null>(() => searchParams.get("agent"));
+  const [page, setPage] = useState(() => Math.max(1, Number(searchParams.get("page")) || 1));
   const [drawer, setDrawer] = useState<{
     open: boolean;
     contact: Client | null;
@@ -116,9 +121,14 @@ export function Clients() {
     });
   }, [contacts, search, tagFilter, agentFilter]);
 
-  useEffect(() => {
-    setPage(1);
-  }, [search, tagFilter, agentFilter]);
+  useResetOnFilterChange(JSON.stringify([search, tagFilter, agentFilter]), () => setPage(1));
+
+  useUrlFilterSync({
+    q: search || null,
+    tag: tagFilter,
+    agent: agentFilter,
+    page: page > 1 ? String(page) : null,
+  });
 
   const totalPages = filtered
     ? Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
