@@ -3,6 +3,9 @@ import { rasterizeLogoForEscPos } from './escposImage'
 import { formatMoney } from '../components/pos/PosReceiptTicket'
 import type { PosReceiptData } from './api/posReceipt'
 import type { PosPendingReceiptData } from '../components/pos/PosPendingReceiptTicket'
+import { EXPENSE_STATUS_LABEL_KEY, expenseDocumentLabel, type ExpenseReceiptData } from '../components/expenses/ExpenseReceiptTicket'
+import type { CreditPaymentTicketData } from '../components/credit/CreditPaymentTicket'
+import { CREDIT_PAYMENT_METHOD_LABEL_KEY } from './api/credit'
 import { PAYMENT_METHOD_LABEL_KEY } from './api/orderPayments'
 import { formatDate, formatDateTime } from './dates'
 import { formatClientPhoneDisplay } from './phone'
@@ -73,6 +76,101 @@ function writeTotals(
   if (totals.shipping > 0) b.row(t('orders.totals.shipping'), formatMoney(totals.shipping, currency))
   b.rule()
   b.bold(true).row(t('orders.totals.total'), formatMoney(totals.total, currency)).bold(false)
+}
+
+/** Soporte de pago de un abono a crédito -- mismo campo por campo que
+ * CreditPaymentTicket.tsx, para la impresora térmica por WebUSB. */
+export async function buildCreditPaymentReceiptEscPos(
+  data: CreditPaymentTicketData,
+  t: T,
+  language: Language,
+  paperWidthMm: 58 | 80,
+): Promise<Uint8Array> {
+  const { tenant, client, payment, balance } = data
+  const b = new EscPosBuilder(paperWidthMm)
+
+  await writeHeader(b, tenant, paperWidthMm)
+  b.rule()
+
+  b.align('center')
+  b.bold(true).line(t('credit.ticket.docTitle')).bold(false)
+  b.line(t('credit.movement.receipt', { number: payment.receipt_number }))
+  b.align('left')
+  b.rule()
+
+  b.row(t('credit.ticket.client'), client.full_name)
+  if (client.document_number) b.row(t('credit.ticket.document'), client.document_number)
+  if (client.phone) b.row(t('pos.receipt.phone'), formatClientPhoneDisplay(client.phone_prefix, client.phone))
+  b.row(t('credit.ticket.date'), formatDate(payment.paid_at))
+  b.row(t('credit.ticket.method'), t(CREDIT_PAYMENT_METHOD_LABEL_KEY[payment.method]))
+
+  if (payment.notes) {
+    b.rule()
+    b.line(t('credit.ticket.notes'))
+    b.line(payment.notes)
+  }
+
+  b.rule()
+  b.bold(true).row(t('credit.ticket.amount'), formatMoney(payment.amount, payment.currency)).bold(false)
+  b.row(t('credit.ticket.balance'), formatMoney(balance, payment.currency))
+  b.rule()
+
+  b.align('center')
+  b.line(t('credit.ticket.disclaimer'))
+  b.line(formatDateTime(new Date().toISOString(), language))
+  b.align('left')
+  b.feed(3)
+  b.cut()
+  return b.toBytes()
+}
+
+/** Comprobante de egreso -- mismo campo por campo que
+ * ExpenseReceiptTicket.tsx, para la impresora térmica por WebUSB. Un egreso
+ * NO es un documento fiscal: sin resolución, sin CUFE, sin QR; sí con
+ * espacio de firma de quien recibe y la leyenda de "documento interno". */
+export async function buildExpenseReceiptEscPos(data: ExpenseReceiptData, t: T, language: Language, paperWidthMm: 58 | 80): Promise<Uint8Array> {
+  const { tenant, expense } = data
+  const b = new EscPosBuilder(paperWidthMm)
+
+  await writeHeader(b, tenant, paperWidthMm)
+  b.rule()
+
+  b.align('center')
+  b.bold(true).line(t('expenses.receipt.docTitle')).bold(false)
+  b.line(expenseDocumentLabel(expense))
+  b.align('left')
+  b.rule()
+
+  b.row(t('expenses.receipt.date'), formatDate(expense.expense_date))
+  if (expense.payment_date) b.row(t('expenses.receipt.paymentDate'), formatDate(expense.payment_date))
+  b.row(t('expenses.receipt.supplier'), expense.supplier?.name ?? '—')
+  b.row(t('expenses.receipt.category'), expense.category?.name ?? '—')
+  if (expense.payment_method) b.row(t('expenses.receipt.method'), expense.payment_method)
+  b.row(t('expenses.receipt.status'), t(EXPENSE_STATUS_LABEL_KEY[expense.status]))
+
+  if (expense.description) {
+    b.rule()
+    b.line(t('expenses.receipt.concept'))
+    b.line(expense.description)
+  }
+
+  b.rule()
+  b.bold(true).row(t('expenses.receipt.amount'), formatMoney(expense.amount, expense.currency)).bold(false)
+  b.rule()
+
+  b.line(t('expenses.receipt.signature'))
+  b.feed(2)
+  b.line('______________________________')
+  b.line(t('expenses.receipt.signatureName'))
+  b.rule()
+
+  b.align('center')
+  b.line(t('expenses.receipt.disclaimer'))
+  b.line(formatDateTime(new Date().toISOString(), language))
+  b.align('left')
+  b.feed(3)
+  b.cut()
+  return b.toBytes()
 }
 
 /** Ticket final, cobrado -- mismo campo por campo que PosReceiptTicket.tsx,

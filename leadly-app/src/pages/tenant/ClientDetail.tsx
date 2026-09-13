@@ -38,7 +38,8 @@ import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { CalendarIcon, CheckIcon, ChatBubbleIcon, PencilIcon, PlusIcon, ReceiptIcon, TrashIcon, XCircleIcon } from '@/components/atoms/icons'
+import { CalendarIcon, CheckIcon, ChatBubbleIcon, PencilIcon, PlusIcon, PrinterIcon, ReceiptIcon, TrashIcon, XCircleIcon } from '@/components/atoms/icons'
+import { useCreditPaymentReceiptPrinter } from '../../lib/useCreditPaymentReceiptPrinter'
 import { ContactDrawer } from './clients/ContactDrawer'
 import { AppointmentDrawer } from './clients/AppointmentDrawer'
 import { AddressDrawer } from './clients/AddressDrawer'
@@ -80,6 +81,33 @@ const APPOINTMENT_STATUS_BADGE_CLASS: Record<AppointmentStatus, string> = {
   activa: 'border-transparent bg-amber-100 text-amber-700',
   completada: 'border-transparent bg-emerald-100 text-emerald-700',
   cancelada: 'border-transparent bg-red-100 text-red-700',
+}
+
+/** La nota de un cargo a crédito trae el número del pedido que lo generó
+ * ("Cargo por orden #28258") -- ese número ES el enlace al pedido, en vez de
+ * un "Ver pedido" aparte repitiendo el mismo número (pedido explícito del
+ * usuario). Sin pedido asociado, o si la nota no trae número, se devuelve el
+ * texto tal cual: nunca se fabrica un enlace que no lleva a ningún lado. */
+function linkifyOrderNumber(notes: string, salesOrderId: string | null): ReactNode {
+  if (!salesOrderId) return notes
+  const parts = notes.split(/(#\d+)/)
+  const linkClass = 'font-medium text-accent-600 hover:text-accent-700'
+  if (parts.length === 1) {
+    return (
+      <Link to={`/app/sales/${salesOrderId}`} className={linkClass}>
+        {notes}
+      </Link>
+    )
+  }
+  return parts.map((part, index) =>
+    /^#\d+$/.test(part) ? (
+      <Link key={index} to={`/app/sales/${salesOrderId}`} className={linkClass}>
+        {part}
+      </Link>
+    ) : (
+      <span key={index}>{part}</span>
+    ),
+  )
 }
 
 const PAGE_SIZE = 8
@@ -369,6 +397,10 @@ function ClientDetailContent({
   const totalCharged = useMemo(() => (creditCharges ?? []).reduce((sum, c) => sum + c.amount, 0), [creditCharges])
   const totalPaid = useMemo(() => (creditPayments ?? []).reduce((sum, p) => sum + p.amount, 0), [creditPayments])
   const creditBalance = totalCharged - totalPaid
+  // Impresión del soporte de pago de un abono -- solo tirilla térmica, mismo
+  // mecanismo que el ticket del POS (pedido explícito del usuario: nada de
+  // PDF acá).
+  const creditReceiptPrinter = useCreditPaymentReceiptPrinter(profile?.tenant_id)
   const creditMovements = useMemo<CreditMovement[]>(() => {
     const charges: CreditMovement[] = (creditCharges ?? []).map((charge) => ({ kind: 'charge', date: charge.created_at, charge }))
     const payments: CreditMovement[] = (creditPayments ?? []).map((payment) => ({ kind: 'payment', date: payment.created_at, payment }))
@@ -754,7 +786,15 @@ function ClientDetailContent({
                             </Badge>
                             <p className="text-xs text-brand-400">{formatDate(m.charge.created_at)}</p>
                           </div>
-                          {m.charge.notes && <p className="mt-1 truncate text-xs text-brand-700">{m.charge.notes}</p>}
+                          {/* Un cargo nace de una venta a crédito: el número
+                              de pedido que ya trae la nota ES el enlace al
+                              pedido (pedido explícito del usuario: nada de un
+                              "Ver pedido" aparte repitiendo el número). */}
+                          {m.charge.notes && (
+                            <p className="mt-1 truncate text-xs text-brand-700">
+                              {linkifyOrderNumber(m.charge.notes, m.charge.sales_order_id)}
+                            </p>
+                          )}
                         </div>
                         <span className="shrink-0 font-semibold text-red-700">-{formatCurrency(m.charge.amount)}</span>
                       </li>
@@ -782,6 +822,16 @@ function ClientDetailContent({
                           <span className="font-semibold text-emerald-700">+{formatCurrency(m.payment.amount)}</span>
                           <button
                             type="button"
+                            onClick={() => creditReceiptPrinter.print(m.payment, contact, creditBalance)}
+                            disabled={creditReceiptPrinter.printing}
+                            className="text-brand-300 hover:text-accent-600 disabled:opacity-50"
+                            aria-label={t('credit.ticket.print')}
+                            title={t('credit.ticket.print')}
+                          >
+                            <PrinterIcon width={12} height={12} />
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => setDeleteCreditPaymentId(m.payment.id)}
                             className="text-brand-300 hover:text-red-600"
                             aria-label={t('credit.movement.deleteAria')}
@@ -795,6 +845,10 @@ function ClientDetailContent({
                 </ul>
               )}
               <Pagination page={page} totalPages={creditMovementsPage.totalPages} onChange={setPage} />
+              {creditReceiptPrinter.error && (
+                <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{creditReceiptPrinter.error}</p>
+              )}
+              {creditReceiptPrinter.portal}
             </Panel>
           </TabsContent>
         )}

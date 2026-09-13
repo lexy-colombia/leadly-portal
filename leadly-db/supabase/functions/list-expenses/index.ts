@@ -90,7 +90,13 @@ Deno.serve(async (req) => {
   const to = from + pageSize - 1;
 
   const listQuery = applyFilters(adminClient.from("expenses").select(EXPENSE_SELECT, { count: "exact" }))
+    // Más reciente arriba, igual que Órdenes. El desempate por created_at es
+    // lo que hace útil el orden: expense_date es una fecha sin hora y casi
+    // todos los gastos de un día comparten la misma, así que sin esto el
+    // orden dentro del día lo decidía Postgres (en la práctica, el más viejo
+    // primero) -- pedido explícito del usuario 2026-09-13.
     .order("expense_date", { ascending: false })
+    .order("created_at", { ascending: false })
     .range(from, to);
 
   const [{ data: rows, error: listError, count }, { data: summaryRaw, error: summaryError }] = await Promise.all([

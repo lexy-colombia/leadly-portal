@@ -1408,6 +1408,10 @@ export interface ExpenseCategory {
 export interface Expense {
   id: string
   tenant_id: string
+  /** Consecutivo por comercio (EGR-1, EGR-2...), asignado en un trigger al
+   * crear el gasto -- mismo mecanismo que sales_orders.number. Es lo que
+   * identifica el comprobante impreso, ver migración 20260913200000. */
+  number: number
   supplier_id: string | null
   category_id: string | null
   amount: number

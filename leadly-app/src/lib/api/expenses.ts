@@ -171,3 +171,27 @@ export async function addExpenseInventoryEntry(input: AddExpenseInventoryEntryIn
   if (error) throw error
   return data as string
 }
+
+/** Comprobante de egreso en PDF (tamaño carta) -- la contraparte "de
+ * archivo" de la tirilla térmica que imprime useExpenseReceiptPrinter. Se
+ * arma en el servidor en cada llamada, ver expense-pdf/index.ts. */
+export async function getExpensePdf(expenseId: string): Promise<{ pdfBase64: string; filename: string }> {
+  const { data, error } = await supabase.functions.invoke<{ pdf_base64: string; filename: string; error?: string }>('expense-pdf', {
+    body: { expense_id: expenseId },
+  })
+  if (error) {
+    const context = (error as { context?: Response }).context
+    if (context && typeof context.json === 'function') {
+      let specificMessage: string | undefined
+      try {
+        const body = await context.json()
+        specificMessage = body?.error
+      } catch {
+        /* fall through to generic error */
+      }
+      if (specificMessage) throw new Error(specificMessage)
+    }
+    throw error
+  }
+  return { pdfBase64: data!.pdf_base64, filename: data!.filename }
+}

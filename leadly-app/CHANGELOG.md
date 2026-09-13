@@ -4,6 +4,19 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.14] - 2026-09-13
+
+### Added
+- Consecutivo por comercio para los egresos (EGR-1, EGR-2...), asignado al crear el gasto, con los 6.092 existentes numerados por fecha y visible como columna en la lista. Un comprobante impreso sin número no se puede referenciar después.
+- Impresión del comprobante de egreso: tirilla térmica (mismo mecanismo que el ticket del POS: WebUSB directo si el comercio lo tiene activado, si no el diálogo del sistema) y PDF tamaño carta, con el mismo diseño de la factura -- sin QR ni CUFE, y con bloque de firmas en su lugar, porque un egreso es un documento interno de control, no fiscal.
+- Cartera: los abonos se pueden imprimir como soporte de pago en tirilla térmica (número de recibo, cliente, método, monto y saldo actual).
+
+### Changed
+- Cartera: en un cargo, el número de pedido de la nota ("Cargo por orden #28258") es ahora el enlace que abre ese pedido.
+
+### Fixed
+- Gastos: el más reciente arriba. La lista ordenaba solo por fecha del gasto, que es una fecha sin hora, así que el orden dentro de un mismo día lo decidía la base (en la práctica, el más viejo primero).
+
 ## [1.0.13] - 2026-09-13
 
 ### Added

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useResetOnFilterChange, useUrlFilterSync } from '../../../lib/urlFilters'
-import { deleteExpense, listExpensesPage, type ExpensesSummary, type ExpenseWithRelations } from '../../../lib/api/expenses'
+import { deleteExpense, getExpensePdf, listExpensesPage, type ExpensesSummary, type ExpenseWithRelations } from '../../../lib/api/expenses'
 import { listExpenseCategories } from '../../../lib/api/expenseCategories'
 import { listSuppliers } from '../../../lib/api/suppliers'
 import type { ExpenseCategory, ExpenseStatus, Supplier } from '../../../types/domain'
@@ -9,7 +9,10 @@ import { useLanguage } from '../../../contexts/LanguageContext'
 import { formatDate } from '../../../lib/dates'
 import { PageSpinner } from '@/components/atoms'
 import { Card, ComboboxFilter, EmptyState, FilterField, Pagination } from '@/components/molecules'
-import { PencilIcon, PlusIcon, TrashIcon } from '@/components/atoms/icons'
+import { PencilIcon, PlusIcon, PrinterIcon, TrashIcon } from '@/components/atoms/icons'
+import { FileTextIcon } from 'lucide-react'
+import { useExpenseReceiptPrinter } from '../../../lib/useExpenseReceiptPrinter'
+import { expenseDocumentLabel } from '../../../components/expenses/ExpenseReceiptTicket'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -147,6 +150,31 @@ export function ExpensesTab({ tenantId }: { tenantId: string }) {
 
   const pageItems = expenses
 
+  // Comprobante del egreso: tirilla térmica (mismo mecanismo que el ticket
+  // del POS -- WebUSB si el comercio lo tiene activado, si no el diálogo de
+  // impresión) y PDF tamaño carta armado en el servidor.
+  const receiptPrinter = useExpenseReceiptPrinter(tenantId)
+  const [pdfLoadingId, setPdfLoadingId] = useState<string | null>(null)
+
+  async function handleDownloadPdf(expense: ExpenseWithRelations) {
+    setPdfLoadingId(expense.id)
+    setError(null)
+    try {
+      const { pdfBase64, filename } = await getExpensePdf(expense.id)
+      const bytes = Uint8Array.from(atob(pdfBase64), (c) => c.charCodeAt(0))
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('expenses.receipt.errors.pdf'))
+    } finally {
+      setPdfLoadingId(null)
+    }
+  }
+
   async function handleDelete(id: string) {
     setDeleting(true)
     setError(null)
@@ -255,6 +283,7 @@ export function ExpensesTab({ tenantId }: { tenantId: string }) {
               <TableHeader>
                 <TableRow>
                   <TableHead>{t('expenses.list.table.date')}</TableHead>
+                  <TableHead>{t('expenses.list.table.number')}</TableHead>
                   <TableHead>{t('expenses.list.table.supplier')}</TableHead>
                   <TableHead>{t('expenses.list.table.category')}</TableHead>
                   <TableHead>{t('expenses.list.table.amount')}</TableHead>
@@ -266,6 +295,7 @@ export function ExpensesTab({ tenantId }: { tenantId: string }) {
                 {pageItems.map((expense) => (
                   <TableRow key={expense.id} onClick={() => setDrawer({ open: true, expense })} className="cursor-pointer">
                     <TableCell className="text-xs text-brand-500">{formatDate(expense.expense_date)}</TableCell>
+                    <TableCell className="text-xs text-brand-500">{expenseDocumentLabel(expense)}</TableCell>
                     <TableCell className="text-xs font-medium text-brand-800">{expense.supplier?.name ?? '—'}</TableCell>
                     <TableCell className="text-xs text-brand-500">{expense.category?.name ?? '—'}</TableCell>
                     <TableCell className="text-xs text-brand-700">{formatCurrency(expense.amount, expense.currency)}</TableCell>
@@ -286,6 +316,26 @@ export function ExpensesTab({ tenantId }: { tenantId: string }) {
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            title={t('expenses.receipt.print')}
+                            aria-label={t('expenses.receipt.print')}
+                            disabled={receiptPrinter.printing}
+                            onClick={() => receiptPrinter.print(expense)}
+                          >
+                            <PrinterIcon width={12} height={12} />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            title={t('expenses.receipt.pdf')}
+                            aria-label={t('expenses.receipt.pdf')}
+                            disabled={pdfLoadingId === expense.id}
+                            onClick={() => handleDownloadPdf(expense)}
+                          >
+                            <FileTextIcon className="size-3" />
+                          </Button>
                           <Button variant="ghost" size="icon-xs" onClick={() => setDrawer({ open: true, expense })}>
                             <PencilIcon width={12} height={12} />
                           </Button>
@@ -305,6 +355,9 @@ export function ExpensesTab({ tenantId }: { tenantId: string }) {
       )}
 
       <ExpenseDrawer open={drawer.open} onClose={() => setDrawer({ open: false, expense: null })} tenantId={tenantId} expense={drawer.expense} onSaved={reload} />
+
+      {receiptPrinter.error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{receiptPrinter.error}</p>}
+      {receiptPrinter.portal}
     </div>
   )
 }
