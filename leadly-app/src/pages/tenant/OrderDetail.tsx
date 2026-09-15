@@ -2481,93 +2481,83 @@ export function OrderDetail() {
                 />
                 <FieldError message={contactError} />
               </div>
-              {/* Envío antes que facturación -- pedido explícito del usuario
-                  (2026-09-14): el flujo real del pedido es primero a dónde se
-                  entrega y después a nombre de quién se factura. Un pedido de
-                  mostrador no tiene envío (showShipping), así que ahí
-                  facturación se queda en esta primera columna. */}
-              {showShipping ? (
-                <>
-                  {addressField("shipping")}
-                  {/* Estado de envío -- solo edición + venta confirmada (concepto
-                      aparte del estado comercial, ver DeliveryStatus). No aplica
-                      en cotización/cancelada, no hay nada que enviar todavía o
-                      ya no corre. */}
-                  {!isNew && order && order.status === "confirmada" && (
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <Label>{t("orders.drawer.fields.deliveryStatus")}</Label>
-                        {/* Con el módulo de Despachos habilitado, el estado real
-                          vive en dispatch_statuses (configurable, con
-                          timeline/transportadora/guía) y sincroniza este campo
-                          automáticamente -- ya no se edita a mano acá, este
-                          link es el único punto de entrada a esa vista. */}
-                        {enabledModules?.has("dispatches") && (
-                          <button
-                            type="button"
-                            onClick={() => setDispatchDrawerOpen(true)}
-                            className="text-[11px] font-medium text-accent-600 hover:text-accent-700"
-                          >
-                            {t("dispatches.detail.link")}
-                          </button>
-                        )}
-                      </div>
-                      {enabledModules?.has("dispatches") ? (
-                        <p className="mt-1 flex items-center gap-1.5 text-xs">
-                          {/* Mismo tamaño que la línea secundaria de
-                            ciudad/estado en las direcciones (text-xs, sin
-                            negrita) -- "Entregado" no debe competir en
-                            jerarquía con el nombre/dirección de arriba. Solo el
-                            punto lleva el color real del estado; el texto queda
-                            en el mismo gris que esa línea secundaria (pedido
-                            explícito del usuario: nombre en negro, color solo
-                            en el punto). */}
-                          {dispatchStatus && (
-                            <span
-                              className="h-1.5 w-1.5 shrink-0 rounded-full"
-                              style={{ backgroundColor: dispatchStatus.color }}
-                            />
-                          )}
-                          <span className="truncate text-brand-400">
-                            {dispatchStatus?.name ??
-                              t(DELIVERY_STATUS_LABEL_KEY[order.delivery_status])}
-                          </span>
-                        </p>
-                      ) : (
-                        <Select
-                          value={order.delivery_status}
-                          onValueChange={(v) =>
-                            handleDeliveryStatusSelect(v as DeliveryStatus)
-                          }
-                        >
-                          <SelectTrigger className="mt-1 w-full">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {(
-                              Object.keys(
-                                DELIVERY_STATUS_LABEL_KEY,
-                              ) as DeliveryStatus[]
-                            ).map((s) => (
-                              <SelectItem key={s} value={s}>
-                                {t(DELIVERY_STATUS_LABEL_KEY[s])}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      )}
-                    </div>
-                  )}
-                </>
-              ) : (
-                addressField("billing")
-              )}
+              {addressField("billing")}
             </div>
 
-            {/* Columna 2: Facturación -- ver la nota de orden de arriba. */}
+            {/* Columna 2: Envío + Estado de envío -- no existe en un pedido
+                de mostrador (ver showShipping). */}
             {showShipping && (
               <div className="min-w-0 space-y-4 sm:border-l sm:border-brand-100 sm:pl-4">
-                {addressField("billing")}
+                {addressField("shipping")}
+                {/* Estado de envío -- solo edición + venta confirmada (concepto
+                  aparte del estado comercial, ver DeliveryStatus). No aplica
+                  en cotización/cancelada, no hay nada que enviar todavía o
+                  ya no corre. */}
+                {!isNew && order && order.status === "confirmada" && (
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <Label>{t("orders.drawer.fields.deliveryStatus")}</Label>
+                      {/* Con el módulo de Despachos habilitado, el estado real
+                        vive en dispatch_statuses (configurable, con
+                        timeline/transportadora/guía) y sincroniza este campo
+                        automáticamente -- ya no se edita a mano acá, este
+                        link es el único punto de entrada a esa vista. */}
+                      {enabledModules?.has("dispatches") && (
+                        <button
+                          type="button"
+                          onClick={() => setDispatchDrawerOpen(true)}
+                          className="text-[11px] font-medium text-accent-600 hover:text-accent-700"
+                        >
+                          {t("dispatches.detail.link")}
+                        </button>
+                      )}
+                    </div>
+                    {enabledModules?.has("dispatches") ? (
+                      <p className="mt-1 flex items-center gap-1.5 text-xs">
+                        {/* Mismo tamaño que la línea secundaria de
+                          ciudad/estado en las direcciones (text-xs, sin
+                          negrita) -- "Entregado" no debe competir en
+                          jerarquía con el nombre/dirección de arriba. Solo el
+                          punto lleva el color real del estado; el texto queda
+                          en el mismo gris que esa línea secundaria (pedido
+                          explícito del usuario: nombre en negro, color solo
+                          en el punto). */}
+                        {dispatchStatus && (
+                          <span
+                            className="h-1.5 w-1.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: dispatchStatus.color }}
+                          />
+                        )}
+                        <span className="truncate text-brand-400">
+                          {dispatchStatus?.name ??
+                            t(DELIVERY_STATUS_LABEL_KEY[order.delivery_status])}
+                        </span>
+                      </p>
+                    ) : (
+                      <Select
+                        value={order.delivery_status}
+                        onValueChange={(v) =>
+                          handleDeliveryStatusSelect(v as DeliveryStatus)
+                        }
+                      >
+                        <SelectTrigger className="mt-1 w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(
+                            Object.keys(
+                              DELIVERY_STATUS_LABEL_KEY,
+                            ) as DeliveryStatus[]
+                          ).map((s) => (
+                            <SelectItem key={s} value={s}>
+                              {t(DELIVERY_STATUS_LABEL_KEY[s])}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
