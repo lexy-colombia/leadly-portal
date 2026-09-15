@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { listProfilesByTenant } from '../../../lib/api/users'
 import type { Profile } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
@@ -14,15 +15,15 @@ import { UsersTable } from '../../shared/UsersTable'
  * ambos casos. Montado en Settings.tsx, admin-only. */
 export function UsersSection({ tenantId }: { tenantId: string }) {
   const { t } = useLanguage()
-  const [users, setUsers] = useState<Profile[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
   const [inviteOpen, setInviteOpen] = useState(false)
 
-  useEffect(() => {
-    listProfilesByTenant(tenantId)
-      .then(setUsers)
-      .catch((err) => setError(err instanceof Error ? err.message : t('account.users.errors.updateFailed')))
-  }, [tenantId, t])
+  const query = useQuery<Profile[]>({
+    queryKey: ['tenantUsers', tenantId],
+    queryFn: () => listProfilesByTenant(tenantId),
+  })
+  const users = query.data
+  const error = query.error instanceof Error ? query.error.message : query.error ? t('account.users.errors.updateFailed') : null
 
   return (
     <div className="space-y-3">
@@ -33,10 +34,17 @@ export function UsersSection({ tenantId }: { tenantId: string }) {
       </div>
 
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
-      {!users && !error && <PageSpinner />}
-      {users && <UsersTable users={users} onChange={(u) => setUsers((prev) => (prev ? prev.map((p) => (p.id === u.id ? u : p)) : prev))} />}
+      {query.isLoading && <PageSpinner />}
+      {users && (
+        <UsersTable
+          users={users}
+          onChange={(u) =>
+            queryClient.setQueryData<Profile[]>(['tenantUsers', tenantId], (prev) => prev?.map((p) => (p.id === u.id ? u : p)) ?? prev)
+          }
+        />
+      )}
 
-      <UserInviteDrawer open={inviteOpen} onClose={() => setInviteOpen(false)} tenantId={tenantId} onInvited={(p) => setUsers((prev) => [p, ...(prev ?? [])])} />
+      <UserInviteDrawer open={inviteOpen} onClose={() => setInviteOpen(false)} tenantId={tenantId} />
     </div>
   )
 }
