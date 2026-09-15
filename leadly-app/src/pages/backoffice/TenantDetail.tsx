@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 import { getTenant, setTenantStatus } from '../../lib/api/tenants'
 import { listProfilesByTenant } from '../../lib/api/users'
@@ -84,18 +85,16 @@ function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onT
   const [statusUpdating, setStatusUpdating] = useState(false)
   const [statusError, setStatusError] = useState<string | null>(null)
 
-  const [users, setUsers] = useState<Profile[] | null>(null)
-  const [usersError, setUsersError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
   const [inviteOpen, setInviteOpen] = useState(false)
   const [plan, setPlan] = useState<BillingPlan | null>(null)
 
-  function reloadUsers() {
-    listProfilesByTenant(tenant.id)
-      .then(setUsers)
-      .catch((err) => setUsersError(err.message ?? t('backoffice.clienteDetalle.errors.loadUsers')))
-  }
-
-  useEffect(reloadUsers, [tenant.id])
+  const usersQuery = useQuery<Profile[]>({
+    queryKey: ['tenantUsers', tenant.id],
+    queryFn: () => listProfilesByTenant(tenant.id),
+  })
+  const users = usersQuery.data
+  const usersError = usersQuery.error instanceof Error ? usersQuery.error.message : usersQuery.error ? t('backoffice.clienteDetalle.errors.loadUsers') : null
 
   async function handleActivate() {
     setStatusUpdating(true)
@@ -292,11 +291,13 @@ function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onT
                   </p>
                 )}
                 {usersError && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{usersError}</p>}
-                {!users && !usersError && <PageSpinner />}
+                {usersQuery.isLoading && <PageSpinner />}
                 {users && (
                   <UsersTable
                     users={users}
-                    onChange={(u) => setUsers((prev) => prev!.map((p) => (p.id === u.id ? u : p)))}
+                    onChange={(u) =>
+                      queryClient.setQueryData<Profile[]>(['tenantUsers', tenant.id], (prev) => prev?.map((p) => (p.id === u.id ? u : p)) ?? prev)
+                    }
                     disableActivate={atUserCapacity}
                   />
                 )}
@@ -320,12 +321,7 @@ function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onT
 
       <TenantDrawer open={editOpen} onClose={() => setEditOpen(false)} tenant={tenant} onSaved={onTenantChange} />
 
-      <UserInviteDrawer
-        open={inviteOpen}
-        onClose={() => setInviteOpen(false)}
-        tenantId={tenant.id}
-        onInvited={(p) => setUsers((prev) => [p, ...(prev ?? [])])}
-      />
+      <UserInviteDrawer open={inviteOpen} onClose={() => setInviteOpen(false)} tenantId={tenant.id} />
 
     </div>
   )

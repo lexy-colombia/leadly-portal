@@ -1,6 +1,27 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { CircleAlertIcon, FileTextIcon, MailIcon, RefreshCwIcon, ScanLineIcon, Undo2Icon, UploadIcon, XIcon } from 'lucide-react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
+import {
+  Link,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
+import {
+  CircleAlertIcon,
+  FileTextIcon,
+  MailIcon,
+  RefreshCwIcon,
+  ScanLineIcon,
+  Undo2Icon,
+  UploadIcon,
+  XIcon,
+} from "lucide-react";
 import {
   calculateOrder,
   deleteOrder,
@@ -14,23 +35,38 @@ import {
   ORDER_STATUS_LABEL_KEY,
   ORDER_STATUS_BADGE_CLASS,
   DELIVERY_STATUS_LABEL_KEY,
-} from '../../lib/api/orders'
-import type { OrderDetail as OrderDetailType, OrderItemInput, OrderTotalsBreakdown, StockShortfall } from '../../lib/api/orders'
-import { saveCartDraft, createOrderFromCart, deleteCart, getCart } from '../../lib/api/carts'
-import { useOrderTotalsPreview } from '../../lib/useOrderTotalsPreview'
-import { listClients } from '../../lib/api/clients'
-import type { Client } from '../../types/domain'
-import { listOpportunities } from '../../lib/api/opportunities'
-import type { OpportunityWithRelations } from '../../lib/api/opportunities'
-import { listAddressesForContact } from '../../lib/api/addresses'
-import { listProducts } from '../../lib/api/products'
-import type { ProductWithImages } from '../../lib/api/products'
-import { listStockByWarehouse } from '../../lib/api/stockMovements'
-import type { ProductWarehouseStockRow } from '../../lib/api/stockMovements'
-import { listProductCategories } from '../../lib/api/productCategories'
-import { listBrands } from '../../lib/api/brands'
-import { listWarehouses } from '../../lib/api/warehouses'
-import { listPaymentsForOrder, deletePayment, updatePaymentMethod, PAYMENT_METHOD_LABEL_KEY } from '../../lib/api/orderPayments'
+} from "../../lib/api/orders";
+import type {
+  OrderDetail as OrderDetailType,
+  OrderItemInput,
+  OrderTotalsBreakdown,
+  StockShortfall,
+} from "../../lib/api/orders";
+import {
+  saveCartDraft,
+  createOrderFromCart,
+  deleteCart,
+  getCart,
+} from "../../lib/api/carts";
+import { useOrderTotalsPreview } from "../../lib/useOrderTotalsPreview";
+import { listClients } from "../../lib/api/clients";
+import type { Client } from "../../types/domain";
+import { listOpportunities } from "../../lib/api/opportunities";
+import type { OpportunityWithRelations } from "../../lib/api/opportunities";
+import { listAddressesForContact } from "../../lib/api/addresses";
+import { listProducts } from "../../lib/api/products";
+import type { ProductWithImages } from "../../lib/api/products";
+import { listStockByWarehouse } from "../../lib/api/stockMovements";
+import type { ProductWarehouseStockRow } from "../../lib/api/stockMovements";
+import { listProductCategories } from "../../lib/api/productCategories";
+import { listBrands } from "../../lib/api/brands";
+import { listWarehouses } from "../../lib/api/warehouses";
+import {
+  listPaymentsForOrder,
+  deletePayment,
+  updatePaymentMethod,
+  PAYMENT_METHOD_LABEL_KEY,
+} from "../../lib/api/orderPayments";
 import {
   listSalesInvoicesForOrder,
   getSalesOrderPdf,
@@ -42,89 +78,151 @@ import {
   checkInvoiceStatus,
   sendDocumentEmail,
   checkCreditNoteStatus,
-} from '../../lib/api/salesInvoices'
-import type { SalesInvoice, SalesInvoiceStatus, SalesCreditNote } from '../../types/domain'
-import { CreditNoteDrawer } from './orders/CreditNoteDrawer'
-import { listCommentsForOrder, createComment } from '../../lib/api/orderComments'
-import type { OrderCommentWithAuthor } from '../../lib/api/orderComments'
-import { listTasksForOpportunity } from '../../lib/api/tasks'
-import type { TaskWithRelations } from '../../lib/api/tasks'
-import type { ContactAddress, SalesOrderPayment, OrderPaymentMethod, OrderStatus, DeliveryStatus, ProductCategory, Brand, Warehouse } from '../../types/domain'
-import { useAuth, usePermission } from '../../contexts/AuthContext'
-import { useLanguage } from '../../contexts/LanguageContext'
-import { useToast } from '../../contexts/ToastContext'
-import { isNotBlank } from '../../lib/validation'
-import { formatDate, formatDateTime } from '../../lib/dates'
-import { formatPhoneDisplay } from '../../lib/phone'
-import { FieldError, InitialsAvatar, PageSpinner } from '@/components/atoms'
-import { ComboboxFilter, CurrencyInput, OrderTotalsSummary } from '@/components/molecules'
-import { ConfirmDialog } from '@/components/organisms'
-import { ClockIcon, PencilIcon, PlusIcon, PrinterIcon, TrashIcon } from '@/components/atoms/icons'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { OrderItemsEditor } from './orders/OrderItemsEditor'
-import { PaymentDrawer } from './orders/PaymentDrawer'
-import { usePosReceiptPrinter } from '../../lib/usePosReceiptPrinter'
-import { DispatchDrawer } from './orders/DispatchDrawer'
-import { getDispatchStatusForOrder, type DispatchStatusSummary } from '../../lib/api/dispatches'
-import { getStoreCreditBalance } from '../../lib/api/returns'
-import { StockShortfallDialog } from './orders/StockShortfallDialog'
-import { AddressDrawer } from './clients/AddressDrawer'
-import { ClientPickerCard } from './clients/ClientPickerCard'
+} from "../../lib/api/salesInvoices";
+import type {
+  SalesInvoice,
+  SalesInvoiceStatus,
+  SalesCreditNote,
+} from "../../types/domain";
+import { CreditNoteDrawer } from "./orders/CreditNoteDrawer";
+import {
+  listCommentsForOrder,
+  createComment,
+} from "../../lib/api/orderComments";
+import type { OrderCommentWithAuthor } from "../../lib/api/orderComments";
+import { listTasksForOpportunity } from "../../lib/api/tasks";
+import type { TaskWithRelations } from "../../lib/api/tasks";
+import type {
+  ContactAddress,
+  SalesOrderPayment,
+  OrderPaymentMethod,
+  OrderStatus,
+  DeliveryStatus,
+  ProductCategory,
+  Brand,
+  Warehouse,
+} from "../../types/domain";
+import { useAuth, usePermission } from "../../contexts/AuthContext";
+import { useLanguage } from "../../contexts/LanguageContext";
+import { useToast } from "../../contexts/ToastContext";
+import { isNotBlank } from "../../lib/validation";
+import { formatDate, formatDateTime } from "../../lib/dates";
+import { formatPhoneDisplay } from "../../lib/phone";
+import { FieldError, InitialsAvatar, PageSpinner } from "@/components/atoms";
+import {
+  ComboboxFilter,
+  CurrencyInput,
+  OrderTotalsSummary,
+} from "@/components/molecules";
+import { ConfirmDialog } from "@/components/organisms";
+import {
+  ClockIcon,
+  PencilIcon,
+  PlusIcon,
+  PrinterIcon,
+  TrashIcon,
+} from "@/components/atoms/icons";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { OrderItemsEditor } from "./orders/OrderItemsEditor";
+import { PaymentDrawer } from "./orders/PaymentDrawer";
+import { usePosReceiptPrinter } from "../../lib/usePosReceiptPrinter";
+import { DispatchDrawer } from "./orders/DispatchDrawer";
+import {
+  getDispatchStatusForOrder,
+  type DispatchStatusSummary,
+} from "../../lib/api/dispatches";
+import { getStoreCreditBalance } from "../../lib/api/returns";
+import { StockShortfallDialog } from "./orders/StockShortfallDialog";
+import { AddressDrawer } from "./clients/AddressDrawer";
+import { ClientPickerCard } from "./clients/ClientPickerCard";
 
 function addressLabel(a: ContactAddress): string {
-  return `${a.label ? `${a.label} — ` : ''}${a.line1}${a.city ? `, ${a.city}` : ''}`
+  return `${a.label ? `${a.label} — ` : ""}${a.line1}${a.city ? `, ${a.city}` : ""}`;
 }
 
 /** Only relevant at creation -- 'cancelada' isn't offered (a brand new
  * order can't start already voided), and once it exists, edit mode moves
  * status forward through the header buttons instead of a select (see
  * statusActions below). */
-const CREATE_STATUS_OPTIONS: OrderStatus[] = ['cotizacion', 'confirmada']
+const CREATE_STATUS_OPTIONS: OrderStatus[] = ["cotizacion", "confirmada"];
 
-function formatCurrency(value: number, currency = 'COP'): string {
-  return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
+function formatCurrency(value: number, currency = "COP"): string {
+  return new Intl.NumberFormat("es-CO", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 0,
+  }).format(value);
 }
 
 const INVOICE_STATUS_VARIANT: Record<SalesInvoiceStatus, string> = {
-  pending: 'bg-brand-100 text-brand-600',
-  blocked_missing_buyer_data: 'bg-amber-100 text-amber-700',
-  generating: 'bg-blue-100 text-blue-700',
-  generated: 'bg-blue-100 text-blue-700',
-  sending: 'bg-blue-100 text-blue-700',
-  sent: 'bg-blue-100 text-blue-700',
-  accepted: 'bg-emerald-100 text-emerald-700',
-  rejected: 'bg-red-100 text-red-700',
-  error: 'bg-red-100 text-red-700',
-}
-
+  pending: "bg-brand-100 text-brand-600",
+  blocked_missing_buyer_data: "bg-amber-100 text-amber-700",
+  generating: "bg-blue-100 text-blue-700",
+  generated: "bg-blue-100 text-blue-700",
+  sending: "bg-blue-100 text-blue-700",
+  sent: "bg-blue-100 text-blue-700",
+  accepted: "bg-emerald-100 text-emerald-700",
+  rejected: "bg-red-100 text-red-700",
+  error: "bg-red-100 text-red-700",
+};
 
 /** Same card shape as ProductDetail.tsx (title + optional header action +
  * content) -- not extracted to a shared component since this is only its
  * second local copy in the codebase (ProductDetail.tsx has the first);
  * a third page adopting the same shape would be the point to share it. */
-function StatCard({ title, action, children, className = '' }: { title: string; action?: ReactNode; children: ReactNode; className?: string }) {
+function StatCard({
+  title,
+  action,
+  children,
+  className = "",
+}: {
+  title: string;
+  action?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
   return (
-    <div className={`min-w-0 rounded-xl border border-brand-100 p-4 ${className}`}>
+    <div
+      className={`min-w-0 rounded-xl border border-brand-100 p-4 ${className}`}
+    >
       <div className="mb-3 flex items-center justify-between gap-2">
         <h3 className="text-xs font-semibold text-brand-800">{title}</h3>
         {action}
       </div>
       {children}
     </div>
-  )
+  );
 }
 
 /** Same pill used across the CRM (ClientDetail.tsx, and the old
  * OrderDetail.tsx) to mark something the AI created on its own. */
 function AiBadge({ label }: { label: string }) {
-  return <span className="shrink-0 rounded-full bg-accent-50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-accent-700">{label}</span>
+  return (
+    <span className="shrink-0 rounded-full bg-accent-50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-accent-700">
+      {label}
+    </span>
+  );
 }
 
 /** Botón de acción solo-ícono con tooltip -- el historial de documentos
@@ -133,17 +231,34 @@ function AiBadge({ label }: { label: string }) {
  * competía con el título del documento por el mismo ancho angosto
  * (feedback del usuario, 2026-09-11). El tooltip conserva la etiqueta sin
  * gastar espacio en la fila. */
-function IconActionButton({ icon, label, onClick, disabled }: { icon: ReactNode; label: string; onClick: () => void; disabled?: boolean }) {
+function IconActionButton({
+  icon,
+  label,
+  onClick,
+  disabled,
+}: {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button type="button" size="icon-sm" variant="outline" onClick={onClick} disabled={disabled} aria-label={label}>
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="outline"
+          onClick={onClick}
+          disabled={disabled}
+          aria-label={label}
+        >
           {icon}
         </Button>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
-  )
+  );
 }
 
 /** Motivo de rechazo/error de la DIAN, como ícono en vez de texto inline --
@@ -154,15 +269,15 @@ function IconActionButton({ icon, label, onClick, disabled }: { icon: ReactNode;
  * px de alto. El texto completo sigue disponible, solo que recién al
  * hacer clic. */
 function RejectionReasonButton({ message }: { message: string }) {
-  const { t } = useLanguage()
+  const { t } = useLanguage();
   return (
     <Popover>
       <PopoverTrigger asChild>
         <button
           type="button"
           className="inline-flex shrink-0 items-center text-amber-600 hover:text-amber-700"
-          aria-label={t('einvoicing.detail.rejectionReason')}
-          title={t('einvoicing.detail.rejectionReason')}
+          aria-label={t("einvoicing.detail.rejectionReason")}
+          title={t("einvoicing.detail.rejectionReason")}
         >
           <CircleAlertIcon className="size-3.5" />
         </button>
@@ -171,7 +286,7 @@ function RejectionReasonButton({ message }: { message: string }) {
         {message}
       </PopoverContent>
     </Popover>
-  )
+  );
 }
 
 /** Corrige el método de un pago YA registrado sin borrarlo/recrearlo --
@@ -187,42 +302,52 @@ function PaymentMethodEditor({
   storeCreditBalance,
   onSaved,
 }: {
-  payment: SalesOrderPayment
+  payment: SalesOrderPayment;
   /** Mismo criterio que PaymentDrawer.tsx: 'credito'/'saldo_favor' no se
    * ofrecen si el cliente no los tiene habilitados/con saldo -- bug real
    * encontrado en vivo (2026-09-11): sin esto, "Cliente Final" (sin cuenta
    * de crédito ni saldo a favor) igual mostraba las dos opciones acá,
    * aunque `PaymentDrawer` ya las escondía correctamente al REGISTRAR un
    * pago nuevo. */
-  creditEnabled: boolean
-  storeCreditBalance: number
-  onSaved: (updated: SalesOrderPayment) => void
+  creditEnabled: boolean;
+  storeCreditBalance: number;
+  onSaved: (updated: SalesOrderPayment) => void;
 }) {
-  const { t } = useLanguage()
-  const [open, setOpen] = useState(false)
-  const [method, setMethod] = useState<OrderPaymentMethod>(payment.method)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const { t } = useLanguage();
+  const [open, setOpen] = useState(false);
+  const [method, setMethod] = useState<OrderPaymentMethod>(payment.method);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   return (
     <Popover
       open={open}
       onOpenChange={(next) => {
-        setOpen(next)
+        setOpen(next);
         if (next) {
-          setMethod(payment.method)
-          setError(null)
+          setMethod(payment.method);
+          setError(null);
         }
       }}
     >
       <PopoverTrigger asChild>
-        <button type="button" className="text-brand-300 hover:text-accent-600" aria-label={t('orders.detail.editPaymentMethodAria')} title={t('orders.detail.editPaymentMethodAria')}>
+        <button
+          type="button"
+          className="text-brand-300 hover:text-accent-600"
+          aria-label={t("orders.detail.editPaymentMethodAria")}
+          title={t("orders.detail.editPaymentMethodAria")}
+        >
           <PencilIcon width={11} height={11} />
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-56">
-        <Label className="text-xs">{t('orders.paymentDrawer.fields.method')}</Label>
-        <Select value={method} onValueChange={(v) => setMethod(v as OrderPaymentMethod)}>
+        <Label className="text-xs">
+          {t("orders.paymentDrawer.fields.method")}
+        </Label>
+        <Select
+          value={method}
+          onValueChange={(v) => setMethod(v as OrderPaymentMethod)}
+        >
           <SelectTrigger className="mt-1 w-full">
             <SelectValue />
           </SelectTrigger>
@@ -238,7 +363,9 @@ function PaymentMethodEditor({
               .filter(
                 (m) =>
                   m === payment.method ||
-                  (m !== 'wompi' && (m !== 'credito' || creditEnabled) && (m !== 'saldo_favor' || storeCreditBalance > 0)),
+                  (m !== "wompi" &&
+                    (m !== "credito" || creditEnabled) &&
+                    (m !== "saldo_favor" || storeCreditBalance > 0)),
               )
               .map((m) => (
                 <SelectItem key={m} value={m}>
@@ -254,24 +381,28 @@ function PaymentMethodEditor({
           className="mt-2 w-full"
           disabled={saving || method === payment.method}
           onClick={async () => {
-            setSaving(true)
-            setError(null)
+            setSaving(true);
+            setError(null);
             try {
-              const updated = await updatePaymentMethod(payment.id, method)
-              onSaved(updated)
-              setOpen(false)
+              const updated = await updatePaymentMethod(payment.id, method);
+              onSaved(updated);
+              setOpen(false);
             } catch (err) {
-              setError(err instanceof Error ? err.message : t('orders.paymentDrawer.errors.save'))
+              setError(
+                err instanceof Error
+                  ? err.message
+                  : t("orders.paymentDrawer.errors.save"),
+              );
             } finally {
-              setSaving(false)
+              setSaving(false);
             }
           }}
         >
-          {saving ? t('common.actions.saving') : t('common.actions.save')}
+          {saving ? t("common.actions.saving") : t("common.actions.save")}
         </Button>
       </PopoverContent>
     </Popover>
-  )
+  );
 }
 
 /** One half of the "4. Notas y comentarios" card -- Notas and Comentarios
@@ -292,35 +423,63 @@ function ThreadColumn({
   addAria,
   form,
 }: {
-  label: string
-  entries: OrderCommentWithAuthor[] | null
-  adding: boolean
-  onToggleAdd: () => void
-  addAria: string
-  form: ReactNode
+  label: string;
+  entries: OrderCommentWithAuthor[] | null;
+  adding: boolean;
+  onToggleAdd: () => void;
+  addAria: string;
+  form: ReactNode;
 }) {
-  const { t, language } = useLanguage()
+  const { t, language } = useLanguage();
   return (
     <div className="min-w-0">
       <div className="mb-2 flex items-center justify-between gap-2">
         <Label>{label}</Label>
-        <Button type="button" variant="default" size="icon-sm" onClick={onToggleAdd} aria-label={addAria}>
-          {adding ? <XIcon className="size-3.5" /> : <PlusIcon width={13} height={13} />}
+        <Button
+          type="button"
+          variant="default"
+          size="icon-sm"
+          onClick={onToggleAdd}
+          aria-label={addAria}
+        >
+          {adding ? (
+            <XIcon className="size-3.5" />
+          ) : (
+            <PlusIcon width={13} height={13} />
+          )}
         </Button>
       </div>
       {adding && <div className="mb-2">{form}</div>}
       {!entries && <PageSpinner />}
-      {entries && entries.length === 0 && !adding && <p className="text-xs text-brand-400">{t('orders.detail.threadEmpty')}</p>}
+      {entries && entries.length === 0 && !adding && (
+        <p className="text-xs text-brand-400">
+          {t("orders.detail.threadEmpty")}
+        </p>
+      )}
       {entries && entries.length > 0 && (
         <ul className="max-h-56 space-y-2.5 overflow-y-auto">
           {entries.map((c) => (
             <li key={c.id} className="flex items-start gap-2">
-              <InitialsAvatar name={c.created_by_ai ? t('orders.detail.aiBadge') : (c.author?.full_name ?? t('orders.detail.agent'))} size="xs" />
+              <InitialsAvatar
+                name={
+                  c.created_by_ai
+                    ? t("orders.detail.aiBadge")
+                    : (c.author?.full_name ?? t("orders.detail.agent"))
+                }
+                size="xs"
+              />
               <div className="min-w-0 flex-1">
-                <p className="whitespace-pre-wrap text-xs text-brand-700">{c.content}</p>
+                <p className="whitespace-pre-wrap text-xs text-brand-700">
+                  {c.content}
+                </p>
                 <p className="mt-0.5 flex items-center gap-1.5 text-xs text-brand-400">
-                  {c.created_by_ai ? t('orders.detail.aiAssistant') : (c.author?.full_name ?? t('orders.detail.agent'))} · {formatDateTime(c.created_at, language)}
-                  {c.created_by_ai && <AiBadge label={t('orders.detail.aiBadge')} />}
+                  {c.created_by_ai
+                    ? t("orders.detail.aiAssistant")
+                    : (c.author?.full_name ?? t("orders.detail.agent"))}{" "}
+                  · {formatDateTime(c.created_at, language)}
+                  {c.created_by_ai && (
+                    <AiBadge label={t("orders.detail.aiBadge")} />
+                  )}
                 </p>
               </div>
             </li>
@@ -328,47 +487,55 @@ function ThreadColumn({
         </ul>
       )}
     </div>
-  )
+  );
 }
 
 export function OrderDetail() {
-  const { id } = useParams<{ id: string }>()
-  const [searchParams, setSearchParams] = useSearchParams()
-  const navigate = useNavigate()
-  const { profile, enabledModules } = useAuth()
-  const canEditInvoicedOrder = usePermission('sales.edit_invoiced_order')
-  const { t, language } = useLanguage()
-  const toast = useToast()
-  const isNew = !id
+  const { id } = useParams<{ id: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const { profile, enabledModules } = useAuth();
+  const canEditInvoicedOrder = usePermission("sales.edit_invoiced_order");
+  const { t, language } = useLanguage();
+  const toast = useToast();
+  const isNew = !id;
 
   // ----- loaded order (edit mode only) -----
-  const [order, setOrder] = useState<OrderDetailType | null | undefined>(isNew ? null : undefined)
-  const [loadError, setLoadError] = useState<string | null>(null)
-  const [actionError, setActionError] = useState<string | null>(null)
+  const [order, setOrder] = useState<OrderDetailType | null | undefined>(
+    isNew ? null : undefined,
+  );
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // ----- reference data (both modes) -----
-  const [contacts, setContacts] = useState<Client[]>([])
-  const [opportunities, setOpportunities] = useState<OpportunityWithRelations[]>([])
-  const [products, setProducts] = useState<ProductWithImages[]>([])
-  const [categories, setCategories] = useState<ProductCategory[]>([])
-  const [brands, setBrands] = useState<Brand[]>([])
-  const [warehouses, setWarehouses] = useState<Warehouse[]>([])
-  const [stockRows, setStockRows] = useState<ProductWarehouseStockRow[]>([])
-  const [addresses, setAddresses] = useState<ContactAddress[]>([])
-  const [relatedTasks, setRelatedTasks] = useState<TaskWithRelations[] | null>(null)
+  const [contacts, setContacts] = useState<Client[]>([]);
+  const [opportunities, setOpportunities] = useState<
+    OpportunityWithRelations[]
+  >([]);
+  const [products, setProducts] = useState<ProductWithImages[]>([]);
+  const [categories, setCategories] = useState<ProductCategory[]>([]);
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [stockRows, setStockRows] = useState<ProductWarehouseStockRow[]>([]);
+  const [addresses, setAddresses] = useState<ContactAddress[]>([]);
+  const [relatedTasks, setRelatedTasks] = useState<TaskWithRelations[] | null>(
+    null,
+  );
 
   // ----- editable fields, shared shape for both modes -----
-  const [contactId, setContactId] = useState(() => searchParams.get('contactId') ?? '')
-  const [opportunityId, setOpportunityId] = useState('')
+  const [contactId, setContactId] = useState(
+    () => searchParams.get("contactId") ?? "",
+  );
+  const [opportunityId, setOpportunityId] = useState("");
   // Ventas directas son el caso por defecto (pedido explícito del usuario:
   // "por defecto deben ser ventas, cotizaciones [son] algo adicional que
   // requiera") -- Cotización sigue siendo una opción real en el Select de
   // Estado, solo dejó de ser el estado inicial al crear.
-  const [status, setStatus] = useState<OrderStatus>('confirmada')
-  const [validUntil, setValidUntil] = useState('')
-  const [shippingAddressId, setShippingAddressId] = useState('')
-  const [billingAddressId, setBillingAddressId] = useState('')
-  const [contactChangedNotice, setContactChangedNotice] = useState(false)
+  const [status, setStatus] = useState<OrderStatus>("confirmada");
+  const [validUntil, setValidUntil] = useState("");
+  const [shippingAddressId, setShippingAddressId] = useState("");
+  const [billingAddressId, setBillingAddressId] = useState("");
+  const [contactChangedNotice, setContactChangedNotice] = useState(false);
   // Contacto ahora lo maneja ClientPickerCard entero (su propio estado de
   // "buscando" interno) -- este componente solo le pasa el id resuelto a
   // handleContactSelect, ver handleClientPicked.
@@ -378,9 +545,9 @@ export function OrderDetail() {
   // dropdown todo el tiempo (feedback explícito del usuario, referencia de
   // captura: la dirección se ve como texto plano, editar es una acción
   // aparte).
-  const [editingShippingAddress, setEditingShippingAddress] = useState(false)
-  const [editingBillingAddress, setEditingBillingAddress] = useState(false)
-  const [touched, setTouched] = useState(false)
+  const [editingShippingAddress, setEditingShippingAddress] = useState(false);
+  const [editingBillingAddress, setEditingBillingAddress] = useState(false);
+  const [touched, setTouched] = useState(false);
 
   // ----- carrito (solo modo "nuevo") -- el borrador de un pedido nuevo
   // vive en un `carts` (calculate-order sin order_id), no en local nada
@@ -389,9 +556,11 @@ export function OrderDetail() {
   // "Crear pedido" (handleCreate) es el único momento en que create-order
   // convierte ese carrito en la fila real de sales_orders -- ver
   // comentarios de cabecera de ambas Edge Functions. -----
-  const [cartId, setCartId] = useState<string | null>(() => (isNew ? searchParams.get('cart') : null))
-  const [cartLoaded, setCartLoaded] = useState(!isNew || !cartId)
-  const [cancellingDraft, setCancellingDraft] = useState(false)
+  const [cartId, setCartId] = useState<string | null>(() =>
+    isNew ? searchParams.get("cart") : null,
+  );
+  const [cartLoaded, setCartLoaded] = useState(!isNew || !cartId);
+  const [cancellingDraft, setCancellingDraft] = useState(false);
 
   // ----- items + shipping: guardado automático centralizado, ver el
   // useEffect de "autosave" más abajo. Nada de esto se calcula en el
@@ -400,35 +569,38 @@ export function OrderDetail() {
   // para saber cuándo ya se cargó el estado real del pedido y recién ahí
   // empezar a tratar cambios como ediciones del agente (ver comentario
   // grande en el useEffect de autosave). -----
-  const [items, setItems] = useState<OrderItemInput[]>([])
-  const [itemsLoaded, setItemsLoaded] = useState(false)
-  const [shippingDraft, setShippingDraft] = useState('0')
-  const [savingDraft, setSavingDraft] = useState(false)
+  const [items, setItems] = useState<OrderItemInput[]>([]);
+  const [itemsLoaded, setItemsLoaded] = useState(false);
+  const [shippingDraft, setShippingDraft] = useState("0");
+  const [savingDraft, setSavingDraft] = useState(false);
 
   // ----- creation -----
-  const [creating, setCreating] = useState(false)
+  const [creating, setCreating] = useState(false);
 
   // ----- payments / notes+comments (edit mode only) -----
-  const [payments, setPayments] = useState<SalesOrderPayment[] | null>(null)
+  const [payments, setPayments] = useState<SalesOrderPayment[] | null>(null);
   // Both threads live in the same table now (sales_order_comments.is_internal
   // splits them, ver types/domain.ts) -- one fetch, filtered client-side into
   // the two columns (see notesList/commentsList below).
-  const [comments, setComments] = useState<OrderCommentWithAuthor[] | null>(null)
+  const [comments, setComments] = useState<OrderCommentWithAuthor[] | null>(
+    null,
+  );
   // Each column's "+" reveals its own form instead of always showing one --
   // explicit user feedback, matches the reference screenshot's collapsed
   // "Comentarios [+]" / "Observaciones [+]" boxes.
-  const [addingNote, setAddingNote] = useState(false)
-  const [noteDraft, setNoteDraft] = useState('')
-  const [savingNote, setSavingNote] = useState(false)
-  const [addingComment, setAddingComment] = useState(false)
-  const [commentDraft, setCommentDraft] = useState('')
-  const [savingComment, setSavingComment] = useState(false)
-  const [paymentDrawerOpen, setPaymentDrawerOpen] = useState(false)
+  const [addingNote, setAddingNote] = useState(false);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+  const [addingComment, setAddingComment] = useState(false);
+  const [commentDraft, setCommentDraft] = useState("");
+  const [savingComment, setSavingComment] = useState(false);
+  const [paymentDrawerOpen, setPaymentDrawerOpen] = useState(false);
   // Reimprimir el ticket de un pedido de mostrador -- ver showShipping más
   // abajo, el mismo criterio que decide qué mostrar/ocultar por canal.
-  const receiptPrinter = usePosReceiptPrinter(profile?.tenant_id)
-  const [dispatchDrawerOpen, setDispatchDrawerOpen] = useState(false)
-  const [dispatchStatus, setDispatchStatus] = useState<DispatchStatusSummary | null>(null)
+  const receiptPrinter = usePosReceiptPrinter(profile?.tenant_id);
+  const [dispatchDrawerOpen, setDispatchDrawerOpen] = useState(false);
+  const [dispatchStatus, setDispatchStatus] =
+    useState<DispatchStatusSummary | null>(null);
 
   // ----- Factura DIAN -- vive DENTRO del pedido, no en una lista propia
   // (feedback explícito del usuario 2026-09-03: comprador/vendedor/ítems ya
@@ -451,8 +623,8 @@ export function OrderDetail() {
   // historia, y el usuario tiene que poder verlos todos. `invoices[0]` (el
   // de mayor attempt_number) sigue siendo "el vigente" para efecto de
   // qué acción mostrar (enviar/reintentar/nota crédito/reemitir).
-  const [invoices, setInvoices] = useState<SalesInvoice[]>([])
-  const latestInvoice = invoices[0] ?? null
+  const [invoices, setInvoices] = useState<SalesInvoice[]>([]);
+  const latestInvoice = invoices[0] ?? null;
   // Reglas explícitas del usuario 2026-09-04 -- ya no es "apenas se
   // confirma": una venta confirmada que TODAVÍA no salió (sin despachar) y
   // cuya factura TODAVÍA no se envió/aceptó por la DIAN sigue siendo
@@ -477,7 +649,9 @@ export function OrderDetail() {
   // no se puede leer antes de su propia declaración -- moverlos generó
   // un "Cannot access before initialization" real la primera vez que se
   // dejaron más abajo (2026-09-11).
-  const dianLocksOrder = !!latestInvoice && (latestInvoice.status === 'sent' || latestInvoice.status === 'accepted')
+  const dianLocksOrder =
+    !!latestInvoice &&
+    (latestInvoice.status === "sent" || latestInvoice.status === "accepted");
   // Hallazgo real al probar: con el módulo de Despachos habilitado,
   // sales_orders.delivery_status NUNCA se sincroniza (confirmado leyendo
   // log_dispatch_status_change() -- solo escribe dispatch_status_history,
@@ -486,7 +660,9 @@ export function OrderDetail() {
   // (dispatchStatus !== null, ver reloadDispatchStatus). Sin el módulo, la
   // única vía es el select simple, que sí escribe delivery_status
   // directo. Hay que chequear las dos.
-  const dispatchLocksOrder = !!order && (dispatchStatus !== null || order.delivery_status !== 'pendiente')
+  const dispatchLocksOrder =
+    !!order &&
+    (dispatchStatus !== null || order.delivery_status !== "pendiente");
   // Excepción angosta a los candados de arriba (pedido explícito del
   // usuario, 2026-09-11, segunda ronda): quien tenga
   // `sales.edit_invoiced_order` puede cambiar el cliente y gestionar los
@@ -496,26 +672,31 @@ export function OrderDetail() {
   // permiso. Despachado o anulado siguen bloqueando siempre, sin
   // excepción para nadie -- por eso NUNCA se activa si `dispatchLocksOrder`
   // es true o el pedido está cancelado.
-  const canOverrideConfirmedLock = !dispatchLocksOrder && order?.status !== 'cancelada' && canEditInvoicedOrder
-  const [sendingInvoice, setSendingInvoice] = useState(false)
-  const [sendInvoiceError, setSendInvoiceError] = useState<string | null>(null)
-  const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null)
-  const [invoicePdfError, setInvoicePdfError] = useState<string | null>(null)
+  const canOverrideConfirmedLock =
+    !dispatchLocksOrder &&
+    order?.status !== "cancelada" &&
+    canEditInvoicedOrder;
+  const [sendingInvoice, setSendingInvoice] = useState(false);
+  const [sendInvoiceError, setSendInvoiceError] = useState<string | null>(null);
+  const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<
+    string | null
+  >(null);
+  const [invoicePdfError, setInvoicePdfError] = useState<string | null>(null);
 
   function reloadInvoices() {
     if (!order?.id) {
-      setInvoices([])
-      return
+      setInvoices([]);
+      return;
     }
     listSalesInvoicesForOrder(order.id)
       .then(setInvoices)
-      .catch(() => setInvoices([]))
+      .catch(() => setInvoices([]));
   }
 
   useEffect(() => {
-    reloadInvoices()
+    reloadInvoices();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [order?.id])
+  }, [order?.id]);
 
   // ----- Notas crédito -- pedido explícito del usuario 2026-09-09, apenas
   // después de confirmar que el envío de facturas reales ya funciona.
@@ -524,59 +705,87 @@ export function OrderDetail() {
   // sin pantalla aparte" ya aplicado a la factura misma. Mapeadas por
   // invoice_id (no un único arreglo) porque el historial ahora puede
   // mostrar varias facturas emitidas a la vez, cada una con las suyas.
-  const [creditNotesByInvoice, setCreditNotesByInvoice] = useState<Record<string, SalesCreditNote[]>>({})
-  const [creditNoteDrawerOpen, setCreditNoteDrawerOpen] = useState(false)
-  const [retryingCreditNoteId, setRetryingCreditNoteId] = useState<string | null>(null)
-  const [retryCreditNoteError, setRetryCreditNoteError] = useState<string | null>(null)
-  const [downloadingCreditNoteId, setDownloadingCreditNoteId] = useState<string | null>(null)
-  const [creditNotePdfError, setCreditNotePdfError] = useState<string | null>(null)
+  const [creditNotesByInvoice, setCreditNotesByInvoice] = useState<
+    Record<string, SalesCreditNote[]>
+  >({});
+  const [creditNoteDrawerOpen, setCreditNoteDrawerOpen] = useState(false);
+  const [retryingCreditNoteId, setRetryingCreditNoteId] = useState<
+    string | null
+  >(null);
+  const [retryCreditNoteError, setRetryCreditNoteError] = useState<
+    string | null
+  >(null);
+  const [downloadingCreditNoteId, setDownloadingCreditNoteId] = useState<
+    string | null
+  >(null);
+  const [creditNotePdfError, setCreditNotePdfError] = useState<string | null>(
+    null,
+  );
   // "Verificar estado" -- SendTestSetAsync es asíncrona, el acuse inicial
   // ('sent') no es la validación final de la DIAN. Pedido explícito del
   // usuario 2026-09-09 ("en el portal de la DIAN no salen esas facturas
   // por ningún lado, en habilitación deberían salir"): sin esto, Leadly
   // nunca volvía a preguntarle a la DIAN qué pasó después del acuse.
-  const [checkingStatusId, setCheckingStatusId] = useState<string | null>(null)
+  const [checkingStatusId, setCheckingStatusId] = useState<string | null>(null);
   // Reenvío del documento al correo del adquiriente (Anexo Técnico 9.3).
   // El envío automático ya sale solo al aceptar la DIAN -- esto cubre "no
   // me llegó" y "le corregí el correo al cliente después de emitir".
-  const [emailingId, setEmailingId] = useState<string | null>(null)
-  const [checkStatusError, setCheckStatusError] = useState<string | null>(null)
+  const [emailingId, setEmailingId] = useState<string | null>(null);
+  const [checkStatusError, setCheckStatusError] = useState<string | null>(null);
 
   // Solo una factura sent/accepted es un documento fiscal REAL (con cufe/
   // número) -- un intento pending/blocked/generating/rejected/error nunca
   // llegó a existir ante la DIAN, no pertenece al historial de "documentos
   // emitidos".
-  const issuedInvoices = useMemo(() => invoices.filter((inv) => inv.status === 'sent' || inv.status === 'accepted'), [invoices])
+  const issuedInvoices = useMemo(
+    () =>
+      invoices.filter(
+        (inv) => inv.status === "sent" || inv.status === "accepted",
+      ),
+    [invoices],
+  );
 
   function reloadCreditNotes() {
     if (issuedInvoices.length === 0) {
-      setCreditNotesByInvoice({})
-      return
+      setCreditNotesByInvoice({});
+      return;
     }
-    Promise.all(issuedInvoices.map((inv) => listCreditNotesForInvoice(inv.id).then((cns) => [inv.id, cns] as const)))
+    Promise.all(
+      issuedInvoices.map((inv) =>
+        listCreditNotesForInvoice(inv.id).then((cns) => [inv.id, cns] as const),
+      ),
+    )
       .then((pairs) => setCreditNotesByInvoice(Object.fromEntries(pairs)))
-      .catch(() => setCreditNotesByInvoice({}))
+      .catch(() => setCreditNotesByInvoice({}));
   }
 
   useEffect(() => {
-    reloadCreditNotes()
+    reloadCreditNotes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [issuedInvoices.map((inv) => inv.id).join(',')])
+  }, [issuedInvoices.map((inv) => inv.id).join(",")]);
 
   async function handleRetryCreditNote(creditNoteId: string) {
-    setRetryingCreditNoteId(creditNoteId)
-    setRetryCreditNoteError(null)
+    setRetryingCreditNoteId(creditNoteId);
+    setRetryCreditNoteError(null);
     try {
-      const result = await retryCreditNote(creditNoteId)
+      const result = await retryCreditNote(creditNoteId);
       // Mismo criterio que handleSendInvoice -- 'rejected' ya es el
       // veredicto real (el propio envío lo consulta antes de responder).
-      if (result.status === 'error') setRetryCreditNoteError(result.faultReason ?? t('einvoicing.creditNote.error'))
-      else if (result.status === 'rejected') setRetryCreditNoteError(result.rejectionDetail ?? t('einvoicing.creditNote.error'))
+      if (result.status === "error")
+        setRetryCreditNoteError(
+          result.faultReason ?? t("einvoicing.creditNote.error"),
+        );
+      else if (result.status === "rejected")
+        setRetryCreditNoteError(
+          result.rejectionDetail ?? t("einvoicing.creditNote.error"),
+        );
     } catch (err) {
-      setRetryCreditNoteError(err instanceof Error ? err.message : t('einvoicing.creditNote.error'))
+      setRetryCreditNoteError(
+        err instanceof Error ? err.message : t("einvoicing.creditNote.error"),
+      );
     } finally {
-      setRetryingCreditNoteId(null)
-      reloadCreditNotes()
+      setRetryingCreditNoteId(null);
+      reloadCreditNotes();
     }
   }
 
@@ -587,54 +796,77 @@ export function OrderDetail() {
    * veredicto claro, para no fingir que "no pasó nada" cuando en realidad
    * la respuesta de la DIAN no se pudo interpretar. */
   async function handleCheckInvoiceStatus(invoiceId: string) {
-    setCheckingStatusId(invoiceId)
-    setCheckStatusError(null)
+    setCheckingStatusId(invoiceId);
+    setCheckStatusError(null);
     try {
-      const result = await checkInvoiceStatus(invoiceId)
-      const status = result.statuses[0] ?? null
-      if (result.faultReason) setCheckStatusError(result.faultReason)
+      const result = await checkInvoiceStatus(invoiceId);
+      const status = result.statuses[0] ?? null;
+      if (result.faultReason) setCheckStatusError(result.faultReason);
       else if (!status || status.isValid === null) {
-        setCheckStatusError(status?.statusDescription ?? status?.statusMessage ?? t('einvoicing.detail.checkStatusPending'))
+        setCheckStatusError(
+          status?.statusDescription ??
+            status?.statusMessage ??
+            t("einvoicing.detail.checkStatusPending"),
+        );
       }
-      reloadInvoices()
+      reloadInvoices();
     } catch (err) {
-      setCheckStatusError(err instanceof Error ? err.message : t('einvoicing.detail.checkStatusError'))
+      setCheckStatusError(
+        err instanceof Error
+          ? err.message
+          : t("einvoicing.detail.checkStatusError"),
+      );
     } finally {
-      setCheckingStatusId(null)
+      setCheckingStatusId(null);
     }
   }
 
   async function handleCheckCreditNoteStatus(creditNoteId: string) {
-    setCheckingStatusId(creditNoteId)
-    setCheckStatusError(null)
+    setCheckingStatusId(creditNoteId);
+    setCheckStatusError(null);
     try {
-      const result = await checkCreditNoteStatus(creditNoteId)
-      const status = result.statuses[0] ?? null
-      if (result.faultReason) setCheckStatusError(result.faultReason)
+      const result = await checkCreditNoteStatus(creditNoteId);
+      const status = result.statuses[0] ?? null;
+      if (result.faultReason) setCheckStatusError(result.faultReason);
       else if (!status || status.isValid === null) {
-        setCheckStatusError(status?.statusDescription ?? status?.statusMessage ?? t('einvoicing.detail.checkStatusPending'))
+        setCheckStatusError(
+          status?.statusDescription ??
+            status?.statusMessage ??
+            t("einvoicing.detail.checkStatusPending"),
+        );
       }
-      reloadCreditNotes()
+      reloadCreditNotes();
     } catch (err) {
-      setCheckStatusError(err instanceof Error ? err.message : t('einvoicing.detail.checkStatusError'))
+      setCheckStatusError(
+        err instanceof Error
+          ? err.message
+          : t("einvoicing.detail.checkStatusError"),
+      );
     } finally {
-      setCheckingStatusId(null)
+      setCheckingStatusId(null);
     }
   }
 
-  async function handleSendDocumentEmail(target: { invoiceId?: string; creditNoteId?: string }) {
-    const id = (target.invoiceId ?? target.creditNoteId)!
-    setEmailingId(id)
+  async function handleSendDocumentEmail(target: {
+    invoiceId?: string;
+    creditNoteId?: string;
+  }) {
+    const id = (target.invoiceId ?? target.creditNoteId)!;
+    setEmailingId(id);
     try {
-      const result = await sendDocumentEmail(target)
-      toast.success(t('einvoicing.detail.emailSent'), result.recipient ?? undefined)
+      const result = await sendDocumentEmail(target);
+      toast.success(t("einvoicing.detail.emailSent"), {
+        description: result.recipient ?? undefined,
+      });
     } catch (err) {
       // El backend distingue "el cliente no tiene correo" (409, accionable)
       // de un fallo real del proveedor (502) -- los dos llegan acá como el
       // mensaje que ya viene redactado del servidor, sin reinterpretarlo.
-      toast.error(t('einvoicing.detail.emailError'), err instanceof Error ? err.message : undefined)
+      toast.error(t("einvoicing.detail.emailError"), {
+        description: err instanceof Error ? err.message : undefined,
+      });
     } finally {
-      setEmailingId(null)
+      setEmailingId(null);
     }
   }
 
@@ -647,23 +879,33 @@ export function OrderDetail() {
    * falta releer el listado completo -- aparece una fila MÁS, no una
    * modificada. */
   async function handleSendInvoice(retry = false) {
-    if (!latestInvoice) return
-    setSendingInvoice(true)
-    setSendInvoiceError(null)
+    if (!latestInvoice) return;
+    setSendingInvoice(true);
+    setSendInvoiceError(null);
     try {
-      const result = retry ? await retrySalesInvoiceToDian(latestInvoice.id) : await sendSalesInvoiceToDian(latestInvoice.id)
+      const result = retry
+        ? await retrySalesInvoiceToDian(latestInvoice.id)
+        : await sendSalesInvoiceToDian(latestInvoice.id);
       // 'rejected' ya es el veredicto REAL de la DIAN (el propio envío lo
       // consulta antes de responder, ver sendInvoiceToDian.ts) -- se
       // muestra igual que un error de envío para feedback inmediato, sin
       // esperar a que reloadInvoices() termine de traer la fila
       // actualizada (que también trae el mismo detalle en status_detail).
-      if (result.status === 'error') setSendInvoiceError(result.faultReason ?? t('einvoicing.detail.sendError'))
-      else if (result.status === 'rejected') setSendInvoiceError(result.rejectionDetail ?? t('einvoicing.detail.sendError'))
-      reloadInvoices()
+      if (result.status === "error")
+        setSendInvoiceError(
+          result.faultReason ?? t("einvoicing.detail.sendError"),
+        );
+      else if (result.status === "rejected")
+        setSendInvoiceError(
+          result.rejectionDetail ?? t("einvoicing.detail.sendError"),
+        );
+      reloadInvoices();
     } catch (err) {
-      setSendInvoiceError(err instanceof Error ? err.message : t('einvoicing.detail.sendError'))
+      setSendInvoiceError(
+        err instanceof Error ? err.message : t("einvoicing.detail.sendError"),
+      );
     } finally {
-      setSendingInvoice(false)
+      setSendingInvoice(false);
     }
   }
 
@@ -680,22 +922,24 @@ export function OrderDetail() {
    * encontrado al probar: el botón terminaba su ciclo de carga normal,
    * pero nunca aparecía ninguna pestaña nueva). */
   async function handleDownloadInvoicePdf() {
-    if (!id) return
-    const pendingTab = window.open('', '_blank')
-    setDownloadingInvoiceId(id)
-    setInvoicePdfError(null)
+    if (!id) return;
+    const pendingTab = window.open("", "_blank");
+    setDownloadingInvoiceId(id);
+    setInvoicePdfError(null);
     try {
-      const { pdfBase64 } = await getSalesOrderPdf(id)
-      const bytes = Uint8Array.from(atob(pdfBase64), (c) => c.charCodeAt(0))
-      const blob = new Blob([bytes], { type: 'application/pdf' })
-      const url = URL.createObjectURL(blob)
-      if (pendingTab) pendingTab.location.href = url
-      else window.open(url, '_blank')
+      const { pdfBase64 } = await getSalesOrderPdf(id);
+      const bytes = Uint8Array.from(atob(pdfBase64), (c) => c.charCodeAt(0));
+      const blob = new Blob([bytes], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      if (pendingTab) pendingTab.location.href = url;
+      else window.open(url, "_blank");
     } catch (err) {
-      pendingTab?.close()
-      setInvoicePdfError(err instanceof Error ? err.message : t('einvoicing.detail.pdfError'))
+      pendingTab?.close();
+      setInvoicePdfError(
+        err instanceof Error ? err.message : t("einvoicing.detail.pdfError"),
+      );
     } finally {
-      setDownloadingInvoiceId(null)
+      setDownloadingInvoiceId(null);
     }
   }
 
@@ -703,76 +947,90 @@ export function OrderDetail() {
    * await, por el bloqueador de pop-ups) -- ver ese comentario para el
    * porqué exacto. */
   async function handleDownloadCreditNotePdf(creditNoteId: string) {
-    const pendingTab = window.open('', '_blank')
-    setDownloadingCreditNoteId(creditNoteId)
-    setCreditNotePdfError(null)
+    const pendingTab = window.open("", "_blank");
+    setDownloadingCreditNoteId(creditNoteId);
+    setCreditNotePdfError(null);
     try {
-      const { pdfBase64 } = await getCreditNotePdf(creditNoteId)
-      const bytes = Uint8Array.from(atob(pdfBase64), (c) => c.charCodeAt(0))
-      const blob = new Blob([bytes], { type: 'application/pdf' })
-      const url = URL.createObjectURL(blob)
-      if (pendingTab) pendingTab.location.href = url
-      else window.open(url, '_blank')
+      const { pdfBase64 } = await getCreditNotePdf(creditNoteId);
+      const bytes = Uint8Array.from(atob(pdfBase64), (c) => c.charCodeAt(0));
+      const blob = new Blob([bytes], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      if (pendingTab) pendingTab.location.href = url;
+      else window.open(url, "_blank");
     } catch (err) {
-      pendingTab?.close()
-      setCreditNotePdfError(err instanceof Error ? err.message : t('einvoicing.creditNote.pdfError'))
+      pendingTab?.close();
+      setCreditNotePdfError(
+        err instanceof Error
+          ? err.message
+          : t("einvoicing.creditNote.pdfError"),
+      );
     } finally {
-      setDownloadingCreditNoteId(null)
+      setDownloadingCreditNoteId(null);
     }
   }
 
   function reloadDispatchStatus() {
-    if (!order || order.sales_channel === 'pos' || !enabledModules?.has('dispatches')) return
+    if (
+      !order ||
+      order.sales_channel === "pos" ||
+      !enabledModules?.has("dispatches")
+    )
+      return;
     getDispatchStatusForOrder(order.id)
       .then(setDispatchStatus)
-      .catch(() => setDispatchStatus(null))
+      .catch(() => setDispatchStatus(null));
   }
 
   useEffect(() => {
-    reloadDispatchStatus()
+    reloadDispatchStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [order?.id, enabledModules])
+  }, [order?.id, enabledModules]);
 
   // Redimir saldo a favor en PaymentDrawer (ver returns.md) necesita saber
   // cuánto tiene disponible el cliente de esta orden -- se recarga cada vez
   // que cambia el contacto, no solo al montar, porque "Cambiar contacto" es
   // una acción real acá (ver handleContactSelect).
-  const [storeCreditBalance, setStoreCreditBalance] = useState(0)
+  const [storeCreditBalance, setStoreCreditBalance] = useState(0);
 
   useEffect(() => {
     if (!order?.contact_id) {
-      setStoreCreditBalance(0)
-      return
+      setStoreCreditBalance(0);
+      return;
     }
-    getStoreCreditBalance(order.contact_id).then(setStoreCreditBalance).catch(() => setStoreCreditBalance(0))
-  }, [order?.contact_id])
+    getStoreCreditBalance(order.contact_id)
+      .then(setStoreCreditBalance)
+      .catch(() => setStoreCreditBalance(0));
+  }, [order?.contact_id]);
 
-  const [addressDrawerOpen, setAddressDrawerOpen] = useState(false)
-  const [deletePaymentId, setDeletePaymentId] = useState<string | null>(null)
-  const [confirmingVoid, setConfirmingVoid] = useState(false)
+  const [addressDrawerOpen, setAddressDrawerOpen] = useState(false);
+  const [deletePaymentId, setDeletePaymentId] = useState<string | null>(null);
+  const [confirmingVoid, setConfirmingVoid] = useState(false);
   // Estado de envío elegido mientras el pedido tiene saldo pendiente -- ver
   // handleDeliveryStatusSelect/applyDeliveryStatus. null = sin diálogo
   // abierto.
-  const [pendingDeliveryStatus, setPendingDeliveryStatus] = useState<DeliveryStatus | null>(null)
-  const [voiding, setVoiding] = useState(false)
-  const [confirmingDelete, setConfirmingDelete] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const [advancingStatus, setAdvancingStatus] = useState(false)
+  const [pendingDeliveryStatus, setPendingDeliveryStatus] =
+    useState<DeliveryStatus | null>(null);
+  const [voiding, setVoiding] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [advancingStatus, setAdvancingStatus] = useState(false);
   // stockShortfalls persists after the dialog closes (it drives the red
   // outline on the offending Cantidad inputs in OrderItemsEditor) --
   // shortfallDialogOpen is the only thing the dialog itself reads.
-  const [stockShortfalls, setStockShortfalls] = useState<StockShortfall[]>([])
-  const [shortfallDialogOpen, setShortfallDialogOpen] = useState(false)
+  const [stockShortfalls, setStockShortfalls] = useState<StockShortfall[]>([]);
+  const [shortfallDialogOpen, setShortfallDialogOpen] = useState(false);
 
   function reloadOrder() {
-    if (!id) return
+    if (!id) return;
     getOrder(id)
       .then(setOrder)
-      .catch((err) => setLoadError(err.message ?? t('orders.detail.loadError')))
+      .catch((err) =>
+        setLoadError(err.message ?? t("orders.detail.loadError")),
+      );
   }
 
   function reloadItems() {
-    if (!id) return
+    if (!id) return;
     listOrderItems(id).then((data) => {
       const mapped = data.map((i) => ({
         product_id: i.product_id,
@@ -783,36 +1041,41 @@ export function OrderDetail() {
         quantity: i.quantity,
         unit_price: i.unit_price,
         discount_amount: i.discount_amount,
-      }))
-      setItems(mapped)
-      setItemsLoaded(true)
-    })
+      }));
+      setItems(mapped);
+      setItemsLoaded(true);
+    });
   }
 
   function reloadPayments() {
-    if (!id) return
-    listPaymentsForOrder(id).then(setPayments).catch(() => setPayments([]))
+    if (!id) return;
+    listPaymentsForOrder(id)
+      .then(setPayments)
+      .catch(() => setPayments([]));
     // Un pago con method='saldo_favor' descuenta el saldo del lado del
     // servidor -- refrescarlo acá para que el drawer no siga ofreciendo un
     // monto máximo desactualizado si se abre de nuevo.
-    if (order?.contact_id) getStoreCreditBalance(order.contact_id).then(setStoreCreditBalance).catch(() => {})
+    if (order?.contact_id)
+      getStoreCreditBalance(order.contact_id)
+        .then(setStoreCreditBalance)
+        .catch(() => {});
   }
 
   function reloadComments() {
-    if (!id) return
-    listCommentsForOrder(id).then(setComments)
+    if (!id) return;
+    listCommentsForOrder(id).then(setComments);
   }
 
   useEffect(() => {
-    if (isNew) return
-    setOrder(undefined)
-    setItemsLoaded(false)
-    reloadOrder()
-    reloadItems()
-    reloadPayments()
-    reloadComments()
+    if (isNew) return;
+    setOrder(undefined);
+    setItemsLoaded(false);
+    reloadOrder();
+    reloadItems();
+    reloadPayments();
+    reloadComments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id])
+  }, [id]);
 
   // Carga el estado inicial del borrador SOLO cuando cambia a un pedido
   // distinto (order.id), nunca en cada reload de este mismo pedido -- a
@@ -822,80 +1085,119 @@ export function OrderDetail() {
   // rompería justo lo que se estaba tipeando si hubo un cambio nuevo
   // durante el viaje de ida y vuelta. */
   useEffect(() => {
-    if (isNew || !order) return
-    setContactId(order.contact_id)
-    setOpportunityId(order.opportunity_id ?? '')
-    setStatus(order.status)
-    setValidUntil(order.valid_until ?? '')
-    setShippingAddressId(order.shipping_address_id ?? '')
-    setBillingAddressId(order.billing_address_id ?? '')
-    setShippingDraft(String(order.shipping))
+    if (isNew || !order) return;
+    setContactId(order.contact_id);
+    setOpportunityId(order.opportunity_id ?? "");
+    setStatus(order.status);
+    setValidUntil(order.valid_until ?? "");
+    setShippingAddressId(order.shipping_address_id ?? "");
+    setBillingAddressId(order.billing_address_id ?? "");
+    setShippingDraft(String(order.shipping));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [order?.id])
+  }, [order?.id]);
 
   useEffect(() => {
-    if (!profile?.tenant_id) return
-    listClients(profile.tenant_id).then(setContacts).catch(() => {})
-    listOpportunities(profile.tenant_id).then(setOpportunities).catch(() => {})
+    if (!profile?.tenant_id) return;
+    listClients(profile.tenant_id)
+      .then(setContacts)
+      .catch(() => {});
+    listOpportunities(profile.tenant_id)
+      .then(setOpportunities)
+      .catch(() => {});
     listProducts(profile.tenant_id, { page: 1, pageSize: 1000 })
       .then(({ data }) => setProducts(data))
-      .catch(() => {})
-    listProductCategories(profile.tenant_id).then(setCategories).catch(() => {})
-    listBrands(profile.tenant_id).then(setBrands).catch(() => {})
-    listWarehouses(profile.tenant_id).then(setWarehouses).catch(() => {})
-    listStockByWarehouse(profile.tenant_id).then(setStockRows).catch(() => {})
-  }, [profile?.tenant_id])
+      .catch(() => {});
+    listProductCategories(profile.tenant_id)
+      .then(setCategories)
+      .catch(() => {});
+    listBrands(profile.tenant_id)
+      .then(setBrands)
+      .catch(() => {});
+    listWarehouses(profile.tenant_id)
+      .then(setWarehouses)
+      .catch(() => {});
+    listStockByWarehouse(profile.tenant_id)
+      .then(setStockRows)
+      .catch(() => {});
+  }, [profile?.tenant_id]);
 
   useEffect(() => {
     if (!contactId) {
-      setAddresses([])
-      return
+      setAddresses([]);
+      return;
     }
-    listAddressesForContact(contactId).then(setAddresses).catch(() => setAddresses([]))
-  }, [contactId])
+    listAddressesForContact(contactId)
+      .then(setAddresses)
+      .catch(() => setAddresses([]));
+  }, [contactId]);
 
   // Edit mode only -- "Tareas relacionadas" needs a real linked opportunity
   // on a saved order (order is always null while creating, so this simply
   // never populates in new mode, matching the card being hidden there too).
   useEffect(() => {
-    if (isNew) return
+    if (isNew) return;
     if (!order?.opportunity_id) {
-      setRelatedTasks([])
-      return
+      setRelatedTasks([]);
+      return;
     }
-    listTasksForOpportunity(order.opportunity_id).then(setRelatedTasks).catch(() => setRelatedTasks([]))
-  }, [isNew, order?.opportunity_id])
+    listTasksForOpportunity(order.opportunity_id)
+      .then(setRelatedTasks)
+      .catch(() => setRelatedTasks([]));
+  }, [isNew, order?.opportunity_id]);
 
   // Clears a stale opportunity/address selection while still drafting a new
   // order (in edit mode this is handled atomically server-side instead, see
   // handleContactSelect).
   useEffect(() => {
-    if (!isNew) return
-    if (opportunityId && !opportunities.some((o) => o.id === opportunityId && o.contact_id === contactId)) setOpportunityId('')
+    if (!isNew) return;
+    if (
+      opportunityId &&
+      !opportunities.some(
+        (o) => o.id === opportunityId && o.contact_id === contactId,
+      )
+    )
+      setOpportunityId("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contactId])
+  }, [contactId]);
 
   useEffect(() => {
-    if (!isNew) return
-    if (shippingAddressId && !addresses.some((a) => a.id === shippingAddressId)) setShippingAddressId('')
-    if (billingAddressId && !addresses.some((a) => a.id === billingAddressId)) setBillingAddressId('')
+    if (!isNew) return;
+    if (shippingAddressId && !addresses.some((a) => a.id === shippingAddressId))
+      setShippingAddressId("");
+    if (billingAddressId && !addresses.some((a) => a.id === billingAddressId))
+      setBillingAddressId("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [addresses])
+  }, [addresses]);
 
   useEffect(() => {
-    if (!contactChangedNotice) return
-    const timer = setTimeout(() => setContactChangedNotice(false), 5000)
-    return () => clearTimeout(timer)
-  }, [contactChangedNotice])
+    if (!contactChangedNotice) return;
+    const timer = setTimeout(() => setContactChangedNotice(false), 5000);
+    return () => clearTimeout(timer);
+  }, [contactChangedNotice]);
 
-  const contactOpportunities = useMemo(() => opportunities.filter((o) => o.contact_id === contactId), [opportunities, contactId])
+  const contactOpportunities = useMemo(
+    () => opportunities.filter((o) => o.contact_id === contactId),
+    [opportunities, contactId],
+  );
   // Same table, split by is_internal (ver types/domain.ts) -- newest first
   // in both, like a conversation. Stays null (not []) while comments hasn't
   // loaded yet so each column can still tell "loading" from "empty".
-  const notesList = useMemo(() => (comments ? comments.filter((c) => c.is_internal) : null), [comments])
-  const commentsList = useMemo(() => (comments ? comments.filter((c) => !c.is_internal) : null), [comments])
-  const totalPaid = useMemo(() => (payments ?? []).reduce((sum, p) => sum + p.amount, 0), [payments])
-  const totalQuantity = useMemo(() => items.reduce((sum, i) => sum + i.quantity, 0), [items])
+  const notesList = useMemo(
+    () => (comments ? comments.filter((c) => c.is_internal) : null),
+    [comments],
+  );
+  const commentsList = useMemo(
+    () => (comments ? comments.filter((c) => !c.is_internal) : null),
+    [comments],
+  );
+  const totalPaid = useMemo(
+    () => (payments ?? []).reduce((sum, p) => sum + p.amount, 0),
+    [payments],
+  );
+  const totalQuantity = useMemo(
+    () => items.reduce((sum, i) => sum + i.quantity, 0),
+    [items],
+  );
 
   // Desglose real (base gravable + cada impuesto por tarifa, según lo que
   // cada producto tenga configurado) para el resumen -- pedido explícito
@@ -910,19 +1212,27 @@ export function OrderDetail() {
   // - Modo "crear" (sin order_id todavía): useOrderTotalsPreview, el mismo
   //   hook que ya usa el POS para el carrito antes de cobrar -- ahí sí
   //   corresponde una vista previa en vivo, no hay nada persistido todavía.
-  const [orderTotals, setOrderTotals] = useState<OrderTotalsBreakdown | null>(null)
+  const [orderTotals, setOrderTotals] = useState<OrderTotalsBreakdown | null>(
+    null,
+  );
   useEffect(() => {
     if (!order) {
-      setOrderTotals(null)
-      return
+      setOrderTotals(null);
+      return;
     }
     getOrderTotalsBreakdown(order)
       .then(setOrderTotals)
-      .catch(() => setOrderTotals(null))
-  }, [order])
-  const { totals: draftTotalsPreview } = useOrderTotalsPreview(isNew ? items : [], Number(shippingDraft) || 0)
+      .catch(() => setOrderTotals(null));
+  }, [order]);
+  const { totals: draftTotalsPreview } = useOrderTotalsPreview(
+    isNew ? items : [],
+    Number(shippingDraft) || 0,
+  );
 
-  const contactError = isNew && touched && !isNotBlank(contactId) ? t('orders.drawer.errors.contactRequired') : undefined
+  const contactError =
+    isNew && touched && !isNotBlank(contactId)
+      ? t("orders.drawer.errors.contactRequired")
+      : undefined;
 
   // ----- Autosave centralizado: TODO el estado editable del pedido
   // (cliente, oportunidad, válida hasta, direcciones, envío, ítems) vive en
@@ -939,8 +1249,8 @@ export function OrderDetail() {
   // edición del agente, es el estado que ya está en el servidor) -- recién
   // "priming" cuando tanto `order` como los ítems (que llegan por una
   // fetch aparte, ver reloadItems/itemsLoaded) ya cargaron los dos.
-  const primedOrderIdRef = useRef<string | null>(null)
-  const lastSyncedSnapshotRef = useRef<string>('')
+  const primedOrderIdRef = useRef<string | null>(null);
+  const lastSyncedSnapshotRef = useRef<string>("");
 
   function currentDraftSnapshot(): string {
     // En un pedido confirmado el autoguardado solo existe para cambiar el
@@ -950,21 +1260,30 @@ export function OrderDetail() {
     // un cambio nuevo y volvía a guardar en bucle; una de esas recargas leyó
     // la lista vacía a mitad del reemplazo y la guardó -- el pedido quedó
     // sin productos.
-    if (order && order.status !== 'cotizacion') return JSON.stringify({ contactId })
-    return JSON.stringify({ contactId, opportunityId, validUntil, shippingAddressId, billingAddressId, shippingDraft, items })
+    if (order && order.status !== "cotizacion")
+      return JSON.stringify({ contactId });
+    return JSON.stringify({
+      contactId,
+      opportunityId,
+      validUntil,
+      shippingAddressId,
+      billingAddressId,
+      shippingDraft,
+      items,
+    });
   }
 
   async function saveDraft(orderId: string, snapshot: string) {
     if (hasIncompleteVariantSelection(items, products)) {
-      setActionError(t('orders.itemsEditor.variantRequired'))
-      return
+      setActionError(t("orders.itemsEditor.variantRequired"));
+      return;
     }
-    setActionError(null)
-    setSavingDraft(true)
+    setActionError(null);
+    setSavingDraft(true);
     try {
       // Pedido confirmado: solo viaja el cliente -- nunca los ítems, que
       // el servidor igual rechaza reescribir ahí (ver calculate-order).
-      const confirmedOrder = !!order && order.status !== 'cotizacion'
+      const confirmedOrder = !!order && order.status !== "cotizacion";
       const { stockShortfalls: shortfalls } = await calculateOrder(
         confirmedOrder
           ? { order_id: orderId, contact_id: contactId, shipping: 0, items: [] }
@@ -978,18 +1297,20 @@ export function OrderDetail() {
               shipping: Number(shippingDraft) || 0,
               items,
             },
-      )
+      );
       // Mismo estado que el chequeo pre-confirmar de más abajo -- ahora se
       // mantiene al día con cada autoguardado, no solo justo antes de
       // confirmar.
-      setStockShortfalls(shortfalls)
-      lastSyncedSnapshotRef.current = snapshot
-      reloadOrder()
-      reloadItems()
+      setStockShortfalls(shortfalls);
+      lastSyncedSnapshotRef.current = snapshot;
+      reloadOrder();
+      reloadItems();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : t('orders.drawer.errors.save'))
+      setActionError(
+        err instanceof Error ? err.message : t("orders.drawer.errors.save"),
+      );
     } finally {
-      setSavingDraft(false)
+      setSavingDraft(false);
     }
   }
 
@@ -1005,24 +1326,40 @@ export function OrderDetail() {
     // demás siguen deshabilitados en pantalla), y el servidor de por sí
     // ignora todo lo que no sea contact_id en ese caso puntual (ver
     // calculate-order).
-    if (isNew || !order || !itemsLoaded || (order.status !== 'cotizacion' && !canOverrideConfirmedLock)) return
-    const snapshot = currentDraftSnapshot()
+    if (
+      isNew ||
+      !order ||
+      !itemsLoaded ||
+      (order.status !== "cotizacion" && !canOverrideConfirmedLock)
+    )
+      return;
+    const snapshot = currentDraftSnapshot();
 
     if (primedOrderIdRef.current !== order.id) {
       // Recién terminó de cargar este pedido -- es el estado base, no un
       // cambio del agente. Nada que guardar todavía.
-      primedOrderIdRef.current = order.id
-      lastSyncedSnapshotRef.current = snapshot
-      return
+      primedOrderIdRef.current = order.id;
+      lastSyncedSnapshotRef.current = snapshot;
+      return;
     }
-    if (snapshot === lastSyncedSnapshotRef.current) return
+    if (snapshot === lastSyncedSnapshotRef.current) return;
 
     const timer = setTimeout(() => {
-      void saveDraft(order.id, snapshot)
-    }, 2000)
-    return () => clearTimeout(timer)
+      void saveDraft(order.id, snapshot);
+    }, 2000);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [order?.id, itemsLoaded, contactId, opportunityId, validUntil, shippingAddressId, billingAddressId, shippingDraft, items])
+  }, [
+    order?.id,
+    itemsLoaded,
+    contactId,
+    opportunityId,
+    validUntil,
+    shippingAddressId,
+    billingAddressId,
+    shippingDraft,
+    items,
+  ]);
 
   // ----- carrito del modo "nuevo" -- mismo mecanismo de autosave de
   // arriba, pero apuntando a saveCartDraft (calculate-order sin
@@ -1031,8 +1368,8 @@ export function OrderDetail() {
   // formulario con lo que ya había guardado antes de empezar a
   // autoguardar -- si no, el primer autosave pisaría ese estado con los
   // campos vacíos con los que arrancó React. -----
-  const primedCartRef = useRef(false)
-  const lastSyncedCartSnapshotRef = useRef('')
+  const primedCartRef = useRef(false);
+  const lastSyncedCartSnapshotRef = useRef("");
 
   async function syncCartDraft(): Promise<string> {
     const { cart, stockShortfalls: shortfalls } = await saveCartDraft({
@@ -1044,33 +1381,33 @@ export function OrderDetail() {
       billing_address_id: billingAddressId || null,
       shipping: Number(shippingDraft) || 0,
       items,
-      origin: 'portal',
-    })
+      origin: "portal",
+    });
     // Mismo estado que ya usaba el chequeo pre-confirmar (findStockShortfalls
     // más abajo) -- ahora se actualiza en vivo con cada autoguardado, en vez
     // de solo calcularse recién al intentar confirmar. OrderItemsEditor ya
     // sabía pintar estas líneas en rojo (prop `shortfalls`).
-    setStockShortfalls(shortfalls)
+    setStockShortfalls(shortfalls);
     if (cart.id !== cartId) {
-      setCartId(cart.id)
-      const next = new URLSearchParams(searchParams)
-      next.set('cart', cart.id)
-      setSearchParams(next, { replace: true })
+      setCartId(cart.id);
+      const next = new URLSearchParams(searchParams);
+      next.set("cart", cart.id);
+      setSearchParams(next, { replace: true });
     }
-    return cart.id
+    return cart.id;
   }
 
   useEffect(() => {
-    if (!isNew || !cartId || cartLoaded) return
+    if (!isNew || !cartId || cartLoaded) return;
     getCart(cartId)
       .then((cart) => {
         if (cart) {
-          setContactId(cart.contact_id ?? '')
-          setOpportunityId(cart.opportunity_id ?? '')
-          setValidUntil(cart.valid_until ?? '')
-          setShippingAddressId(cart.shipping_address_id ?? '')
-          setBillingAddressId(cart.billing_address_id ?? '')
-          setShippingDraft(String(cart.shipping ?? 0))
+          setContactId(cart.contact_id ?? "");
+          setOpportunityId(cart.opportunity_id ?? "");
+          setValidUntil(cart.valid_until ?? "");
+          setShippingAddressId(cart.shipping_address_id ?? "");
+          setBillingAddressId(cart.billing_address_id ?? "");
+          setShippingDraft(String(cart.shipping ?? 0));
           setItems(
             cart.items.map((i) => ({
               product_id: i.product_id,
@@ -1082,15 +1419,15 @@ export function OrderDetail() {
               unit_price: i.unit_price,
               discount_amount: i.discount_amount,
             })),
-          )
+          );
         }
       })
-      .finally(() => setCartLoaded(true))
+      .finally(() => setCartLoaded(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isNew, cartId, cartLoaded])
+  }, [isNew, cartId, cartLoaded]);
 
   useEffect(() => {
-    if (!isNew || !cartLoaded) return
+    if (!isNew || !cartLoaded) return;
     // Prime en el primer render con cartLoaded=true (blanco, o ya
     // hidratado desde un carrito existente) -- recién a partir de ahí un
     // cambio de verdad (ej. elegir cliente) cuenta como edición a
@@ -1098,37 +1435,51 @@ export function OrderDetail() {
     // resto de los chequeos de abajo, el primer contacto elegido queda
     // marcado como "estado base" por error y nunca se guarda.
     if (!primedCartRef.current) {
-      primedCartRef.current = true
-      lastSyncedCartSnapshotRef.current = currentDraftSnapshot()
-      return
+      primedCartRef.current = true;
+      lastSyncedCartSnapshotRef.current = currentDraftSnapshot();
+      return;
     }
-    if (!isNotBlank(contactId)) return
-    const snapshot = currentDraftSnapshot()
-    if (snapshot === lastSyncedCartSnapshotRef.current) return
+    if (!isNotBlank(contactId)) return;
+    const snapshot = currentDraftSnapshot();
+    if (snapshot === lastSyncedCartSnapshotRef.current) return;
     const timer = setTimeout(() => {
-      setSavingDraft(true)
+      setSavingDraft(true);
       syncCartDraft()
         .then(() => {
-          lastSyncedCartSnapshotRef.current = snapshot
+          lastSyncedCartSnapshotRef.current = snapshot;
         })
-        .catch((err) => setActionError(err instanceof Error ? err.message : t('orders.drawer.errors.save')))
-        .finally(() => setSavingDraft(false))
-    }, 2000)
-    return () => clearTimeout(timer)
+        .catch((err) =>
+          setActionError(
+            err instanceof Error ? err.message : t("orders.drawer.errors.save"),
+          ),
+        )
+        .finally(() => setSavingDraft(false));
+    }, 2000);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isNew, cartLoaded, contactId, opportunityId, validUntil, shippingAddressId, billingAddressId, shippingDraft, items])
+  }, [
+    isNew,
+    cartLoaded,
+    contactId,
+    opportunityId,
+    validUntil,
+    shippingAddressId,
+    billingAddressId,
+    shippingDraft,
+    items,
+  ]);
 
   function handleContactSelect(newContactId: string | null) {
-    if (!newContactId || newContactId === contactId) return
-    setContactId(newContactId)
+    if (!newContactId || newContactId === contactId) return;
+    setContactId(newContactId);
     // Cambiar de cliente invalida oportunidad/direcciones del cliente
     // anterior -- solo tiene sentido resetearlas en modo edición (al crear
     // todavía no había nada elegido).
     if (!isNew) {
-      setOpportunityId('')
-      setShippingAddressId('')
-      setBillingAddressId('')
-      setContactChangedNotice(true)
+      setOpportunityId("");
+      setShippingAddressId("");
+      setBillingAddressId("");
+      setContactChangedNotice(true);
     }
   }
 
@@ -1141,14 +1492,14 @@ export function OrderDetail() {
   function handleClientPicked(client: Client | null) {
     if (client) {
       setContacts((prev) => {
-        const idx = prev.findIndex((c) => c.id === client.id)
-        if (idx === -1) return [...prev, client]
-        const next = [...prev]
-        next[idx] = client
-        return next
-      })
+        const idx = prev.findIndex((c) => c.id === client.id);
+        if (idx === -1) return [...prev, client];
+        const next = [...prev];
+        next[idx] = client;
+        return next;
+      });
     }
-    handleContactSelect(client?.id ?? null)
+    handleContactSelect(client?.id ?? null);
   }
 
   /** Filtra la lista de contactos que ya está en memoria (cargada entera al
@@ -1156,44 +1507,61 @@ export function OrderDetail() {
    * (searchPosClients, catálogo potencialmente enorme), acá no hace falta
    * ningún viaje de red para buscar. */
   async function searchOrderContacts(query: string): Promise<Client[]> {
-    const q = query.trim().toLowerCase()
-    if (!q) return []
-    return contacts.filter((c) => c.full_name.toLowerCase().includes(q) || (c.document_number ?? '').toLowerCase().includes(q) || c.phone.includes(q)).slice(0, 8)
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    return contacts
+      .filter(
+        (c) =>
+          c.full_name.toLowerCase().includes(q) ||
+          (c.document_number ?? "").toLowerCase().includes(q) ||
+          c.phone.includes(q),
+      )
+      .slice(0, 8);
   }
 
   function handleOpportunitySelect(newId: string | null) {
-    setOpportunityId(newId ?? '')
+    setOpportunityId(newId ?? "");
   }
 
   async function handleStatusSelect(newStatus: OrderStatus) {
     if (isNew) {
-      setStatus(newStatus)
-      return
+      setStatus(newStatus);
+      return;
     }
-    if (!order || !profile?.tenant_id) return
-    setActionError(null)
+    if (!order || !profile?.tenant_id) return;
+    setActionError(null);
     // Stock is only checked at the exact moment a cotización turns into a
     // venta -- quoting is allowed to exceed what's on hand, confirming
     // isn't (explicit product decision). Void (-> cancelada) never needs
     // this check.
-    if (order.status === 'cotizacion' && newStatus === 'confirmada') {
+    if (order.status === "cotizacion" && newStatus === "confirmada") {
       try {
-        const shortfalls = await findStockShortfalls(profile.tenant_id, items, warehouses)
+        const shortfalls = await findStockShortfalls(
+          profile.tenant_id,
+          items,
+          warehouses,
+        );
         if (shortfalls.length > 0) {
-          setStockShortfalls(shortfalls)
-          setShortfallDialogOpen(true)
-          return
+          setStockShortfalls(shortfalls);
+          setShortfallDialogOpen(true);
+          return;
         }
       } catch (err) {
-        setActionError(err instanceof Error ? err.message : t('orders.drawer.errors.save'))
-        return
+        setActionError(
+          err instanceof Error ? err.message : t("orders.drawer.errors.save"),
+        );
+        return;
       }
     }
-    setAdvancingStatus(true)
+    setAdvancingStatus(true);
     updateOrderStatus(order.id, newStatus)
       .then(reloadOrder)
-      .catch((err) => setActionError(err instanceof Error ? err.message : t('orders.drawer.errors.save')))
-      .finally(() => setAdvancingStatus(false))
+      .catch((err) =>
+        setActionError(
+          err instanceof Error ? err.message : t("orders.drawer.errors.save"),
+        ),
+      )
+      .finally(() => setAdvancingStatus(false));
   }
 
   /** Fully independent from handleStatusSelect -- delivery_status never
@@ -1201,37 +1569,44 @@ export function OrderDetail() {
    * no restriction on which values are reachable from which (ver
    * types/domain.ts). */
   function handleDeliveryStatusSelect(newStatus: DeliveryStatus) {
-    if (!order) return
+    if (!order) return;
     // Pedido explícito del usuario 2026-09-04: despachar con saldo
     // pendiente no se bloquea (puede ser una decisión real del negocio),
     // pero exige una confirmación explícita en vez de aplicarse directo --
     // ver pendingDeliveryStatus/ConfirmDialog más abajo.
-    if (newStatus !== 'pendiente' && balance > 0) {
-      setPendingDeliveryStatus(newStatus)
-      return
+    if (newStatus !== "pendiente" && balance > 0) {
+      setPendingDeliveryStatus(newStatus);
+      return;
     }
-    applyDeliveryStatus(newStatus)
+    applyDeliveryStatus(newStatus);
   }
 
   function applyDeliveryStatus(newStatus: DeliveryStatus) {
-    if (!order) return
-    setActionError(null)
+    if (!order) return;
+    setActionError(null);
     updateDeliveryStatus(order.id, newStatus)
       .then(reloadOrder)
-      .catch((err) => setActionError(err instanceof Error ? err.message : t('orders.drawer.errors.save')))
+      .catch((err) =>
+        setActionError(
+          err instanceof Error ? err.message : t("orders.drawer.errors.save"),
+        ),
+      );
   }
 
   function handleValidUntilChange(value: string) {
-    setValidUntil(value)
+    setValidUntil(value);
   }
 
-  function handleAddressSelect(kind: 'shipping' | 'billing', addressId: string | null) {
-    if (kind === 'shipping') {
-      setEditingShippingAddress(false)
-      setShippingAddressId(addressId ?? '')
+  function handleAddressSelect(
+    kind: "shipping" | "billing",
+    addressId: string | null,
+  ) {
+    if (kind === "shipping") {
+      setEditingShippingAddress(false);
+      setShippingAddressId(addressId ?? "");
     } else {
-      setEditingBillingAddress(false)
-      setBillingAddressId(addressId ?? '')
+      setEditingBillingAddress(false);
+      setBillingAddressId(addressId ?? "");
     }
   }
 
@@ -1241,55 +1616,65 @@ export function OrderDetail() {
    * instead of create-then-pick. Solo toca estado local -- el autosave
    * centralizado se encarga de persistirlo. */
   function handleAddressCreated(newAddress: ContactAddress) {
-    setAddresses((prev) => [newAddress, ...prev])
-    if (newAddress.is_shipping && !shippingAddressId) setShippingAddressId(newAddress.id)
-    if (newAddress.is_billing && !billingAddressId) setBillingAddressId(newAddress.id)
+    setAddresses((prev) => [newAddress, ...prev]);
+    if (newAddress.is_shipping && !shippingAddressId)
+      setShippingAddressId(newAddress.id);
+    if (newAddress.is_billing && !billingAddressId)
+      setBillingAddressId(newAddress.id);
   }
 
   async function handleAddNote(e: FormEvent) {
-    e.preventDefault()
-    if (!noteDraft.trim() || !profile?.tenant_id || !id) return
-    setSavingNote(true)
+    e.preventDefault();
+    if (!noteDraft.trim() || !profile?.tenant_id || !id) return;
+    setSavingNote(true);
     try {
-      await createComment(profile.tenant_id, id, noteDraft.trim(), true)
-      setNoteDraft('')
-      setAddingNote(false)
-      reloadComments()
+      await createComment(profile.tenant_id, id, noteDraft.trim(), true);
+      setNoteDraft("");
+      setAddingNote(false);
+      reloadComments();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : t('orders.detail.errors.notes'))
+      setActionError(
+        err instanceof Error ? err.message : t("orders.detail.errors.notes"),
+      );
     } finally {
-      setSavingNote(false)
+      setSavingNote(false);
     }
   }
 
   async function handleCreate() {
-    setTouched(true)
-    setActionError(null)
-    if (!isNotBlank(contactId) || !profile?.tenant_id) return
+    setTouched(true);
+    setActionError(null);
+    if (!isNotBlank(contactId) || !profile?.tenant_id) return;
 
-    const validItems = items.filter((item) => isNotBlank(item.product_name))
+    const validItems = items.filter((item) => isNotBlank(item.product_name));
     if (hasIncompleteVariantSelection(validItems, products)) {
-      setActionError(t('orders.itemsEditor.variantRequired'))
-      return
+      setActionError(t("orders.itemsEditor.variantRequired"));
+      return;
     }
 
     // Same rule as handleStatusSelect: creating directly as a venta (not a
     // cotización) skips the separate "convert" step but not this check.
-    if (status !== 'cotizacion') {
+    if (status !== "cotizacion") {
       try {
-        const shortfalls = await findStockShortfalls(profile.tenant_id, validItems, warehouses)
+        const shortfalls = await findStockShortfalls(
+          profile.tenant_id,
+          validItems,
+          warehouses,
+        );
         if (shortfalls.length > 0) {
-          setStockShortfalls(shortfalls)
-          setShortfallDialogOpen(true)
-          return
+          setStockShortfalls(shortfalls);
+          setShortfallDialogOpen(true);
+          return;
         }
       } catch (err) {
-        setActionError(err instanceof Error ? err.message : t('orders.detail.errors.create'))
-        return
+        setActionError(
+          err instanceof Error ? err.message : t("orders.detail.errors.create"),
+        );
+        return;
       }
     }
 
-    setCreating(true)
+    setCreating(true);
     try {
       // Guarda el estado final en el carrito (por si el agente apretó
       // "Crear pedido" antes de que corriera el autosave de 2s) y recién
@@ -1308,21 +1693,24 @@ export function OrderDetail() {
         billing_address_id: billingAddressId || null,
         shipping: Number(shippingDraft) || 0,
         items: validItems,
-        origin: 'portal',
-      })
-      setStockShortfalls(shortfalls)
-      setCartId(cart.id)
+        origin: "portal",
+      });
+      setStockShortfalls(shortfalls);
+      setCartId(cart.id);
       // create-order valida stock real antes de crear nada (rechaza sin
       // dejar ninguna fila huérfana si algo no alcanza) -- el pre-chequeo
       // de arriba (findStockShortfalls) es solo para avisar antes, esto es
       // lo que de verdad bloquea si igual llegó a pasar algo.
-      const created = await createOrderFromCart(cart.id)
-      if (status === 'confirmada') await updateOrderStatus(created.id, 'confirmada')
-      navigate(`/app/sales/${created.id}`, { replace: true })
+      const created = await createOrderFromCart(cart.id);
+      if (status === "confirmada")
+        await updateOrderStatus(created.id, "confirmada");
+      navigate(`/app/sales/${created.id}`, { replace: true });
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : t('orders.detail.errors.create'))
+      setActionError(
+        err instanceof Error ? err.message : t("orders.detail.errors.create"),
+      );
     } finally {
-      setCreating(false)
+      setCreating(false);
     }
   }
 
@@ -1333,104 +1721,127 @@ export function OrderDetail() {
    * nada). */
   async function handleCancelDraft() {
     if (!cartId) {
-      navigate('/app/sales')
-      return
+      navigate("/app/sales");
+      return;
     }
-    setCancellingDraft(true)
+    setCancellingDraft(true);
     try {
-      await deleteCart(cartId)
-      navigate('/app/sales')
+      await deleteCart(cartId);
+      navigate("/app/sales");
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : t('orders.detail.errors.cancelDraft'))
-      setCancellingDraft(false)
+      setActionError(
+        err instanceof Error
+          ? err.message
+          : t("orders.detail.errors.cancelDraft"),
+      );
+      setCancellingDraft(false);
     }
   }
 
   async function handleAddComment(e: FormEvent) {
-    e.preventDefault()
-    if (!commentDraft.trim() || !profile?.tenant_id || !id) return
-    setSavingComment(true)
+    e.preventDefault();
+    if (!commentDraft.trim() || !profile?.tenant_id || !id) return;
+    setSavingComment(true);
     try {
-      await createComment(profile.tenant_id, id, commentDraft.trim())
-      setCommentDraft('')
-      setAddingComment(false)
-      reloadComments()
+      await createComment(profile.tenant_id, id, commentDraft.trim());
+      setCommentDraft("");
+      setAddingComment(false);
+      reloadComments();
     } catch {
       /* keep the draft on failure so the agent doesn't lose what they typed */
     } finally {
-      setSavingComment(false)
+      setSavingComment(false);
     }
   }
 
   async function handleDeletePayment() {
-    if (!deletePaymentId) return
-    setActionError(null)
+    if (!deletePaymentId) return;
+    setActionError(null);
     try {
-      await deletePayment(deletePaymentId)
-      setDeletePaymentId(null)
-      reloadPayments()
+      await deletePayment(deletePaymentId);
+      setDeletePaymentId(null);
+      reloadPayments();
     } catch (err) {
-      setDeletePaymentId(null)
-      setActionError(err instanceof Error ? err.message : t('orders.detail.errors.deletePayment'))
+      setDeletePaymentId(null);
+      setActionError(
+        err instanceof Error
+          ? err.message
+          : t("orders.detail.errors.deletePayment"),
+      );
     }
   }
 
   async function handleVoid() {
-    if (!order) return
-    setVoiding(true)
+    if (!order) return;
+    setVoiding(true);
     try {
-      await updateOrderStatus(order.id, 'cancelada')
-      setConfirmingVoid(false)
-      reloadOrder()
+      await updateOrderStatus(order.id, "cancelada");
+      setConfirmingVoid(false);
+      reloadOrder();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : t('orders.detail.errors.void'))
-      setConfirmingVoid(false)
+      setActionError(
+        err instanceof Error ? err.message : t("orders.detail.errors.void"),
+      );
+      setConfirmingVoid(false);
     } finally {
-      setVoiding(false)
+      setVoiding(false);
     }
   }
 
   async function handleDelete() {
-    if (!order) return
-    setDeleting(true)
+    if (!order) return;
+    setDeleting(true);
     try {
-      await deleteOrder(order.id)
-      navigate('/app/sales')
+      await deleteOrder(order.id);
+      navigate("/app/sales");
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : t('orders.detail.errors.delete'))
-      setDeleting(false)
+      setActionError(
+        err instanceof Error ? err.message : t("orders.detail.errors.delete"),
+      );
+      setDeleting(false);
     }
   }
 
   if (!isNew) {
-    if (loadError) return <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{loadError}</p>
-    if (order === undefined) return <PageSpinner />
+    if (loadError)
+      return (
+        <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+          {loadError}
+        </p>
+      );
+    if (order === undefined) return <PageSpinner />;
     if (order === null) {
       return (
         <div className="space-y-4">
-          <p className="text-brand-500">{t('orders.detail.notFound')}</p>
-          <Link to="/app/sales" className="text-xs font-medium text-accent-600 hover:text-accent-700">
-            {t('orders.detail.backToList')}
+          <p className="text-brand-500">{t("orders.detail.notFound")}</p>
+          <Link
+            to="/app/sales"
+            className="text-xs font-medium text-accent-600 hover:text-accent-700"
+          >
+            {t("orders.detail.backToList")}
           </Link>
         </div>
-      )
+      );
     }
   }
 
-  const balance = order ? Math.max(0, order.total - totalPaid) : 0
-  const selectedContact = contacts.find((c) => c.id === contactId)
+  const balance = order ? Math.max(0, order.total - totalPaid) : 0;
+  const selectedContact = contacts.find((c) => c.id === contactId);
   /** Un pedido de mostrador (POS) no tiene nada que enviar: ni dirección de
    * envío, ni estado de entrega, ni despachos, ni costo de envío. En vez de
    * una segunda pantalla de detalle para el POS, es el mismo componente con
    * toda esa parte apagada -- el canal del pedido es el parámetro. El
    * backend ya piensa igual: guard_sales_order_confirmation se saltea el
    * requisito de direcciones cuando sales_channel = 'pos'. */
-  const showShipping = !order || order.sales_channel !== 'pos'
+  const showShipping = !order || order.sales_channel !== "pos";
 
   // dianLocksOrder/dispatchLocksOrder están declarados arriba, junto a
   // `latestInvoice` -- el efecto de autoguardado los necesita antes de
   // este punto del render.
-  const locked = !isNew && !!order && (dianLocksOrder || dispatchLocksOrder || order.status === 'cancelada')
+  const locked =
+    !isNew &&
+    !!order &&
+    (dianLocksOrder || dispatchLocksOrder || order.status === "cancelada");
   // Bug real reportado por el usuario: cliente/direcciones/oportunidad/
   // envío/ítems se editaban igual (sin ningún candado visual) en un pedido
   // ya `confirmada` -- pero el autosave (ver saveDraft más abajo) se niega
@@ -1440,7 +1851,7 @@ export function OrderDetail() {
   // lo compensara. `draftLocked` es el candado real de todo ese borrador
   // (mismos 7 campos de currentDraftSnapshot) -- `locked` a secas sigue
   // existiendo solo para el botón "Anular", que es un caso aparte.
-  const draftLocked = locked || (!!order && order.status !== 'cotizacion')
+  const draftLocked = locked || (!!order && order.status !== "cotizacion");
   // Excepción angosta al candado de arriba (pedido explícito del usuario,
   // 2026-09-11 -- ampliada en una segunda ronda el mismo día a CUALQUIER
   // pedido confirmado, no solo el ya facturado): quien tenga
@@ -1451,33 +1862,70 @@ export function OrderDetail() {
   // NUNCA se aplica si además está despachado o anulado (ver
   // `canOverrideConfirmedLock`) -- esos bloquean siempre, sin excepción
   // para nadie, ni a los ítems/precios del resto del borrador.
-  const clientPickerDisabled = draftLocked && !canOverrideConfirmedLock
+  const clientPickerDisabled = draftLocked && !canOverrideConfirmedLock;
 
-  const addressField = (kind: 'shipping' | 'billing') => {
-    const value = kind === 'shipping' ? shippingAddressId : billingAddressId
-    const filtered = addresses.filter((a) => (kind === 'shipping' ? a.is_shipping : a.is_billing))
-    const selected = filtered.find((a) => a.id === value)
-    const editing = kind === 'shipping' ? editingShippingAddress : editingBillingAddress
-    const setEditing = kind === 'shipping' ? setEditingShippingAddress : setEditingBillingAddress
+  const addressField = (kind: "shipping" | "billing") => {
+    const value = kind === "shipping" ? shippingAddressId : billingAddressId;
+    const filtered = addresses.filter((a) =>
+      kind === "shipping" ? a.is_shipping : a.is_billing,
+    );
+    const selected = filtered.find((a) => a.id === value);
+    const editing =
+      kind === "shipping" ? editingShippingAddress : editingBillingAddress;
+    const setEditing =
+      kind === "shipping"
+        ? setEditingShippingAddress
+        : setEditingBillingAddress;
     return (
       <div>
-        <Label>{t(kind === 'shipping' ? 'orders.detail.shipping' : 'orders.detail.billing')}</Label>
+        <Label>
+          {t(
+            kind === "shipping"
+              ? "orders.detail.shipping"
+              : "orders.detail.billing",
+          )}
+        </Label>
         {selected && !editing ? (
           <div className="mt-1 flex items-start justify-between gap-2">
             <div className="min-w-0 text-xs">
-              {selected.recipient_name && <p className="truncate font-medium text-brand-800">{selected.recipient_name}</p>}
+              {selected.recipient_name && (
+                <p className="truncate font-medium text-brand-800">
+                  {selected.recipient_name}
+                </p>
+              )}
               <p className="truncate text-brand-800">
                 {selected.line1}
-                {selected.line2 ? `, ${selected.line2}` : ''}
+                {selected.line2 ? `, ${selected.line2}` : ""}
               </p>
-              {(selected.city || selected.state_province || selected.country) && (
-                <p className="truncate text-xs text-brand-400">{[selected.city, selected.state_province, selected.country].filter(Boolean).join(', ')}</p>
+              {(selected.city ||
+                selected.state_province ||
+                selected.country) && (
+                <p className="truncate text-xs text-brand-400">
+                  {[selected.city, selected.state_province, selected.country]
+                    .filter(Boolean)
+                    .join(", ")}
+                </p>
               )}
-              {selected.phone && <p className="truncate text-xs text-brand-400">{formatPhoneDisplay(selected.phone)}</p>}
-              {selected.tax_id && <p className="truncate text-xs text-brand-400">{t('orders.detail.addressTaxId')}: {selected.tax_id}</p>}
+              {selected.phone && (
+                <p className="truncate text-xs text-brand-400">
+                  {formatPhoneDisplay(selected.phone)}
+                </p>
+              )}
+              {selected.tax_id && (
+                <p className="truncate text-xs text-brand-400">
+                  {t("orders.detail.addressTaxId")}: {selected.tax_id}
+                </p>
+              )}
             </div>
             {!draftLocked && (
-              <Button type="button" variant="default" size="icon-sm" onClick={() => setEditing(true)} aria-label={t('orders.detail.changeAddressAria')} className="shrink-0">
+              <Button
+                type="button"
+                variant="default"
+                size="icon-sm"
+                onClick={() => setEditing(true)}
+                aria-label={t("orders.detail.changeAddressAria")}
+                className="shrink-0"
+              >
                 <PencilIcon width={12} height={12} />
               </Button>
             )}
@@ -1485,12 +1933,15 @@ export function OrderDetail() {
         ) : (
           <div className="mt-1 flex gap-2">
             <ComboboxFilter
-              options={filtered.map((a) => ({ id: a.id, label: addressLabel(a) }))}
+              options={filtered.map((a) => ({
+                id: a.id,
+                label: addressLabel(a),
+              }))}
               value={value || null}
               onChange={(v) => handleAddressSelect(kind, v)}
-              placeholder={t('orders.detail.noAddress')}
-              searchPlaceholder={t('orders.detail.searchAddress')}
-              emptyLabel={t('orders.detail.noAddressResults')}
+              placeholder={t("orders.detail.noAddress")}
+              searchPlaceholder={t("orders.detail.searchAddress")}
+              emptyLabel={t("orders.detail.noAddressResults")}
               disabled={draftLocked}
               className="min-w-0 flex-1"
               triggerClassName="min-w-0 flex-1 shrink"
@@ -1501,7 +1952,7 @@ export function OrderDetail() {
               size="icon"
               onClick={() => setAddressDrawerOpen(true)}
               disabled={!contactId || draftLocked}
-              aria-label={t('orders.detail.newAddressAria')}
+              aria-label={t("orders.detail.newAddressAria")}
               className="shrink-0"
             >
               <PlusIcon width={14} height={14} />
@@ -1509,43 +1960,66 @@ export function OrderDetail() {
           </div>
         )}
       </div>
-    )
-  }
+    );
+  };
 
   // Sin botón de "Guardar" -- el autosave (ver useEffect de arriba)
   // persiste solo, 2s después del último cambio. Este indicador es
   // puramente informativo.
-  const itemsSaveAction = !isNew && savingDraft ? <span className="text-xs font-medium text-brand-400">{t('common.actions.saving')}</span> : undefined
+  const itemsSaveAction =
+    !isNew && savingDraft ? (
+      <span className="text-xs font-medium text-brand-400">
+        {t("common.actions.saving")}
+      </span>
+    ) : undefined;
 
-  const showPayments = (isNew ? status : order?.status) !== 'cotizacion'
-  const showTasks = !isNew && !!relatedTasks && relatedTasks.length > 0
-  const showInvoiceCard = !isNew && !!latestInvoice
-  const hasSidePanel = showPayments || showTasks || showInvoiceCard
-  const posPointName = order?.pos_point?.name ?? null
+  const showPayments = (isNew ? status : order?.status) !== "cotizacion";
+  const showTasks = !isNew && !!relatedTasks && relatedTasks.length > 0;
+  const showInvoiceCard = !isNew && !!latestInvoice;
+  const hasSidePanel = showPayments || showTasks || showInvoiceCard;
+  const posPointName = order?.pos_point?.name ?? null;
 
-  const isInvoiceAdmin = profile?.role === 'tenant_admin' || profile?.role === 'superadmin'
+  const isInvoiceAdmin =
+    profile?.role === "tenant_admin" || profile?.role === "superadmin";
   // Pedido explícito del usuario 2026-09-04: no se manda un documento fiscal
   // real a la DIAN de una venta que todavía no está cobrada del todo -- el
   // candado real está en dian-submit/index.ts (rechaza aunque alguien llame
   // la función directo), esto es solo la parte de UX.
-  const isFullyPaid = balance === 0
-  const canSendInvoice = latestInvoice?.status === 'pending' && isInvoiceAdmin && isFullyPaid
+  const isFullyPaid = balance === 0;
+  const canSendInvoice =
+    latestInvoice?.status === "pending" && isInvoiceAdmin && isFullyPaid;
   // Reintentar sólo tiene sentido sobre un intento que ya fracasó: el índice
   // único parcial de sales_invoices no admite un segundo intento vivo
   // mientras el anterior no esté en 'rejected'/'error'.
-  const canRetryInvoice = (latestInvoice?.status === 'rejected' || latestInvoice?.status === 'error') && isInvoiceAdmin && isFullyPaid
+  const canRetryInvoice =
+    (latestInvoice?.status === "rejected" ||
+      latestInvoice?.status === "error") &&
+    isInvoiceAdmin &&
+    isFullyPaid;
   // Para explicarle al agente POR QUÉ no ve el botón cuando la factura ya
   // está en un estado que normalmente lo mostraría -- distinto de "no sos
   // admin" (eso no se explica, es autoevidente por el rol).
-  const invoiceBlockedByBalance = !isFullyPaid && isInvoiceAdmin && (latestInvoice?.status === 'pending' || latestInvoice?.status === 'rejected' || latestInvoice?.status === 'error')
+  const invoiceBlockedByBalance =
+    !isFullyPaid &&
+    isInvoiceAdmin &&
+    (latestInvoice?.status === "pending" ||
+      latestInvoice?.status === "rejected" ||
+      latestInvoice?.status === "error");
   // Saldo disponible para acreditar = total de la factura vigente menos lo
   // que ya quedó acreditado por notas anteriores realmente enviadas/
   // aceptadas -- un intento rechazado/con error nunca contó contra este
   // saldo (ver create_credit_note_attempt). Puede llegar a 0 si ya se
   // acreditó todo.
-  const latestInvoiceCreditNotes = latestInvoice ? (creditNotesByInvoice[latestInvoice.id] ?? []) : []
-  const creditedSoFar = latestInvoiceCreditNotes.filter((cn) => cn.status === 'sent' || cn.status === 'accepted').reduce((sum, cn) => sum + cn.total, 0)
-  const creditNoteAvailableBalance = Math.max(0, (latestInvoice?.total ?? 0) - creditedSoFar)
+  const latestInvoiceCreditNotes = latestInvoice
+    ? (creditNotesByInvoice[latestInvoice.id] ?? [])
+    : [];
+  const creditedSoFar = latestInvoiceCreditNotes
+    .filter((cn) => cn.status === "sent" || cn.status === "accepted")
+    .reduce((sum, cn) => sum + cn.total, 0);
+  const creditNoteAvailableBalance = Math.max(
+    0,
+    (latestInvoice?.total ?? 0) - creditedSoFar,
+  );
   // Solo tiene sentido corregir una factura que la DIAN ya aceptó de
   // verdad -- mismo candado real del lado del servidor
   // (create_credit_note_attempt), esto es la parte de UX. Solo se ofrece
@@ -1556,7 +2030,11 @@ export function OrderDetail() {
   // igual la habría rechazado del lado del servidor (monto > saldo
   // disponible), pero la UI no tiene por qué ofrecer una acción que ya se
   // sabe de antemano que va a fallar.
-  const canIssueCreditNote = isInvoiceAdmin && (latestInvoice?.status === 'sent' || latestInvoice?.status === 'accepted') && creditNoteAvailableBalance > 0.01
+  const canIssueCreditNote =
+    isInvoiceAdmin &&
+    (latestInvoice?.status === "sent" ||
+      latestInvoice?.status === "accepted") &&
+    creditNoteAvailableBalance > 0.01;
   // Una factura DIAN nunca se anula (ver
   // 20260909220000_sales_invoices_no_voided_reissue_after_credit.sql) -- la
   // forma de corregirla del todo y volver a facturar el pedido es
@@ -1564,7 +2042,11 @@ export function OrderDetail() {
   // que valida esto server-side (guard_sales_invoice_live_attempt) es el
   // candado real; esto es la parte de UX.
   const canReissueInvoice =
-    isInvoiceAdmin && isFullyPaid && !!latestInvoice && (latestInvoice.status === 'sent' || latestInvoice.status === 'accepted') && creditedSoFar + 0.01 >= latestInvoice.total
+    isInvoiceAdmin &&
+    isFullyPaid &&
+    !!latestInvoice &&
+    (latestInvoice.status === "sent" || latestInvoice.status === "accepted") &&
+    creditedSoFar + 0.01 >= latestInvoice.total;
   // Pedido explícito del usuario 2026-09-09: "debería salirme el historial
   // de documentos emitidos en esta orden" -- ya no alcanza con mostrar solo
   // el intento vigente (ver el comentario grande arriba, junto a
@@ -1573,58 +2055,107 @@ export function OrderDetail() {
   // no sea "la actual". Solo la más reciente (issuedInvoices[0]) tiene
   // acciones (nota crédito/descarga) -- las anteriores son de solo lectura.
   const invoiceCard = latestInvoice && (
-    <StatCard title={t('einvoicing.cardTitle')}>
+    <StatCard title={t("einvoicing.cardTitle")}>
       {/* Estado accionable del intento vigente -- solo se muestra mientras
           ese intento todavía no es un documento emitido de verdad (sin
           cufe/número): una vez sent/accepted pasa a vivir como la entrada
           más reciente del historial de abajo, sin esta franja aparte. */}
-      {latestInvoice.status !== 'sent' && latestInvoice.status !== 'accepted' && (
-        <div>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <Badge variant="outline" className={`border-transparent ${INVOICE_STATUS_VARIANT[latestInvoice.status]}`}>
-              {t(`einvoicing.status.${latestInvoice.status}`)}
-            </Badge>
-            <div className="flex shrink-0 items-center gap-1.5">
-              {/* El motivo del rechazo es justamente lo que hace falta para
+      {latestInvoice.status !== "sent" &&
+        latestInvoice.status !== "accepted" && (
+          <div>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Badge
+                variant="outline"
+                className={`border-transparent ${INVOICE_STATUS_VARIANT[latestInvoice.status]}`}
+              >
+                {t(`einvoicing.status.${latestInvoice.status}`)}
+              </Badge>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {/* El motivo del rechazo es justamente lo que hace falta para
                   poder corregir y reintentar -- sigue disponible, solo que
                   recién al hacer clic en el ícono (ver RejectionReasonButton). */}
-              {latestInvoice.status_detail && <RejectionReasonButton message={latestInvoice.status_detail} />}
-              {canSendInvoice && (
-                <Button type="button" size="sm" onClick={() => handleSendInvoice()} disabled={sendingInvoice}>
-                  {sendingInvoice ? t('einvoicing.detail.sending') : t('einvoicing.detail.send')}
-                </Button>
-              )}
-              {canRetryInvoice && (
-                <IconActionButton
-                  icon={<RefreshCwIcon className="size-3.5" />}
-                  label={sendingInvoice ? t('einvoicing.detail.retrying') : t('einvoicing.detail.retry')}
-                  onClick={() => handleSendInvoice(true)}
-                  disabled={sendingInvoice}
-                />
-              )}
+                {latestInvoice.status_detail && (
+                  <RejectionReasonButton
+                    message={latestInvoice.status_detail}
+                  />
+                )}
+                {canSendInvoice && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => handleSendInvoice()}
+                    disabled={sendingInvoice}
+                  >
+                    {sendingInvoice
+                      ? t("einvoicing.detail.sending")
+                      : t("einvoicing.detail.send")}
+                  </Button>
+                )}
+                {canRetryInvoice && (
+                  <IconActionButton
+                    icon={<RefreshCwIcon className="size-3.5" />}
+                    label={
+                      sendingInvoice
+                        ? t("einvoicing.detail.retrying")
+                        : t("einvoicing.detail.retry")
+                    }
+                    onClick={() => handleSendInvoice(true)}
+                    disabled={sendingInvoice}
+                  />
+                )}
+              </div>
             </div>
+            {invoiceBlockedByBalance && (
+              <p className="mt-1.5 text-xs text-amber-700">
+                {t("einvoicing.detail.balancePending", {
+                  amount: formatCurrency(balance, order?.currency),
+                })}
+              </p>
+            )}
+            {sendInvoiceError && <FieldError message={sendInvoiceError} />}
           </div>
-          {invoiceBlockedByBalance && <p className="mt-1.5 text-xs text-amber-700">{t('einvoicing.detail.balancePending', { amount: formatCurrency(balance, order?.currency) })}</p>}
-          {sendInvoiceError && <FieldError message={sendInvoiceError} />}
-        </div>
-      )}
+        )}
 
       {issuedInvoices.length > 0 && (
-        <div className={latestInvoice.status !== 'sent' && latestInvoice.status !== 'accepted' ? 'mt-3 space-y-3 border-t border-brand-100 pt-3' : 'space-y-3'}>
+        <div
+          className={
+            latestInvoice.status !== "sent" &&
+            latestInvoice.status !== "accepted"
+              ? "mt-3 space-y-3 border-t border-brand-100 pt-3"
+              : "space-y-3"
+          }
+        >
           <div className="flex items-center justify-between gap-2">
-            <p className="text-xs font-medium text-brand-700">{t('einvoicing.history.title')}</p>
+            <p className="text-xs font-medium text-brand-700">
+              {t("einvoicing.history.title")}
+            </p>
             {canReissueInvoice && (
-              <Button type="button" size="sm" variant="outline" onClick={() => handleSendInvoice(true)} disabled={sendingInvoice}>
-                {sendingInvoice ? t('einvoicing.detail.sending') : t('einvoicing.detail.reissue')}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => handleSendInvoice(true)}
+                disabled={sendingInvoice}
+              >
+                {sendingInvoice
+                  ? t("einvoicing.detail.sending")
+                  : t("einvoicing.detail.reissue")}
               </Button>
             )}
           </div>
-          {sendInvoiceError && (latestInvoice.status === 'sent' || latestInvoice.status === 'accepted') && <FieldError message={sendInvoiceError} />}
+          {sendInvoiceError &&
+            (latestInvoice.status === "sent" ||
+              latestInvoice.status === "accepted") && (
+              <FieldError message={sendInvoiceError} />
+            )}
           {issuedInvoices.map((inv, index) => {
-            const isCurrent = index === 0
-            const cns = creditNotesByInvoice[inv.id] ?? []
+            const isCurrent = index === 0;
+            const cns = creditNotesByInvoice[inv.id] ?? [];
             return (
-              <div key={inv.id} className="rounded-lg border border-brand-100 p-2.5">
+              <div
+                key={inv.id}
+                className="rounded-lg border border-brand-100 p-2.5"
+              >
                 {/* Título (con fecha/monto en su propia línea debajo) a la
                     izquierda, acciones agrupadas a la derecha -- vuelve a
                     caber en una sola fila ahora que las acciones son solo
@@ -1643,39 +2174,60 @@ export function OrderDetail() {
                       validación final de la DIAN. */}
                   <div className="min-w-0">
                     <p className="text-xs font-medium text-brand-700">
-                      {t('einvoicing.detail.invoiceNumber')}: {inv.invoice_prefix ?? ''}
-                      {inv.invoice_number ?? ''}
+                      {t("einvoicing.detail.invoiceNumber")}:{" "}
+                      {inv.invoice_prefix ?? ""}
+                      {inv.invoice_number ?? ""}
                     </p>
                     <p className="mt-0.5 text-[11px] text-brand-400">
-                      {inv.issue_date ? `${formatDate(inv.issue_date)} — ` : ''}
+                      {inv.issue_date ? `${formatDate(inv.issue_date)} — ` : ""}
                       {formatCurrency(inv.total, inv.currency)}
-                      {inv.status === 'sent' && <span className="ml-1.5 font-medium text-amber-600">{t('einvoicing.detail.unconfirmed')}</span>}
+                      {inv.status === "sent" && (
+                        <span className="ml-1.5 font-medium text-amber-600">
+                          {t("einvoicing.detail.unconfirmed")}
+                        </span>
+                      )}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
-                    {isCurrent && inv.status === 'sent' && isInvoiceAdmin && (
+                    {isCurrent && inv.status === "sent" && isInvoiceAdmin && (
                       <IconActionButton
                         icon={<RefreshCwIcon className="size-3.5" />}
-                        label={checkingStatusId === inv.id ? t('einvoicing.detail.checkingStatus') : t('einvoicing.detail.checkStatus')}
+                        label={
+                          checkingStatusId === inv.id
+                            ? t("einvoicing.detail.checkingStatus")
+                            : t("einvoicing.detail.checkStatus")
+                        }
                         onClick={() => handleCheckInvoiceStatus(inv.id)}
                         disabled={checkingStatusId === inv.id}
                       />
                     )}
-                    {isCurrent && (inv.status === 'accepted' || inv.status === 'sent') && isInvoiceAdmin && (
-                      <IconActionButton
-                        icon={<MailIcon className="size-3.5" />}
-                        label={emailingId === inv.id ? t('einvoicing.detail.emailSending') : t('einvoicing.detail.emailResend')}
-                        onClick={() => handleSendDocumentEmail({ invoiceId: inv.id })}
-                        disabled={emailingId === inv.id}
-                      />
-                    )}
+                    {isCurrent &&
+                      (inv.status === "accepted" || inv.status === "sent") &&
+                      isInvoiceAdmin && (
+                        <IconActionButton
+                          icon={<MailIcon className="size-3.5" />}
+                          label={
+                            emailingId === inv.id
+                              ? t("einvoicing.detail.emailSending")
+                              : t("einvoicing.detail.emailResend")
+                          }
+                          onClick={() =>
+                            handleSendDocumentEmail({ invoiceId: inv.id })
+                          }
+                          disabled={emailingId === inv.id}
+                        />
+                      )}
                     {isCurrent && canIssueCreditNote && (
-                      <IconActionButton icon={<Undo2Icon className="size-3.5" />} label={t('einvoicing.creditNote.button')} onClick={() => setCreditNoteDrawerOpen(true)} />
+                      <IconActionButton
+                        icon={<Undo2Icon className="size-3.5" />}
+                        label={t("einvoicing.creditNote.button")}
+                        onClick={() => setCreditNoteDrawerOpen(true)}
+                      />
                     )}
                     {isCurrent && (
                       <IconActionButton
                         icon={<FileTextIcon className="size-3.5" />}
-                        label={t('einvoicing.detail.downloadPdf')}
+                        label={t("einvoicing.detail.downloadPdf")}
                         onClick={handleDownloadInvoicePdf}
                         disabled={downloadingInvoiceId !== null}
                       />
@@ -1690,118 +2242,194 @@ export function OrderDetail() {
                       // -- sin tag de estado. El tag se conserva solo
                       // mientras sigue siendo un problema a resolver
                       // (pendiente/en camino/rechazada/con error).
-                      const cnIsIssued = cn.status === 'sent' || cn.status === 'accepted'
+                      const cnIsIssued =
+                        cn.status === "sent" || cn.status === "accepted";
                       return (
-                        <div key={cn.id} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 rounded-lg bg-brand-50/60 px-2.5 py-1.5 text-xs">
+                        <div
+                          key={cn.id}
+                          className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 rounded-lg bg-brand-50/60 px-2.5 py-1.5 text-xs"
+                        >
                           <div className="min-w-0">
                             <span className="font-medium text-brand-700">
-                              {cn.credit_note_prefix && cn.credit_note_number != null
-                                ? `${t('einvoicing.creditNote.number')} ${cn.credit_note_prefix}${cn.credit_note_number}`
-                                : t('einvoicing.creditNote.number')}
+                              {cn.credit_note_prefix &&
+                              cn.credit_note_number != null
+                                ? `${t("einvoicing.creditNote.number")} ${cn.credit_note_prefix}${cn.credit_note_number}`
+                                : t("einvoicing.creditNote.number")}
                             </span>
-                            <span className="text-brand-400"> — {formatCurrency(cn.total, cn.currency)}</span>
-                            {cn.status === 'sent' && <span className="ml-1.5 text-[11px] font-medium text-amber-600">{t('einvoicing.detail.unconfirmed')}</span>}
+                            <span className="text-brand-400">
+                              {" "}
+                              — {formatCurrency(cn.total, cn.currency)}
+                            </span>
+                            {cn.status === "sent" && (
+                              <span className="ml-1.5 text-[11px] font-medium text-amber-600">
+                                {t("einvoicing.detail.unconfirmed")}
+                              </span>
+                            )}
                           </div>
                           <div className="flex shrink-0 items-center gap-1.5">
-                            {cn.status_detail && <RejectionReasonButton message={cn.status_detail} />}
-                            {(cn.status === 'accepted' || cn.status === 'sent') && isInvoiceAdmin && (
-                              <IconActionButton
-                                icon={<MailIcon className="size-3.5" />}
-                                label={emailingId === cn.id ? t('einvoicing.detail.emailSending') : t('einvoicing.detail.emailResend')}
-                                onClick={() => handleSendDocumentEmail({ creditNoteId: cn.id })}
-                                disabled={emailingId === cn.id}
+                            {cn.status_detail && (
+                              <RejectionReasonButton
+                                message={cn.status_detail}
                               />
                             )}
-                            {cn.status === 'sent' && isInvoiceAdmin && (
+                            {(cn.status === "accepted" ||
+                              cn.status === "sent") &&
+                              isInvoiceAdmin && (
+                                <IconActionButton
+                                  icon={<MailIcon className="size-3.5" />}
+                                  label={
+                                    emailingId === cn.id
+                                      ? t("einvoicing.detail.emailSending")
+                                      : t("einvoicing.detail.emailResend")
+                                  }
+                                  onClick={() =>
+                                    handleSendDocumentEmail({
+                                      creditNoteId: cn.id,
+                                    })
+                                  }
+                                  disabled={emailingId === cn.id}
+                                />
+                              )}
+                            {cn.status === "sent" && isInvoiceAdmin && (
                               <IconActionButton
                                 icon={<RefreshCwIcon className="size-3.5" />}
-                                label={checkingStatusId === cn.id ? t('einvoicing.detail.checkingStatus') : t('einvoicing.detail.checkStatus')}
-                                onClick={() => handleCheckCreditNoteStatus(cn.id)}
+                                label={
+                                  checkingStatusId === cn.id
+                                    ? t("einvoicing.detail.checkingStatus")
+                                    : t("einvoicing.detail.checkStatus")
+                                }
+                                onClick={() =>
+                                  handleCheckCreditNoteStatus(cn.id)
+                                }
                                 disabled={checkingStatusId === cn.id}
                               />
                             )}
-                            {(cn.status === 'error' || cn.status === 'rejected') && isInvoiceAdmin && (
-                              <IconActionButton
-                                icon={<RefreshCwIcon className="size-3.5" />}
-                                label={retryingCreditNoteId === cn.id ? t('einvoicing.detail.retrying') : t('einvoicing.detail.retry')}
-                                onClick={() => handleRetryCreditNote(cn.id)}
-                                disabled={retryingCreditNoteId === cn.id}
-                              />
-                            )}
+                            {(cn.status === "error" ||
+                              cn.status === "rejected") &&
+                              isInvoiceAdmin && (
+                                <IconActionButton
+                                  icon={<RefreshCwIcon className="size-3.5" />}
+                                  label={
+                                    retryingCreditNoteId === cn.id
+                                      ? t("einvoicing.detail.retrying")
+                                      : t("einvoicing.detail.retry")
+                                  }
+                                  onClick={() => handleRetryCreditNote(cn.id)}
+                                  disabled={retryingCreditNoteId === cn.id}
+                                />
+                              )}
                             {cnIsIssued && (
                               <IconActionButton
                                 icon={<FileTextIcon className="size-3.5" />}
-                                label={t('einvoicing.detail.downloadPdf')}
-                                onClick={() => handleDownloadCreditNotePdf(cn.id)}
+                                label={t("einvoicing.detail.downloadPdf")}
+                                onClick={() =>
+                                  handleDownloadCreditNotePdf(cn.id)
+                                }
                                 disabled={downloadingCreditNoteId === cn.id}
                               />
                             )}
                             {!cnIsIssued && (
-                              <Badge variant="outline" className={`border-transparent ${INVOICE_STATUS_VARIANT[cn.status]}`}>
+                              <Badge
+                                variant="outline"
+                                className={`border-transparent ${INVOICE_STATUS_VARIANT[cn.status]}`}
+                              >
                                 {t(`einvoicing.status.${cn.status}`)}
                               </Badge>
                             )}
                           </div>
                         </div>
-                      )
+                      );
                     })}
                   </div>
                 )}
               </div>
-            )
+            );
           })}
           {creditNotePdfError && <FieldError message={creditNotePdfError} />}
-          {retryCreditNoteError && <FieldError message={retryCreditNoteError} />}
+          {retryCreditNoteError && (
+            <FieldError message={retryCreditNoteError} />
+          )}
           {checkStatusError && <FieldError message={checkStatusError} />}
         </div>
       )}
     </StatCard>
-  )
+  );
 
   const paymentsCard =
     !isNew && order ? (
       <StatCard
-        title={t('orders.detail.payments')}
+        title={t("orders.detail.payments")}
         action={
-          <Button type="button" variant="default" size="icon-sm" onClick={() => setPaymentDrawerOpen(true)} aria-label={t('orders.detail.registerPaymentAria')}>
+          <Button
+            type="button"
+            variant="default"
+            size="icon-sm"
+            onClick={() => setPaymentDrawerOpen(true)}
+            aria-label={t("orders.detail.registerPaymentAria")}
+          >
             <PlusIcon width={13} height={13} />
           </Button>
         }
       >
         {balance > 0 ? (
           <div className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-700">
-            {t('orders.detail.pendingBalance', { amount: formatCurrency(balance, order.currency) })}
+            {t("orders.detail.pendingBalance", {
+              amount: formatCurrency(balance, order.currency),
+            })}
           </div>
         ) : (
           payments &&
           payments.length > 0 && (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-700">{t('orders.detail.fullyPaid')}</div>
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-700">
+              {t("orders.detail.fullyPaid")}
+            </div>
           )
         )}
 
         {payments && payments.length > 0 && (
           <ul className="mt-2 space-y-1">
             {payments.map((p) => (
-              <li key={p.id} className="flex items-center justify-between gap-2 text-xs text-brand-600">
+              <li
+                key={p.id}
+                className="flex items-center justify-between gap-2 text-xs text-brand-600"
+              >
                 <span className="min-w-0 truncate">
-                  {p.method === 'wompi' && p.provider_reference ? `${t(PAYMENT_METHOD_LABEL_KEY.wompi)} · ${p.provider_reference}` : t(PAYMENT_METHOD_LABEL_KEY[p.method])} · {formatDate(p.paid_at)}
+                  {p.method === "wompi" && p.provider_reference
+                    ? `${t(PAYMENT_METHOD_LABEL_KEY.wompi)} · ${p.provider_reference}`
+                    : t(PAYMENT_METHOD_LABEL_KEY[p.method])}{" "}
+                  · {formatDate(p.paid_at)}
                 </span>
                 <span className="flex shrink-0 items-center gap-1.5">
-                  <span className="font-medium text-brand-800">{formatCurrency(p.amount, p.currency)}</span>
-                  {(order.status === 'cotizacion' || canOverrideConfirmedLock) && p.method !== 'wompi' && (
-                    <PaymentMethodEditor
-                      payment={p}
-                      creditEnabled={contacts.find((c) => c.id === order.contact_id)?.credit_enabled ?? false}
-                      storeCreditBalance={storeCreditBalance}
-                      onSaved={reloadPayments}
-                    />
-                  )}
-                  {order.status === 'cotizacion' || canOverrideConfirmedLock ? (
-                    <button type="button" onClick={() => setDeletePaymentId(p.id)} className="text-brand-300 hover:text-red-600" aria-label={t('orders.detail.deletePaymentAria')}>
+                  <span className="font-medium text-brand-800">
+                    {formatCurrency(p.amount, p.currency)}
+                  </span>
+                  {(order.status === "cotizacion" ||
+                    canOverrideConfirmedLock) &&
+                    p.method !== "wompi" && (
+                      <PaymentMethodEditor
+                        payment={p}
+                        creditEnabled={
+                          contacts.find((c) => c.id === order.contact_id)
+                            ?.credit_enabled ?? false
+                        }
+                        storeCreditBalance={storeCreditBalance}
+                        onSaved={reloadPayments}
+                      />
+                    )}
+                  {order.status === "cotizacion" || canOverrideConfirmedLock ? (
+                    <button
+                      type="button"
+                      onClick={() => setDeletePaymentId(p.id)}
+                      className="text-brand-300 hover:text-red-600"
+                      aria-label={t("orders.detail.deletePaymentAria")}
+                    >
                       <TrashIcon width={11} height={11} />
                     </button>
                   ) : (
-                    <span title={t('orders.detail.paymentLocked')} className="text-brand-200">
+                    <span
+                      title={t("orders.detail.paymentLocked")}
+                      className="text-brand-200"
+                    >
                       <TrashIcon width={11} height={11} />
                     </span>
                   )}
@@ -1810,31 +2438,44 @@ export function OrderDetail() {
             ))}
           </ul>
         )}
-        {payments && payments.length === 0 && balance === 0 && <p className="text-xs text-brand-400">{t('orders.detail.noPayments')}</p>}
+        {payments && payments.length === 0 && balance === 0 && (
+          <p className="text-xs text-brand-400">
+            {t("orders.detail.noPayments")}
+          </p>
+        )}
       </StatCard>
     ) : (
-      <StatCard title={t('orders.detail.payments')}>
-        <p className="text-xs text-brand-400">{t('orders.detail.paymentsAfterCreateHint')}</p>
+      <StatCard title={t("orders.detail.payments")}>
+        <p className="text-xs text-brand-400">
+          {t("orders.detail.paymentsAfterCreateHint")}
+        </p>
       </StatCard>
-    )
+    );
 
   const detailsContent = (
     <div className="space-y-4">
       {/* Row 1: 1. Cliente y direcciones + Pagos/Tareas al lado -- pedido
           explícito del usuario de que los pagos queden junto a la card de
           cliente en vez de más abajo en la página. */}
-      <div className={`grid grid-cols-1 gap-4 ${hasSidePanel ? 'lg:grid-cols-3' : ''}`}>
-        <StatCard title={t('orders.detail.sections.clientAndAddresses')} className={hasSidePanel ? 'lg:col-span-2' : ''}>
-          <div className={`grid grid-cols-1 gap-y-4 ${showShipping ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} sm:gap-x-6`}>
+      <div
+        className={`grid grid-cols-1 gap-4 ${hasSidePanel ? "lg:grid-cols-3" : ""}`}
+      >
+        <StatCard
+          title={t("orders.detail.sections.clientAndAddresses")}
+          className={hasSidePanel ? "lg:col-span-2" : ""}
+        >
+          <div
+            className={`grid grid-cols-1 gap-y-4 ${showShipping ? "sm:grid-cols-3" : "sm:grid-cols-2"} sm:gap-x-6`}
+          >
             {/* Columna 1: Cliente + Facturación */}
             <div className="min-w-0 space-y-4">
               <div>
                 <ClientPickerCard
-                  tenantId={profile?.tenant_id ?? ''}
+                  tenantId={profile?.tenant_id ?? ""}
                   client={selectedContact ?? null}
                   onSelect={handleClientPicked}
                   onSearch={searchOrderContacts}
-                  emptyLabel={t('orders.drawer.fields.selectPlaceholder')}
+                  emptyLabel={t("orders.drawer.fields.selectPlaceholder")}
                   disabled={clientPickerDisabled}
                   bare
                 />
@@ -1847,66 +2488,87 @@ export function OrderDetail() {
                   facturación se queda en esta primera columna. */}
               {showShipping ? (
                 <>
-                  {addressField('shipping')}
-              {/* Estado de envío -- solo edición + venta confirmada (concepto
-                  aparte del estado comercial, ver DeliveryStatus). No aplica
-                  en cotización/cancelada, no hay nada que enviar todavía o
-                  ya no corre. */}
-              {!isNew && order && order.status === 'confirmada' && (
-                <div>
-                  <div className="flex items-center justify-between">
-                    <Label>{t('orders.drawer.fields.deliveryStatus')}</Label>
-                    {/* Con el módulo de Despachos habilitado, el estado real
-                        vive en dispatch_statuses (configurable, con
-                        timeline/transportadora/guía) y sincroniza este campo
-                        automáticamente -- ya no se edita a mano acá, este
-                        link es el único punto de entrada a esa vista. */}
-                    {enabledModules?.has('dispatches') && (
-                      <button type="button" onClick={() => setDispatchDrawerOpen(true)} className="text-[11px] font-medium text-accent-600 hover:text-accent-700">
-                        {t('dispatches.detail.link')}
-                      </button>
-                    )}
-                  </div>
-                  {enabledModules?.has('dispatches') ? (
-                    <p className="mt-1 flex items-center gap-1.5 text-xs">
-                      {/* Mismo tamaño que la línea secundaria de
-                          ciudad/estado en las direcciones (text-xs, sin
-                          negrita) -- "Entregado" no debe competir en
-                          jerarquía con el nombre/dirección de arriba. Solo el
-                          punto lleva el color real del estado; el texto queda
-                          en el mismo gris que esa línea secundaria (pedido
-                          explícito del usuario: nombre en negro, color solo
-                          en el punto). */}
-                      {dispatchStatus && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: dispatchStatus.color }} />}
-                      <span className="truncate text-brand-400">{dispatchStatus?.name ?? t(DELIVERY_STATUS_LABEL_KEY[order.delivery_status])}</span>
-                    </p>
-                  ) : (
-                    <Select value={order.delivery_status} onValueChange={(v) => handleDeliveryStatusSelect(v as DeliveryStatus)}>
-                      <SelectTrigger className="mt-1 w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(Object.keys(DELIVERY_STATUS_LABEL_KEY) as DeliveryStatus[]).map((s) => (
-                          <SelectItem key={s} value={s}>
-                            {t(DELIVERY_STATUS_LABEL_KEY[s])}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                  {addressField("shipping")}
+                  {/* Estado de envío -- solo edición + venta confirmada (concepto
+                      aparte del estado comercial, ver DeliveryStatus). No aplica
+                      en cotización/cancelada, no hay nada que enviar todavía o
+                      ya no corre. */}
+                  {!isNew && order && order.status === "confirmada" && (
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <Label>{t("orders.drawer.fields.deliveryStatus")}</Label>
+                        {/* Con el módulo de Despachos habilitado, el estado real
+                          vive en dispatch_statuses (configurable, con
+                          timeline/transportadora/guía) y sincroniza este campo
+                          automáticamente -- ya no se edita a mano acá, este
+                          link es el único punto de entrada a esa vista. */}
+                        {enabledModules?.has("dispatches") && (
+                          <button
+                            type="button"
+                            onClick={() => setDispatchDrawerOpen(true)}
+                            className="text-[11px] font-medium text-accent-600 hover:text-accent-700"
+                          >
+                            {t("dispatches.detail.link")}
+                          </button>
+                        )}
+                      </div>
+                      {enabledModules?.has("dispatches") ? (
+                        <p className="mt-1 flex items-center gap-1.5 text-xs">
+                          {/* Mismo tamaño que la línea secundaria de
+                            ciudad/estado en las direcciones (text-xs, sin
+                            negrita) -- "Entregado" no debe competir en
+                            jerarquía con el nombre/dirección de arriba. Solo el
+                            punto lleva el color real del estado; el texto queda
+                            en el mismo gris que esa línea secundaria (pedido
+                            explícito del usuario: nombre en negro, color solo
+                            en el punto). */}
+                          {dispatchStatus && (
+                            <span
+                              className="h-1.5 w-1.5 shrink-0 rounded-full"
+                              style={{ backgroundColor: dispatchStatus.color }}
+                            />
+                          )}
+                          <span className="truncate text-brand-400">
+                            {dispatchStatus?.name ??
+                              t(DELIVERY_STATUS_LABEL_KEY[order.delivery_status])}
+                          </span>
+                        </p>
+                      ) : (
+                        <Select
+                          value={order.delivery_status}
+                          onValueChange={(v) =>
+                            handleDeliveryStatusSelect(v as DeliveryStatus)
+                          }
+                        >
+                          <SelectTrigger className="mt-1 w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(
+                              Object.keys(
+                                DELIVERY_STATUS_LABEL_KEY,
+                              ) as DeliveryStatus[]
+                            ).map((s) => (
+                              <SelectItem key={s} value={s}>
+                                {t(DELIVERY_STATUS_LABEL_KEY[s])}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </div>
                   )}
-                </div>
-              )}
                 </>
               ) : (
-                addressField('billing')
+                addressField("billing")
               )}
             </div>
 
             {/* Columna 2: Facturación -- ver la nota de orden de arriba. */}
             {showShipping && (
-            <div className="min-w-0 space-y-4 sm:border-l sm:border-brand-100 sm:pl-4">
-              {addressField('billing')}
-            </div>
+              <div className="min-w-0 space-y-4 sm:border-l sm:border-brand-100 sm:pl-4">
+                {addressField("billing")}
+              </div>
             )}
 
             {/* Columna 3: Oportunidad + Estado (solo al crear) + Válida
@@ -1914,14 +2576,17 @@ export function OrderDetail() {
                 confirmada, se oculta entera en vez de mostrarla deshabilitada). */}
             <div className="min-w-0 space-y-4 sm:border-l sm:border-brand-100 sm:pl-4">
               <div>
-                <Label>{t('orders.drawer.fields.opportunity')}</Label>
+                <Label>{t("orders.drawer.fields.opportunity")}</Label>
                 <ComboboxFilter
-                  options={contactOpportunities.map((o) => ({ id: o.id, label: o.title }))}
+                  options={contactOpportunities.map((o) => ({
+                    id: o.id,
+                    label: o.title,
+                  }))}
                   value={opportunityId || null}
                   onChange={handleOpportunitySelect}
-                  placeholder={t('orders.drawer.fields.noOpportunity')}
-                  searchPlaceholder={t('orders.detail.searchOpportunity')}
-                  emptyLabel={t('orders.detail.noOpportunityResults')}
+                  placeholder={t("orders.drawer.fields.noOpportunity")}
+                  searchPlaceholder={t("orders.detail.searchOpportunity")}
+                  emptyLabel={t("orders.detail.noOpportunityResults")}
                   disabled={draftLocked}
                   className="mt-1 w-full"
                   triggerClassName="min-w-0 flex-1 shrink"
@@ -1932,13 +2597,19 @@ export function OrderDetail() {
                   StatCard propia para esto -- pedido explícito del usuario. */}
               {posPointName && (
                 <p className="text-xs text-brand-400">
-                  {t('orders.channel.pos')}: <span className="font-medium text-brand-700">{posPointName}</span>
+                  {t("orders.channel.pos")}:{" "}
+                  <span className="font-medium text-brand-700">
+                    {posPointName}
+                  </span>
                 </p>
               )}
               {isNew && (
                 <div>
-                  <Label>{t('orders.drawer.fields.status')}</Label>
-                  <Select value={status} onValueChange={(v) => handleStatusSelect(v as OrderStatus)}>
+                  <Label>{t("orders.drawer.fields.status")}</Label>
+                  <Select
+                    value={status}
+                    onValueChange={(v) => handleStatusSelect(v as OrderStatus)}
+                  >
                     <SelectTrigger className="mt-1 w-full">
                       <SelectValue />
                     </SelectTrigger>
@@ -1952,16 +2623,25 @@ export function OrderDetail() {
                   </Select>
                 </div>
               )}
-              {(isNew ? status : order?.status) === 'cotizacion' && (
+              {(isNew ? status : order?.status) === "cotizacion" && (
                 <div>
-                  <Label>{t('orders.drawer.fields.validUntil')}</Label>
-                  <Input type="date" value={validUntil} onChange={(e) => handleValidUntilChange(e.target.value)} className="mt-1" />
+                  <Label>{t("orders.drawer.fields.validUntil")}</Label>
+                  <Input
+                    type="date"
+                    value={validUntil}
+                    onChange={(e) => handleValidUntilChange(e.target.value)}
+                    className="mt-1"
+                  />
                 </div>
               )}
             </div>
           </div>
 
-          {contactChangedNotice && <p className="mt-3 text-xs text-amber-600">{t('orders.detail.contactChangedNotice')}</p>}
+          {contactChangedNotice && (
+            <p className="mt-3 text-xs text-amber-600">
+              {t("orders.detail.contactChangedNotice")}
+            </p>
+          )}
         </StatCard>
 
         {hasSidePanel && (
@@ -1969,13 +2649,26 @@ export function OrderDetail() {
             {showPayments && paymentsCard}
             {showInvoiceCard && invoiceCard}
             {showTasks && (
-              <StatCard title={t('orders.detail.relatedTasks')}>
+              <StatCard title={t("orders.detail.relatedTasks")}>
                 <ul className="space-y-1.5">
                   {relatedTasks!.map((task) => (
-                    <li key={task.id} className="flex items-center justify-between gap-2 text-xs">
-                      <span className="min-w-0 truncate text-brand-600">{task.title}</span>
-                      <Badge className={task.status === 'completada' ? 'border-transparent bg-emerald-100 text-emerald-700' : 'border-transparent bg-amber-100 text-amber-700'}>
-                        {task.status === 'completada' ? t('orders.detail.taskDone') : t('orders.detail.taskPending')}
+                    <li
+                      key={task.id}
+                      className="flex items-center justify-between gap-2 text-xs"
+                    >
+                      <span className="min-w-0 truncate text-brand-600">
+                        {task.title}
+                      </span>
+                      <Badge
+                        className={
+                          task.status === "completada"
+                            ? "border-transparent bg-emerald-100 text-emerald-700"
+                            : "border-transparent bg-amber-100 text-amber-700"
+                        }
+                      >
+                        {task.status === "completada"
+                          ? t("orders.detail.taskDone")
+                          : t("orders.detail.taskPending")}
                       </Badge>
                     </li>
                   ))}
@@ -1988,16 +2681,34 @@ export function OrderDetail() {
 
       {/* 2. Ítems de la orden */}
       <StatCard
-        title={t('orders.detail.sections.items')}
+        title={t("orders.detail.sections.items")}
         action={
           <div className="flex flex-wrap items-center gap-2.5">
-            <Button type="button" variant="outline" size="sm" disabled title={t('orders.detail.comingSoon')}>
-              <ScanLineIcon className="size-3.5" /> {t('orders.detail.actions.scan')}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled
+              title={t("orders.detail.comingSoon")}
+            >
+              <ScanLineIcon className="size-3.5" />{" "}
+              {t("orders.detail.actions.scan")}
             </Button>
-            <Button type="button" variant="outline" size="sm" disabled title={t('orders.detail.comingSoon')}>
-              <UploadIcon className="size-3.5" /> {t('orders.detail.actions.import')}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled
+              title={t("orders.detail.comingSoon")}
+            >
+              <UploadIcon className="size-3.5" />{" "}
+              {t("orders.detail.actions.import")}
             </Button>
-            {itemsSaveAction && <span className="ml-1 border-l border-brand-200 pl-2.5">{itemsSaveAction}</span>}
+            {itemsSaveAction && (
+              <span className="ml-1 border-l border-brand-200 pl-2.5">
+                {itemsSaveAction}
+              </span>
+            )}
           </div>
         }
       >
@@ -2009,19 +2720,24 @@ export function OrderDetail() {
           warehouses={warehouses}
           stockRows={stockRows}
           shortfalls={stockShortfalls}
-          currency={order?.currency ?? 'COP'}
+          currency={order?.currency ?? "COP"}
           locked={draftLocked}
           onChange={(next) => {
-            setItems(next)
+            setItems(next);
             // Stale otherwise -- a shortfall found for the old quantities/
             // warehouse doesn't necessarily still apply once the agent
             // changes something.
-            setStockShortfalls([])
+            setStockShortfalls([]);
           }}
         />
         {items.length > 0 && (
           <p className="mt-2 text-xs text-brand-400">
-            {t(items.length === 1 ? 'orders.detail.itemsSummary.singular' : 'orders.detail.itemsSummary.plural', { count: items.length, qty: totalQuantity })}
+            {t(
+              items.length === 1
+                ? "orders.detail.itemsSummary.singular"
+                : "orders.detail.itemsSummary.plural",
+              { count: items.length, qty: totalQuantity },
+            )}
           </p>
         )}
       </StatCard>
@@ -2032,13 +2748,21 @@ export function OrderDetail() {
             "Impuesto" genérico sin discriminar. Ver el comentario grande
             junto a `orderTotals`/`draftTotalsPreview` para de dónde sale
             cada fuente según isNew. */}
-        <StatCard title={t('orders.detail.orderSummary')} action={itemsSaveAction}>
+        <StatCard
+          title={t("orders.detail.orderSummary")}
+          action={itemsSaveAction}
+        >
           <OrderTotalsSummary
             totals={isNew ? draftTotalsPreview : orderTotals}
             currency={order?.currency}
             shippingSlot={
               showShipping ? (
-                <CurrencyInput value={shippingDraft} onChange={(e) => setShippingDraft(e.target.value)} disabled={draftLocked} className="h-7 w-28 text-right text-xs" />
+                <CurrencyInput
+                  value={shippingDraft}
+                  onChange={(e) => setShippingDraft(e.target.value)}
+                  disabled={draftLocked}
+                  className="h-7 w-28 text-right text-xs"
+                />
               ) : undefined
             }
           />
@@ -2051,27 +2775,36 @@ export function OrderDetail() {
             único -- ambas viven en sales_order_comments, diferenciadas por
             is_internal. Solo en edición: necesitan un order.id real. */}
         {!isNew && (
-          <StatCard title={t('orders.detail.sections.notesAndComments')}>
+          <StatCard title={t("orders.detail.sections.notesAndComments")}>
             <div className="grid grid-cols-1 gap-y-5 sm:grid-cols-2 sm:gap-x-6">
               <ThreadColumn
-                label={t('orders.detail.notesTab')}
+                label={t("orders.detail.notesTab")}
                 entries={notesList}
                 adding={addingNote}
                 onToggleAdd={() => setAddingNote((v) => !v)}
-                addAria={t('orders.detail.addNoteAria')}
+                addAria={t("orders.detail.addNoteAria")}
                 form={
-                  <form onSubmit={handleAddNote} className="rounded-lg border border-brand-100 bg-brand-50/40 p-2 focus-within:border-accent-300">
+                  <form
+                    onSubmit={handleAddNote}
+                    className="rounded-lg border border-brand-100 bg-brand-50/40 p-2 focus-within:border-accent-300"
+                  >
                     <Textarea
                       value={noteDraft}
                       onChange={(e) => setNoteDraft(e.target.value)}
-                      placeholder={t('orders.detail.notesPlaceholder')}
+                      placeholder={t("orders.detail.notesPlaceholder")}
                       rows={2}
                       autoFocus
                       className="resize-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
                     />
                     <div className="mt-1 flex justify-end">
-                      <Button type="submit" size="sm" disabled={savingNote || !noteDraft.trim()}>
-                        {savingNote ? t('common.actions.saving') : t('common.actions.save')}
+                      <Button
+                        type="submit"
+                        size="sm"
+                        disabled={savingNote || !noteDraft.trim()}
+                      >
+                        {savingNote
+                          ? t("common.actions.saving")
+                          : t("common.actions.save")}
                       </Button>
                     </div>
                   </form>
@@ -2080,24 +2813,33 @@ export function OrderDetail() {
 
               <div className="sm:border-l sm:border-brand-100 sm:pl-6">
                 <ThreadColumn
-                  label={t('orders.detail.commentsTab')}
+                  label={t("orders.detail.commentsTab")}
                   entries={commentsList}
                   adding={addingComment}
                   onToggleAdd={() => setAddingComment((v) => !v)}
-                  addAria={t('orders.detail.addCommentAria')}
+                  addAria={t("orders.detail.addCommentAria")}
                   form={
-                    <form onSubmit={handleAddComment} className="rounded-lg border border-brand-100 bg-brand-50/40 p-2 focus-within:border-accent-300">
+                    <form
+                      onSubmit={handleAddComment}
+                      className="rounded-lg border border-brand-100 bg-brand-50/40 p-2 focus-within:border-accent-300"
+                    >
                       <Textarea
                         value={commentDraft}
                         onChange={(e) => setCommentDraft(e.target.value)}
-                        placeholder={t('orders.detail.commentPlaceholder')}
+                        placeholder={t("orders.detail.commentPlaceholder")}
                         rows={2}
                         autoFocus
                         className="resize-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
                       />
                       <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
-                        <Button type="submit" size="sm" disabled={savingComment || !commentDraft.trim()}>
-                          {savingComment ? t('common.actions.saving') : t('common.actions.save')}
+                        <Button
+                          type="submit"
+                          size="sm"
+                          disabled={savingComment || !commentDraft.trim()}
+                        >
+                          {savingComment
+                            ? t("common.actions.saving")
+                            : t("common.actions.save")}
                         </Button>
                       </div>
                     </form>
@@ -2109,22 +2851,38 @@ export function OrderDetail() {
         )}
       </div>
     </div>
-  )
+  );
 
   return (
     <div className="space-y-4">
       {isNew ? (
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-xs font-bold text-brand-800">{t(status === 'cotizacion' ? 'orders.drawer.newTitle' : 'orders.detail.newSaleTitle')}</h1>
-            <p className="mt-1 text-xs text-brand-500">{t('orders.detail.newSubtitle')}</p>
+            <h1 className="text-xs font-bold text-brand-800">
+              {t(
+                status === "cotizacion"
+                  ? "orders.drawer.newTitle"
+                  : "orders.detail.newSaleTitle",
+              )}
+            </h1>
+            <p className="mt-1 text-xs text-brand-500">
+              {t("orders.detail.newSubtitle")}
+            </p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={handleCancelDraft} disabled={cancellingDraft}>
-              {cancellingDraft ? t('common.actions.saving') : t('common.actions.cancel')}
+            <Button
+              variant="outline"
+              onClick={handleCancelDraft}
+              disabled={cancellingDraft}
+            >
+              {cancellingDraft
+                ? t("common.actions.saving")
+                : t("common.actions.cancel")}
             </Button>
             <Button onClick={handleCreate} disabled={creating}>
-              {creating ? t('common.actions.saving') : t('orders.detail.createAction')}
+              {creating
+                ? t("common.actions.saving")
+                : t("orders.detail.createAction")}
             </Button>
           </div>
         </div>
@@ -2136,13 +2894,25 @@ export function OrderDetail() {
                   misma fila que el badge/agente -- pedido explícito del
                   usuario. */}
               <div>
-                <h1 className="text-xs font-bold text-brand-800">ORD-{order.number}</h1>
+                <h1 className="text-xs font-bold text-brand-800">
+                  ORD-{order.number}
+                </h1>
                 <p className="mt-0.5 flex items-center gap-1 text-xs font-medium text-brand-600">
-                  <ClockIcon width={13} height={13} /> {t('orders.detail.createdAtLabel')}: {formatDateTime(order.created_at, language)}
+                  <ClockIcon width={13} height={13} />{" "}
+                  {t("orders.detail.createdAtLabel")}:{" "}
+                  {formatDateTime(order.created_at, language)}
                 </p>
               </div>
-              <Badge className={`mt-0.5 ${ORDER_STATUS_BADGE_CLASS[order.status]}`}>{t(ORDER_STATUS_LABEL_KEY[order.status])}</Badge>
-              {order.created_by_profile && <span className="mt-0.5 text-xs text-brand-400">· {order.created_by_profile.full_name}</span>}
+              <Badge
+                className={`mt-0.5 ${ORDER_STATUS_BADGE_CLASS[order.status]}`}
+              >
+                {t(ORDER_STATUS_LABEL_KEY[order.status])}
+              </Badge>
+              {order.created_by_profile && (
+                <span className="mt-0.5 text-xs text-brand-400">
+                  · {order.created_by_profile.full_name}
+                </span>
+              )}
             </div>
             {/* Botones condicionados al estado actual -- reemplaza el menú
                 "···" y el Select de Estado de más abajo (pedido explícito
@@ -2162,8 +2932,8 @@ export function OrderDetail() {
                 size="icon-sm"
                 onClick={handleDownloadInvoicePdf}
                 disabled={downloadingInvoiceId !== null}
-                aria-label={t('einvoicing.detail.downloadPdf')}
-                title={t('einvoicing.detail.downloadPdf')}
+                aria-label={t("einvoicing.detail.downloadPdf")}
+                title={t("einvoicing.detail.downloadPdf")}
               >
                 <FileTextIcon className="size-3.5" />
               </Button>
@@ -2173,32 +2943,48 @@ export function OrderDetail() {
                   pedidos de mostrador (POS): un pedido del portal/IA/tienda
                   no tiene ticket térmico, tiene su factura/remisión de
                   arriba. */}
-              {order.sales_channel === 'pos' && (
+              {order.sales_channel === "pos" && (
                 <Button
                   type="button"
                   variant="outline"
                   size="icon-sm"
                   onClick={() => receiptPrinter.print(order.id)}
                   disabled={receiptPrinter.printing}
-                  aria-label={t('pos.receipt.reprint')}
-                  title={t('pos.receipt.reprint')}
+                  aria-label={t("pos.receipt.reprint")}
+                  title={t("pos.receipt.reprint")}
                 >
                   <PrinterIcon width={13} height={13} />
                 </Button>
               )}
-              {order.status === 'cotizacion' && (
+              {order.status === "cotizacion" && (
                 <>
-                  <Button size="sm" onClick={() => handleStatusSelect('confirmada')} disabled={advancingStatus}>
-                    {advancingStatus ? t('common.actions.saving') : t('orders.detail.actions.confirmSale')}
+                  <Button
+                    size="sm"
+                    onClick={() => handleStatusSelect("confirmada")}
+                    disabled={advancingStatus}
+                  >
+                    {advancingStatus
+                      ? t("common.actions.saving")
+                      : t("orders.detail.actions.confirmSale")}
                   </Button>
-                  <Button variant="outline" size="sm" className="text-red-600 hover:bg-red-50" onClick={() => setConfirmingDelete(true)}>
-                    {t('orders.detail.deleteAction')}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-red-600 hover:bg-red-50"
+                    onClick={() => setConfirmingDelete(true)}
+                  >
+                    {t("orders.detail.deleteAction")}
                   </Button>
                 </>
               )}
-              {order.status === 'confirmada' && !locked && (
-                <Button variant="outline" size="sm" className="text-red-600 hover:bg-red-50" onClick={() => setConfirmingVoid(true)}>
-                  {t('orders.detail.voidAction')}
+              {order.status === "confirmada" && !locked && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-red-600 hover:bg-red-50"
+                  onClick={() => setConfirmingVoid(true)}
+                >
+                  {t("orders.detail.voidAction")}
                 </Button>
               )}
             </div>
@@ -2209,13 +2995,27 @@ export function OrderDetail() {
       {/* El PDF se puede descargar aunque no exista factura DIAN (remisión),
           así que su error NO puede vivir dentro de la card de Factura DIAN:
           ahí quedaría invisible justo para los tenants sin DIAN. */}
-      {invoicePdfError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{invoicePdfError}</p>}
-      {actionError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{actionError}</p>}
+      {invoicePdfError && (
+        <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+          {invoicePdfError}
+        </p>
+      )}
+      {actionError && (
+        <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+          {actionError}
+        </p>
+      )}
 
       {detailsContent}
 
       {profile?.tenant_id && contactId && (
-        <AddressDrawer open={addressDrawerOpen} onClose={() => setAddressDrawerOpen(false)} tenantId={profile.tenant_id} contactId={contactId} onSaved={handleAddressCreated} />
+        <AddressDrawer
+          open={addressDrawerOpen}
+          onClose={() => setAddressDrawerOpen(false)}
+          tenantId={profile.tenant_id}
+          contactId={contactId}
+          onSaved={handleAddressCreated}
+        />
       )}
 
       {!isNew && order && profile?.tenant_id && (
@@ -2224,7 +3024,10 @@ export function OrderDetail() {
           onClose={() => setPaymentDrawerOpen(false)}
           tenantId={profile.tenant_id}
           order={order}
-          creditEnabled={contacts.find((c) => c.id === order.contact_id)?.credit_enabled ?? false}
+          creditEnabled={
+            contacts.find((c) => c.id === order.contact_id)?.credit_enabled ??
+            false
+          }
           storeCreditBalance={storeCreditBalance}
           pendingAmount={balance}
           onSaved={reloadPayments}
@@ -2232,7 +3035,11 @@ export function OrderDetail() {
       )}
 
       {receiptPrinter.portal}
-      {receiptPrinter.error && <p className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 shadow-lg">{receiptPrinter.error}</p>}
+      {receiptPrinter.error && (
+        <p className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 shadow-lg">
+          {receiptPrinter.error}
+        </p>
+      )}
 
       {latestInvoice && (
         <CreditNoteDrawer
@@ -2240,31 +3047,38 @@ export function OrderDetail() {
           onClose={() => setCreditNoteDrawerOpen(false)}
           invoiceId={latestInvoice.id}
           availableBalance={creditNoteAvailableBalance}
-          availableBalanceLabel={formatCurrency(creditNoteAvailableBalance, latestInvoice.currency)}
+          availableBalanceLabel={formatCurrency(
+            creditNoteAvailableBalance,
+            latestInvoice.currency,
+          )}
           onCreated={() => reloadCreditNotes()}
         />
       )}
 
-      {!isNew && order && profile?.tenant_id && showShipping && enabledModules?.has('dispatches') && (
-        <DispatchDrawer
-          open={dispatchDrawerOpen}
-          onClose={() => setDispatchDrawerOpen(false)}
-          tenantId={profile.tenant_id}
-          order={order}
-          balance={balance}
-          onOrderChanged={() => {
-            reloadOrder()
-            reloadDispatchStatus()
-          }}
-        />
-      )}
+      {!isNew &&
+        order &&
+        profile?.tenant_id &&
+        showShipping &&
+        enabledModules?.has("dispatches") && (
+          <DispatchDrawer
+            open={dispatchDrawerOpen}
+            onClose={() => setDispatchDrawerOpen(false)}
+            tenantId={profile.tenant_id}
+            order={order}
+            balance={balance}
+            onOrderChanged={() => {
+              reloadOrder();
+              reloadDispatchStatus();
+            }}
+          />
+        )}
 
       <ConfirmDialog
         open={!!deletePaymentId}
         onClose={() => setDeletePaymentId(null)}
         onConfirm={handleDeletePayment}
-        title={t('orders.detail.deletePaymentTitle')}
-        description={t('orders.detail.deletePaymentBody')}
+        title={t("orders.detail.deletePaymentTitle")}
+        description={t("orders.detail.deletePaymentBody")}
       />
 
       <ConfirmDialog
@@ -2272,9 +3086,9 @@ export function OrderDetail() {
         onClose={() => setConfirmingVoid(false)}
         onConfirm={handleVoid}
         loading={voiding}
-        title={t('orders.detail.voidTitle')}
-        description={t('orders.detail.voidBody')}
-        confirmLabel={t('orders.detail.voidAction')}
+        title={t("orders.detail.voidTitle")}
+        description={t("orders.detail.voidBody")}
+        confirmLabel={t("orders.detail.voidAction")}
       />
 
       <ConfirmDialog
@@ -2282,24 +3096,30 @@ export function OrderDetail() {
         onClose={() => setConfirmingDelete(false)}
         onConfirm={handleDelete}
         loading={deleting}
-        title={t('orders.detail.deleteTitle')}
-        description={t('orders.detail.deleteBody')}
-        confirmLabel={t('orders.detail.deleteAction')}
+        title={t("orders.detail.deleteTitle")}
+        description={t("orders.detail.deleteBody")}
+        confirmLabel={t("orders.detail.deleteAction")}
       />
 
       <ConfirmDialog
         open={!!pendingDeliveryStatus}
         onClose={() => setPendingDeliveryStatus(null)}
         onConfirm={() => {
-          if (pendingDeliveryStatus) applyDeliveryStatus(pendingDeliveryStatus)
-          setPendingDeliveryStatus(null)
+          if (pendingDeliveryStatus) applyDeliveryStatus(pendingDeliveryStatus);
+          setPendingDeliveryStatus(null);
         }}
-        title={t('orders.detail.dispatchWithBalanceTitle')}
-        description={t('orders.detail.dispatchWithBalanceBody', { amount: formatCurrency(balance, order?.currency) })}
-        confirmLabel={t('orders.detail.dispatchWithBalanceConfirm')}
+        title={t("orders.detail.dispatchWithBalanceTitle")}
+        description={t("orders.detail.dispatchWithBalanceBody", {
+          amount: formatCurrency(balance, order?.currency),
+        })}
+        confirmLabel={t("orders.detail.dispatchWithBalanceConfirm")}
       />
 
-      <StockShortfallDialog shortfalls={stockShortfalls} open={shortfallDialogOpen} onClose={() => setShortfallDialogOpen(false)} />
+      <StockShortfallDialog
+        shortfalls={stockShortfalls}
+        open={shortfallDialogOpen}
+        onClose={() => setShortfallDialogOpen(false)}
+      />
     </div>
-  )
+  );
 }
