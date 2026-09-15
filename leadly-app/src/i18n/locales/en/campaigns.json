@@ -2,6 +2,7 @@
   "campaigns.title": "Campaigns",
   "campaigns.subtitle": "Send a WhatsApp template to a list of contacts at a scheduled time.",
   "campaigns.actions.new": "New campaign",
+  "campaigns.tabs.campaigns": "Campaigns",
   "campaigns.empty": "You haven't created any campaigns yet.",
   "campaigns.errors.load": "Couldn't load campaigns.",
   "campaigns.errors.cancelFailed": "Couldn't cancel the campaign.",

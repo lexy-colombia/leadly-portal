@@ -43,6 +43,7 @@ import { Calendar } from './pages/tenant/Calendar'
 import { Billing as TenantBilling } from './pages/tenant/Billing'
 import { Integrations as TenantIntegrations } from './pages/tenant/Integrations'
 import { AiAgents } from './pages/tenant/AiAgents'
+import { Channels } from './pages/tenant/Channels'
 import { Campaigns } from './pages/tenant/Campaigns'
 import { Users as TenantUsers } from './pages/tenant/Users'
 import { Roles as TenantRoles } from './pages/tenant/Roles'
@@ -141,6 +142,7 @@ export default function App() {
             <Route path="tasks" element={<Navigate to="/app/calendar" replace />} />
             <Route path="calendar" element={<RequireModule moduleKey="calendar" action="calendar.view"><Calendar /></RequireModule>} />
             <Route path="ai-agents" element={<RequireModule moduleKey="aiAgents" action="aiAgents.view"><AiAgents /></RequireModule>} />
+            <Route path="channels" element={<RequireModule moduleKey="channels" action="channels.view"><Channels /></RequireModule>} />
             <Route path="billing" element={<RequireModule moduleKey="billing"><TenantBilling /></RequireModule>} />
             <Route path="integrations" element={<RequireModule moduleKey="integrations"><TenantIntegrations /></RequireModule>} />
             <Route path="campaigns" element={<RequireModule moduleKey="campaigns" action="campaigns.view"><Campaigns /></RequireModule>} />

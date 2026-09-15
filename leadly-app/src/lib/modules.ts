@@ -1,4 +1,4 @@
-import { AiSparkleIcon, ArchiveIcon, BoxIcon, BuildingIcon, CalendarIcon, ChatBubbleIcon, CheckIcon, CreditCardIcon, DashboardIcon, DollarIcon, GlobeIcon, KeyIcon, MegaphoneIcon, ReceiptIcon, RefreshIcon, ScanIcon, SettingsIcon, TargetIcon, UsersIcon, WalletIcon } from '@/components/atoms/icons'
+import { AiSparkleIcon, ArchiveIcon, BoxIcon, BuildingIcon, CalendarIcon, ChatBubbleIcon, CheckIcon, CreditCardIcon, DashboardIcon, DollarIcon, GlobeIcon, KeyIcon, MegaphoneIcon, PhoneIcon, ReceiptIcon, RefreshIcon, ScanIcon, SettingsIcon, TargetIcon, UsersIcon, WalletIcon } from '@/components/atoms/icons'
 import type { TranslationKey } from '../i18n/translations'
 import type { ComponentType } from 'react'
 
@@ -102,6 +102,14 @@ export const TENANT_MODULES: TenantModuleDefinition[] = [
   { key: 'calendar', labelKey: 'common.nav.calendar', to: '/app/calendar', icon: CalendarIcon, viewAction: 'calendar.view' },
   { key: 'campaigns', labelKey: 'common.nav.campaigns', to: '/app/campaigns', icon: MegaphoneIcon, viewAction: 'campaigns.view' },
   { key: 'aiAgents', labelKey: 'common.nav.aiAgents', to: '/app/ai-agents', icon: AiSparkleIcon, viewAction: 'aiAgents.view' },
+  // Canales: las líneas de WhatsApp y su conexión con Meta. Salieron de
+  // "IA & Agentes" el 2026-09-13 -- una línea es el canal por donde entra la
+  // conversación, la atienda un agente de IA o una persona. Es un módulo del
+  // CRM como cualquier otro (togglable por el superadmin, con permisos por
+  // acción, ver migración 20260913210000): pedido explícito del usuario en
+  // la segunda ronda, después de que la primera versión lo dejó fijo y
+  // admin-only fuera del grupo.
+  { key: 'channels', labelKey: 'common.nav.channels', to: '/app/channels', icon: PhoneIcon, viewAction: 'channels.view' },
   { key: 'billing', labelKey: 'common.nav.billing', to: '/app/billing', icon: CreditCardIcon },
   { key: 'integrations', labelKey: 'common.nav.integrations', to: '/app/integrations', icon: GlobeIcon },
   { key: 'users', labelKey: 'common.nav.users', to: '/app/users', icon: UsersIcon, alwaysEnabled: true, adminOnly: true },
@@ -122,4 +130,4 @@ export type TenantModuleKey = (typeof TENANT_MODULES)[number]['key']
  * TenantLayout groups them visually. */
 export const CRM_GROUP_KEY = 'crm'
 export const CRM_GROUP_ICON = UsersIcon
-export const CRM_GROUP_MODULE_KEYS: TenantModuleKey[] = ['conversations', 'pipeline', 'tasks', 'calendar', 'campaigns', 'aiAgents']
+export const CRM_GROUP_MODULE_KEYS: TenantModuleKey[] = ['conversations', 'channels', 'pipeline', 'tasks', 'calendar', 'campaigns', 'aiAgents']

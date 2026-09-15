@@ -16,6 +16,7 @@ import type { TranslationKey } from '../../../i18n/translations'
  * etiquetas de nav en vez de duplicar el texto acá. */
 const MODULE_LABEL_KEY: Record<string, TranslationKey> = {
   conversations: 'common.nav.conversations',
+  channels: 'common.nav.channels',
   contacts: 'common.nav.contacts',
   pipeline: 'common.nav.pipeline',
   products: 'common.nav.products',

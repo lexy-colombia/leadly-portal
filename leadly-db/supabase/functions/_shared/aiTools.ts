@@ -110,14 +110,14 @@ export const AI_TOOLS: AiToolDefinition[] = [
     name: "list_catalog_categories",
     skill: "catalogo",
     description:
-      "Lista las categorías de productos del tenant (nombre y descripción), hasta 5 -- la herramienta misma limita el resultado, no hace falta que vos recortes la lista. Úsala para sugerirle categorías al cliente cuando no haya pedido un producto puntual (ej. al iniciar la conversación).",
+      "Lista las categorías de productos del tenant (nombre y descripción), hasta 5 -- la herramienta misma limita el resultado, no hace falta que vos recortes la lista. Úsala para sugerirle categorías al cliente cuando no haya pedido un producto puntual (ej. al iniciar la conversación, o si pide el catálogo). Si el negocio tiene tienda pública activa, la respuesta trae `storefront_url`: inclúyelo tal cual en ese mismo mensaje para que el cliente vea todo el catálogo.",
     parameters: { type: "object", properties: {}, required: [] },
   },
   {
     name: "list_catalog_products",
     skill: "catalogo",
     description:
-      "Busca productos activos del catálogo del tenant por nombre, categoría y/o marca, con su nombre, precio, categorías (un producto puede tener varias) y descripción completa (no incluye stock -- eso solo se revisa al momento de crear una cotización, ver create_quote). La descripción puede incluir detalle extendido según el rubro del tenant (ej. para instituciones educativas: duración, modalidad, horarios, plan de estudios, requisitos de admisión, título otorgado) -- si el cliente pide ese tipo de detalle sobre un producto puntual, usá esta herramienta (con `search` por el nombre exacto) y respondé con lo que la descripción realmente dice, nunca lo inventes. Úsala cuando el cliente pregunte qué productos hay, pida precios o detalles, o mencione algo que querés confirmar que existe en el catálogo antes de ofrecerlo. Si pasás solo `category` y/o `brand` (sin `search`), te devuelve hasta 5 productos ya priorizados internamente -- mostralos en ese orden. Cuando `search` deja un único producto (típico de un pedido de detalle), la respuesta trae `image_sent: true|false` -- la foto ya se mandó sola en ese caso, NO llames send_product_image de nuevo para el mismo producto en el mismo turno. Si viene en false, avisale al cliente con naturalidad que todavía no hay foto cargada de ese producto.",
+      "Busca productos activos del catálogo del tenant por nombre, categoría y/o marca, con su nombre, precio, categorías (un producto puede tener varias) y descripción completa, `in_stock` (true/false, nunca la cantidad) y `product_url` (enlace del producto en la tienda pública, solo si está publicado -- compártelo tal cual, nunca armes uno); si un producto viene con in_stock false está agotado -- díselo al cliente en ese mismo mensaje y ofrécele algo disponible, nunca lo descubra al final de la compra. La descripción puede incluir detalle extendido según el rubro del tenant (ej. para instituciones educativas: duración, modalidad, horarios, plan de estudios, requisitos de admisión, título otorgado) -- si el cliente pide ese tipo de detalle sobre un producto puntual, usá esta herramienta (con `search` por el nombre exacto) y respondé con lo que la descripción realmente dice, nunca lo inventes. Úsala cuando el cliente pregunte qué productos hay, pida precios o detalles, o mencione algo que querés confirmar que existe en el catálogo antes de ofrecerlo. Si pasás solo `category` y/o `brand` (sin `search`), te devuelve hasta 5 productos ya priorizados internamente -- mostralos en ese orden. Con `category`/`brand`, o con una búsqueda que no deja un único producto, la respuesta trae `storefront_url` si el negocio tiene tienda pública activa: compártelo tal cual en ese mismo mensaje. Cuando `search` deja un único producto (típico de un pedido de detalle), la respuesta trae `image_sent: true|false` -- la foto ya se mandó sola en ese caso, NO llames send_product_image de nuevo para el mismo producto en el mismo turno. Si viene en false, avisale al cliente con naturalidad que todavía no hay foto cargada de ese producto.",
     parameters: {
       type: "object",
       properties: {
@@ -145,7 +145,7 @@ export const AI_TOOLS: AiToolDefinition[] = [
     name: "list_product_variants",
     skill: "catalogo",
     description:
-      "Consulta si un producto tiene variantes (ej. color, talla) y, si las tiene, las lista con su precio propio. Llamala SIEMPRE antes de crear una cotización con un producto que pueda tener variantes -- si `has_variants` da true, tenés que preguntarle al cliente cuál quiere (usando el `label` exacto de cada una) antes de pasar a create_quote/add_item_to_quote. Si `has_variants` da false, el producto no tiene variantes y no hace falta preguntar nada.",
+      "Consulta si un producto tiene variantes (ej. color, talla) y, si las tiene, las lista con su precio propio. Cada opción trae `in_stock` (sin variantes, viene a nivel del producto): nunca ofrezcas elegir una agotada -- dile al cliente cuáles no hay y muéstrale las disponibles. También trae `product_url` si el producto está publicado en la tienda. Llamala SIEMPRE antes de crear una cotización con un producto que pueda tener variantes -- si `has_variants` da true, tenés que preguntarle al cliente cuál quiere (usando el `label` exacto de cada una) antes de pasar a create_quote/add_item_to_quote. Si `has_variants` da false, el producto no tiene variantes y no hace falta preguntar nada.",
     parameters: {
       type: "object",
       properties: {
@@ -158,7 +158,7 @@ export const AI_TOOLS: AiToolDefinition[] = [
     name: "create_quote",
     skill: "ventas",
     description:
-      "Crea una cotización para este cliente con uno o más productos del catálogo. Cotización y venta son la misma entidad -- crearla acá la deja en estado \"cotizacion\", todavía sin tocar el inventario (eso pasa recién en confirm_quote). Si no sabés el nombre exacto de un producto o su precio, consultá list_catalog_products primero -- nunca inventes un producto ni un precio. Si un producto tiene variantes (list_product_variants con has_variants=true) y no pasás `variant`, la línea se rechaza -- consultá list_product_variants y confirmá con el cliente antes de llamar a esta herramienta. La respuesta incluye `billing_address_on_file`: si viene en false, es el momento de pedirle al cliente sus datos de FACTURACIÓN (no de envío todavía -- eso se pide recién si confirma la compra) y guardarlos con save_contact_address (is_billing: true).",
+      "Crea una cotización para este cliente con uno o más productos del catálogo. Cotización y venta son la misma entidad -- crearla acá la deja en estado \"cotizacion\", todavía sin tocar el inventario (eso pasa recién en confirm_quote). Si no sabés el nombre exacto de un producto o su precio, consultá list_catalog_products primero -- nunca inventes un producto ni un precio. Si un producto tiene variantes (list_product_variants con has_variants=true) y no pasás `variant`, la línea se rechaza -- consultá list_product_variants y confirmá con el cliente antes de llamar a esta herramienta. Si alguna línea pide más unidades de las que hay en stock, no se crea nada y la herramienta devuelve un error con la cantidad disponible: díselo al cliente antes de pedirle cualquier dato. Nunca toca pedidos anteriores del cliente. La respuesta trae `saved_addresses` (las direcciones guardadas, en texto): antes de confirmar, lístaselas al cliente y pregúntale en UN mensaje si le enviamos a esa dirección y si facturamos con esos mismos datos. Si no tiene ninguna o dice que no, pídele la dirección nueva y en ese mismo mensaje pregúntale si usamos esos mismos datos para facturación, para no hacerle digitarlos dos veces.",
     parameters: {
       type: "object",
       properties: {
@@ -188,7 +188,7 @@ export const AI_TOOLS: AiToolDefinition[] = [
     name: "add_item_to_quote",
     skill: "ventas",
     description:
-      "Agrega uno o más productos a la cotización más reciente de este cliente, solo si todavía está en estado \"cotizacion\" (no una venta ya confirmada). Úsala cuando el cliente pida sumar algo a un pedido que ya armaste, en vez de crear una cotización nueva. Si no sabés el nombre exacto de un producto o su precio, consultá list_catalog_products primero -- nunca inventes un producto ni un precio. Mismo requisito de variante que create_quote: si el producto tiene variantes, pasá `variant` (de list_product_variants) o la línea se rechaza.",
+      "Agrega uno o más productos al pedido que se está armando en esta conversación (el más reciente del cliente, si sigue en \"cotizacion\" y se tocó en las últimas 12 horas). Nunca agrega a un pedido anterior salvo que el cliente nombre su número y pida modificarlo: ahí pasa `order_number`. Mismo chequeo de stock que create_quote. Úsala cuando el cliente pida sumar algo a un pedido que ya armaste, en vez de crear una cotización nueva. Si no sabés el nombre exacto de un producto o su precio, consultá list_catalog_products primero -- nunca inventes un producto ni un precio. Mismo requisito de variante que create_quote: si el producto tiene variantes, pasá `variant` (de list_product_variants) o la línea se rechaza.",
     parameters: {
       type: "object",
       properties: {
@@ -209,6 +209,7 @@ export const AI_TOOLS: AiToolDefinition[] = [
             required: ["product_name", "quantity"],
           },
         },
+        order_number: { type: "string", description: "Solo si el cliente nombró un pedido puntual (ej. \"049\") y pidió consultarlo o modificarlo. Sin esto se usa el pedido que se está armando en esta conversación." },
       },
       required: ["items"],
     },
@@ -216,8 +217,14 @@ export const AI_TOOLS: AiToolDefinition[] = [
   {
     name: "get_quote_status",
     skill: "ventas",
-    description: "Consulta la cotización o venta más reciente de este cliente: número, estado, productos, total, notas que un agente haya dejado (si hay alguna, comunicásela al cliente), y cuánto lleva pagado / cuánto falta (total_paid/balance_due). Úsala cuando el cliente pregunte por el estado de su pedido/cotización, o por su saldo pendiente. `status` es el valor crudo (cotizacion/confirmada/cancelada); `status_label` es el texto ya listo para decirle al cliente -- usalo en vez de inventar tu propia palabra a partir de `status`.",
-    parameters: { type: "object", properties: {}, required: [] },
+    description: "Consulta la cotización o venta más reciente de este cliente (o la del número que el cliente nombre, con `order_number`): número, estado, productos, total, notas que un agente haya dejado (si hay alguna, comunicásela al cliente), y cuánto lleva pagado / cuánto falta (total_paid/balance_due). Úsala cuando el cliente pregunte por el estado de su pedido/cotización, o por su saldo pendiente. `status` es el valor crudo (cotizacion/confirmada/cancelada); `status_label` es el texto ya listo para decirle al cliente -- usalo en vez de inventar tu propia palabra a partir de `status`. `can_modify` dice si ese pedido todavía se puede modificar (solo mientras está en cotización); si el cliente pregunta si puede cambiar un pedido que ya no se puede, díselo y ofrécele que un asesor lo revise.",
+    parameters: {
+      type: "object",
+      properties: {
+        order_number: { type: "string", description: "Solo si el cliente nombró un pedido puntual (ej. \"049\") y pidió consultarlo o modificarlo. Sin esto se usa el pedido que se está armando en esta conversación." },
+      },
+      required: [],
+    },
   },
   {
     name: "add_order_comment",
@@ -235,15 +242,27 @@ export const AI_TOOLS: AiToolDefinition[] = [
     name: "confirm_quote",
     skill: "ventas",
     description:
-      "Confirma la cotización más reciente de este cliente como venta (pasa de \"cotizacion\" a \"confirmada\") -- solo cuando el cliente confirme explícitamente que quiere seguir adelante con la compra. El inventario real se descuenta ahí mismo. Esta es la etapa en la que se pide la dirección de ENVÍO (no antes). La herramienta exige que ya exista una dirección de facturación y una de envío guardadas -- si falta alguna, en vez de confirmar devuelve { blocked: true, reason: \"billing_address_required\" | \"shipping_address_required\" } y no cambia nada. Ante eso, pedile al cliente el dato que falta (nunca lo inventes), guardalo con save_contact_address, y recién ahí volvé a llamar confirm_quote. Si confirma con éxito, la respuesta trae `status_label: \"Pedido confirmado (venta en firme)\"` -- usá ese texto (o una paráfrasis que mantenga la idea de \"pedido/venta confirmada\") en tu mensaje al cliente. Una vez que esto se ejecutó, dejá de llamarlo \"cotización\": ya es una compra en firme, no una estimación de precio.\n\nAl confirmar con éxito, la respuesta también resuelve el pago sola -- nunca llames generate_payment_link/charge_sale_to_credit por tu cuenta después de esto salvo en el caso que se explica abajo, ya se hizo o se te está pidiendo que preguntes: `payment_method: \"wompi\"` + `checkout_url` (ya se generó el link, compartíselo tal cual en tu misma respuesta), `payment_method: \"credito\"` + `payment_charged: true` (ya se cargó a la cuenta de crédito del cliente, solo confirmaselo), `payment_options: [\"credito\",\"wompi\"]` (hay más de una forma de cobrar disponible -- esta es la ÚNICA situación en la que preguntás al cliente cuál prefiere, y recién ahí llamás charge_sale_to_credit o generate_payment_link según lo que elija), o `payment_pending: true` (no hay ninguna forma de cobro automática disponible -- decile al cliente que el pago queda pendiente y que un agente se va a poner en contacto).",
-    parameters: { type: "object", properties: {}, required: [] },
+      "Confirma el pedido que se está armando en esta conversación (o el que el cliente nombró, con `order_number`) como venta (pasa de \"cotizacion\" a \"confirmada\") -- solo cuando el cliente confirme explícitamente que quiere seguir adelante con la compra. El inventario real se descuenta ahí mismo. Exige que el pedido ya tenga aplicadas la dirección de envío y la de facturación, confirmadas con el cliente (save_contact_address con apply_as_shipping/apply_as_billing): si falta alguna, no confirma y devuelve { blocked: true, reason: \"address_confirmation_required\", missing, saved_addresses } -- lístale al cliente esas direcciones, pregúntale en un solo mensaje a cuál enviamos y si facturamos con los mismos datos, aplícalas y vuelve a llamar confirm_quote. Nunca elijas una dirección por tu cuenta. Al confirmar devuelve `shipping_address` y `billing_address` en texto. Si confirma con éxito, la respuesta trae `status_label: \"Pedido confirmado (venta en firme)\"` -- usá ese texto (o una paráfrasis que mantenga la idea de \"pedido/venta confirmada\") en tu mensaje al cliente. Una vez que esto se ejecutó, dejá de llamarlo \"cotización\": ya es una compra en firme, no una estimación de precio. Llámala una sola vez por pedido: si el cliente ya confirmó y está eligiendo cómo pagar, eso es charge_sale_to_credit o generate_payment_link, no esta herramienta.\n\nAl confirmar con éxito, la respuesta también resuelve el pago sola -- nunca llames generate_payment_link/charge_sale_to_credit por tu cuenta después de esto salvo en el caso que se explica abajo, ya se hizo o se te está pidiendo que preguntes: `payment_method: \"wompi\"` + `checkout_url` (ya se generó el link, compartíselo tal cual en tu misma respuesta), `payment_method: \"credito\"` + `payment_charged: true` (ya se cargó a la cuenta de crédito del cliente, solo confirmaselo), `payment_options: [\"credito\",\"wompi\"]` (hay más de una forma de cobrar disponible -- esta es la ÚNICA situación en la que preguntás al cliente cuál prefiere, y recién ahí llamás charge_sale_to_credit o generate_payment_link según lo que elija), o `payment_pending: true` (no hay ninguna forma de cobro automática disponible -- decile al cliente que el pago queda pendiente y que un agente se va a poner en contacto).",
+    parameters: {
+      type: "object",
+      properties: {
+        order_number: { type: "string", description: "Solo si el cliente nombró un pedido puntual (ej. \"049\") y pidió consultarlo o modificarlo. Sin esto se usa el pedido que se está armando en esta conversación." },
+      },
+      required: [],
+    },
   },
   {
     name: "cancel_quote",
     skill: "ventas",
     description:
-      "Cancela la cotización más reciente de este cliente (solo si todavía está en estado \"cotizacion\", no una venta ya confirmada). No hay stock que liberar -- una cotización nunca lo tocó. Solo cuando el cliente lo pida explícitamente.",
-    parameters: { type: "object", properties: {}, required: [] },
+      "Anula el pedido que se está armando en esta conversación, o el que el cliente nombre con `order_number` (solo si todavía está en estado \"cotizacion\", no una venta ya confirmada). No hay stock que liberar -- una cotización nunca lo tocó. Solo cuando el cliente lo pida explícitamente.",
+    parameters: {
+      type: "object",
+      properties: {
+        order_number: { type: "string", description: "Solo si el cliente nombró un pedido puntual (ej. \"049\") y pidió consultarlo o modificarlo. Sin esto se usa el pedido que se está armando en esta conversación." },
+      },
+      required: [],
+    },
   },
   {
     name: "complete_sale",
@@ -322,11 +341,11 @@ export const AI_TOOLS: AiToolDefinition[] = [
     name: "save_contact_address",
     skill: "clientes",
     description:
-      "Guarda o actualiza una dirección de este cliente, y opcionalmente la aplica a su cotización/venta más reciente. Para reutilizar una dirección ya guardada (ej. el cliente dijo \"la misma de siempre\"), pasá su address_id junto con apply_as_shipping/apply_as_billing sin repetir el resto de los campos. Para una dirección NUEVA: pedile al cliente los datos reales completos -- nunca inventes ni completes una dirección a medias, ni con un valor de relleno tipo \"no registrada\" o \"pendiente\" solo para poder avanzar (la herramienta lo rechaza igual). line1 y city son obligatorios en una dirección nueva, y hay que indicar explícitamente is_shipping o is_billing (no hay un valor por defecto) según en qué paso del flujo de venta estás: dirección de FACTURACIÓN al cotizar, dirección de ENVÍO recién si el cliente confirma la compra.",
+      "Guarda o actualiza una dirección de este cliente, y opcionalmente la aplica al pedido que se está armando en esta conversación (o al que el cliente nombró, con `order_number`). Para reutilizar una dirección ya guardada (ej. el cliente dijo \"la misma de siempre\"), pasá su address_id junto con apply_as_shipping/apply_as_billing sin repetir el resto de los campos. Para una dirección NUEVA: pedile al cliente los datos reales completos -- nunca inventes ni completes una dirección a medias, ni con un valor de relleno tipo \"no registrada\" o \"pendiente\" solo para poder avanzar (la herramienta lo rechaza igual). line1 y city son obligatorios en una dirección nueva, y hay que indicar explícitamente is_shipping o is_billing (no hay un valor por defecto) según para qué la dio el cliente. Si dijo que se usen los mismos datos para envío y facturación, pasa los dos en true y aplícala como las dos (apply_as_shipping y apply_as_billing) en una sola llamada.",
     parameters: {
       type: "object",
       properties: {
-        address_id: { type: "string", description: "Id de una dirección ya guardada (de list_contact_addresses) para actualizarla o reutilizarla, en vez de crear una nueva." },
+        address_id: { type: "string", description: "Dirección ya guardada a actualizar o reutilizar, en vez de crear una nueva: su address_id, o su número `option` de saved_addresses (ej. \"1\" si el cliente eligió la primera opción)." },
         label: { type: "string", description: "Nombre corto para identificarla (ej. \"Casa\", \"Oficina\"), opcional." },
         is_shipping: { type: "boolean", description: "Si es una dirección de envío. Obligatorio (junto con is_billing) al crear una dirección nueva -- no tiene valor por defecto." },
         is_billing: { type: "boolean", description: "Si es una dirección/datos de facturación. Obligatorio (junto con is_shipping) al crear una dirección nueva -- no tiene valor por defecto." },
@@ -340,8 +359,9 @@ export const AI_TOOLS: AiToolDefinition[] = [
         postal_code: { type: "string", description: "Código postal (opcional)." },
         country: { type: "string", description: "País (opcional, por defecto Colombia)." },
         notes: { type: "string", description: "Instrucciones adicionales de entrega (opcional)." },
-        apply_as_shipping: { type: "boolean", description: "Si aplicar esta dirección como la de envío de la cotización/venta más reciente del cliente." },
-        apply_as_billing: { type: "boolean", description: "Si aplicar esta dirección como la de facturación de la cotización/venta más reciente del cliente." },
+        apply_as_shipping: { type: "boolean", description: "Si aplicar esta dirección como la de envío del pedido en armado (o del de order_number)." },
+        order_number: { type: "string", description: "Solo si el cliente nombró un pedido puntual (ej. \"049\") y pidió consultarlo o modificarlo. Sin esto se usa el pedido que se está armando en esta conversación." },
+        apply_as_billing: { type: "boolean", description: "Si aplicar esta dirección como la de facturación del pedido en armado (o del de order_number)." },
       },
       required: [],
     },

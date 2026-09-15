@@ -76,6 +76,9 @@ function MetricCard({ icon, iconClass, value, label, sublabel }: { icon: ReactNo
  * Meta credentials; the tenant self-connects via Embedded Signup), so
  * that part is injected -- exactly one of `renderLineDrawer`/`connectLine`
  * should be passed. */
+export type LinesAndAgentsTab = 'lineas' | 'agentes' | 'plantillas'
+const ALL_TABS: LinesAndAgentsTab[] = ['lineas', 'agentes', 'plantillas']
+
 export function LinesAndAgentsSection({
   tenantId,
   canManage,
@@ -83,6 +86,7 @@ export function LinesAndAgentsSection({
   showMetrics = true,
   renderLineDrawer,
   connectLine,
+  tabs: tabsProp,
 }: {
   tenantId: string
   /** Whether the current viewer can delete lines/agents (tenant: only
@@ -98,9 +102,18 @@ export function LinesAndAgentsSection({
   renderLineDrawer?: (props: { open: boolean; line: WhatsappLine | null; onClose: () => void; onSaved: () => void }) => ReactNode
   /** Tenant: Embedded Signup self-service connect instead of a manual drawer. */
   connectLine?: { label: string; loading: boolean; onClick: () => void }
+  /** Qué pestañas se muestran. El backoffice las quiere las tres juntas (es
+   * la vista de soporte de un cliente); el panel del tenant las reparte:
+   * "Canales" se queda con las líneas, "IA & Agentes" con los agentes y las
+   * plantillas se fueron a Campañas, que es donde se usan (reorganización
+   * pedida por el usuario, 2026-09-13: tener las tres cosas bajo "IA &
+   * Agentes" confundía, porque dos de las tres no son de IA). Con una sola
+   * pestaña no se dibuja la barra: sería un solo botón sin alternativa. */
+  tabs?: LinesAndAgentsTab[]
 }) {
   const { t, language } = useLanguage()
-  const [tab, setTab] = useState<'lineas' | 'agentes' | 'plantillas'>('lineas')
+  const visibleTabs = tabsProp ?? ALL_TABS
+  const [tab, setTab] = useState<LinesAndAgentsTab>(visibleTabs[0])
   const [lines, setLines] = useState<WhatsappLine[] | null>(null)
   const [assistants, setAssistants] = useState<AiAssistant[] | null>(null)
   const [conversations, setConversations] = useState<ConversationWithLine[] | null>(null)
@@ -200,19 +213,29 @@ export function LinesAndAgentsSection({
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
-          <TabsList>
-            <TabsTrigger value="lineas" className="text-xs">
-              <PhoneIcon width={13} height={13} /> {t('settings.lines.tabs.lines')}
-            </TabsTrigger>
-            <TabsTrigger value="agentes" className="text-xs">
-              <AiSparkleIcon width={13} height={13} /> {t('settings.lines.tabs.agents')}
-            </TabsTrigger>
-            <TabsTrigger value="plantillas" className="text-xs">
-              <FileIcon width={13} height={13} /> {t('settings.templates.tabs.templates')}
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+        {visibleTabs.length > 1 ? (
+          <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
+            <TabsList>
+              {visibleTabs.includes('lineas') && (
+                <TabsTrigger value="lineas" className="text-xs">
+                  <PhoneIcon width={13} height={13} /> {t('settings.lines.tabs.lines')}
+                </TabsTrigger>
+              )}
+              {visibleTabs.includes('agentes') && (
+                <TabsTrigger value="agentes" className="text-xs">
+                  <AiSparkleIcon width={13} height={13} /> {t('settings.lines.tabs.agents')}
+                </TabsTrigger>
+              )}
+              {visibleTabs.includes('plantillas') && (
+                <TabsTrigger value="plantillas" className="text-xs">
+                  <FileIcon width={13} height={13} /> {t('settings.templates.tabs.templates')}
+                </TabsTrigger>
+              )}
+            </TabsList>
+          </Tabs>
+        ) : (
+          <span />
+        )}
 
         {tab !== 'plantillas' &&
           canManage &&

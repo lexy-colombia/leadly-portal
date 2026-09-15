@@ -16,6 +16,9 @@ import { CampaignFormDrawer, defaultScheduledAt, toDatetimeLocalValue } from './
 import type { CampaignFormInitial } from './campaigns/CampaignFormDrawer'
 import { CampaignDetailDrawer } from './campaigns/CampaignDetailDrawer'
 import { formatDateTime } from '../../lib/dates'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { TemplatesSection } from '../shared/TemplatesSection'
+import { MegaphoneIcon, FileIcon } from '@/components/atoms/icons'
 
 const PAGE_SIZE = 10
 
@@ -37,9 +40,33 @@ export const CAMPAIGN_STATUS_BADGE_CLASS: Record<CampaignStatus, string> = {
   failed: 'border-transparent bg-red-100 text-red-700',
 }
 
+function CampaignsTabs({
+  tab,
+  onChange,
+  t,
+}: {
+  tab: 'campanas' | 'plantillas'
+  onChange: (next: 'campanas' | 'plantillas') => void
+  t: (key: TranslationKey) => string
+}) {
+  return (
+    <Tabs value={tab} onValueChange={(v) => onChange(v as 'campanas' | 'plantillas')}>
+      <TabsList>
+        <TabsTrigger value="campanas" className="text-xs">
+          <MegaphoneIcon width={13} height={13} /> {t('campaigns.tabs.campaigns')}
+        </TabsTrigger>
+        <TabsTrigger value="plantillas" className="text-xs">
+          <FileIcon width={13} height={13} /> {t('settings.templates.tabs.templates')}
+        </TabsTrigger>
+      </TabsList>
+    </Tabs>
+  )
+}
+
 export function Campaigns() {
   const { profile } = useAuth()
   const { t, language } = useLanguage()
+  const [tab, setTab] = useState<'campanas' | 'plantillas'>('campanas')
   const [campaigns, setCampaigns] = useState<CampaignWithRelations[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [page, setPage] = useState(1)
@@ -124,9 +151,24 @@ export function Campaigns() {
   const totalPages = campaigns ? Math.max(1, Math.ceil(campaigns.length / PAGE_SIZE)) : 1
   const pageItems = campaigns ? campaigns.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE) : null
 
+  // Las plantillas de Meta viven acá desde el 2026-09-13 (pedido explícito
+  // del usuario): antes estaban bajo "IA & Agentes", que además de confuso
+  // dejaba el recurso lejos de donde se usa para enviar. Otros flujos
+  // también las consumen (el OTP de la tienda, el aviso de leads), pero la
+  // pantalla donde un humano las elige es esta.
+  if (tab === 'plantillas' && profile?.tenant_id) {
+    return (
+      <div className="space-y-3">
+        <CampaignsTabs tab={tab} onChange={setTab} t={t} />
+        <TemplatesSection tenantId={profile.tenant_id} canManage={profile.role === 'tenant_admin'} />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <CampaignsTabs tab={tab} onChange={setTab} t={t} />
         <Button onClick={openCreate} size="sm">
           <PlusIcon width={14} height={14} /> {t('campaigns.actions.new')}
         </Button>

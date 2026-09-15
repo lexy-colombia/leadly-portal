@@ -146,3 +146,21 @@ export function requestsHumanHandoff(text: string): boolean {
     .replace(/[̀-ͯ]/g, ""); // strip accents so "atención"/"atencion" both match
   return HUMAN_HANDOFF_PHRASES.some((phrase) => normalized.includes(phrase.normalize("NFD").replace(/[̀-ͯ]/g, "")));
 }
+
+/** Traduce el markdown que escriben los modelos al formato de WhatsApp.
+ * WhatsApp usa *un* asterisco para negrita, _guion bajo_ para cursiva y
+ * ~virgulilla~ para tachado; no entiende `**doble**`, títulos `#` ni enlaces
+ * `[texto](url)` -- el cliente los ve literales. Pedirlo en el prompt no
+ * alcanzó (reportado por el usuario 2026-09-13: "siguen enviándose mensajes
+ * con doble *"), así que se corrige acá, en código, sobre todo lo que la IA
+ * manda. Cada regla trabaja dentro de una sola línea, para que un `**`
+ * suelto nunca empareje con otro de un párrafo distinto. */
+export function toWhatsappMarkup(text: string): string {
+  return text
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, (_match, label: string, url: string) => (label.trim() === url ? url : `${label}: ${url}`))
+    .replace(/^#{1,6}[ \t]+(.+)$/gm, "*$1*")
+    .replace(/\*\*\*([^*\n]+?)\*\*\*/g, "*$1*")
+    .replace(/\*\*([^\n]+?)\*\*/g, "*$1*")
+    .replace(/__([^_\n]+?)__/g, "_$1_")
+    .replace(/~~([^~\n]+?)~~/g, "~$1~");
+}

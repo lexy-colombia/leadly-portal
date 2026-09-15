@@ -10,8 +10,9 @@ import { json } from "../_shared/cors.ts";
 import { AI_TOOLS, isToolAllowed } from "../_shared/aiTools.ts";
 import { sendWhatsappImage } from "../_shared/whatsapp.ts";
 import { chargeSalesOrderToCredit, createSalesOrderPaymentLink } from "../_shared/payments/salesOrderPayments.ts";
-import { confirmSalesOrder, getDefaultAddress, getStockTotals, getVariantStock, isPlaceholderAddressText } from "../_shared/orders/confirmSalesOrder.ts";
+import { confirmSalesOrder, getStockTotals, getVariantStock, isPlaceholderAddressText } from "../_shared/orders/confirmSalesOrder.ts";
 import { persistOrderItems, type ResolvedOrderItem } from "../_shared/orders/persistOrderItems.ts";
+import { findStockShortfalls, type StockCheckItem } from "../_shared/orders/stockAvailability.ts";
 import { makeIntegrationSecretGetter, resolveTenantIntegrationCredential } from "../_shared/integrations/credentials.ts";
 import { createDeal, createOrUpdateContact, getDealPipelines } from "../_shared/integrations/hubspot.ts";
 import { resolveShopifyDomain, searchCustomerByPhone, searchOrders, searchProducts } from "../_shared/integrations/shopify.ts";
@@ -24,6 +25,13 @@ import {
 } from "../_shared/appointments/manageAppointment.ts";
 
 const CATALOG_SEARCH_LIMIT = 15;
+/** Una cotización sin tocar en este tiempo deja de ser "el pedido en armado"
+ * de la conversación -- ver resolveTargetOrder. */
+const OPEN_QUOTE_MAX_AGE_HOURS = 12;
+/** Dominio público del portal, donde vive la tienda (/tienda/:slug). El
+ * backend no tenía ninguna referencia a él -- la tienda la arma el frontend.
+ * Sobrescribible con el secreto PUBLIC_APP_URL. */
+const PUBLIC_APP_URL = (Deno.env.get("PUBLIC_APP_URL") ?? "https://leadly.lexycolombia.com").replace(/\/+$/, "");
 const CATEGORY_LIST_LIMIT = 5;
 const CATEGORY_TOP_PRODUCTS_LIMIT = 5;
 
@@ -392,18 +400,26 @@ async function executeTool(
         .order("name", { ascending: true })
         .limit(CATEGORY_LIST_LIMIT);
       if (error) throw new Error(error.message);
-      return { categories: data ?? [] };
+      // storefront_url en la respuesta de la herramienta, no solo escrito en
+      // el prompt (2026-09-14): con el enlace únicamente en el system_prompt,
+      // el modelo contestó "me das el catálogo" / "qué tienen" con la lista de
+      // categorías y nunca lo compartió, dos veces seguidas. Solo viene si el
+      // tenant tiene la tienda pública activa. whatsapp-ai-respond además lo
+      // agrega al final si el modelo lo omite (ensureStorefrontLink).
+      const storefrontUrl = await getStorefrontUrl(adminClient, tenantId);
+      return { categories: data ?? [], ...(storefrontUrl ? { storefront_url: storefrontUrl } : {}) };
     }
 
     case "list_catalog_products": {
-      // Deliberately doesn't select/return stock at all -- browsing the
-      // catalog should never surface quantities or "agotado" to the
-      // customer (a tenant preference, see the catalogo skill's
-      // prompt_fragment). Data minimization instead of a prompt-only rule:
-      // if the model never receives the number, it can't leak it here no
-      // matter how it's instructed. create_quote is the one place stock is
-      // still checked and disclosed -- reactively, only once the customer
-      // is actually trying to buy a specific quantity.
+      // Devuelve `in_stock` (sí/no) por producto, nunca la cantidad.
+      // Cambio de criterio 2026-09-14, pedido explícito del usuario tras una
+      // prueba real: antes esto no exponía stock en absoluto y la falta de
+      // stock se descubría recién al confirmar, después de que el cliente
+      // ya había dado nombre, documento y dirección. El agotado tiene que
+      // salir en la consulta. La cantidad exacta sigue sin exponerse acá --
+      // solo aparece en create_quote cuando piden más de lo que hay.
+      // ⚠️ Acoplado con el fragmento global de `catalogo` (migración
+      // 20260914150000): si este campo cambia, ese fragmento también.
       const search = parameters.search ? String(parameters.search).trim() : "";
       const category = parameters.category ? String(parameters.category).trim() : "";
       const brand = parameters.brand ? String(parameters.brand).trim() : "";
@@ -416,7 +432,7 @@ async function executeTool(
       // embeds every one of a product's categories (categories:string[] in
       // the response), not just whichever one matched the filter.
       const categorySelect =
-        "id, name, sku, retail_price, description, track_inventory, categories:product_category_links(category:product_categories(name))";
+        "id, name, slug, sku, retail_price, description, track_inventory, is_visible_in_catalog, categories:product_category_links(category:product_categories(name))";
 
       async function productIdsForCategory(categoryName: string): Promise<string[] | null> {
         const { data: categoryRow, error: categoryError } = await adminClient
@@ -451,13 +467,18 @@ async function executeTool(
         return brandRow?.id ?? null;
       }
 
-      function mapProduct(p: any) {
+      function mapProduct(p: any, stockTotals: Map<string, { available: number }>, storefrontUrl: string | null) {
+        const productUrl = buildProductUrl(storefrontUrl, p);
         return {
           name: p.name,
           sku: p.sku,
           price: formatCurrencyCOP(p.retail_price),
           categories: (p.categories ?? []).map((c: any) => c.category?.name).filter(Boolean),
           description: p.description ?? null,
+          in_stock: !p.track_inventory || (stockTotals.get(p.id)?.available ?? 0) > 0,
+          // Enlace del producto en la tienda pública (2026-09-14), solo si
+          // está publicado -- ver buildProductUrl.
+          ...(productUrl ? { product_url: productUrl } : {}),
         };
       }
 
@@ -488,17 +509,18 @@ async function executeTool(
         // summed across warehouses, same aggregation listStockTotalsByTenant
         // does client-side in leadly-app.
         const stockTotals = await getStockTotals(adminClient, tenantId, (data ?? []).map((p: any) => p.id));
+        const browseStorefrontUrl = await getStorefrontUrl(adminClient, tenantId);
 
         const ranked = (data ?? [])
           .map((p: any) => ({
-            ...mapProduct(p),
+            ...mapProduct(p, stockTotals, browseStorefrontUrl),
             _rank: p.track_inventory ? (stockTotals.get(p.id)?.available ?? 0) : Number.POSITIVE_INFINITY,
           }))
           .sort((a: any, b: any) => b._rank - a._rank)
           .slice(0, CATEGORY_TOP_PRODUCTS_LIMIT)
           .map(({ _rank, ...rest }: any) => rest);
 
-        return { products: ranked };
+        return { products: ranked, ...(browseStorefrontUrl ? { storefront_url: browseStorefrontUrl } : {}) };
       }
 
       const categoryProductIds = category ? await productIdsForCategory(category) : null;
@@ -546,7 +568,9 @@ async function executeTool(
         data = fallback.data;
       }
 
-      const products = (data ?? []).map(mapProduct);
+      const searchStockTotals = await getStockTotals(adminClient, tenantId, (data ?? []).map((p: any) => p.id));
+      const searchBaseUrl = await getStorefrontUrl(adminClient, tenantId);
+      const products = (data ?? []).map((p: any) => mapProduct(p, searchStockTotals, searchBaseUrl));
 
       // Auto-attach the photo when `search` pins down exactly one product --
       // see trySendSingleProductImage's comment for why this isn't left to
@@ -554,7 +578,14 @@ async function executeTool(
       const isSingleSearchResult = !!search && (data?.length ?? 0) === 1;
       const imageSent = isSingleSearchResult ? await trySendSingleProductImage(adminClient, conversationId, (data as { id: string }[])[0].id) : null;
 
-      return { products, ...(isSingleSearchResult ? { image_sent: imageSent } : {}) };
+      // Con varios resultados (o ninguno) la tienda ayuda a elegir; con uno
+      // solo ya va la foto con su ficha y el enlace sobra.
+      const searchStorefrontUrl = isSingleSearchResult ? null : searchBaseUrl;
+      return {
+        products,
+        ...(isSingleSearchResult ? { image_sent: imageSent } : {}),
+        ...(searchStorefrontUrl ? { storefront_url: searchStorefrontUrl } : {}),
+      };
     }
 
     case "send_product_image": {
@@ -579,7 +610,10 @@ async function executeTool(
       const { data: publicUrlData } = adminClient.storage.from("product-images").getPublicUrl(image.storage_path);
 
       const sendContext = await resolveConversationSendContext(adminClient, conversationId);
-      const sendResult = await sendWhatsappImage(sendContext.phoneNumberId, sendContext.accessToken, sendContext.contactPhone, publicUrlData.publicUrl);
+      // Misma ficha en el caption que el envío automático -- ver
+      // buildProductImageCaption.
+      const caption = await buildProductImageCaption(adminClient, String(product.id));
+      const sendResult = await sendWhatsappImage(sendContext.phoneNumberId, sendContext.accessToken, sendContext.contactPhone, publicUrlData.publicUrl, caption);
       if (!sendResult.ok) throw new Error(sendResult.errorMessage ?? "No se pudo enviar la imagen.");
 
       await adminClient.from("whatsapp_messages").insert({
@@ -599,24 +633,35 @@ async function executeTool(
 
       const product = await findProductByName(adminClient, tenantId, productName);
       if (!product) throw new Error(`No se encontró el producto "${productName}" en el catálogo.`);
-      if (!product.has_variants) return { has_variants: false };
+      // `in_stock` por variante (o por producto, si no tiene variantes) --
+      // ver el comentario de list_catalog_products.
+      const productUrl = buildProductUrl(await getStorefrontUrl(adminClient, tenantId), product);
+      const productUrlField = productUrl ? { product_url: productUrl } : {};
+      const tracksInventory = !!product.track_inventory;
+      if (!product.has_variants) {
+        const totals = tracksInventory ? await getStockTotals(adminClient, tenantId, [String(product.id)]) : null;
+        return { has_variants: false, in_stock: !totals || (totals.get(String(product.id))?.available ?? 0) > 0, ...productUrlField };
+      }
 
       const { data, error } = await adminClient
         .from("product_variants")
-        .select("sku, retail_price, option1_value, option2_value, option3_value")
+        .select("id, sku, retail_price, option1_value, option2_value, option3_value")
         .eq("tenant_id", tenantId)
         .eq("product_id", product.id)
         .eq("is_active", true)
         .is("deleted_at", null);
       if (error) throw new Error(error.message);
 
-      const variants = (data ?? []).map((v: { sku: string; retail_price: number; option1_value: string | null; option2_value: string | null; option3_value: string | null }) => ({
+      const variantStock = tracksInventory ? await getStockByVariant(adminClient, tenantId, String(product.id)) : null;
+
+      const variants = (data ?? []).map((v: { id: string; sku: string; retail_price: number; option1_value: string | null; option2_value: string | null; option3_value: string | null }) => ({
         label: [v.option1_value, v.option2_value, v.option3_value].filter(Boolean).join(" / "),
         sku: v.sku,
         price: formatCurrencyCOP(v.retail_price),
+        in_stock: !variantStock || (variantStock.get(v.id) ?? 0) > 0,
       }));
 
-      return { has_variants: true, variants };
+      return { has_variants: true, variants, ...productUrlField };
     }
 
     case "create_quote": {
@@ -634,6 +679,7 @@ async function executeTool(
         tax_type_code: string | null;
         tax_rate: number;
       }[] = [];
+      const stockItems: StockCheckItem[] = [];
       for (const rawItem of rawItems) {
         const productName = String((rawItem as Record<string, unknown>).product_name ?? "").trim();
         const variantLabel = String((rawItem as Record<string, unknown>).variant ?? "").trim();
@@ -667,16 +713,19 @@ async function executeTool(
           sku = variant.sku as string;
         }
 
-        // Deliberately no stock check here (removed 2026-08-10, real-world
-        // test feedback): a cotización is a price estimate, not a stock
-        // commitment -- rejecting/capping it when requested quantity exceeds
-        // current inventory also meant this whole function threw before ever
-        // reaching resolveOrCreateOpportunityForQuote below, so a customer
-        // asking for more than what's in stock silently never got an
-        // opportunity created either. Availability is still a real business
-        // question, just not one the AI should gate quote creation on --
-        // fulfillment/backorder is a human call. Nothing in product_stock
-        // moves at all until the sale is confirmed (see confirm_quote).
+        // Stock: se revisa abajo, antes de crear el pedido
+        // (assertStockForQuote). El 2026-08-10 se había sacado de acá para
+        // que un faltante no impidiera crear la oportunidad; volvió el
+        // 2026-09-14, pedido explícito del usuario tras una prueba real en
+        // la que el cliente dio todos sus datos y recién al final se enteró
+        // de que "no había". La oportunidad la registra create_opportunity
+        // desde el primer interés, no depende de que el pedido se arme.
+        stockItems.push({
+          product_id: product.id as string,
+          variant_id: variantId,
+          product_name: variantId ? `${product.name} (${variantLabel})` : (product.name as string),
+          quantity,
+        });
         resolvedItems.push({
           product_id: product.id as string,
           variant_id: variantId,
@@ -691,6 +740,8 @@ async function executeTool(
           tax_rate: (product.tax_rate as number) ?? 0,
         });
       }
+
+      await assertStockForQuote(adminClient, tenantId, stockItems);
 
       // Estimado solo para resolveOrCreateOpportunityForQuote (antes de
       // tener un order.id) -- el subtotal/tax_total/total reales los
@@ -712,14 +763,8 @@ async function executeTool(
       if (orderError) throw new Error(orderError.message);
 
       const totals = await persistOrderItems(adminClient, tenantId, order.id, resolvedItems, 0);
-      const subtotal = totals.subtotal;
 
-      // Facturación se pide en esta etapa (no envío -- eso es solo relevante
-      // si el cliente confirma que va a comprar, ver confirm_quote). No
-      // bloquea la creación de la cotización -- es solo un precio, el
-      // cliente puede querer verlo antes de dar ningún dato -- pero le da al
-      // modelo la señal explícita de que falta, en vez de dejarlo adivinar.
-      const billingAddress = await getDefaultAddress(adminClient, tenantId, contactId, "is_billing");
+      const subtotal = totals.subtotal;
 
       return {
         order_number: order.number,
@@ -732,13 +777,16 @@ async function executeTool(
           unit_price: formatCurrencyCOP(i.unit_price),
           subtotal: formatCurrencyCOP(i.quantity * i.unit_price),
         })),
-        billing_address_on_file: !!billingAddress,
+        // Direcciones guardadas en texto: el modelo se las lista al cliente
+        // y le pregunta cuál usar antes de confirm_quote (2026-09-14).
+        saved_addresses: await listAddressesForConversation(adminClient, tenantId, contactId),
       };
     }
 
     case "add_item_to_quote": {
-      const order = await resolveLatestOrder(adminClient, tenantId, contactId, "cotizacion");
-      if (!order) throw new Error("Este cliente no tiene ninguna cotización pendiente a la que agregarle productos.");
+      const orderNumber = parseOrderNumber(parameters.order_number);
+      const { order, latest } = await resolveTargetOrder(adminClient, tenantId, contactId, orderNumber);
+      if (!order) throw orderNotOpenError(latest, orderNumber, "modificar");
 
       const rawItems = Array.isArray(parameters.items) ? parameters.items : [];
       if (rawItems.length === 0) throw new Error("items es requerido y no puede estar vacío.");
@@ -797,6 +845,14 @@ async function executeTool(
         });
       }
 
+      // Mismo chequeo de stock que create_quote, sobre el pedido completo
+      // (lo que ya tenía + lo nuevo), antes de escribir nada.
+      await assertStockForQuote(
+        adminClient,
+        tenantId,
+        items.map((item) => ({ product_id: item.product_id, variant_id: item.variant_id, product_name: item.product_name, quantity: item.quantity })),
+      );
+
       // Sin envío en este flujo -- ver comentario histórico más arriba, la
       // IA nunca setea shipping en una cotización.
       const totals = await persistOrderItems(adminClient, tenantId, order.id, items, 0);
@@ -823,7 +879,10 @@ async function executeTool(
     }
 
     case "get_quote_status": {
-      const order = await resolveLatestOrder(adminClient, tenantId, contactId);
+      // Con `order_number` consulta ese pedido puntual (el cliente lo nombró);
+      // `can_modify` le dice al modelo si todavía se puede cambiar.
+      const orderNumber = parseOrderNumber(parameters.order_number);
+      const order = await resolveLatestOrder(adminClient, tenantId, contactId, undefined, orderNumber ?? undefined);
       if (!order) return { found: false };
 
       const { data: items } = await adminClient
@@ -846,6 +905,7 @@ async function executeTool(
         total_paid: formatCurrencyCOP(totalPaid),
         balance_due: formatCurrencyCOP(balanceDue),
         notes: order.notes,
+        can_modify: order.status === "cotizacion",
         items: (items ?? []).map((item: { product_name: string; quantity: number; unit_price: number; subtotal: number }) => ({
           product_name: item.product_name,
           quantity: item.quantity,
@@ -871,8 +931,39 @@ async function executeTool(
 
     case "confirm_quote": {
       if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
-      const order = await resolveLatestOrder(adminClient, tenantId, contactId, "cotizacion");
-      if (!order) throw new Error("Este cliente no tiene ninguna cotización pendiente de confirmar.");
+      const orderNumber = parseOrderNumber(parameters.order_number);
+      const { order, latest } = await resolveTargetOrder(adminClient, tenantId, contactId, orderNumber);
+      if (!order) {
+        // Encontrado en vivo 2026-09-13: con payment_options en la mano, el
+        // modelo volvió a llamar confirm_quote en vez de la herramienta de
+        // pago. Decirle exactamente qué corresponde corta ese loop.
+        if (orderNumber === null && latest?.status === "confirmada" && isRecentlyTouched(latest)) {
+          throw new Error(
+            `El pedido ${formatOrderCode(latest.number)} ya está confirmado -- no vuelvas a llamar confirm_quote. Si el cliente está eligiendo cómo pagar, usa charge_sale_to_credit o generate_payment_link.`,
+          );
+        }
+        throw orderNotOpenError(latest, orderNumber, "confirmar");
+      }
+
+      // Direcciones confirmadas con el cliente, nunca asignadas solas
+      // (pedido explícito del usuario 2026-09-14): el modelo le lista las
+      // guardadas, le pregunta si envía a esa y si factura con los mismos
+      // datos, y las aplica con save_contact_address. Mientras el pedido no
+      // tenga las dos aplicadas, no se confirma -- sin esto, el trigger de
+      // confirmación elegiría en silencio la dirección por defecto, que
+      // puede no ser la que el cliente quiere.
+      if (!order.shipping_address_id || !order.billing_address_id) {
+        return {
+          order_number: order.number,
+          order_code: formatOrderCode(order.number),
+          blocked: true,
+          reason: "address_confirmation_required",
+          missing: [order.shipping_address_id ? null : "envío", order.billing_address_id ? null : "facturación"].filter(Boolean),
+          saved_addresses: await listAddressesForConversation(adminClient, tenantId, contactId),
+        };
+      }
+      const shippingAddressId = order.shipping_address_id;
+      const billingAddressId = order.billing_address_id;
 
       // Stock check, address gate, opportunity move, and invoice queueing
       // all live in DB triggers now (guard_sales_order_confirmation /
@@ -884,7 +975,13 @@ async function executeTool(
       // result for the conversation.
       const result = await confirmSalesOrder(adminClient, tenantId, contactId, order.id);
       if (result.blocked) {
-        return { order_number: order.number, order_code: formatOrderCode(order.number), blocked: true, reason: result.reason };
+        return {
+          order_number: order.number,
+          order_code: formatOrderCode(order.number),
+          blocked: true,
+          reason: result.reason,
+          ...(result.detail ? { detail: result.detail.replace(/^INSUFFICIENT_STOCK:\s*/, "") } : {}),
+        };
       }
 
       // Resuelve el pago acá mismo, en la misma llamada, en vez de dejarlo
@@ -899,12 +996,23 @@ async function executeTool(
       // se acuerde de llamar una segunda tool.
       const paymentInfo = await resolvePaymentAfterConfirm(adminClient, tenantId, conversationId, contactId, result.order.id);
 
-      return { order_number: result.order.number, order_code: formatOrderCode(result.order.number), status: "confirmada", status_label: statusLabel("confirmada"), ...paymentInfo };
+      const [shippingAddress, billingAddress] = await Promise.all([describeAddress(adminClient, shippingAddressId), describeAddress(adminClient, billingAddressId)]);
+
+      return {
+        order_number: result.order.number,
+        order_code: formatOrderCode(result.order.number),
+        status: "confirmada",
+        status_label: statusLabel("confirmada"),
+        ...(shippingAddress ? { shipping_address: shippingAddress } : {}),
+        ...(billingAddress ? { billing_address: billingAddress } : {}),
+        ...paymentInfo,
+      };
     }
 
     case "cancel_quote": {
-      const order = await resolveLatestOrder(adminClient, tenantId, contactId, "cotizacion");
-      if (!order) throw new Error("Este cliente no tiene ninguna cotización pendiente de cancelar.");
+      const orderNumber = parseOrderNumber(parameters.order_number);
+      const { order, latest } = await resolveTargetOrder(adminClient, tenantId, contactId, orderNumber);
+      if (!order) throw orderNotOpenError(latest, orderNumber, "anular");
 
       const { error } = await adminClient.from("sales_orders").update({ status: "cancelada" }).eq("id", order.id);
       if (error) throw new Error(error.message);
@@ -1157,7 +1265,13 @@ async function executeTool(
         throw new Error(`"${fields.line1}" no es una dirección real, parece un valor de relleno. Preguntale al cliente su dirección real (calle, ciudad) antes de volver a llamar esta herramienta.`);
       }
 
-      const addressId = parameters.address_id ? String(parameters.address_id) : null;
+      // address_id llega como el id real o como el número de opción con el
+      // que se le listó la dirección al cliente (`option` de saved_addresses).
+      // Encontrado en vivo 2026-09-14, dos veces: el cliente respondió "1", el
+      // modelo pasó "1" como address_id y, con un error que le pedía el id
+      // real, en vez de corregirse le volvió a preguntar la dirección al
+      // cliente. Resolverlo acá elimina ese paso de fallo.
+      const addressId = await resolveAddressReference(adminClient, tenantId, contactId, parameters.address_id);
       let savedAddressId = addressId;
 
       if (addressId) {
@@ -1188,17 +1302,23 @@ async function executeTool(
 
       const applyAsShipping = parameters.apply_as_shipping === true;
       const applyAsBilling = parameters.apply_as_billing === true;
+      // Solo sobre el pedido en armado de esta conversación, o el que el
+      // cliente nombró (resolveTargetOrder) -- nunca sobre un pedido
+      // anterior por decisión propia del modelo (2026-09-14).
+      let appliedToOrder: string | null = null;
       if ((applyAsShipping || applyAsBilling) && savedAddressId) {
-        const order = await resolveLatestOrder(adminClient, tenantId, contactId);
+        const { order } = await resolveTargetOrder(adminClient, tenantId, contactId, parseOrderNumber(parameters.order_number));
         if (order) {
           const orderUpdate: Record<string, string> = {};
           if (applyAsShipping) orderUpdate.shipping_address_id = savedAddressId;
           if (applyAsBilling) orderUpdate.billing_address_id = savedAddressId;
-          await adminClient.from("sales_orders").update(orderUpdate).eq("id", order.id);
+          const { error: applyError } = await adminClient.from("sales_orders").update(orderUpdate).eq("id", order.id).eq("tenant_id", tenantId);
+          if (applyError) throw new Error(applyError.message);
+          appliedToOrder = formatOrderCode(order.number);
         }
       }
 
-      return { address_id: savedAddressId, saved: true };
+      return { address_id: savedAddressId, saved: true, applied_to_order: appliedToOrder };
     }
 
     case "generate_payment_link": {
@@ -1538,6 +1658,8 @@ async function resolveLatestOrder(
   tenantId: string,
   contactId: string | undefined,
   status?: string,
+  /** Un pedido puntual por su número (el cliente lo nombró). */
+  orderNumber?: number,
 ): Promise<{
   id: string;
   number: number;
@@ -1548,18 +1670,20 @@ async function resolveLatestOrder(
   shipping_address_id: string | null;
   billing_address_id: string | null;
   opportunity_id: string | null;
+  updated_at: string;
 } | null> {
   if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
 
   let query = adminClient
     .from("sales_orders")
-    .select("id, number, status, total, currency, notes, shipping_address_id, billing_address_id, opportunity_id")
+    .select("id, number, status, total, currency, notes, shipping_address_id, billing_address_id, opportunity_id, updated_at")
     .eq("tenant_id", tenantId)
     .eq("contact_id", contactId)
     .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .limit(1);
   if (status) query = query.eq("status", status);
+  if (orderNumber !== undefined) query = query.eq("number", orderNumber);
 
   const { data, error } = await query.maybeSingle();
   if (error) throw new Error(error.message);
@@ -1690,7 +1814,7 @@ async function resolveOrCreateOpportunityForQuote(
  * fetch it separately via getStockTotals, keyed off the id this returns. */
 // deno-lint-ignore no-explicit-any
 async function findProductByName(adminClient: any, tenantId: string, name: string): Promise<Record<string, unknown> | null> {
-  const columns = "id, name, sku, retail_price, track_inventory, has_variants, tax_type_code, tax_rate";
+  const columns = "id, name, slug, sku, retail_price, track_inventory, has_variants, is_visible_in_catalog, tax_type_code, tax_rate";
 
   const { data: exact } = await adminClient
     .from("products")
@@ -1807,6 +1931,286 @@ async function resolvePaymentAfterConfirm(
   }
 }
 
+/** Rechaza armar/ampliar un pedido si alguna línea pide más de lo que hay,
+ * con un mensaje que le dice al modelo qué contarle al cliente. Va ANTES de
+ * escribir nada: el objetivo (2026-09-14) es que la falta de stock salga
+ * mientras el cliente todavía está eligiendo, no después de pedirle datos. */
+// deno-lint-ignore no-explicit-any
+async function assertStockForQuote(adminClient: any, tenantId: string, items: StockCheckItem[]): Promise<void> {
+  const shortfalls = await findStockShortfalls(adminClient, tenantId, items);
+  if (shortfalls.length === 0) return;
+  const detail = shortfalls.map((s) => `${s.product_name}: pidió ${s.requested}, hay ${Math.max(0, s.available)} disponible(s)`).join("; ");
+  throw new Error(
+    `Stock insuficiente, no se armó el pedido -- ${detail}. Díselo al cliente en este mismo mensaje con la cantidad disponible y ofrécele una referencia que sí haya (list_product_variants marca in_stock). No le pidas datos ni sigas con la compra hasta resolver esto.`,
+  );
+}
+
+/** Stock sumado por variante (todas las bodegas) de un producto. */
+// deno-lint-ignore no-explicit-any
+async function getStockByVariant(adminClient: any, tenantId: string, productId: string): Promise<Map<string, number>> {
+  const { data, error } = await adminClient
+    .from("product_stock")
+    .select("variant_id, quantity")
+    .eq("tenant_id", tenantId)
+    .eq("product_id", productId)
+    .not("variant_id", "is", null);
+  if (error) throw new Error(error.message);
+  const totals = new Map<string, number>();
+  for (const row of (data ?? []) as { variant_id: string; quantity: number }[]) {
+    totals.set(row.variant_id, (totals.get(row.variant_id) ?? 0) + row.quantity);
+  }
+  return totals;
+}
+
+/** Enlace de la tienda pública del tenant, o null si no la tiene activa (sin
+ * slug o storefront_enabled en false) -- en ese caso el modelo no debe
+ * mencionar ninguna tienda. */
+// deno-lint-ignore no-explicit-any
+async function getStorefrontUrl(adminClient: any, tenantId: string): Promise<string | null> {
+  const { data, error } = await adminClient.from("tenants").select("storefront_enabled, storefront_slug").eq("id", tenantId).maybeSingle();
+  if (error) {
+    console.error(`getStorefrontUrl failed for tenant ${tenantId}`, error);
+    return null;
+  }
+  if (!data?.storefront_enabled || !data.storefront_slug) return null;
+  return `${PUBLIC_APP_URL}/tienda/${encodeURIComponent(data.storefront_slug)}`;
+}
+
+/** Enlace de un producto en la tienda pública -- misma ruta que arma el
+ * frontend (ProductCard.tsx: /tienda/:slug/producto/:slug-o-id). Solo si
+ * la tienda está activa y el producto está publicado en ella
+ * (is_visible_in_catalog); si no, ese enlace terminaría en "no encontrado".
+ * Pedido del usuario 2026-09-14: que cada producto traiga su URL. */
+function buildProductUrl(storefrontUrl: string | null, product: { id?: unknown; slug?: unknown; is_visible_in_catalog?: unknown }): string | null {
+  if (!storefrontUrl || product.is_visible_in_catalog !== true) return null;
+  const reference = product.slug ? String(product.slug) : product.id ? String(product.id) : null;
+  return reference ? `${storefrontUrl}/producto/${encodeURIComponent(reference)}` : null;
+}
+
+/** Dirección guardada a partir de lo que mande el modelo: el address_id real
+ * tal cual, o un número de opción ("1", "opción 2") resuelto contra
+ * listAddressesForConversation -- la misma lista, en el mismo orden, que el
+ * modelo recibió en saved_addresses. */
+async function resolveAddressReference(
+  // deno-lint-ignore no-explicit-any
+  adminClient: any,
+  tenantId: string,
+  contactId: string,
+  value: unknown,
+): Promise<string | null> {
+  if (value === undefined || value === null || String(value).trim() === "") return null;
+  const raw = String(value).trim();
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw)) return raw;
+
+  const option = parseOrderNumber(raw);
+  const addresses = await listAddressesForConversation(adminClient, tenantId, contactId);
+  const match = option !== null ? addresses.find((a) => a.option === option) : undefined;
+  if (!match) {
+    const choices = addresses.map((a) => `${a.option}) ${a.address} [address_id ${a.address_id}]`).join("; ") || "ninguna";
+    throw new Error(
+      `"${raw}" no corresponde a ninguna dirección guardada. Opciones: ${choices}. Vuelve a llamar esta herramienta con una de ellas en este mismo turno, sin preguntarle de nuevo al cliente.`,
+    );
+  }
+  return match.address_id;
+}
+
+type OrderRow = NonNullable<Awaited<ReturnType<typeof resolveLatestOrder>>>;
+
+function isRecentlyTouched(order: OrderRow): boolean {
+  return Date.parse(order.updated_at) >= Date.now() - OPEN_QUOTE_MAX_AGE_HOURS * 60 * 60 * 1000;
+}
+
+/** "049", 49, "#49", "pedido 049" -> 49. null si no viene o no trae dígitos. */
+function parseOrderNumber(value: unknown): number | null {
+  if (value === undefined || value === null) return null;
+  const digits = String(value).replace(/\D/g, "");
+  return digits ? Number(digits) : null;
+}
+
+/** El pedido sobre el que puede actuar la IA: add_item_to_quote,
+ * confirm_quote, cancel_quote y aplicar direcciones.
+ *
+ * Pedido explícito del usuario (2026-09-14): "la ia no debe tocar
+ * cotizaciones viejas ni nada de eso a menos que el cliente lo pida" --
+ * solo si pregunta puntualmente por un número de pedido y si lo puede
+ * modificar.
+ * - Con `orderNumber` (el cliente nombró el pedido): ese pedido del
+ *   contacto, sin límite de antigüedad. `order` sale null si ya no está en
+ *   cotización -- no se puede modificar por este medio.
+ * - Sin él: solo el pedido MÁS RECIENTE del contacto, cualquiera sea su
+ *   estado, y solo si sigue en cotización y se tocó en las últimas
+ *   OPEN_QUOTE_MAX_AGE_HOURS. Nunca cae a una cotización más vieja cuando
+ *   el más reciente ya se confirmó: eso fue exactamente lo que falló en
+ *   vivo el 2026-09-13 (confirm_quote tomó una cotización del día anterior
+ *   con 51 unidades y dijo que no había stock).
+ * `latest` siempre trae lo que se encontró, para armar el mensaje de error. */
+async function resolveTargetOrder(
+  // deno-lint-ignore no-explicit-any
+  adminClient: any,
+  tenantId: string,
+  contactId: string | undefined,
+  orderNumber: number | null,
+): Promise<{ order: OrderRow | null; latest: OrderRow | null }> {
+  if (orderNumber !== null) {
+    const found = await resolveLatestOrder(adminClient, tenantId, contactId, undefined, orderNumber);
+    return { order: found && found.status === "cotizacion" ? found : null, latest: found };
+  }
+  const latest = await resolveLatestOrder(adminClient, tenantId, contactId);
+  if (!latest) return { order: null, latest: null };
+  return { order: latest.status === "cotizacion" && isRecentlyTouched(latest) ? latest : null, latest };
+}
+
+function orderNotOpenError(latest: OrderRow | null, orderNumber: number | null, action: string): Error {
+  if (orderNumber !== null) {
+    if (!latest) return new Error(`No se encontró el pedido ${formatOrderCode(orderNumber)} entre los pedidos de este cliente.`);
+    return new Error(
+      `El pedido ${formatOrderCode(latest.number)} (${statusLabel(latest.status)}) ya no se puede ${action} por este medio -- díselo al cliente y ofrécele que un asesor lo revise.`,
+    );
+  }
+  return new Error(
+    `No hay un pedido en armado en esta conversación para ${action}. Si el cliente quiere comprar, arma uno nuevo con create_quote. No uses pedidos anteriores salvo que el cliente nombre su número y pida modificarlo (order_number).`,
+  );
+}
+
+/** Direcciones guardadas del cliente, en texto y sin repetidas, para que el
+ * modelo se las liste y le pregunte cuál usar (2026-09-14). */
+async function listAddressesForConversation(
+  // deno-lint-ignore no-explicit-any
+  adminClient: any,
+  tenantId: string,
+  contactId: string,
+): Promise<{ option: number; address_id: string; address: string; used_for: string[] }[]> {
+  const { data, error } = await adminClient
+    .from("contact_addresses")
+    .select("id, line1, line2, city, is_shipping, is_billing")
+    .eq("tenant_id", tenantId)
+    .eq("contact_id", contactId)
+    .is("deleted_at", null)
+    .order("is_default", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(10);
+  if (error) throw new Error(error.message);
+
+  const normalize = (value: string | null) => (value ?? "").toLowerCase().normalize("NFD").replace(/[^a-z0-9ñ]/g, "");
+  const byKey = new Map<string, { address_id: string; address: string; used_for: Set<string> }>();
+  for (const row of (data ?? []) as { id: string; line1: string | null; line2: string | null; city: string | null; is_shipping: boolean; is_billing: boolean }[]) {
+    if (!row.line1 || isPlaceholderAddressText(row.line1)) continue;
+    // "carrera 26 # 2i 24, Neiva" y "Carrera 26 # 2i 24 Neiva" son la misma
+    // dirección para el cliente: se lista una sola vez, juntando para qué
+    // se usa cada copia, y sin repetir la ciudad si ya viene en la línea.
+    const street = [row.line1, row.line2].filter(Boolean).join(" ");
+    const city = normalize(row.city);
+    const streetKey = normalize(street);
+    const key = city && streetKey.endsWith(city) ? streetKey.slice(0, -city.length) : streetKey;
+    const existing = byKey.get(key);
+    const entry = existing ?? {
+      address_id: row.id,
+      address: row.city && !(city && streetKey.endsWith(city)) ? `${street}, ${row.city}` : street,
+      used_for: new Set<string>(),
+    };
+    if (row.is_shipping) entry.used_for.add("envío");
+    if (row.is_billing) entry.used_for.add("facturación");
+    if (!existing) {
+      if (byKey.size === 3) continue;
+      byKey.set(key, entry);
+    }
+  }
+  // `option` es el número con el que el modelo le lista cada dirección al
+  // cliente -- save_contact_address lo acepta en address_id (ver
+  // resolveAddressReference).
+  const addresses = [...byKey.values()].map((entry, index) => ({ option: index + 1, address_id: entry.address_id, address: entry.address, used_for: [...entry.used_for] }));
+  return addresses;
+}
+
+/** "Carrera 26 # 2i 24, Neiva" -- para que el modelo le diga al cliente a
+ * dónde va el pedido. */
+// deno-lint-ignore no-explicit-any
+async function describeAddress(adminClient: any, addressId: string): Promise<string | null> {
+  const { data } = await adminClient.from("contact_addresses").select("line1, line2, city").eq("id", addressId).maybeSingle();
+  if (!data) return null;
+  const text = [data.line1, data.line2, data.city].filter(Boolean).join(", ");
+  return text || null;
+}
+
+/** Pie de foto del producto: la ficha va DENTRO del mensaje de la imagen
+ * (caption de WhatsApp), no en un mensaje de texto aparte.
+ *
+ * Pedido explícito del usuario (2026-09-13): "cuando pregunten por un
+ * producto muestre la imagen y bajo la imagen las referencias del producto,
+ * todo bajo la misma imagen". En WhatsApp eso es exactamente el caption --
+ * una foto y un texto suelto llegan como dos mensajes distintos, y el
+ * cliente los ve separados (a veces hasta en otro orden).
+ *
+ * Lleva nombre, precio y las referencias reales del producto (sus variantes
+ * si las tiene; si no, el SKU cuando existe), más la descripción recortada.
+ * El tope de un caption de WhatsApp son 1024 caracteres -- se recorta antes
+ * de llegar ahí, porque pasarse hace fallar el envío entero.
+ *
+ * ⚠️ Acoplado con el prompt_fragment de la habilidad `catalogo`, que le dice
+ * al modelo que NO repita estos mismos datos en su respuesta de texto. Si
+ * este caption cambia (se le agregan o quitan campos), hay que actualizar
+ * ese fragmento en la misma ronda: es global, así que una desalineación
+ * afecta a los agentes de TODOS los tenants, no solo al que la motivó. */
+// deno-lint-ignore no-explicit-any
+async function buildProductImageCaption(adminClient: any, productId: string): Promise<string | undefined> {
+  try {
+    const { data: product } = await adminClient
+      .from("products")
+      .select("id, tenant_id, name, slug, sku, retail_price, description, has_variants, track_inventory, is_visible_in_catalog")
+      .eq("id", productId)
+      .maybeSingle();
+    if (!product) return undefined;
+
+    const lines: string[] = [`*${product.name}*`, formatCurrencyCOP(product.retail_price)];
+
+    // Solo las referencias con stock (2026-09-14): el cliente elige mirando
+    // esta lista, así que una agotada acá es exactamente la venta que
+    // después se cae. Sin nada disponible, lo dice en la misma ficha.
+    const tracksInventory = !!product.track_inventory;
+    if (product.has_variants) {
+      const { data: variants } = await adminClient
+        .from("product_variants")
+        .select("id, option1_value, option2_value, option3_value, sku")
+        .eq("product_id", productId)
+        .eq("is_active", true)
+        .is("deleted_at", null)
+        .order("created_at", { ascending: true });
+      const variantStock = tracksInventory ? await getStockByVariant(adminClient, product.tenant_id, productId) : null;
+      const labels = (variants ?? [])
+        .filter((v: { id: string }) => !variantStock || (variantStock.get(v.id) ?? 0) > 0)
+        .map((v: { option1_value: string | null; option2_value: string | null; option3_value: string | null }) =>
+          [v.option1_value, v.option2_value, v.option3_value].filter(Boolean).join(" / "),
+        )
+        .filter((label: string) => label.length > 0);
+      if (labels.length > 0) lines.push("", `Referencias disponibles: ${labels.join(" · ")}`);
+      else if (tracksInventory && (variants ?? []).length > 0) lines.push("", "Agotado por ahora");
+    } else {
+      if (product.sku) lines.push("", `Referencia: ${product.sku}`);
+      if (tracksInventory) {
+        const totals = await getStockTotals(adminClient, product.tenant_id, [productId]);
+        if ((totals.get(productId)?.available ?? 0) <= 0) lines.push("", "Agotado por ahora");
+      }
+    }
+
+    // Enlace del producto en la tienda, antes de la descripción: si el
+    // caption se recorta por largo, se pierde texto, nunca el enlace.
+    const storeProductUrl = buildProductUrl(await getStorefrontUrl(adminClient, product.tenant_id), product);
+    if (storeProductUrl) lines.push("", `Ver en la tienda: ${storeProductUrl}`);
+
+    if (product.description) {
+      const description = String(product.description).replace(/\s+/g, " ").trim();
+      lines.push("", description.length > 400 ? `${description.slice(0, 400)}…` : description);
+    }
+
+    const caption = lines.join("\n");
+    return caption.length > 1000 ? `${caption.slice(0, 1000)}…` : caption;
+  } catch (err) {
+    // Un caption que no se pudo armar nunca bloquea el envío de la foto.
+    console.error(`buildProductImageCaption failed for product ${productId}`, err);
+    return undefined;
+  }
+}
+
 /** Best-effort: sends a product's first photo via WhatsApp and logs it in
  * the ledger, called automatically from list_catalog_products when a
  * `search` resolves to exactly one product. Found live 2026-08-25: even
@@ -1832,7 +2236,8 @@ async function trySendSingleProductImage(adminClient: any, conversationId: strin
 
     const { data: publicUrlData } = adminClient.storage.from("product-images").getPublicUrl(image.storage_path);
     const sendContext = await resolveConversationSendContext(adminClient, conversationId);
-    const sendResult = await sendWhatsappImage(sendContext.phoneNumberId, sendContext.accessToken, sendContext.contactPhone, publicUrlData.publicUrl);
+    const caption = await buildProductImageCaption(adminClient, productId);
+    const sendResult = await sendWhatsappImage(sendContext.phoneNumberId, sendContext.accessToken, sendContext.contactPhone, publicUrlData.publicUrl, caption);
     if (!sendResult.ok) return false;
 
     await adminClient.from("whatsapp_messages").insert({

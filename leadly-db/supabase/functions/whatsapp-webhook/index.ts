@@ -55,6 +55,9 @@ Deno.serve(async (req: Request) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
+  // Si algún mensaje de este lote no se pudo guardar por una falla pasajera,
+  // se responde con error al final para que Meta reintente la entrega.
+  let hadPersistFailure = false;
 
   for (const entry of payload.entry ?? []) {
     for (const change of entry.changes ?? []) {
@@ -149,22 +152,39 @@ Deno.serve(async (req: Request) => {
 
         const contactId = existingContact?.id ?? null;
 
-        const { data: conversation, error: convError } = await adminClient
-          .from("whatsapp_conversations")
-          .upsert(
-            {
-              tenant_id: line.tenant_id,
-              whatsapp_line_id: line.id,
-              contact_phone: contactPhone,
-              contact_name: contactName,
-              contact_id: contactId ?? null,
-            },
-            { onConflict: "whatsapp_line_id,contact_phone", ignoreDuplicates: false },
-          )
-          .select()
-          .single();
+        // Reintentado: la base puede cortar por timeout en un pico (visto en
+        // producción 2026-09-13: 75 respuestas 504 de PostgREST en un día, una
+        // de ellas justo en este upsert, con el mensaje real de un cliente).
+        const { data: conversation, error: convError } = await withRetries(
+          `upsert conversation for ${contactPhone}`,
+          () =>
+            adminClient
+              .from("whatsapp_conversations")
+              .upsert(
+                {
+                  tenant_id: line.tenant_id,
+                  whatsapp_line_id: line.id,
+                  contact_phone: contactPhone,
+                  contact_name: contactName,
+                  contact_id: contactId ?? null,
+                },
+                { onConflict: "whatsapp_line_id,contact_phone", ignoreDuplicates: false },
+              )
+              .select()
+              .single(),
+        );
 
-        if (convError || !conversation) continue;
+        if (convError || !conversation) {
+          // Antes esto era un `continue` a secas y la función igual devolvía
+          // 200: Meta daba la entrega por buena y el mensaje del cliente se
+          // perdía para siempre, sin rastro. Ahora se marca el lote como
+          // fallido para responder con error y que Meta lo reintente -- el
+          // chequeo por wamid de más arriba hace que la redelivery no
+          // duplique lo que sí se alcanzó a guardar.
+          console.error(`Failed to resolve conversation for ${contactPhone}`, convError);
+          hadPersistFailure = true;
+          continue;
+        }
 
         // contact_name can change between messages (they update their WhatsApp
         // profile); keep it current without clobbering an admin-edited value on
@@ -206,6 +226,7 @@ Deno.serve(async (req: Request) => {
         if (insertError) {
           if (insertError.code === "23505") continue; // duplicate wamid, race with another delivery -- already handled
           console.error(`Failed to insert inbound message ${message.id}`, insertError);
+          hadPersistFailure = true;
           continue;
         }
 
@@ -228,8 +249,28 @@ Deno.serve(async (req: Request) => {
     }
   }
 
+  // 500 = "no lo pude guardar, mandámelo de nuevo". Meta reintenta el evento;
+  // el chequeo por wamid evita que lo ya guardado se duplique. Devolver 200
+  // acá era perder el mensaje del cliente en silencio.
+  if (hadPersistFailure) return json({ received: false, retry: true }, 500);
+
   return json({ received: true }, 200);
 });
+
+const PERSIST_RETRY_DELAYS_MS = [400, 1200];
+
+/** Reintenta una escritura contra la base ante fallas pasajeras (timeouts de
+ * PostgREST en un pico de carga). Devuelve el último resultado, exitoso o
+ * no -- el llamador decide qué hacer con el error final. */
+async function withRetries<T extends { error: unknown }>(label: string, run: () => PromiseLike<T>): Promise<T> {
+  let result = await run();
+  for (let attempt = 0; result.error && attempt < PERSIST_RETRY_DELAYS_MS.length; attempt++) {
+    console.error(`${label} failed (attempt ${attempt + 1}), retrying`, result.error);
+    await sleep(PERSIST_RETRY_DELAYS_MS[attempt]);
+    result = await run();
+  }
+  return result;
+}
 
 const AI_RESPOND_MAX_ATTEMPTS = 3;
 const AI_RESPOND_RETRY_DELAYS_MS = [500, 1500];

@@ -1840,14 +1840,14 @@ export function OrderDetail() {
                 />
                 <FieldError message={contactError} />
               </div>
-              {addressField('billing')}
-            </div>
-
-            {/* Columna 2: Envío + Estado de envío -- no existe en un pedido
-                de mostrador (ver showShipping). */}
-            {showShipping && (
-            <div className="min-w-0 space-y-4 sm:border-l sm:border-brand-100 sm:pl-4">
-              {addressField('shipping')}
+              {/* Envío antes que facturación -- pedido explícito del usuario
+                  (2026-09-14): el flujo real del pedido es primero a dónde se
+                  entrega y después a nombre de quién se factura. Un pedido de
+                  mostrador no tiene envío (showShipping), así que ahí
+                  facturación se queda en esta primera columna. */}
+              {showShipping ? (
+                <>
+                  {addressField('shipping')}
               {/* Estado de envío -- solo edición + venta confirmada (concepto
                   aparte del estado comercial, ver DeliveryStatus). No aplica
                   en cotización/cancelada, no hay nada que enviar todavía o
@@ -1896,6 +1896,16 @@ export function OrderDetail() {
                   )}
                 </div>
               )}
+                </>
+              ) : (
+                addressField('billing')
+              )}
+            </div>
+
+            {/* Columna 2: Facturación -- ver la nota de orden de arriba. */}
+            {showShipping && (
+            <div className="min-w-0 space-y-4 sm:border-l sm:border-brand-100 sm:pl-4">
+              {addressField('billing')}
             </div>
             )}
 

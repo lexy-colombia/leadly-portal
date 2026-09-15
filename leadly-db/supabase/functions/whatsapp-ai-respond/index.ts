@@ -13,7 +13,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { json } from "../_shared/cors.ts";
-import { requestsHumanHandoff, sendWhatsappText } from "../_shared/whatsapp.ts";
+import { requestsHumanHandoff, sendWhatsappText, toWhatsappMarkup } from "../_shared/whatsapp.ts";
 import { toolsForSkills, type AiToolDefinition } from "../_shared/aiTools.ts";
 import { splitPhone } from "../_shared/phone.ts";
 
@@ -306,7 +306,9 @@ async function respondToConversation(
       max_tokens: assistant.max_tokens,
     };
     const completion = await runConversationLoop(adminClient, supabaseUrl, serviceRoleKey, assistantConfig, enabledTools, history, conversationContext);
-    replyText = completion.text;
+    // Formato de WhatsApp (negrita con un asterisco, sin títulos ni
+    // enlaces markdown) -- ver toWhatsappMarkup.
+    replyText = ensureStorefrontLink(toWhatsappMarkup(completion.text), completion.storefrontUrl);
     tokensUsed = completion.tokensUsed;
   } catch (err) {
     console.error("AI provider call failed", err);
@@ -394,14 +396,24 @@ async function buildCustomerContext(adminClient: any, tenantId: string, contactI
 
   const { data: addresses } = await adminClient
     .from("contact_addresses")
-    .select("label, is_default")
+    .select("line1, line2, city, is_billing, is_shipping, is_default")
     .eq("contact_id", contact.id)
     .is("deleted_at", null)
     .order("is_default", { ascending: false })
+    .order("created_at", { ascending: false })
     .limit(3);
+  // El texto real de cada dirección, no solo su etiqueta (2026-09-14): con
+  // "sin nombre (default)" el modelo no sabía qué dirección tenía el cliente
+  // y se la volvía a pedir -- en vivo, un minuto después de que el cliente
+  // la había dado.
   lines.push(
     addresses && addresses.length > 0
-      ? `Direcciones guardadas: ${addresses.map((a: { label: string | null; is_default: boolean }) => `${a.label ?? "sin nombre"}${a.is_default ? " (default)" : ""}`).join(", ")}. OJO: tener una dirección guardada NO significa que ya esté aplicada al pedido actual -- si el pedido implica envío físico, igual tenés que llamar save_contact_address con su address_id y apply_as_shipping=true antes de confirmar la venta, o va a quedar sin dirección de envío.`
+      ? `Direcciones guardadas: ${addresses
+          .map((a: { line1: string | null; line2: string | null; city: string | null; is_billing: boolean; is_shipping: boolean }) => {
+            const uses = [a.is_billing ? "facturación" : null, a.is_shipping ? "envío" : null].filter(Boolean).join(" y ");
+            return `${[a.line1, a.line2, a.city].filter(Boolean).join(", ")}${uses ? ` (${uses})` : ""}`;
+          })
+          .join(" | ")}. Al armar un pedido, lístaselas al cliente y pregúntale si envías a alguna de ellas y si facturas con esos mismos datos -- nunca le pidas digitar de nuevo una dirección que ya está guardada.`
       : "Direcciones guardadas: ninguna todavía.",
   );
 
@@ -527,17 +539,20 @@ async function runConversationLoop(
   tools: AiToolDefinition[],
   history: HistoryMessage[],
   conversation: ConversationContext,
-): Promise<{ text: string; tokensUsed: number | null }> {
+): Promise<{ text: string; tokensUsed: number | null; storefrontUrl: string | null }> {
   // deno-lint-ignore no-explicit-any
   const extraTurns: any[] = [];
   let totalTokens = 0;
+  // Enlace de la tienda si alguna herramienta lo devolvió en este turno --
+  // ver ensureStorefrontLink.
+  let storefrontUrl: string | null = null;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const turn = await callAiProvider(adminClient, assistant, tools, history, extraTurns);
     totalTokens += turn.tokensUsed ?? 0;
 
     if (turn.kind === "text") {
-      return { text: turn.text, tokensUsed: totalTokens || null };
+      return { text: turn.text, tokensUsed: totalTokens || null, storefrontUrl };
     }
 
     // All calls from this one turn must be echoed back as a single
@@ -548,13 +563,30 @@ async function runConversationLoop(
     const results = await Promise.all(turn.calls.map((call) => callAiTool(supabaseUrl, serviceRoleKey, call, conversation)));
     appendToolCallTurn(assistant.provider, extraTurns, turn.calls);
     appendToolResultTurns(assistant.provider, extraTurns, turn.calls, results);
+    for (const result of results) {
+      const url = (result as { storefront_url?: unknown } | null)?.storefront_url;
+      if (typeof url === "string" && url.length > 0) storefrontUrl = url;
+    }
   }
 
   console.error(`Model kept calling tools past ${MAX_TOOL_ROUNDS} rounds for conversation ${conversation.id}`);
   return {
     text: "Perdón, tuve un problema procesando tu solicitud. Un miembro de nuestro equipo te va a contactar pronto.",
     tokensUsed: totalTokens || null,
+    storefrontUrl: null,
   };
+}
+
+/** Si una herramienta devolvió el enlace de la tienda en este turno y el
+ * modelo no lo puso en su respuesta, se agrega al final. Encontrado en vivo
+ * el 2026-09-14: con el enlace escrito en el system_prompt y la instrucción
+ * de compartirlo, el modelo contestó "me das el catálogo" y "qué tienen" solo
+ * con las categorías, dos veces seguidas. Solo actúa cuando la herramienta
+ * lo devolvió -- es decir, cuando el tenant tiene tienda pública activa y la
+ * consulta era de catálogo (ver getStorefrontUrl en whatsapp-ai-tools). */
+function ensureStorefrontLink(text: string, storefrontUrl: string | null): string {
+  if (!storefrontUrl || text.includes(storefrontUrl)) return text;
+  return `${text.trimEnd()}\n\nMira todo nuestro catálogo aquí: ${storefrontUrl}`;
 }
 
 /** Calls whatsapp-ai-tools for a single tool call -- tenant_id/contact_id
