@@ -4,6 +4,19 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.15] - 2026-09-20
+
+### Added
+- POS: en el buscador de productos, los que no tienen stock aparecen inhabilitados ("Agotado") y no se pueden agregar, ni con clic ni con el teclado. Aplica a venta rápida y a cuentas abiertas; los productos que no controlan inventario nunca se inhabilitan.
+
+### Changed
+- POS · Cuentas abiertas: si una línea pide más de lo disponible, el servidor rechaza el guardado con el nombre del producto y la cantidad disponible, y la cuenta queda como estaba en vez de guardarse con la línea en rojo. Órdenes del portal conserva el comportamiento anterior, porque ahí sí se arman cotizaciones.
+- POS · Cuentas abiertas: "Cobrar" y "Dividir cuenta" esperan a que el servidor confirme el stock ("Verificando stock…") y no abren el pago si hay faltantes. Los faltantes se calculan también al abrir una cuenta existente. En venta rápida, "Cobrar" espera a que termine el cálculo de totales.
+- POS: abrir una cuenta ya no espera cargas repetidas (se reutiliza el carrito recién creado y el cliente Consumidor Final), y el listado de cuentas no se recarga mientras hay una abierta.
+
+### Fixed
+- POS · Cuentas abiertas: "Cobrar" podía quedar bloqueado para siempre si se revertía un cambio mientras se estaba guardando.
+
 ## [1.0.14] - 2026-09-13
 
 ### Added

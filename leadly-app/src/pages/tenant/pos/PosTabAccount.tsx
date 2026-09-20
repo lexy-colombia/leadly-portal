@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import { formatDate, formatTime } from '../../../lib/dates'
 import { usePermission } from '../../../contexts/AuthContext'
-import { saveCartDraft, listChargesFromCart, createOrderFromCart, closeCart, deleteCart, getCart } from '../../../lib/api/carts'
-import type { CartCharge } from '../../../lib/api/carts'
+import { saveCartDraft, CartStockRejectedError, listChargesFromCart, createOrderFromCart, closeCart, deleteCart, getCart } from '../../../lib/api/carts'
+import type { CartCharge, CartWithItems } from '../../../lib/api/carts'
+import { posOpenMark } from '../../../lib/posPerf'
 import { getClient } from '../../../lib/api/clients'
 import { searchPosClients } from '../../../lib/api/pos'
 import { getClientCreditSummary } from '../../../lib/api/credit'
@@ -49,7 +50,24 @@ function formatCurrency(value: number, currency = 'COP'): string {
  * seguido del mismo confirmar+pagar de cualquier venta. Sin validación
  * previa en el cliente en ningún paso -- se llama al backend y se
  * muestra el error que devuelva, tal cual. */
-export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { tenantId: string; cartId: string; points: PosPoint[]; onBack: () => void; onClosed: () => void }) {
+export function PosTabAccount({
+  tenantId,
+  cartId,
+  initialCart,
+  points,
+  onBack,
+  onClosed,
+}: {
+  tenantId: string
+  cartId: string
+  /** Carrito recién creado por quien abre la pantalla (PosOpenTabs.handleCreate
+   * ya lo trae completo de calculate-order) -- evita un getCart redundante
+   * que bloqueaba el render con el spinner. Ausente = se lee del servidor. */
+  initialCart?: CartWithItems
+  points: PosPoint[]
+  onBack: () => void
+  onClosed: () => void
+}) {
   const { t, language } = useLanguage()
   const canCheckout = usePermission('pos.checkout')
   const receiptPrinter = usePosReceiptPrinter(tenantId)
@@ -82,12 +100,22 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Líneas que piden más de lo que hay en stock real -- las devuelve
-  // calculate-order en cada guardado (ver saveCartDraft), nunca se calculan
-  // acá. Mientras haya alguna: OrderItemsEditor las pinta en rojo (prop
-  // `shortfalls`, ya existía para esto) y "Cobrar" queda deshabilitado --
+  // calculate-order (nunca se calculan acá), por dos vías que no se pisan:
+  // el preview de totales (`previewShortfalls`, abajo, corre también al abrir
+  // una cuenta con productos ya cargados) y el guardado (`flushShortfalls`,
+  // lo que devolvió el último flush). Mientras haya alguna: OrderItemsEditor
+  // las pinta en rojo (prop `shortfalls`) y "Cobrar" queda deshabilitado --
   // el cajero tiene que borrar la línea o cambiarla de bodega para poder
   // seguir. Pedido explícito del usuario 2026-09-06.
-  const [stockShortfalls, setStockShortfalls] = useState<StockShortfall[]>([])
+  const [flushShortfalls, setFlushShortfalls] = useState<StockShortfall[]>([])
+  // Cambios que todavía no se sincronizaron con el servidor: mismo valor que
+  // `lastSyncedRef` pero como estado, para que el botón "Cobrar" reaccione
+  // (un ref no vuelve a renderizar). null = aún no se armó la base inicial.
+  const [syncedSnap, setSyncedSnap] = useState<string | null>(null)
+  // Si el último guardado falló, "Cobrar" se habilita de nuevo para que
+  // handleChargeAll reintente el guardado en vez de quedar bloqueado hasta la
+  // próxima edición.
+  const [syncFailed, setSyncFailed] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [confirmingCancel, setConfirmingCancel] = useState(false)
   const [charging, setCharging] = useState(false)
@@ -139,7 +167,10 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
 
   useEffect(() => {
     listProducts(tenantId, { page: 1, pageSize: 1000 })
-      .then(({ data }) => setProducts(data))
+      .then(({ data }) => {
+        setProducts(data)
+        posOpenMark('catalogo-listo')
+      })
       .catch(() => {})
     listProductCategories(tenantId).then(setCategories).catch(() => {})
     listBrands(tenantId).then(setBrands).catch(() => {})
@@ -151,30 +182,43 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
   }, [tenantId])
 
   useEffect(() => {
+    function applyCart(cart: CartWithItems) {
+      setContactId(cart.contact_id ?? '')
+      setPosPointId(cart.pos_point_id ?? '')
+      setLabel(cart.label ?? '')
+      setCreatedAt(cart.created_at)
+      setItems(
+        cart.items.map((i) => ({
+          product_id: i.product_id,
+          variant_id: i.variant_id,
+          warehouse_id: i.warehouse_id,
+          product_name: i.product_name,
+          sku: i.sku,
+          quantity: i.quantity,
+          unit_price: i.unit_price,
+          discount_amount: i.discount_amount,
+        })),
+      )
+      setLoaded(true)
+    }
+    if (initialCart && initialCart.id === cartId) {
+      // Cuenta recién creada: ya la tenemos completa y sin cobros, no hay
+      // nada que pedir al servidor antes de pintar.
+      applyCart(initialCart)
+      return
+    }
     getCart(cartId)
       .then((cart) => {
         if (!cart) return
-        setContactId(cart.contact_id ?? '')
-        setPosPointId(cart.pos_point_id ?? '')
-        setLabel(cart.label ?? '')
-        setCreatedAt(cart.created_at)
-        setItems(
-          cart.items.map((i) => ({
-            product_id: i.product_id,
-            variant_id: i.variant_id,
-            warehouse_id: i.warehouse_id,
-            product_name: i.product_name,
-            sku: i.sku,
-            quantity: i.quantity,
-            unit_price: i.unit_price,
-            discount_amount: i.discount_amount,
-          })),
-        )
-        setLoaded(true)
+        applyCart(cart)
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('pos.tabs.errors.save')))
     listChargesFromCart(cartId).then(setCharges).catch(() => {})
   }, [cartId])
+
+  useEffect(() => {
+    if (loaded) posOpenMark('cuenta-pintada')
+  }, [loaded])
 
   useEffect(() => {
     if (!contactId) {
@@ -216,19 +260,68 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
   function snapshot(): string {
     return JSON.stringify({ contactId, posPointId, label, items })
   }
+  // Snapshot de lo que hay en pantalla AHORA, para que un flush que resuelve
+  // tarde sepa si lo que guardó todavía es lo actual (los closures de flush
+  // ven el estado de cuando se lanzó).
+  const currentSnapRef = useRef('')
+  currentSnapRef.current = snapshot()
 
-  async function flush(): Promise<void> {
+  // Solo el último guardado pedido puede escribir el estado -- mismo patrón
+  // que requestRef en useOrderTotalsPreview. Sin esto, una respuesta lenta de
+  // un guardado anterior pisa `lastSyncedRef`/los faltantes del actual y el
+  // botón "Cobrar" queda con un estado que no corresponde a lo que hay en
+  // pantalla.
+  const flushIdRef = useRef(0)
+
+  /** Guarda el borrador y devuelve los faltantes de stock que calculó el
+   * servidor para exactamente lo que se guardó (handleChargeAll los usa para
+   * no abrir el pago si hay alguno). */
+  async function flush(): Promise<StockShortfall[]> {
+    const flushId = ++flushIdRef.current
+    const snap = snapshot()
     setSaving(true)
     setError(null)
+    setSyncFailed(false)
     try {
       const { stockShortfalls } = await saveCartDraft({ cart_id: cartId, contact_id: contactId, items, pos_point_id: posPointId || null, label: label || null })
-      lastSyncedRef.current = snapshot()
-      setStockShortfalls(stockShortfalls)
+      if (flushIdRef.current === flushId) {
+        lastSyncedRef.current = snap
+        setSyncedSnap(snap)
+        // Si mientras tanto se editó, esos faltantes son de una versión vieja:
+        // no se publican (el efecto de autoguardado vuelve a guardar lo actual).
+        setFlushShortfalls(currentSnapRef.current === snap ? stockShortfalls : [])
+      }
+      return stockShortfalls
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('pos.tabs.errors.save'))
+      if (flushIdRef.current === flushId) {
+        setError(err instanceof CartStockRejectedError ? t('pos.tabs.errors.stockRejected', { detail: err.message }) : err instanceof Error ? err.message : t('pos.tabs.errors.save'))
+        if (err instanceof CartStockRejectedError && err.cart && currentSnapRef.current === snap) {
+          // El servidor NO guardó esa línea (stock insuficiente): la pantalla
+          // vuelve al carrito tal como quedó allá, sin línea "fantasma", y
+          // eso cuenta como sincronizado (no hay nada pendiente que reintentar).
+          const serverItems: OrderItemInput[] = err.cart.items.map((i) => ({
+            product_id: i.product_id,
+            variant_id: i.variant_id,
+            warehouse_id: i.warehouse_id,
+            product_name: i.product_name,
+            sku: i.sku,
+            quantity: i.quantity,
+            unit_price: i.unit_price,
+            discount_amount: i.discount_amount,
+          }))
+          const revertedSnap = JSON.stringify({ contactId, posPointId, label, items: serverItems })
+          prevItemCountRef.current = serverItems.length
+          lastSyncedRef.current = revertedSnap
+          setItems(serverItems)
+          setSyncedSnap(revertedSnap)
+          setFlushShortfalls([])
+        } else {
+          setSyncFailed(true)
+        }
+      }
       throw err
     } finally {
-      setSaving(false)
+      if (flushIdRef.current === flushId) setSaving(false)
     }
   }
 
@@ -238,6 +331,7 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
     if (!primedRef.current) {
       primedRef.current = true
       lastSyncedRef.current = snap
+      setSyncedSnap(snap)
       prevItemCountRef.current = items.length
       return
     }
@@ -251,20 +345,37 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
     prevItemCountRef.current = items.length
     const timer = setTimeout(
       () => {
-        void flush()
+        flush().catch(() => {})
       },
       justAddedItem ? 0 : 2000,
     )
     return () => clearTimeout(timer)
+    // `syncedSnap` en las deps: si un guardado termina con un snapshot distinto
+    // del actual (el cajero revirtió o siguió editando mientras volaba), el
+    // efecto se re-evalúa y programa otro guardado. Sin bucle: cuando
+    // syncedSnap === snapshot() el efecto retorna arriba, y un guardado fallido
+    // no cambia syncedSnap (no reintenta solo; syncFailed rehabilita el clic).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, contactId, posPointId, label, items])
+  }, [loaded, contactId, posPointId, label, items, syncedSnap])
 
   // Desglose de la cuenta antes de cobrarla -- hasta ahora esta pantalla no
   // mostraba ningún total (el cajero solo veía las líneas), así que no había
   // forma de saber cuánto iba la mesa ni cuánto de eso era impuesto. Lo
   // calcula el servidor con las mismas reglas del pedido real, ver
   // useOrderTotalsPreview.
-  const { totals, loading: totalsLoading, error: totalsError } = useOrderTotalsPreview(items)
+  const { totals, stockShortfalls: previewShortfalls, loading: totalsLoading, error: totalsError } = useOrderTotalsPreview(items)
+  // Faltantes que se muestran: lo que devolvió el último guardado si hay
+  // alguno, si no lo del preview (que corre también al abrir una cuenta con
+  // productos ya cargados, sin esperar a una primera edición). Ambos vienen
+  // de calculate-order; acá no se compara nada contra stock cacheado.
+  const stockShortfalls = flushShortfalls.length > 0 ? flushShortfalls : previewShortfalls
+  // "Verificando": hay cambios sin sincronizar, un guardado en vuelo o un
+  // preview en vuelo -- los faltantes que se ven todavía pueden no
+  // corresponder a lo que hay en pantalla, así que "Cobrar"/"Dividir cuenta"
+  // no se ofrecen como si estuvieran listos. Si el último guardado falló no
+  // se bloquea: el clic reintenta el guardado (handleChargeAll).
+  const unsynced = syncedSnap === null || snapshot() !== syncedSnap
+  const verifying = !syncFailed && (saving || totalsLoading || unsynced)
 
   /** Cerrar la mesa: acción propia, nunca un efecto de haber cobrado. Se
    * ofrece recién cuando la cuenta ya no tiene productos por cobrar --
@@ -383,7 +494,13 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
     if (snapshot() !== lastSyncedRef.current) {
       setCharging(true)
       try {
-        await flush()
+        // Si el servidor devuelve faltantes para lo que se acaba de guardar,
+        // no se abre el pago: quedan en rojo (flush los deja en estado).
+        const shortfalls = await flush()
+        if (shortfalls.length > 0) {
+          setCharging(false)
+          return
+        }
       } catch {
         setCharging(false)
         return
@@ -400,7 +517,10 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
     setOpeningSplit(true)
     setError(null)
     try {
-      if (snapshot() !== lastSyncedRef.current) await flush()
+      if (snapshot() !== lastSyncedRef.current) {
+        const shortfalls = await flush()
+        if (shortfalls.length > 0) return
+      }
       const cart = await getCart(cartId)
       if (!cart) throw new Error(t('pos.tabs.errors.save'))
       setSplitItems(cart.items)
@@ -456,6 +576,7 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
     // volver a guardar (snapshot() todavía vería el `items` de antes de
     // este setItems, React no lo actualiza en el momento).
     primedRef.current = false
+    setFlushShortfalls([])
     setItems(
       cart.items.map((i) => ({
         product_id: i.product_id,
@@ -498,7 +619,7 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
             shortfalls={stockShortfalls}
             searchAlwaysOpen
             onChange={(next) => {
-              setStockShortfalls([])
+              setFlushShortfalls([])
               setItems(next)
             }}
           />
@@ -706,7 +827,8 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
           ) : (
             <>
               {stockShortfalls.length > 0 && <p className="mb-2 text-center text-xs font-medium text-red-600">{t('pos.tabs.errors.stockShortfall')}</p>}
-              <Button type="button" size="lg" className="w-full" disabled={!canCheckout || charging || stockShortfalls.length > 0} onClick={handleChargeAll}>
+              {verifying && stockShortfalls.length === 0 && <p className="mb-2 text-center text-xs text-brand-400">{t('pos.tabs.verifyingStock')}</p>}
+              <Button type="button" size="lg" className="w-full" disabled={!canCheckout || charging || verifying || stockShortfalls.length > 0} onClick={handleChargeAll}>
                 {charging ? t('pos.actions.charging') : t('pos.tabs.charge')}
               </Button>
             </>
@@ -715,7 +837,7 @@ export function PosTabAccount({ tenantId, cartId, points, onBack, onClosed }: { 
             <button
               type="button"
               onClick={handleOpenSplit}
-              disabled={!canCheckout || openingSplit || charging}
+              disabled={!canCheckout || openingSplit || charging || verifying || stockShortfalls.length > 0}
               className="block w-full text-center text-xs font-medium text-accent-600 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
             >
               {openingSplit ? t('common.actions.saving') : t('pos.tabs.splitBill')}

@@ -37,6 +37,7 @@ export function ProductSearchBox<T>({
   getKey,
   renderResult,
   onSelect,
+  isDisabled,
   placeholder,
   autoFocus = false,
   loading = false,
@@ -57,6 +58,9 @@ export function ProductSearchBox<T>({
   getKey: (item: T) => string
   renderResult: (item: T, highlighted: boolean, select: () => void) => ReactNode
   onSelect: (item: T, quantity: number) => void
+  /** Resultado inhabilitado (ej. agotado): sigue visible y resaltable, pero
+   * ni el clic ni Enter llaman `onSelect`. */
+  isDisabled?: (item: T) => boolean
   placeholder: string
   autoFocus?: boolean
   loading?: boolean
@@ -86,6 +90,7 @@ export function ProductSearchBox<T>({
   }, [highlightedIndex])
 
   function handleSelect(item: T) {
+    if (isDisabled?.(item)) return
     onSelect(item, quantity)
     setHighlightedIndex(-1)
     setQuantity(1)

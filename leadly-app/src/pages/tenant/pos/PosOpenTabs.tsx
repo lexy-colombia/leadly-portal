@@ -3,14 +3,15 @@ import { useLanguage } from '../../../contexts/LanguageContext'
 import { formatDate, formatTime } from '../../../lib/dates'
 import { formatClientPhoneDisplay } from '../../../lib/phone'
 import { listPosPoints } from '../../../lib/api/posPoints'
-import { closeCart, createOrderFromCart, deleteCart, getCart, listOpenCarts, saveCartDraft, subscribeToOpenCarts, type OpenCartSummary } from '../../../lib/api/carts'
+import { closeCart, createOrderFromCart, deleteCart, getCart, listOpenCarts, saveCartDraft, subscribeToOpenCarts, type CartWithItems, type OpenCartSummary } from '../../../lib/api/carts'
+import { posOpenMark, posOpenStart } from '../../../lib/posPerf'
 import { previewOrderTotals, type OrderTotalsBreakdown } from '../../../lib/api/orders'
 import { getClient } from '../../../lib/api/clients'
 import { getStoreCreditBalance } from '../../../lib/api/returns'
 import { PaymentDrawer } from '../orders/PaymentDrawer'
 import { usePosReceiptPrinter } from '../../../lib/usePosReceiptPrinter'
 import { getWalkInClient } from '../../../lib/api/pos'
-import type { PosPoint } from '../../../types/domain'
+import type { Client, PosPoint } from '../../../types/domain'
 import { PosTabAccount } from './PosTabAccount'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -45,6 +46,22 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
   const [points, setPoints] = useState<PosPoint[] | null>(null)
   const [accounts, setAccounts] = useState<OpenCartSummary[] | null>(null)
   const [selectedCartId, setSelectedCartId] = useState<string | null>(null)
+  // Carrito recién creado, tal como lo devolvió calculate-order -- se le pasa
+  // a PosTabAccount para no volver a pedirlo. Solo aplica a la cuenta recién
+  // abierta; abrir una existente lo deja en null y la pantalla lo lee.
+  const [createdCart, setCreatedCart] = useState<CartWithItems | null>(null)
+  // Mientras hay una cuenta abierta este listado no se ve: no tiene sentido
+  // releerlo por cada autoguardado de la cuenta (el realtime de `carts`
+  // dispara en cada UPDATE de last_activity_at). Al volver (onBack/onClosed)
+  // ya se recarga explícitamente.
+  const selectedCartIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    selectedCartIdRef.current = selectedCartId
+  }, [selectedCartId])
+  // El cliente Consumidor Final no cambia entre clics: se pide una vez al
+  // montar y se reutiliza, en vez de sumar un viaje de red antes de crear
+  // cada cuenta.
+  const walkInRef = useRef<Promise<Client | null> | null>(null)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Cancelar una cuenta desde el listado -- misma acción destructiva que
@@ -80,7 +97,10 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
       .then(setPoints)
       .catch(() => setPoints([]))
     reload()
-    const unsubscribe = subscribeToOpenCarts(tenantId, reload)
+    walkInRef.current = getWalkInClient(tenantId).catch(() => null)
+    const unsubscribe = subscribeToOpenCarts(tenantId, () => {
+      if (!selectedCartIdRef.current) reload()
+    })
     return unsubscribe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId])
@@ -165,9 +185,17 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
     setCreating(true)
     setError(null)
     try {
-      const walkIn = await getWalkInClient(tenantId)
+      posOpenStart()
+      let walkIn = await walkInRef.current
+      if (!walkIn) {
+        // La precarga falló o aún no había terminado con éxito: se reintenta.
+        walkIn = await getWalkInClient(tenantId)
+        walkInRef.current = Promise.resolve(walkIn)
+      }
       if (!walkIn) throw new Error(t('pos.tabs.errors.noWalkIn'))
       const { cart } = await saveCartDraft({ contact_id: walkIn.id, origin: 'pos', pos_point_id: posPointId, items: [] })
+      posOpenMark('carrito-creado')
+      setCreatedCart(cart)
       setSelectedCartId(cart.id)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('pos.tabs.errors.create'))
@@ -176,11 +204,19 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
     }
   }
 
+  /** Abrir una cuenta existente: sin carrito precargado, la pantalla lo lee. */
+  function openExisting(cartId: string) {
+    posOpenStart()
+    setCreatedCart(null)
+    setSelectedCartId(cartId)
+  }
+
   if (selectedCartId) {
     return (
       <PosTabAccount
         tenantId={tenantId}
         cartId={selectedCartId}
+        initialCart={createdCart ?? undefined}
         points={points ?? []}
         onBack={() => {
           setSelectedCartId(null)
@@ -222,7 +258,7 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
                   <button
                     key={point.id}
                     type="button"
-                    onClick={() => setSelectedCartId(account.id)}
+                    onClick={() => openExisting(account.id)}
                     className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-left transition-colors hover:bg-amber-100"
                   >
                     <div className="flex items-start justify-between gap-1.5">
@@ -293,7 +329,7 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
               </TableHeader>
               <TableBody>
                 {unassignedAccounts.map((account) => (
-                  <TableRow key={account.id} onClick={() => setSelectedCartId(account.id)} className="cursor-pointer">
+                  <TableRow key={account.id} onClick={() => openExisting(account.id)} className="cursor-pointer">
                     <TableCell className="text-xs text-brand-700">
                       <p className="font-medium text-brand-800">{account.contact_name}</p>
                       {account.contact_phone && (
@@ -384,7 +420,7 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
                 <button
                   key={account.id}
                   type="button"
-                  onClick={() => setSelectedCartId(account.id)}
+                  onClick={() => openExisting(account.id)}
                   className="rounded-lg border border-brand-100 bg-white p-2.5 text-left transition-colors hover:border-accent-300"
                 >
                   <div className="flex items-start justify-between gap-1.5">

@@ -124,6 +124,18 @@ export function OrderItemsEditor({
     return new Set([categoryFilter, ...Array.from(descendantIds(categories, categoryFilter))])
   }, [categoryFilter, categories])
 
+  /** Stock ya cargado (`stockRows`) de la bodega con la que nacería la línea
+   * (la misma que usa addProductLine y que valida el servidor). Sin inventario
+   * nunca está agotado; con variantes, solo si todas las activas lo están. */
+  function isOutOfStock(p: ProductWithImages): boolean {
+    if (!p.track_inventory) return false
+    if (p.has_variants) {
+      const active = p.variants.filter((v) => v.is_active)
+      return active.length > 0 && active.every((v) => (availableStock(stockRows, p.id, v.id, defaultWarehouseId) ?? 0) <= 0)
+    }
+    return (availableStock(stockRows, p.id, null, defaultWarehouseId) ?? 0) <= 0
+  }
+
   const results = useMemo(() => {
     const q = query.trim().toLowerCase()
     return products
@@ -269,6 +281,7 @@ export function OrderItemsEditor({
         results={results}
         getKey={(p) => p.id}
         onSelect={handlePick}
+        isDisabled={(p) => searchAlwaysOpen && isOutOfStock(p)}
         placeholder={t('orders.itemsEditor.search.placeholder')}
         autoFocus
         inputClassName="!rounded-lg"
@@ -280,7 +293,12 @@ export function OrderItemsEditor({
             name={p.name}
             sku={p.sku}
             highlighted={highlighted}
+            // Solo en el POS (searchAlwaysOpen): un producto sin stock sigue
+            // en los resultados pero no se puede agregar. Órdenes del portal
+            // (donde se arman cotizaciones) no cambia.
+            disabled={searchAlwaysOpen && isOutOfStock(p)}
             onClick={select}
+            right={searchAlwaysOpen && p.track_inventory && isOutOfStock(p) ? <span className="block text-[10px] text-red-500">{t('pos.stock.out')}</span> : undefined}
           />
         )}
       />

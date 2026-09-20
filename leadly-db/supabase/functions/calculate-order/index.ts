@@ -28,6 +28,10 @@
  * a lo que ya devolvía, la lista de líneas cuya cantidad pedida supera el
  * stock real disponible (por bodega puntual si la línea tiene warehouse_id,
  * sumado en todas las bodegas si no) -- ver `_shared/orders/stockAvailability.ts`.
+ * (Actualizado 2026-09-20: en un carrito de POS -- carts.origin = 'pos' -- un
+ * faltante SÍ rechaza el guardado con 409, ver la rama de carrito más abajo;
+ * lo que sigue describe Órdenes del portal, preview y pedidos reales, que no
+ * cambian.)
  * Nunca bloquea el guardado del carrito/borrador con esto: el frontend usa
  * esta lista solo para pintar esas líneas en rojo y deshabilitar "Cobrar"/
  * "Crear pedido" mientras exista alguna, forzando a que el cajero/agente la
@@ -368,10 +372,63 @@ Deno.serve(async (req) => {
   // una sola vez, en create-order, al convertir.
   let cartId = body.cart_id ?? null;
 
+  // Discriminador POS: `carts.origin`. En un carrito existente sale de la fila
+  // guardada (leída con el cliente del caller, RLS) -- nunca de lo que mande
+  // el body en esta llamada, así un guardado no puede "cambiarse" de origen
+  // para saltarse la regla. En un carrito nuevo es el origin con que se crea
+  // (el POS lo crea con 'pos', ver PosOpenTabs). Órdenes del portal es
+  // 'portal' y conserva el comportamiento de siempre.
+  let cartOrigin: string = body.origin ?? "portal";
+
   if (cartId) {
-    const { data: existingCart } = await callerClient.from("carts").select("id, status").eq("id", cartId).maybeSingle();
+    const { data: existingCart } = await callerClient.from("carts").select("id, status, origin").eq("id", cartId).maybeSingle();
     if (!existingCart) return json({ error: "Carrito no encontrado." }, 404);
     if (existingCart.status !== "open") return json({ error: "Este carrito ya no está abierto." }, 409);
+    cartOrigin = existingCart.origin as string;
+  } else if (!body.contact_id) {
+    return json({ error: "contact_id es requerido para crear un carrito." }, 400);
+  }
+
+  // Chequeo de stock -- ver el comentario de `stock_shortfalls` en la
+  // cabecera del archivo. Se corre ANTES de escribir nada (ni cabecera ni
+  // ítems) porque en el carrito de POS un faltante rechaza el guardado
+  // completo: la línea que pide más de lo disponible nunca llega a la base y
+  // el carrito queda exactamente como estaba (este endpoint reemplaza todas
+  // las líneas, así que rechazar el guardado entero es "no guardar esa
+  // línea"). Reversión de la decisión del 2026-09-06 solo para POS; en
+  // Órdenes del portal (origin 'portal') sigue informando sin rechazar.
+  const shortfalls = await findStockShortfalls(
+    adminClient,
+    tenantId,
+    items.map((item) => ({ product_id: item.product_id, variant_id: item.variant_id, warehouse_id: item.warehouse_id, product_name: item.product_name, quantity: item.quantity })),
+  );
+  // Una línea de producto CON variantes que todavía no eligió variante
+  // (variant_id null, así nace al agregarla desde el buscador del POS) no es
+  // una petición de stock real: findStockShortfalls la compara contra la
+  // clave sin variante y siempre da 0. Rechazarla dejaría imposible agregar
+  // cualquier producto con variantes; sigue saliendo en `stock_shortfalls`
+  // (roja) y create-order/pos-checkout la frenan al cobrar.
+  let rejectable = shortfalls;
+  if (cartOrigin === "pos" && shortfalls.some((s) => !s.variant_id)) {
+    const noVariantIds = Array.from(new Set(shortfalls.filter((s) => !s.variant_id).map((s) => s.product_id)));
+    const { data: variantProducts, error: variantProductsError } = await adminClient.from("products").select("id").eq("tenant_id", tenantId).eq("has_variants", true).in("id", noVariantIds);
+    if (variantProductsError) return json({ error: variantProductsError.message }, 500);
+    const pendingVariantIds = new Set((variantProducts ?? []).map((p) => p.id as string));
+    rejectable = shortfalls.filter((s) => s.variant_id || !pendingVariantIds.has(s.product_id));
+  }
+  if (cartOrigin === "pos" && rejectable.length > 0) {
+    const detail = rejectable.map((s) => `"${s.product_name}" (disponible ${s.available}, pedido ${s.requested})`).join(", ");
+    // Se devuelve el carrito tal como quedó en el servidor para que el
+    // frontend deje de mostrar la línea que no se guardó.
+    let currentCart: unknown = null;
+    if (cartId) {
+      const { data } = await adminClient.from("carts").select("*, items:cart_items(*)").eq("id", cartId).eq("tenant_id", tenantId).maybeSingle();
+      currentCart = data ?? null;
+    }
+    return json({ error: `Sin stock suficiente para: ${detail}.`, stock_shortfalls: rejectable, cart: currentCart }, 409);
+  }
+
+  if (cartId) {
 
     const cartPatch: Record<string, unknown> = { last_activity_at: new Date().toISOString() };
     if (body.contact_id !== undefined) cartPatch.contact_id = body.contact_id;
@@ -386,7 +443,6 @@ Deno.serve(async (req) => {
     const { error: cartPatchError } = await adminClient.from("carts").update(cartPatch).eq("id", cartId);
     if (cartPatchError) return json({ error: cartPatchError.message }, 500);
   } else {
-    if (!body.contact_id) return json({ error: "contact_id es requerido para crear un carrito." }, 400);
     const { data: newCart, error: cartInsertError } = await adminClient
       .from("carts")
       .insert({
@@ -407,18 +463,6 @@ Deno.serve(async (req) => {
     if (cartInsertError) return json({ error: cartInsertError.message }, 500);
     cartId = newCart.id;
   }
-
-  // Chequeo de stock -- ver el comentario de `stock_shortfalls` en la
-  // cabecera del archivo: solo informa, NUNCA rechaza este guardado. El
-  // borrador se guarda tal cual se mandó, con la línea problemática incluida
-  // -- el frontend la pinta en rojo y deshabilita "Cobrar"/"Crear pedido"
-  // usando la lista que se devuelve más abajo, sin volver a calcular nada
-  // por su cuenta.
-  const shortfalls = await findStockShortfalls(
-    adminClient,
-    tenantId,
-    items.map((item) => ({ product_id: item.product_id, variant_id: item.variant_id, warehouse_id: item.warehouse_id, product_name: item.product_name, quantity: item.quantity })),
-  );
 
   // Reemplaza todos los cart_items -- mismo criterio "reemplaza todo, no
   // hace merge/diff" que ya usa persistOrderItems, sin impuesto.

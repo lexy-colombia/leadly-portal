@@ -65,6 +65,15 @@ function lineKey(l: Pick<CartLine, 'product_id' | 'variant_id'>): string {
  * direcciones, sin despacho, sin envío a la DIAN todavía. Modo por
  * default de /app/pos -- cuando el tenant activa `pos_allow_open_tabs`,
  * Pos.tsx renderiza PosOpenTabs en su lugar y este componente no se toca. */
+/** Estado del resultado de búsqueda, a partir del stock ya cargado (`available`
+ * por producto/variante, sumado en todas las bodegas -- igual que lo valida
+ * pos-checkout). Sin inventario (track_inventory=false) nunca está agotado. */
+function isOutOfStock(p: PosProduct): boolean {
+  if (!p.track_inventory) return false
+  if (p.has_variants) return p.variants.length > 0 && p.variants.every((v) => v.available != null && v.available <= 0)
+  return (p.available ?? 0) <= 0
+}
+
 export function PosFastCheckout() {
   const { profile } = useAuth()
   const { t } = useLanguage()
@@ -313,6 +322,9 @@ export function PosFastCheckout() {
     cart.length > 0 &&
     !charging &&
     !storeCreditExceeded &&
+    // Con un preview en vuelo los faltantes que se ven pueden ser de la
+    // lectura anterior del carrito (ej. recién escaneado un producto).
+    !totalsLoading &&
     stockShortfalls.length === 0 &&
     Math.abs(remainingToAssign) < 0.01 &&
     paymentLines.every((l) => (Number(l.amount) || 0) > 0) &&
@@ -466,6 +478,7 @@ export function PosFastCheckout() {
             results={query.trim().length >= 2 ? results : []}
             getKey={(p) => p.id}
             onSelect={handlePick}
+            isDisabled={isOutOfStock}
             placeholder={t('pos.scan.placeholder')}
             autoFocus
             inputClassName="h-11"
@@ -484,10 +497,17 @@ export function PosFastCheckout() {
                 name={p.name}
                 sku={p.sku}
                 highlighted={highlighted}
+                // Sin stock: sigue apareciendo pero no se puede agregar. Es
+                // solo el estado del dato ya cargado (`available`, el mismo
+                // del texto de la derecha); el rechazo real lo hace el
+                // servidor. Sin inventario (track_inventory=false) nunca se
+                // inhabilita; con variantes, solo si TODAS están agotadas.
+                disabled={isOutOfStock(p)}
                 onClick={select}
                 right={
                   <>
                     <span className="block text-xs font-semibold text-brand-800">{formatCurrency(p.price)}</span>
+                    {p.track_inventory && p.has_variants && isOutOfStock(p) && <span className="block text-[10px] text-red-500">{t('pos.stock.out')}</span>}
                     {p.track_inventory && !p.has_variants && (
                       <span className={`block text-[10px] ${(p.available ?? 0) <= 0 ? 'text-red-500' : 'text-brand-400'}`}>
                         {(p.available ?? 0) <= 0 ? t('pos.stock.out') : t('pos.stock.available', { count: p.available ?? 0 })}
@@ -569,11 +589,12 @@ export function PosFastCheckout() {
                   <button
                     key={v.id}
                     type="button"
+                    disabled={v.available != null && v.available <= 0}
                     onClick={() => {
                       addToCart(variantPickerFor, v, variantPickerQty)
                       setVariantPickerFor(null)
                     }}
-                    className="flex w-full items-center justify-between rounded-lg border border-brand-100 px-3 py-2 text-left text-xs hover:bg-accent-50"
+                    className="flex w-full items-center justify-between rounded-lg border border-brand-100 px-3 py-2 text-left text-xs hover:bg-accent-50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <span>{v.label}</span>
                     <span className="flex items-center gap-2">

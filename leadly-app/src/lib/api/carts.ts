@@ -7,19 +7,42 @@ export type CartWithItems = Cart & { items: CartItem[] }
 /** Mismo manejo de error que calculateOrder -- un 4xx/5xx de la función
  * llega como FunctionsHttpError con el cuerpo sin parsear, hay que leerlo
  * para mostrar el mensaje real en vez de uno genérico. */
+class ApiBodyError extends Error {
+  body: unknown
+  constructor(message: string, body: unknown) {
+    super(message)
+    this.body = body
+  }
+}
+
+/** El servidor rechazó guardar el carrito de POS porque una línea pide más de
+ * lo disponible (409 de calculate-order). `cart` es el carrito tal como quedó
+ * en el servidor (sin esa línea): el caller lo usa para dejar la pantalla
+ * igual a él en vez de conservar una línea que nunca se guardó. */
+export class CartStockRejectedError extends Error {
+  cart: CartWithItems | null
+  stockShortfalls: StockShortfall[]
+  constructor(message: string, cart: CartWithItems | null, stockShortfalls: StockShortfall[]) {
+    super(message)
+    this.cart = cart
+    this.stockShortfalls = stockShortfalls
+  }
+}
+
 async function invokeAndUnwrap<T>(name: string, body: object): Promise<T> {
   const { data, error } = await supabase.functions.invoke<T & { error?: string }>(name, { body })
   if (error) {
     const context = (error as { context?: Response }).context
     if (context && typeof context.json === 'function') {
       let specificMessage: string | undefined
+      let responseBody: unknown
       try {
-        const responseBody = await context.json()
-        specificMessage = responseBody?.error
+        responseBody = await context.json()
+        specificMessage = (responseBody as { error?: string })?.error
       } catch {
         /* fall through to generic error */
       }
-      if (specificMessage) throw new Error(specificMessage)
+      if (specificMessage) throw new ApiBodyError(specificMessage, responseBody)
     }
     throw error
   }
@@ -46,13 +69,24 @@ export interface SaveCartDraftInput {
  * comentario de cabecera de esa Edge Function. Nunca toca sales_orders.
  *
  * `stockShortfalls` (2026-09-06): calculate-order siempre devuelve, junto al
- * carrito, qué líneas piden más de lo que hay en stock real -- nunca
- * rechaza este guardado por eso (el borrador se guarda tal cual, con la
- * línea problemática incluida). El caller (PosTabAccount.tsx, OrderDetail.tsx)
+ * carrito, qué líneas piden más de lo que hay en stock real. Desde
+ * 2026-09-20, en un carrito de POS un faltante rechaza el guardado (lanza
+ * CartStockRejectedError, la línea NO se guarda); en Órdenes del portal sigue
+ * guardando el borrador con la línea problemática incluida. El caller (PosTabAccount.tsx, OrderDetail.tsx)
  * usa esta lista, y solo esta, para pintar esas líneas en rojo y deshabilitar
  * "Cobrar"/"Crear pedido" -- nunca vuelve a calcular esto por su cuenta. */
 export async function saveCartDraft(input: SaveCartDraftInput): Promise<{ cart: CartWithItems; stockShortfalls: StockShortfall[] }> {
-  const { cart, stock_shortfalls } = await invokeAndUnwrap<{ cart: CartWithItems; stock_shortfalls?: ApiStockShortfall[] }>('calculate-order', input)
+  let response: { cart: CartWithItems; stock_shortfalls?: ApiStockShortfall[] }
+  try {
+    response = await invokeAndUnwrap<{ cart: CartWithItems; stock_shortfalls?: ApiStockShortfall[] }>('calculate-order', input)
+  } catch (err) {
+    // Carrito de POS con una línea sin stock suficiente (2026-09-20): el
+    // servidor no la guardó y devuelve el carrito como quedó.
+    const body = err instanceof ApiBodyError ? (err.body as { cart?: CartWithItems | null; stock_shortfalls?: ApiStockShortfall[] }) : null
+    if (body?.stock_shortfalls) throw new CartStockRejectedError(err instanceof Error ? err.message : '', body.cart ?? null, mapApiStockShortfalls(body.stock_shortfalls))
+    throw err
+  }
+  const { cart, stock_shortfalls } = response
   return { cart, stockShortfalls: mapApiStockShortfalls(stock_shortfalls ?? []) }
 }
 
