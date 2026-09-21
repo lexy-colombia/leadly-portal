@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLanguage } from '../../../contexts/LanguageContext'
+import { useToast } from '../../../contexts/ToastContext'
 import { formatDate, formatTime } from '../../../lib/dates'
 import { formatClientPhoneDisplay } from '../../../lib/phone'
 import { listPosPoints } from '../../../lib/api/posPoints'
-import { closeCart, createOrderFromCart, deleteCart, getCart, listOpenCarts, saveCartDraft, subscribeToOpenCarts, type CartWithItems, type OpenCartSummary } from '../../../lib/api/carts'
+import { closeCart, createOrderFromCart, deleteCart, getCart, listOpenCarts, saveCartDraft, subscribeToOpenCarts, waitForCartSaves, type CartWithItems, type OpenCartSummary } from '../../../lib/api/carts'
 import { posOpenMark, posOpenStart } from '../../../lib/posPerf'
 import { previewOrderTotals, type OrderTotalsBreakdown } from '../../../lib/api/orders'
 import { getClient } from '../../../lib/api/clients'
@@ -43,6 +44,7 @@ function formatCurrency(value: number, currency = 'COP'): string {
  * existe ningún sales_orders para ninguna de ellas hasta que se cobra. */
 export function PosOpenTabs({ tenantId }: { tenantId: string }) {
   const { t, language } = useLanguage()
+  const toast = useToast()
   const [points, setPoints] = useState<PosPoint[] | null>(null)
   const [accounts, setAccounts] = useState<OpenCartSummary[] | null>(null)
   const [selectedCartId, setSelectedCartId] = useState<string | null>(null)
@@ -63,7 +65,6 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
   // cada cuenta.
   const walkInRef = useRef<Promise<Client | null> | null>(null)
   const [creating, setCreating] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   // Cancelar una cuenta desde el listado -- misma acción destructiva que
   // dentro de la cuenta (deleteCart), con la misma confirmación. Solo se
   // ofrece mientras no haya cobrado nada (ver charge_count).
@@ -86,16 +87,40 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
   const [preparingCharge, setPreparingCharge] = useState<string | null>(null)
   const receiptPrinter = usePosReceiptPrinter(tenantId)
 
+  // Un fallo al leer la lista o los puntos NO se convierte en "lista vacía"
+  // (parecería que no hay cuentas abiertas y el cajero abriría duplicadas):
+  // se muestra el error con reintento, y si ya había datos se conservan.
+  // Flags separados por fuente: el éxito de una no borra el fallo de la otra,
+  // así mientras falte alguna carga necesaria siempre hay salida (Reintentar).
+  const [pointsFailed, setPointsFailed] = useState(false)
+  const [accountsFailed, setAccountsFailed] = useState(false)
+  const loadError = pointsFailed || accountsFailed
+
   function reload() {
     listOpenCarts(tenantId, 'pos')
-      .then(setAccounts)
-      .catch(() => setAccounts([]))
+      .then((list) => {
+        setAccounts(list)
+        setAccountsFailed(false)
+      })
+      .catch(() => setAccountsFailed(true))
+  }
+
+  function loadPoints() {
+    listPosPoints(tenantId, { activeOnly: true })
+      .then((list) => {
+        setPoints(list)
+        setPointsFailed(false)
+      })
+      .catch(() => setPointsFailed(true))
+  }
+
+  function retryLoad() {
+    loadPoints()
+    reload()
   }
 
   useEffect(() => {
-    listPosPoints(tenantId, { activeOnly: true })
-      .then(setPoints)
-      .catch(() => setPoints([]))
+    loadPoints()
     reload()
     walkInRef.current = getWalkInClient(tenantId).catch(() => null)
     const unsubscribe = subscribeToOpenCarts(tenantId, () => {
@@ -109,11 +134,12 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
     if (!confirmCancel) return
     setCancelling(true)
     try {
+      await waitForCartSaves(confirmCancel.id)
       await deleteCart(confirmCancel.id)
       setConfirmCancel(null)
       reload()
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('pos.tabs.errors.cancel'))
+      toast.error(err instanceof Error ? err.message : t('pos.tabs.errors.cancel'))
     } finally {
       setCancelling(false)
     }
@@ -133,11 +159,12 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
     if (!confirmClose) return
     setClosing(true)
     try {
+      await waitForCartSaves(confirmClose.id)
       await closeCart(confirmClose.id)
       setConfirmClose(null)
       reload()
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('pos.tabs.errors.close'))
+      toast.error(err instanceof Error ? err.message : t('pos.tabs.errors.close'))
     } finally {
       setClosing(false)
     }
@@ -150,8 +177,10 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
    * cuenta, sin duplicar el flujo de cobro: lo ejecuta el PaymentDrawer. */
   async function handleChargeFromList(account: OpenCartSummary) {
     setPreparingCharge(account.id)
-    setError(null)
     try {
+      // Espera el guardado en segundo plano de un "Volver" reciente: se cobra
+      // lo último que dejó el cajero, no una versión vieja.
+      await waitForCartSaves(account.id)
       const cart = await getCart(account.id)
       if (!cart) throw new Error(t('pos.tabs.errors.charge'))
       const totals = await previewOrderTotals(
@@ -175,7 +204,7 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
       const posPointName = account.pos_point_id ? (points?.find((p) => p.id === account.pos_point_id)?.name ?? null) : null
       setCharge({ cartId: account.id, posPointName, totals, creditEnabled: client?.credit_enabled ?? false, storeCreditBalance })
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('pos.tabs.errors.charge'))
+      toast.error(err instanceof Error ? err.message : t('pos.tabs.errors.charge'))
     } finally {
       setPreparingCharge(null)
     }
@@ -183,7 +212,6 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
 
   async function handleCreate(posPointId: string | null) {
     setCreating(true)
-    setError(null)
     try {
       posOpenStart()
       let walkIn = await walkInRef.current
@@ -198,7 +226,7 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
       setCreatedCart(cart)
       setSelectedCartId(cart.id)
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('pos.tabs.errors.create'))
+      toast.error(err instanceof Error ? err.message : t('pos.tabs.errors.create'))
     } finally {
       setCreating(false)
     }
@@ -218,9 +246,12 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
         cartId={selectedCartId}
         initialCart={createdCart ?? undefined}
         points={points ?? []}
-        onBack={() => {
+        onBack={(pending) => {
           setSelectedCartId(null)
           reload()
+          // Guardado en segundo plano de "Volver": al terminar se relee el
+          // listado (el realtime también lo hace, esto no depende de él).
+          pending?.finally(reload)
         }}
         onClosed={() => {
           setSelectedCartId(null)
@@ -230,14 +261,33 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
     )
   }
 
-  if (points === null || accounts === null) return <PageSpinner />
+  if (points === null || accounts === null) {
+    if (loadError) {
+      return (
+        <div className="flex flex-col items-center gap-3 py-16 text-center">
+          <p className="text-sm text-red-700">{t('pos.tabs.errors.loadList')}</p>
+          <Button type="button" variant="outline" onClick={retryLoad}>
+            {t('common.actions.retry')}
+          </Button>
+        </div>
+      )
+    }
+    return <PageSpinner />
+  }
 
   const accountsByPoint = new Map(accounts.filter((a) => a.pos_point_id).map((a) => [a.pos_point_id as string, a]))
   const unassignedAccounts = accounts.filter((a) => !a.pos_point_id)
 
   return (
     <div className="space-y-4">
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
+      {loadError && (
+        <div className="flex items-center justify-between gap-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+          <span>{t('pos.tabs.errors.loadList')}</span>
+          <Button type="button" size="sm" variant="outline" onClick={retryLoad}>
+            {t('common.actions.retry')}
+          </Button>
+        </div>
+      )}
 
       {points.length > 0 && (
         <div>
@@ -252,8 +302,10 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
               if (account) {
                 // Una cuenta abierta sin ítems es una mesa que ya se cobró y
                 // todavía no se cerró (cobrar no cierra la cuenta) -- se
-                // marca para no confundirla con una recién abierta.
-                const isCharged = account.item_count === 0
+                // marca para no confundirla con una recién abierta (una mesa
+                // recién abierta también tiene 0 ítems: solo es cobrada si ya
+                // tiene algún cobro, mismo criterio que la tabla).
+                const isCharged = charged(account)
                 return (
                   <button
                     key={point.id}
@@ -415,7 +467,7 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
         ) : (
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {unassignedAccounts.map((account) => {
-              const isCharged = account.item_count === 0
+              const isCharged = charged(account)
               return (
                 <button
                   key={account.id}

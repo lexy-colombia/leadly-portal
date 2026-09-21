@@ -49,14 +49,18 @@ import {
   getCart,
 } from "../../lib/api/carts";
 import { useOrderTotalsPreview } from "../../lib/useOrderTotalsPreview";
-import { listClients } from "../../lib/api/clients";
+import { getClient } from "../../lib/api/clients";
+import { searchClientsForOrder } from "../../lib/api/orderContactSearch";
 import type { Client } from "../../types/domain";
-import { listOpportunities } from "../../lib/api/opportunities";
+import { listOpportunitiesForContact } from "../../lib/api/opportunities";
 import type { OpportunityWithRelations } from "../../lib/api/opportunities";
 import { listAddressesForContact } from "../../lib/api/addresses";
 import { listProducts } from "../../lib/api/products";
 import type { ProductWithImages } from "../../lib/api/products";
-import { listStockByWarehouse } from "../../lib/api/stockMovements";
+import {
+  listStockByWarehouse,
+  listStockByWarehouseForProducts,
+} from "../../lib/api/stockMovements";
 import type { ProductWarehouseStockRow } from "../../lib/api/stockMovements";
 import { listProductCategories } from "../../lib/api/productCategories";
 import { listBrands } from "../../lib/api/brands";
@@ -109,6 +113,8 @@ import { isNotBlank } from "../../lib/validation";
 import { formatDate, formatDateTime } from "../../lib/dates";
 import { formatPhoneDisplay } from "../../lib/phone";
 import { FieldError, InitialsAvatar, PageSpinner } from "@/components/atoms";
+import { Skeleton } from "@/components/ui/skeleton";
+import { startLoad, type LoadStatus } from "../../lib/loadStatus";
 import {
   ComboboxFilter,
   CurrencyInput,
@@ -422,9 +428,14 @@ function ThreadColumn({
   onToggleAdd,
   addAria,
   form,
+  error = false,
+  onRetry,
 }: {
   label: string;
   entries: OrderCommentWithAuthor[] | null;
+  /** La carga falló: en vez de un spinner eterno, mensaje + Reintentar. */
+  error?: boolean;
+  onRetry?: () => void;
   adding: boolean;
   onToggleAdd: () => void;
   addAria: string;
@@ -450,7 +461,17 @@ function ThreadColumn({
         </Button>
       </div>
       {adding && <div className="mb-2">{form}</div>}
-      {!entries && <PageSpinner />}
+      {!entries && !error && <PageSpinner />}
+      {!entries && error && (
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs text-red-700">
+          <span>{t("orders.detail.errors.loadComments")}</span>
+          {onRetry && (
+            <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+              {t("common.actions.retry")}
+            </Button>
+          )}
+        </div>
+      )}
       {entries && entries.length === 0 && !adding && (
         <p className="text-xs text-brand-400">
           {t("orders.detail.threadEmpty")}
@@ -560,6 +581,11 @@ export function OrderDetail() {
     isNew ? searchParams.get("cart") : null,
   );
   const [cartLoaded, setCartLoaded] = useState(!isNew || !cartId);
+  const [cartError, setCartError] = useState<string | null>(null);
+  // `id` vigente de la URL: las respuestas de un pedido anterior (navegar de
+  // /sales/A a /sales/B con A todavía en vuelo) se descartan con esto.
+  const idRef = useRef(id);
+  idRef.current = id;
   const [cancellingDraft, setCancellingDraft] = useState(false);
 
   // ----- items + shipping: guardado automático centralizado, ver el
@@ -571,6 +597,7 @@ export function OrderDetail() {
   // grande en el useEffect de autosave). -----
   const [items, setItems] = useState<OrderItemInput[]>([]);
   const [itemsLoaded, setItemsLoaded] = useState(false);
+  const [itemsError, setItemsError] = useState<string | null>(null);
   const [shippingDraft, setShippingDraft] = useState("0");
   const [savingDraft, setSavingDraft] = useState(false);
 
@@ -595,12 +622,29 @@ export function OrderDetail() {
   const [commentDraft, setCommentDraft] = useState("");
   const [savingComment, setSavingComment] = useState(false);
   const [paymentDrawerOpen, setPaymentDrawerOpen] = useState(false);
+  const [paymentsStatus, setPaymentsStatus] = useState<LoadStatus>("loading");
+  const [commentsStatus, setCommentsStatus] = useState<LoadStatus>("loading");
   // Reimprimir el ticket de un pedido de mostrador -- ver showShipping más
   // abajo, el mismo criterio que decide qué mostrar/ocultar por canal.
   const receiptPrinter = usePosReceiptPrinter(profile?.tenant_id);
   const [dispatchDrawerOpen, setDispatchDrawerOpen] = useState(false);
   const [dispatchStatus, setDispatchStatus] =
     useState<DispatchStatusSummary | null>(null);
+
+  // El despacho solo se consulta si el módulo está habilitado y no es un
+  // pedido de mostrador. Ahí, cargando/fallado/reintentándose = desconocido.
+  // (En una cotización no se cuenta como bloqueo: un despacho sobre una
+  // cotización no es un estado real y bloquearía el editor cada vez que se
+  // abre mientras llega la consulta, que depende del pedido.)
+  const dispatchApplies =
+    !!order &&
+    order.sales_channel !== "pos" &&
+    !!enabledModules?.has("dispatches");
+  const [dispatchLoad, setDispatchLoad] = useState<LoadStatus>("loading");
+  const dispatchUnknown =
+    dispatchApplies &&
+    order?.status !== "cotizacion" &&
+    dispatchLoad !== "ready";
 
   // ----- Factura DIAN -- vive DENTRO del pedido, no en una lista propia
   // (feedback explícito del usuario 2026-09-03: comprador/vendedor/ítems ya
@@ -674,6 +718,7 @@ export function OrderDetail() {
   // es true o el pedido está cancelado.
   const canOverrideConfirmedLock =
     !dispatchLocksOrder &&
+    !dispatchUnknown &&
     order?.status !== "cancelada" &&
     canEditInvoicedOrder;
   const [sendingInvoice, setSendingInvoice] = useState(false);
@@ -683,20 +728,52 @@ export function OrderDetail() {
   >(null);
   const [invoicePdfError, setInvoicePdfError] = useState<string | null>(null);
 
+  // Las facturas se piden por el `id` de la URL, no por `order.id`: así viajan
+  // en paralelo con getOrder en vez de esperar a que este llegue.
+  // `invoicesLoaded` evita decidir "el pedido no tiene factura" (y por tanto
+  // "es editable") antes de que la consulta responda.
+  // `invoicesLoaded` = ya respondió al menos una vez (o falló); NO es lo que
+  // desbloquea. Lo que decide es `invoicesStatus`: sin saber si hay una
+  // factura transmitida NO se ofrece nada destructivo (Anular) ni se habilita
+  // editar (ningún trigger bloquea cancelar, solo la UI). Cargando, fallada
+  // O reintentándose = desconocido = bloqueado.
+  const [invoicesLoaded, setInvoicesLoaded] = useState(false);
+  const [invoicesStatus, setInvoicesStatus] = useState<LoadStatus>("loading");
+  const invoicesError = invoicesStatus === "error";
+  const invoicesUnknown = !isNew && invoicesStatus !== "ready";
+
   function reloadInvoices() {
-    if (!order?.id) {
+    if (isNew || !id) {
       setInvoices([]);
+      setInvoicesStatus("ready");
+      setInvoicesLoaded(true);
       return;
     }
-    listSalesInvoicesForOrder(order.id)
-      .then(setInvoices)
-      .catch(() => setInvoices([]));
+    const reqId = id;
+    setInvoicesStatus(startLoad);
+    listSalesInvoicesForOrder(id)
+      .then((list) => {
+        if (idRef.current !== reqId) return;
+        setInvoices(list);
+        setInvoicesStatus("ready");
+      })
+      .catch(() => {
+        if (idRef.current !== reqId) return;
+        setInvoicesStatus("error");
+        toast.error(t("orders.detail.errors.loadInvoices"));
+      })
+      .finally(() => {
+        if (idRef.current === reqId) setInvoicesLoaded(true);
+      });
   }
 
   useEffect(() => {
+    setInvoicesLoaded(false);
+    setInvoicesStatus("loading");
+    setInvoices([]);
     reloadInvoices();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [order?.id]);
+  }, [id]);
 
   // ----- Notas crédito -- pedido explícito del usuario 2026-09-09, apenas
   // después de confirmar que el envío de facturas reales ya funciona.
@@ -970,15 +1047,24 @@ export function OrderDetail() {
   }
 
   function reloadDispatchStatus() {
-    if (
-      !order ||
-      order.sales_channel === "pos" ||
-      !enabledModules?.has("dispatches")
-    )
+    if (!order) return;
+    if (!dispatchApplies) {
+      setDispatchLoad("ready");
       return;
+    }
+    const reqId = order.id;
+    setDispatchLoad(startLoad);
     getDispatchStatusForOrder(order.id)
-      .then(setDispatchStatus)
-      .catch(() => setDispatchStatus(null));
+      .then((d) => {
+        if (idRef.current !== reqId) return;
+        setDispatchStatus(d);
+        setDispatchLoad("ready");
+      })
+      .catch(() => {
+        if (idRef.current !== reqId) return;
+        setDispatchLoad("error");
+        toast.error(t("orders.detail.errors.loadDispatch"));
+      });
   }
 
   useEffect(() => {
@@ -991,15 +1077,38 @@ export function OrderDetail() {
   // que cambia el contacto, no solo al montar, porque "Cambiar contacto" es
   // una acción real acá (ver handleContactSelect).
   const [storeCreditBalance, setStoreCreditBalance] = useState(0);
+  const [creditStatus, setCreditStatus] = useState<LoadStatus>("loading");
+  // Cliente vigente del pedido, para descartar respuestas de un saldo pedido
+  // con otro cliente (o de otro pedido) y no usar el `order` viejo de un
+  // closure.
+  const orderContactRef = useRef<string | null>(null);
+  orderContactRef.current = order?.contact_id ?? null;
 
-  useEffect(() => {
-    if (!order?.contact_id) {
+  function refreshCredit() {
+    const contact = orderContactRef.current;
+    if (!contact) {
       setStoreCreditBalance(0);
+      setCreditStatus("ready");
       return;
     }
-    getStoreCreditBalance(order.contact_id)
-      .then(setStoreCreditBalance)
-      .catch(() => setStoreCreditBalance(0));
+    setCreditStatus(startLoad);
+    getStoreCreditBalance(contact)
+      .then((b) => {
+        if (orderContactRef.current !== contact) return;
+        setStoreCreditBalance(b);
+        setCreditStatus("ready");
+      })
+      .catch(() => {
+        if (orderContactRef.current !== contact) return;
+        // Saldo DESCONOCIDO (no 0): mientras tanto no se registran pagos.
+        setCreditStatus("error");
+        toast.error(t("orders.detail.errors.loadCredit"));
+      });
+  }
+
+  useEffect(() => {
+    refreshCredit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order?.contact_id]);
 
   const [addressDrawerOpen, setAddressDrawerOpen] = useState(false);
@@ -1020,56 +1129,111 @@ export function OrderDetail() {
   const [stockShortfalls, setStockShortfalls] = useState<StockShortfall[]>([]);
   const [shortfallDialogOpen, setShortfallDialogOpen] = useState(false);
 
-  function reloadOrder() {
-    if (!id) return;
-    getOrder(id)
-      .then(setOrder)
-      .catch((err) =>
-        setLoadError(err.message ?? t("orders.detail.loadError")),
-      );
+  function reloadOrder(): Promise<void> {
+    if (!id) return Promise.resolve();
+    const reqId = id;
+    return getOrder(id)
+      .then((o) => {
+        if (idRef.current === reqId) setOrder(o);
+      })
+      .catch((err) => {
+        if (idRef.current === reqId)
+          setLoadError(err.message ?? t("orders.detail.loadError"));
+      });
   }
 
   function reloadItems() {
     if (!id) return;
-    listOrderItems(id).then((data) => {
-      const mapped = data.map((i) => ({
-        product_id: i.product_id,
-        variant_id: i.variant_id,
-        warehouse_id: i.warehouse_id,
-        product_name: i.product_name,
-        sku: i.sku,
-        quantity: i.quantity,
-        unit_price: i.unit_price,
-        discount_amount: i.discount_amount,
-      }));
-      setItems(mapped);
-      setItemsLoaded(true);
-    });
+    setItemsError(null);
+    const reqId = id;
+    listOrderItems(id)
+      .then((data) => {
+        if (idRef.current !== reqId) return;
+        const mapped = data.map((i) => ({
+          product_id: i.product_id,
+          variant_id: i.variant_id,
+          warehouse_id: i.warehouse_id,
+          product_name: i.product_name,
+          sku: i.sku,
+          quantity: i.quantity,
+          unit_price: i.unit_price,
+          discount_amount: i.discount_amount,
+        }));
+        setItems(mapped);
+        setItemsLoaded(true);
+      })
+      .catch(() => {
+        if (idRef.current !== reqId) return;
+        // NO se marca itemsLoaded: con datos vacíos el autosave "priming"
+        // tomaría [] como estado real y luego borraría las líneas reales.
+        setItemsError(t("orders.detail.errors.loadItems"));
+        toast.error(t("orders.detail.errors.loadItems"));
+      });
   }
 
+  // Pagos: si la carga falla NO se deja `payments=[]` (eso haría parecer que
+  // el pedido no tiene pagos y ofrecería cobrar el total otra vez). Se queda
+  // en `error`/`loading` = desconocido y se bloquea registrar/borrar/editar
+  // pagos hasta que una carga termine bien.
   function reloadPayments() {
     if (!id) return;
+    const reqId = id;
+    setPaymentsStatus(startLoad);
     listPaymentsForOrder(id)
-      .then(setPayments)
-      .catch(() => setPayments([]));
+      .then((list) => {
+        if (idRef.current !== reqId) return;
+        setPayments(list);
+        setPaymentsStatus("ready");
+      })
+      .catch(() => {
+        if (idRef.current !== reqId) return;
+        setPaymentsStatus("error");
+        toast.error(t("orders.detail.errors.loadPayments"));
+      });
     // Un pago con method='saldo_favor' descuenta el saldo del lado del
-    // servidor -- refrescarlo acá para que el drawer no siga ofreciendo un
-    // monto máximo desactualizado si se abre de nuevo.
-    if (order?.contact_id)
-      getStoreCreditBalance(order.contact_id)
-        .then(setStoreCreditBalance)
-        .catch(() => {});
+    // servidor -- se refresca para que el drawer no ofrezca un monto máximo
+    // desactualizado.
+    refreshCredit();
   }
 
   function reloadComments() {
     if (!id) return;
-    listCommentsForOrder(id).then(setComments);
+    const reqId = id;
+    setCommentsStatus(startLoad);
+    listCommentsForOrder(id)
+      .then((list) => {
+        if (idRef.current !== reqId) return;
+        setComments(list);
+        setCommentsStatus("ready");
+      })
+      .catch(() => {
+        if (idRef.current !== reqId) return;
+        setCommentsStatus("error");
+        toast.error(t("orders.detail.errors.loadComments"));
+      });
   }
 
   useEffect(() => {
     if (isNew) return;
     setOrder(undefined);
+    // Un pedido nunca hereda el estado del anterior: ítems, banderas de carga,
+    // snapshot sincronizado y lo derivado del pedido previo.
+    setItems([]);
     setItemsLoaded(false);
+    setItemsError(null);
+    lastSyncedSnapshotRef.current = "";
+    primedOrderIdRef.current = null;
+    setPayments(null);
+    setPaymentsStatus("loading");
+    setComments(null);
+    setCommentsStatus("loading");
+    setDispatchStatus(null);
+    setDispatchLoad("loading");
+    setStockShortfalls([]);
+    setOrderTotals(null);
+    setLoadError(null);
+    setActionError(null);
+    if (fullCatalogTenantRef.current !== tenantId) setCatalogStatus("idle");
     reloadOrder();
     reloadItems();
     reloadPayments();
@@ -1096,30 +1260,176 @@ export function OrderDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order?.id]);
 
+  // ----- Catálogos: solo lo que hace falta para PINTAR se pide al montar
+  // (bodegas, que son pocas y las usa el editor y el chequeo de faltantes).
+  // Los catálogos grandes (productos con 6 embeds, stock de todo el tenant,
+  // categorías, marcas) solo sirven para EDITAR el borrador, así que se piden
+  // únicamente cuando el pedido es editable (nuevo, o cotización sin
+  // candados). En un pedido confirmado/anulado/facturado solo se piden los
+  // productos de sus propias líneas (imagen, variante, disponible). Clientes y
+  // oportunidades ya no se cargan enteros: cliente actual por id, búsqueda
+  // en servidor al abrir el selector, oportunidades solo del cliente. -----
+  const tenantId = profile?.tenant_id;
+  const catalogEditable =
+    isNew ||
+    (!!order &&
+      order.status === "cotizacion" &&
+      invoicesLoaded &&
+      !invoicesError &&
+      !dianLocksOrder &&
+      !dispatchLocksOrder);
+  const fullCatalogTenantRef = useRef<string | null>(null);
+  // El editor NO se pinta hasta que productos + stock llegaron JUNTOS
+  // (Promise.all, todo o nada): con stock vacío mostraba "Disponible: 0" en
+  // rojo en cada línea y marcaba todo como Agotado.
+  const [catalogStatus, setCatalogStatus] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
+  // Datos base (ítems del pedido, o carrito retomado) cargados BIEN. Sin esto
+  // `items` es [] por carga en curso o fallida, y guardar/confirmar/crear
+  // con esa lista vacía borraría las líneas reales (incidente #28245).
+  const baseDataReady = isNew
+    ? cartLoaded && !cartError
+    : itemsLoaded && !itemsError;
+  // Confirmar/crear además exigen el catálogo (ver hasIncompleteVariantSelection,
+  // que con products vacío no valida nada): estado de carga, no regla de negocio.
+  const canCommit = baseDataReady && catalogStatus === "ready";
+  function guardBaseData(needCatalog = false): boolean {
+    if (needCatalog ? canCommit : baseDataReady) return true;
+    toast.error(t("orders.detail.errors.dataNotReady"));
+    return false;
+  }
+
   useEffect(() => {
-    if (!profile?.tenant_id) return;
-    listClients(profile.tenant_id)
-      .then(setContacts)
-      .catch(() => {});
-    listOpportunities(profile.tenant_id)
-      .then(setOpportunities)
-      .catch(() => {});
-    listProducts(profile.tenant_id, { page: 1, pageSize: 1000 })
-      .then(({ data }) => setProducts(data))
-      .catch(() => {});
-    listProductCategories(profile.tenant_id)
-      .then(setCategories)
-      .catch(() => {});
-    listBrands(profile.tenant_id)
-      .then(setBrands)
-      .catch(() => {});
-    listWarehouses(profile.tenant_id)
+    if (!tenantId) return;
+    listWarehouses(tenantId)
       .then(setWarehouses)
-      .catch(() => {});
-    listStockByWarehouse(profile.tenant_id)
-      .then(setStockRows)
-      .catch(() => {});
-  }, [profile?.tenant_id]);
+      .catch(() => toast.error(t("orders.detail.errors.loadCatalog")));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantId]);
+
+  function loadCatalog(kind: "full" | "lines", productIds: string[] = []) {
+    if (!tenantId) return;
+    // La carga por líneas es DE ESTE pedido: si al responder ya se navegó a
+    // otro, se descarta entera (el efecto de arriba pide la del nuevo pedido).
+    // El catálogo completo es del tenant, no del pedido, así que sirve a
+    // cualquier pedido y NO se descarta (descartarlo dejaría al siguiente
+    // pedido sin catálogo: el efecto no lo vuelve a pedir).
+    const reqId = idRef.current;
+    const stale = () => kind === "lines" && idRef.current !== reqId;
+    setCatalogStatus("loading");
+    const job =
+      kind === "full"
+        ? Promise.all([
+            listProducts(tenantId, { page: 1, pageSize: 1000 }),
+            listProductCategories(tenantId),
+            listBrands(tenantId),
+            listStockByWarehouse(tenantId),
+          ]).then(([prods, cats, brs, stock]) => {
+            setProducts(prods.data);
+            setCategories(cats);
+            setBrands(brs);
+            setStockRows(stock);
+          })
+        : Promise.all([
+            listProducts(tenantId, { page: 1, pageSize: 1000, productIds }),
+            listStockByWarehouseForProducts(tenantId, productIds),
+          ]).then(([prods, stock]) => {
+            if (stale()) return;
+            setProducts(prods.data);
+            setStockRows(stock);
+          });
+    job
+      .then(() => {
+        if (!stale()) setCatalogStatus("ready");
+      })
+      .catch(() => {
+        if (stale()) return;
+        if (kind === "full") fullCatalogTenantRef.current = null;
+        setCatalogStatus("error");
+        toast.error(t("orders.detail.errors.loadCatalog"));
+      });
+  }
+
+  useEffect(() => {
+    if (!tenantId || !catalogEditable) return;
+    if (fullCatalogTenantRef.current === tenantId) return;
+    fullCatalogTenantRef.current = tenantId;
+    loadCatalog("full");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantId, catalogEditable]);
+
+  // Pedido no editable: solo los productos y el stock de sus líneas.
+  useEffect(() => {
+    if (!tenantId || isNew || !order || !itemsLoaded || !invoicesLoaded) return;
+    if (catalogEditable || fullCatalogTenantRef.current === tenantId) return;
+    const productIds = Array.from(
+      new Set(items.map((i) => i.product_id).filter((p): p is string => !!p)),
+    );
+    if (productIds.length === 0) {
+      setCatalogStatus("ready");
+      return;
+    }
+    loadCatalog("lines", productIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantId, order?.id, itemsLoaded, invoicesLoaded, catalogEditable]);
+
+  function retryCatalog() {
+    if (catalogEditable) {
+      fullCatalogTenantRef.current = tenantId ?? null;
+      loadCatalog("full");
+    } else {
+      const productIds = Array.from(
+        new Set(items.map((i) => i.product_id).filter((p): p is string => !!p)),
+      );
+      loadCatalog("lines", productIds);
+    }
+  }
+
+  // Oportunidades: solo las del cliente elegido y solo si el pedido es
+  // editable (el combo está deshabilitado en uno bloqueado, que usa la
+  // oportunidad que ya viene embebida en `order`).
+  const [opportunitiesFor, setOpportunitiesFor] = useState<string | null>(null);
+  useEffect(() => {
+    if (!catalogEditable || !contactId) {
+      setOpportunities([]);
+      setOpportunitiesFor(null);
+      return;
+    }
+    let stale = false;
+    listOpportunitiesForContact(contactId)
+      .then((list) => {
+        if (stale) return;
+        setOpportunities(list);
+        setOpportunitiesFor(contactId);
+      })
+      .catch(() => {
+        if (!stale) toast.error(t("orders.detail.errors.loadOpportunities"));
+      });
+    return () => {
+      stale = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catalogEditable, contactId]);
+
+  // Cliente actual (y el del pedido, para `credit_enabled`): por id, no el
+  // listado completo. `contacts` es solo una caché de los que ya se vieron.
+  useEffect(() => {
+    const wanted = [contactId, order?.contact_id].filter(
+      (c): c is string => !!c && !contacts.some((k) => k.id === c),
+    );
+    for (const cid of new Set(wanted)) {
+      getClient(cid)
+        .then((client) => {
+          if (!client) return;
+          setContacts((prev) =>
+            prev.some((c) => c.id === client.id) ? prev : [...prev, client],
+          );
+        })
+        .catch(() => toast.error(t("orders.detail.errors.loadClient")));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contactId, order?.contact_id]);
 
   useEffect(() => {
     if (!contactId) {
@@ -1150,15 +1460,18 @@ export function OrderDetail() {
   // handleContactSelect).
   useEffect(() => {
     if (!isNew) return;
+    // Solo se decide cuando la lista ya es la de ESTE cliente (antes se
+    // cargaban todas y la lista siempre estaba completa).
     if (
       opportunityId &&
+      opportunitiesFor === contactId &&
       !opportunities.some(
         (o) => o.id === opportunityId && o.contact_id === contactId,
       )
     )
       setOpportunityId("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contactId]);
+  }, [contactId, opportunitiesFor]);
 
   useEffect(() => {
     if (!isNew) return;
@@ -1215,15 +1528,44 @@ export function OrderDetail() {
   const [orderTotals, setOrderTotals] = useState<OrderTotalsBreakdown | null>(
     null,
   );
+  const [orderTotalsLoading, setOrderTotalsLoading] = useState(false);
+  const [orderTotalsError, setOrderTotalsError] = useState(false);
+  const [totalsNonce, setTotalsNonce] = useState(0);
+  // Se recalcula solo cuando cambia lo que de verdad lo determina (el pedido
+  // o sus cifras/updated_at), no en cada recarga de `order` con el mismo
+  // contenido (cambio de estado de envío, factura, etc. no tocan ítems).
   useEffect(() => {
     if (!order) {
       setOrderTotals(null);
+      setOrderTotalsError(false);
       return;
     }
+    let stale = false;
+    setOrderTotalsLoading(true);
+    setOrderTotalsError(false);
     getOrderTotalsBreakdown(order)
-      .then(setOrderTotals)
-      .catch(() => setOrderTotals(null));
-  }, [order]);
+      .then((t) => !stale && setOrderTotals(t))
+      .catch(() => {
+        if (stale) return;
+        setOrderTotals(null);
+        setOrderTotalsError(true);
+        toast.error(t("orders.detail.errors.loadTotals"));
+      })
+      .finally(() => !stale && setOrderTotalsLoading(false));
+    return () => {
+      stale = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    order?.id,
+    order?.updated_at,
+    order?.subtotal,
+    order?.discount_total,
+    order?.tax_total,
+    order?.shipping,
+    order?.total,
+    totalsNonce,
+  ]);
   const { totals: draftTotalsPreview } = useOrderTotalsPreview(
     isNew ? items : [],
     Number(shippingDraft) || 0,
@@ -1252,7 +1594,37 @@ export function OrderDetail() {
   const primedOrderIdRef = useRef<string | null>(null);
   const lastSyncedSnapshotRef = useRef<string>("");
 
-  function currentDraftSnapshot(): string {
+  // Valores más recientes del borrador, actualizados en cada render. Los
+  // guardados (que corren en una cola, después de esperar a otros) leen de
+  // aquí en el momento de ejecutarse y NO del closure del render que los
+  // programó: así siempre guardan/confirman la última versión.
+  const draftRef = useRef({
+    contactId,
+    opportunityId,
+    validUntil,
+    shippingAddressId,
+    billingAddressId,
+    shippingDraft,
+    items,
+    orderStatus: order?.status ?? null,
+    products,
+    baseDataReady,
+  });
+  draftRef.current = {
+    contactId,
+    opportunityId,
+    validUntil,
+    shippingAddressId,
+    billingAddressId,
+    shippingDraft,
+    items,
+    orderStatus: order?.status ?? null,
+    products,
+    baseDataReady,
+  };
+  type DraftValues = typeof draftRef.current;
+
+  function snapshotOf(d: DraftValues): string {
     // En un pedido confirmado el autoguardado solo existe para cambiar el
     // cliente (permiso `sales.edit_invoiced_order`), así que solo eso cuenta
     // como edición. Incidente real 2026-09-12 (pedido #28245): con los ítems
@@ -1260,42 +1632,90 @@ export function OrderDetail() {
     // un cambio nuevo y volvía a guardar en bucle; una de esas recargas leyó
     // la lista vacía a mitad del reemplazo y la guardó -- el pedido quedó
     // sin productos.
-    if (order && order.status !== "cotizacion")
-      return JSON.stringify({ contactId });
+    if (d.orderStatus && d.orderStatus !== "cotizacion")
+      return JSON.stringify({ contactId: d.contactId });
     return JSON.stringify({
-      contactId,
-      opportunityId,
-      validUntil,
-      shippingAddressId,
-      billingAddressId,
-      shippingDraft,
-      items,
+      contactId: d.contactId,
+      opportunityId: d.opportunityId,
+      validUntil: d.validUntil,
+      shippingAddressId: d.shippingAddressId,
+      billingAddressId: d.billingAddressId,
+      shippingDraft: d.shippingDraft,
+      items: d.items,
     });
   }
+  function currentDraftSnapshot(): string {
+    return snapshotOf(draftRef.current);
+  }
 
-  async function saveDraft(orderId: string, snapshot: string) {
-    if (hasIncompleteVariantSelection(items, products)) {
+  // Cola de escrituras del pedido/carrito: NUNCA dos calculate-order (ni
+  // confirmar/crear) del mismo pedido a la vez. persistOrderItems borra e
+  // inserta las líneas sin transacción, así que dos guardados intercalados
+  // duplican líneas (y el trigger de confirmación descontaría stock doble).
+  // Mismo patrón que enqueueCartSave del POS (lib/api/carts.ts).
+  const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+  function enqueueSave<T>(job: () => Promise<T>): Promise<T> {
+    const run = saveQueueRef.current.then(job, job);
+    saveQueueRef.current = run.catch(() => undefined);
+    return run;
+  }
+  // Confirmar/crear ya en curso (cubre el doble clic en el mismo tick, antes
+  // de que el estado deshabilite el botón).
+  const opInFlightRef = useRef(false);
+  // El carrito ya se convirtió en pedido o se descartó: ningún autosave
+  // pendiente puede volver a escribirlo.
+  const cartConsumedRef = useRef(false);
+  const cartIdRef = useRef<string | null>(cartId);
+  function applyCartId(next: string | null) {
+    cartIdRef.current = next;
+    setCartId(next);
+  }
+  useEffect(() => {
+    if (isNew) cartConsumedRef.current = false;
+  }, [isNew]);
+
+  /** Guarda el borrador del pedido (SIN cola: se llama desde dentro de la
+   * cola). Lee lo más reciente del borrador; si ya coincide con lo guardado,
+   * no hace nada y devuelve true. Devuelve true si el borrador quedó guardado
+   * en el servidor (los llamadores que van a confirmar no deben seguir si es
+   * false). */
+  async function saveDraftNow(orderId: string): Promise<boolean> {
+    // Pedido ya distinto (navegó de A a B): el borrador en memoria es de B.
+    if (idRef.current !== orderId) return false;
+    const d = draftRef.current;
+    if (!d.baseDataReady) {
+      toast.error(t("orders.detail.errors.dataNotReady"));
+      return false;
+    }
+    const snapshot = snapshotOf(d);
+    if (snapshot === lastSyncedSnapshotRef.current) return true;
+    if (hasIncompleteVariantSelection(d.items, d.products)) {
       setActionError(t("orders.itemsEditor.variantRequired"));
-      return;
+      return false;
     }
     setActionError(null);
     setSavingDraft(true);
     try {
       // Pedido confirmado: solo viaja el cliente -- nunca los ítems, que
       // el servidor igual rechaza reescribir ahí (ver calculate-order).
-      const confirmedOrder = !!order && order.status !== "cotizacion";
+      const confirmedOrder = !!d.orderStatus && d.orderStatus !== "cotizacion";
       const { stockShortfalls: shortfalls } = await calculateOrder(
         confirmedOrder
-          ? { order_id: orderId, contact_id: contactId, shipping: 0, items: [] }
+          ? {
+              order_id: orderId,
+              contact_id: d.contactId,
+              shipping: 0,
+              items: [],
+            }
           : {
               order_id: orderId,
-              contact_id: contactId,
-              opportunity_id: opportunityId || null,
-              valid_until: validUntil || null,
-              shipping_address_id: shippingAddressId || null,
-              billing_address_id: billingAddressId || null,
-              shipping: Number(shippingDraft) || 0,
-              items,
+              contact_id: d.contactId,
+              opportunity_id: d.opportunityId || null,
+              valid_until: d.validUntil || null,
+              shipping_address_id: d.shippingAddressId || null,
+              billing_address_id: d.billingAddressId || null,
+              shipping: Number(d.shippingDraft) || 0,
+              items: d.items,
             },
       );
       // Mismo estado que el chequeo pre-confirmar de más abajo -- ahora se
@@ -1303,15 +1723,26 @@ export function OrderDetail() {
       // confirmar.
       setStockShortfalls(shortfalls);
       lastSyncedSnapshotRef.current = snapshot;
-      reloadOrder();
-      reloadItems();
+      // Solo se refresca la cabecera (totales). Los ítems NO se releen: el
+      // estado local ya es exactamente lo que se acaba de guardar, y
+      // reemplazarlo con lo que devuelve el servidor podía pisar lo que el
+      // agente editó mientras viajaba el guardado (y fue el origen del bucle
+      // de guardado del incidente del pedido #28245).
+      void reloadOrder();
+      return true;
     } catch (err) {
       setActionError(
         err instanceof Error ? err.message : t("orders.drawer.errors.save"),
       );
+      return false;
     } finally {
       setSavingDraft(false);
     }
+  }
+
+  /** Autoguardado / guardado explícito: serializado en la cola. */
+  function saveDraft(orderId: string): Promise<boolean> {
+    return enqueueSave(() => saveDraftNow(orderId));
   }
 
   useEffect(() => {
@@ -1345,12 +1776,16 @@ export function OrderDetail() {
     if (snapshot === lastSyncedSnapshotRef.current) return;
 
     const timer = setTimeout(() => {
-      void saveDraft(order.id, snapshot);
+      void saveDraft(order.id);
     }, 2000);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     order?.id,
+    // Al pasar a confirmada el efecto se reejecuta y su cleanup cancela el
+    // timer de autosave pendiente (si no, a los 2 s iría un calculate-order
+    // a un pedido ya confirmado).
+    order?.status,
     itemsLoaded,
     contactId,
     opportunityId,
@@ -1371,34 +1806,52 @@ export function OrderDetail() {
   const primedCartRef = useRef(false);
   const lastSyncedCartSnapshotRef = useRef("");
 
-  async function syncCartDraft(): Promise<string> {
-    const { cart, stockShortfalls: shortfalls } = await saveCartDraft({
-      cart_id: cartId,
-      contact_id: contactId,
-      opportunity_id: opportunityId || null,
-      valid_until: validUntil || null,
-      shipping_address_id: shippingAddressId || null,
-      billing_address_id: billingAddressId || null,
-      shipping: Number(shippingDraft) || 0,
-      items,
-      origin: "portal",
-    });
-    // Mismo estado que ya usaba el chequeo pre-confirmar (findStockShortfalls
-    // más abajo) -- ahora se actualiza en vivo con cada autoguardado, en vez
-    // de solo calcularse recién al intentar confirmar. OrderItemsEditor ya
-    // sabía pintar estas líneas en rojo (prop `shortfalls`).
-    setStockShortfalls(shortfalls);
-    if (cart.id !== cartId) {
-      setCartId(cart.id);
-      const next = new URLSearchParams(searchParams);
-      next.set("cart", cart.id);
-      setSearchParams(next, { replace: true });
+  /** Guarda el carrito del modo "nuevo" (SIN cola: se llama desde dentro de
+   * la cola). Lee lo más reciente del borrador y el id de carrito vigente
+   * (`cartIdRef`), así dos guardados seguidos nunca crean dos carritos. */
+  async function syncCartDraftNow(): Promise<void> {
+    if (cartConsumedRef.current) return;
+    const d = draftRef.current;
+    if (!d.baseDataReady || !isNotBlank(d.contactId)) return;
+    const snapshot = snapshotOf(d);
+    if (snapshot === lastSyncedCartSnapshotRef.current) return;
+    setSavingDraft(true);
+    try {
+      const { cart, stockShortfalls: shortfalls } = await saveCartDraft({
+        cart_id: cartIdRef.current,
+        contact_id: d.contactId,
+        opportunity_id: d.opportunityId || null,
+        valid_until: d.validUntil || null,
+        shipping_address_id: d.shippingAddressId || null,
+        billing_address_id: d.billingAddressId || null,
+        shipping: Number(d.shippingDraft) || 0,
+        items: d.items,
+        origin: "portal",
+      });
+      // Mismo estado que ya usaba el chequeo pre-confirmar (findStockShortfalls
+      // más abajo) -- ahora se actualiza en vivo con cada autoguardado, en vez
+      // de solo calcularse recién al intentar confirmar. OrderItemsEditor ya
+      // sabía pintar estas líneas en rojo (prop `shortfalls`).
+      setStockShortfalls(shortfalls);
+      if (cart.id !== cartIdRef.current) {
+        applyCartId(cart.id);
+        const next = new URLSearchParams(window.location.search);
+        next.set("cart", cart.id);
+        setSearchParams(next, { replace: true });
+      }
+      lastSyncedCartSnapshotRef.current = snapshot;
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : t("orders.drawer.errors.save"),
+      );
+    } finally {
+      setSavingDraft(false);
     }
-    return cart.id;
   }
 
-  useEffect(() => {
-    if (!isNew || !cartId || cartLoaded) return;
+  function loadCart() {
+    if (!cartId) return;
+    setCartError(null);
     getCart(cartId)
       .then((cart) => {
         if (cart) {
@@ -1420,9 +1873,28 @@ export function OrderDetail() {
               discount_amount: i.discount_amount,
             })),
           );
+        } else {
+          // El carrito ya no existe: se arranca en blanco SIN arrastrar su id
+          // (un guardado posterior con ese cart_id fallaría o pisaría datos).
+          applyCartId(null);
+          const next = new URLSearchParams(searchParams);
+          next.delete("cart");
+          setSearchParams(next, { replace: true });
         }
+        // Solo se marca cargado si la consulta respondió: si falló, no se
+        // arma ningún autosave ni se puede crear (guardaría un carrito vacío
+        // sobre las líneas ya guardadas).
+        setCartLoaded(true);
       })
-      .finally(() => setCartLoaded(true));
+      .catch(() => {
+        setCartError(t("orders.detail.errors.loadCart"));
+        toast.error(t("orders.detail.errors.loadCart"));
+      });
+  }
+
+  useEffect(() => {
+    if (!isNew || !cartId || cartLoaded) return;
+    loadCart();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isNew, cartId, cartLoaded]);
 
@@ -1443,17 +1915,7 @@ export function OrderDetail() {
     const snapshot = currentDraftSnapshot();
     if (snapshot === lastSyncedCartSnapshotRef.current) return;
     const timer = setTimeout(() => {
-      setSavingDraft(true);
-      syncCartDraft()
-        .then(() => {
-          lastSyncedCartSnapshotRef.current = snapshot;
-        })
-        .catch((err) =>
-          setActionError(
-            err instanceof Error ? err.message : t("orders.drawer.errors.save"),
-          ),
-        )
-        .finally(() => setSavingDraft(false));
+      void enqueueSave(syncCartDraftNow);
     }, 2000);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1502,25 +1964,69 @@ export function OrderDetail() {
     handleContactSelect(client?.id ?? null);
   }
 
-  /** Filtra la lista de contactos que ya está en memoria (cargada entera al
-   * abrir el pedido, ver listClients más arriba) -- a diferencia del POS
-   * (searchPosClients, catálogo potencialmente enorme), acá no hace falta
-   * ningún viaje de red para buscar. */
+  /** Búsqueda en servidor, solo cuando el agente abre/teclea en el selector
+   * (antes se cargaba el listado entero del tenant al abrir cada pedido).
+   * Los resultados se guardan en la caché `contacts` para que, al elegir uno,
+   * el resto de la pantalla lo encuentre por id. */
   async function searchOrderContacts(query: string): Promise<Client[]> {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
-    return contacts
-      .filter(
-        (c) =>
-          c.full_name.toLowerCase().includes(q) ||
-          (c.document_number ?? "").toLowerCase().includes(q) ||
-          c.phone.includes(q),
-      )
-      .slice(0, 8);
+    if (!query.trim() || !profile?.tenant_id) return [];
+    let found: Client[];
+    try {
+      found = await searchClientsForOrder(profile.tenant_id, query);
+    } catch {
+      toast.error(t("orders.detail.errors.searchClients"));
+      return [];
+    }
+    // Las respuestas obsoletas las descarta ClientPickerCard (bandera
+    // `cancelled` de su efecto de búsqueda); acá solo se cachea.
+    setContacts((prev) => {
+      const known = new Set(prev.map((c) => c.id));
+      const added = found.filter((c) => !known.has(c.id));
+      return added.length > 0 ? [...prev, ...added] : prev;
+    });
+    return found;
   }
 
   function handleOpportunitySelect(newId: string | null) {
     setOpportunityId(newId ?? "");
+  }
+
+  /** Cotización -> venta. Todo dentro de la cola: espera a cualquier
+   * autoguardado en vuelo, guarda la última versión (si hace falta), revisa
+   * faltantes con lo guardado y recién ahí confirma. Nunca dos guardados o
+   * confirmaciones simultáneos. */
+  async function confirmQuote(orderId: string, tenantId: string) {
+    if (opInFlightRef.current) return;
+    opInFlightRef.current = true;
+    setAdvancingStatus(true);
+    try {
+      await enqueueSave(async () => {
+        // Si falla, NO se confirma (el error ya quedó en pantalla).
+        if (!(await saveDraftNow(orderId))) return;
+        // Stock is only checked at the exact moment a cotización turns into a
+        // venta -- quoting is allowed to exceed what's on hand, confirming
+        // isn't (explicit product decision).
+        const shortfalls = await findStockShortfalls(
+          tenantId,
+          draftRef.current.items,
+          warehouses,
+        );
+        if (shortfalls.length > 0) {
+          setStockShortfalls(shortfalls);
+          setShortfallDialogOpen(true);
+          return;
+        }
+        await updateOrderStatus(orderId, "confirmada");
+        await reloadOrder();
+      });
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : t("orders.drawer.errors.save"),
+      );
+    } finally {
+      setAdvancingStatus(false);
+      opInFlightRef.current = false;
+    }
   }
 
   async function handleStatusSelect(newStatus: OrderStatus) {
@@ -1529,29 +2035,13 @@ export function OrderDetail() {
       return;
     }
     if (!order || !profile?.tenant_id) return;
+    // Nunca guardar ni confirmar con los ítems sin cargar (o fallidos): se
+    // guardaría [] y se borrarían las líneas reales.
+    if (!guardBaseData(order.status === "cotizacion")) return;
     setActionError(null);
-    // Stock is only checked at the exact moment a cotización turns into a
-    // venta -- quoting is allowed to exceed what's on hand, confirming
-    // isn't (explicit product decision). Void (-> cancelada) never needs
-    // this check.
     if (order.status === "cotizacion" && newStatus === "confirmada") {
-      try {
-        const shortfalls = await findStockShortfalls(
-          profile.tenant_id,
-          items,
-          warehouses,
-        );
-        if (shortfalls.length > 0) {
-          setStockShortfalls(shortfalls);
-          setShortfallDialogOpen(true);
-          return;
-        }
-      } catch (err) {
-        setActionError(
-          err instanceof Error ? err.message : t("orders.drawer.errors.save"),
-        );
-        return;
-      }
+      await confirmQuote(order.id, profile.tenant_id);
+      return;
     }
     setAdvancingStatus(true);
     updateOrderStatus(order.id, newStatus)
@@ -1574,7 +2064,7 @@ export function OrderDetail() {
     // pendiente no se bloquea (puede ser una decisión real del negocio),
     // pero exige una confirmación explícita en vez de aplicarse directo --
     // ver pendingDeliveryStatus/ConfirmDialog más abajo.
-    if (newStatus !== "pendiente" && balance > 0) {
+    if (newStatus !== "pendiente" && (!paymentsReady || balance > 0)) {
       setPendingDeliveryStatus(newStatus);
       return;
     }
@@ -1645,72 +2135,78 @@ export function OrderDetail() {
     setTouched(true);
     setActionError(null);
     if (!isNotBlank(contactId) || !profile?.tenant_id) return;
-
-    const validItems = items.filter((item) => isNotBlank(item.product_name));
-    if (hasIncompleteVariantSelection(validItems, products)) {
-      setActionError(t("orders.itemsEditor.variantRequired"));
-      return;
-    }
-
-    // Same rule as handleStatusSelect: creating directly as a venta (not a
-    // cotización) skips the separate "convert" step but not this check.
-    if (status !== "cotizacion") {
-      try {
-        const shortfalls = await findStockShortfalls(
-          profile.tenant_id,
-          validItems,
-          warehouses,
-        );
-        if (shortfalls.length > 0) {
-          setStockShortfalls(shortfalls);
-          setShortfallDialogOpen(true);
-          return;
-        }
-      } catch (err) {
-        setActionError(
-          err instanceof Error ? err.message : t("orders.detail.errors.create"),
-        );
-        return;
-      }
-    }
+    if (!guardBaseData(true)) return;
+    if (opInFlightRef.current) return;
+    opInFlightRef.current = true;
+    const tenantId = profile.tenant_id;
 
     setCreating(true);
     try {
-      // Guarda el estado final en el carrito (por si el agente apretó
-      // "Crear pedido" antes de que corriera el autosave de 2s) y recién
-      // ahí lo convierte en el pedido real -- create-order siempre lo
-      // crea en 'cotizacion' (ver comentario de cabecera en esa Edge
-      // Function), si el agente eligió "Confirmada" en este formulario el
-      // paso a confirmada es una segunda llamada, ahora que los ítems ya
-      // existen de verdad y el trigger de confirmación tiene algo real
-      // contra qué validar stock.
-      const { cart, stockShortfalls: shortfalls } = await saveCartDraft({
-        cart_id: cartId,
-        contact_id: contactId,
-        opportunity_id: opportunityId || null,
-        valid_until: validUntil || null,
-        shipping_address_id: shippingAddressId || null,
-        billing_address_id: billingAddressId || null,
-        shipping: Number(shippingDraft) || 0,
-        items: validItems,
-        origin: "portal",
+      // Todo en la cola: espera un autoguardado del carrito en vuelo (que
+      // puede estar creando el carrito) y usa el id de carrito vigente.
+      await enqueueSave(async () => {
+        const d = draftRef.current;
+        const validItems = d.items.filter((item) =>
+          isNotBlank(item.product_name),
+        );
+        if (hasIncompleteVariantSelection(validItems, d.products)) {
+          setActionError(t("orders.itemsEditor.variantRequired"));
+          return;
+        }
+
+        // Same rule as confirmQuote: creating directly as a venta (not a
+        // cotización) skips the separate "convert" step but not this check.
+        if (status !== "cotizacion") {
+          const shortfalls = await findStockShortfalls(
+            tenantId,
+            validItems,
+            warehouses,
+          );
+          if (shortfalls.length > 0) {
+            setStockShortfalls(shortfalls);
+            setShortfallDialogOpen(true);
+            return;
+          }
+        }
+
+        // Guarda el estado final en el carrito (por si el agente apretó
+        // "Crear pedido" antes de que corriera el autosave de 2s) y recién
+        // ahí lo convierte en el pedido real -- create-order siempre lo
+        // crea en 'cotizacion' (ver comentario de cabecera en esa Edge
+        // Function), si el agente eligió "Confirmada" en este formulario el
+        // paso a confirmada es una segunda llamada, ahora que los ítems ya
+        // existen de verdad y el trigger de confirmación tiene algo real
+        // contra qué validar stock.
+        const { cart, stockShortfalls: shortfalls } = await saveCartDraft({
+          cart_id: cartIdRef.current,
+          contact_id: d.contactId,
+          opportunity_id: d.opportunityId || null,
+          valid_until: d.validUntil || null,
+          shipping_address_id: d.shippingAddressId || null,
+          billing_address_id: d.billingAddressId || null,
+          shipping: Number(d.shippingDraft) || 0,
+          items: validItems,
+          origin: "portal",
+        });
+        setStockShortfalls(shortfalls);
+        applyCartId(cart.id);
+        // create-order valida stock real antes de crear nada (rechaza sin
+        // dejar ninguna fila huérfana si algo no alcanza) -- el pre-chequeo
+        // de arriba (findStockShortfalls) es solo para avisar antes, esto es
+        // lo que de verdad bloquea si igual llegó a pasar algo.
+        const created = await createOrderFromCart(cart.id);
+        cartConsumedRef.current = true;
+        if (status === "confirmada")
+          await updateOrderStatus(created.id, "confirmada");
+        navigate(`/app/sales/${created.id}`, { replace: true });
       });
-      setStockShortfalls(shortfalls);
-      setCartId(cart.id);
-      // create-order valida stock real antes de crear nada (rechaza sin
-      // dejar ninguna fila huérfana si algo no alcanza) -- el pre-chequeo
-      // de arriba (findStockShortfalls) es solo para avisar antes, esto es
-      // lo que de verdad bloquea si igual llegó a pasar algo.
-      const created = await createOrderFromCart(cart.id);
-      if (status === "confirmada")
-        await updateOrderStatus(created.id, "confirmada");
-      navigate(`/app/sales/${created.id}`, { replace: true });
     } catch (err) {
       setActionError(
         err instanceof Error ? err.message : t("orders.detail.errors.create"),
       );
     } finally {
       setCreating(false);
+      opInFlightRef.current = false;
     }
   }
 
@@ -1720,13 +2216,18 @@ export function OrderDetail() {
    * había guardado ningún carrito (el agente entró y se fue sin cargar
    * nada). */
   async function handleCancelDraft() {
-    if (!cartId) {
+    if (!cartIdRef.current && !savingDraft) {
       navigate("/app/sales");
       return;
     }
     setCancellingDraft(true);
     try {
-      await deleteCart(cartId);
+      // En la cola: espera a un autoguardado en vuelo (que podría estar
+      // creando el carrito) y evita que uno posterior lo vuelva a escribir.
+      await enqueueSave(async () => {
+        cartConsumedRef.current = true;
+        if (cartIdRef.current) await deleteCart(cartIdRef.current);
+      });
       navigate("/app/sales");
     } catch (err) {
       setActionError(
@@ -1756,6 +2257,12 @@ export function OrderDetail() {
 
   async function handleDeletePayment() {
     if (!deletePaymentId) return;
+    if (!paymentsReady) {
+      // Los pagos dejaron de estar confirmados con el diálogo abierto.
+      setDeletePaymentId(null);
+      toast.error(t("orders.detail.errors.paymentsNotReady"));
+      return;
+    }
     setActionError(null);
     try {
       await deletePayment(deletePaymentId);
@@ -1773,6 +2280,13 @@ export function OrderDetail() {
 
   async function handleVoid() {
     if (!order) return;
+    if (invoicesUnknown) {
+      // El estado de facturación dejó de ser conocido con el diálogo abierto
+      // (reintento en vuelo o falló): no se anula, se avisa y se cierra.
+      setConfirmingVoid(false);
+      toast.error(t("orders.detail.errors.voidBlocked"));
+      return;
+    }
     setVoiding(true);
     try {
       await updateOrderStatus(order.id, "cancelada");
@@ -1826,6 +2340,12 @@ export function OrderDetail() {
   }
 
   const balance = order ? Math.max(0, order.total - totalPaid) : 0;
+  // Pagos + saldo a favor cargados BIEN. Sin eso `balance` no es real (con
+  // payments sin cargar sería el total completo) y NO se registra, edita ni
+  // borra ningún pago, ni se factura ni se despacha "como pagado".
+  const paymentsReady =
+    paymentsStatus === "ready" &&
+    (!order?.contact_id || creditStatus === "ready");
   const selectedContact = contacts.find((c) => c.id === contactId);
   /** Un pedido de mostrador (POS) no tiene nada que enviar: ni dirección de
    * envío, ni estado de entrega, ni despachos, ni costo de envío. En vez de
@@ -1841,7 +2361,11 @@ export function OrderDetail() {
   const locked =
     !isNew &&
     !!order &&
-    (dianLocksOrder || dispatchLocksOrder || order.status === "cancelada");
+    (dianLocksOrder ||
+      dispatchLocksOrder ||
+      dispatchUnknown ||
+      invoicesUnknown ||
+      order.status === "cancelada");
   // Bug real reportado por el usuario: cliente/direcciones/oportunidad/
   // envío/ítems se editaban igual (sin ningún candado visual) en un pedido
   // ya `confirmada` -- pero el autosave (ver saveDraft más abajo) se niega
@@ -1851,7 +2375,13 @@ export function OrderDetail() {
   // lo compensara. `draftLocked` es el candado real de todo ese borrador
   // (mismos 7 campos de currentDraftSnapshot) -- `locked` a secas sigue
   // existiendo solo para el botón "Anular", que es un caso aparte.
-  const draftLocked = locked || (!!order && order.status !== "cotizacion");
+  // Mientras confirma/crea, el borrador también queda bloqueado: una edición
+  // en ese tramo sería un guardado más contra un pedido a punto de cambiar.
+  const draftLocked =
+    locked ||
+    (!!order && order.status !== "cotizacion") ||
+    advancingStatus ||
+    creating;
   // Excepción angosta al candado de arriba (pedido explícito del usuario,
   // 2026-09-11 -- ampliada en una segunda ronda el mismo día a CUALQUIER
   // pedido confirmado, no solo el ya facturado): quien tenga
@@ -1985,7 +2515,7 @@ export function OrderDetail() {
   // real a la DIAN de una venta que todavía no está cobrada del todo -- el
   // candado real está en dian-submit/index.ts (rechaza aunque alguien llame
   // la función directo), esto es solo la parte de UX.
-  const isFullyPaid = balance === 0;
+  const isFullyPaid = paymentsReady && balance === 0;
   const canSendInvoice =
     latestInvoice?.status === "pending" && isInvoiceAdmin && isFullyPaid;
   // Reintentar sólo tiene sentido sobre un intento que ya fracasó: el índice
@@ -2364,20 +2894,44 @@ export function OrderDetail() {
             type="button"
             variant="default"
             size="icon-sm"
-            onClick={() => setPaymentDrawerOpen(true)}
+            onClick={() => {
+              if (!paymentsReady) {
+                toast.error(t("orders.detail.errors.paymentsNotReady"));
+                return;
+              }
+              setPaymentDrawerOpen(true);
+            }}
+            disabled={!paymentsReady}
             aria-label={t("orders.detail.registerPaymentAria")}
           >
             <PlusIcon width={13} height={13} />
           </Button>
         }
       >
-        {balance > 0 ? (
+        {!paymentsReady ? (
+          paymentsStatus === "error" || creditStatus === "error" ? (
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs text-red-700">
+              <span>{t("orders.detail.errors.loadPayments")}</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={reloadPayments}
+              >
+                {t("common.actions.retry")}
+              </Button>
+            </div>
+          ) : (
+            <PageSpinner />
+          )
+        ) : balance > 0 ? (
           <div className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-700">
             {t("orders.detail.pendingBalance", {
               amount: formatCurrency(balance, order.currency),
             })}
           </div>
         ) : (
+          paymentsReady &&
           payments &&
           payments.length > 0 && (
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-700">
@@ -2405,6 +2959,7 @@ export function OrderDetail() {
                   </span>
                   {(order.status === "cotizacion" ||
                     canOverrideConfirmedLock) &&
+                    paymentsReady &&
                     p.method !== "wompi" && (
                       <PaymentMethodEditor
                         payment={p}
@@ -2420,7 +2975,8 @@ export function OrderDetail() {
                     <button
                       type="button"
                       onClick={() => setDeletePaymentId(p.id)}
-                      className="text-brand-300 hover:text-red-600"
+                      disabled={!paymentsReady}
+                      className="text-brand-300 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
                       aria-label={t("orders.detail.deletePaymentAria")}
                     >
                       <TrashIcon width={11} height={11} />
@@ -2438,11 +2994,14 @@ export function OrderDetail() {
             ))}
           </ul>
         )}
-        {payments && payments.length === 0 && balance === 0 && (
-          <p className="text-xs text-brand-400">
-            {t("orders.detail.noPayments")}
-          </p>
-        )}
+        {paymentsReady &&
+          payments &&
+          payments.length === 0 &&
+          balance === 0 && (
+            <p className="text-xs text-brand-400">
+              {t("orders.detail.noPayments")}
+            </p>
+          )}
       </StatCard>
     ) : (
       <StatCard title={t("orders.detail.payments")}>
@@ -2568,10 +3127,21 @@ export function OrderDetail() {
               <div>
                 <Label>{t("orders.drawer.fields.opportunity")}</Label>
                 <ComboboxFilter
-                  options={contactOpportunities.map((o) => ({
-                    id: o.id,
-                    label: o.title,
-                  }))}
+                  options={
+                    catalogEditable
+                      ? contactOpportunities.map((o) => ({
+                          id: o.id,
+                          label: o.title,
+                        }))
+                      : order?.opportunity_id && order.opportunity
+                        ? [
+                            {
+                              id: order.opportunity_id,
+                              label: order.opportunity.title,
+                            },
+                          ]
+                        : []
+                  }
                   value={opportunityId || null}
                   onChange={handleOpportunitySelect}
                   placeholder={t("orders.drawer.fields.noOpportunity")}
@@ -2620,6 +3190,7 @@ export function OrderDetail() {
                     type="date"
                     value={validUntil}
                     onChange={(e) => handleValidUntilChange(e.target.value)}
+                    disabled={draftLocked || invoicesUnknown}
                     className="mt-1"
                   />
                 </div>
@@ -2702,24 +3273,56 @@ export function OrderDetail() {
           </div>
         }
       >
-        <OrderItemsEditor
-          items={items}
-          products={products}
-          categories={categories}
-          brands={brands}
-          warehouses={warehouses}
-          stockRows={stockRows}
-          shortfalls={stockShortfalls}
-          currency={order?.currency ?? "COP"}
-          locked={draftLocked}
-          onChange={(next) => {
-            setItems(next);
-            // Stale otherwise -- a shortfall found for the old quantities/
-            // warehouse doesn't necessarily still apply once the agent
-            // changes something.
-            setStockShortfalls([]);
-          }}
-        />
+        {itemsError || cartError || catalogStatus === "error" ? (
+          <div className="mb-2 flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            <span>
+              {itemsError ?? cartError ?? t("orders.detail.errors.loadCatalog")}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (itemsError) reloadItems();
+                if (cartError) loadCart();
+                if (catalogStatus === "error") retryCatalog();
+              }}
+            >
+              {t("common.actions.retry")}
+            </Button>
+          </div>
+        ) : null}
+        {itemsError || cartError ? null : (!isNew && !itemsLoaded) ||
+          (isNew && !cartLoaded) ? (
+          // Skeleton SOLO hasta que llegan los ítems (o el carrito retomado).
+          <div className="space-y-2" aria-busy="true">
+            <Skeleton className="h-14 w-full" />
+            <Skeleton className="h-14 w-full" />
+          </div>
+        ) : (
+          <OrderItemsEditor
+            items={items}
+            products={products}
+            categories={categories}
+            brands={brands}
+            warehouses={warehouses}
+            stockRows={stockRows}
+            // Mientras productos/stock no llegaron (o fallaron) el editor no
+            // pinta disponibilidad ni Agotado, no inhabilita el buscador ni
+            // aplica tope: vacío = "sin datos", no "agotado".
+            stockLoading={catalogStatus !== "ready"}
+            shortfalls={stockShortfalls}
+            currency={order?.currency ?? "COP"}
+            locked={draftLocked}
+            onChange={(next) => {
+              setItems(next);
+              // Stale otherwise -- a shortfall found for the old quantities/
+              // warehouse doesn't necessarily still apply once the agent
+              // changes something.
+              setStockShortfalls([]);
+            }}
+          />
+        )}
         {items.length > 0 && (
           <p className="mt-2 text-xs text-brand-400">
             {t(
@@ -2742,20 +3345,40 @@ export function OrderDetail() {
           title={t("orders.detail.orderSummary")}
           action={itemsSaveAction}
         >
-          <OrderTotalsSummary
-            totals={isNew ? draftTotalsPreview : orderTotals}
-            currency={order?.currency}
-            shippingSlot={
-              showShipping ? (
-                <CurrencyInput
-                  value={shippingDraft}
-                  onChange={(e) => setShippingDraft(e.target.value)}
-                  disabled={draftLocked}
-                  className="h-7 w-28 text-right text-xs"
-                />
-              ) : undefined
-            }
-          />
+          {!isNew && orderTotalsError && order ? (
+            // El desglose falló: nunca "Calculando…" eterno. Se muestra el
+            // total ya guardado en el pedido y se ofrece reintentar.
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              <span>
+                {t("orders.detail.errors.loadTotals")}{" "}
+                <strong>{formatCurrency(order.total, order.currency)}</strong>
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setTotalsNonce((n) => n + 1)}
+              >
+                {t("common.actions.retry")}
+              </Button>
+            </div>
+          ) : (
+            <OrderTotalsSummary
+              totals={isNew ? draftTotalsPreview : orderTotals}
+              loading={!isNew && !orderTotals && orderTotalsLoading}
+              currency={order?.currency}
+              shippingSlot={
+                showShipping ? (
+                  <CurrencyInput
+                    value={shippingDraft}
+                    onChange={(e) => setShippingDraft(e.target.value)}
+                    disabled={draftLocked}
+                    className="h-7 w-28 text-right text-xs"
+                  />
+                ) : undefined
+              }
+            />
+          )}
         </StatCard>
 
         {/* 4. Notas y comentarios -- una sola card, dividida en 2 columnas
@@ -2770,6 +3393,8 @@ export function OrderDetail() {
               <ThreadColumn
                 label={t("orders.detail.notesTab")}
                 entries={notesList}
+                error={commentsStatus === "error"}
+                onRetry={reloadComments}
                 adding={addingNote}
                 onToggleAdd={() => setAddingNote((v) => !v)}
                 addAria={t("orders.detail.addNoteAria")}
@@ -2805,6 +3430,8 @@ export function OrderDetail() {
                 <ThreadColumn
                   label={t("orders.detail.commentsTab")}
                   entries={commentsList}
+                  error={commentsStatus === "error"}
+                  onRetry={reloadComments}
                   adding={addingComment}
                   onToggleAdd={() => setAddingComment((v) => !v)}
                   addAria={t("orders.detail.addCommentAria")}
@@ -2869,7 +3496,10 @@ export function OrderDetail() {
                 ? t("common.actions.saving")
                 : t("common.actions.cancel")}
             </Button>
-            <Button onClick={handleCreate} disabled={creating}>
+            <Button
+              onClick={handleCreate}
+              disabled={creating || savingDraft || !canCommit}
+            >
               {creating
                 ? t("common.actions.saving")
                 : t("orders.detail.createAction")}
@@ -2951,7 +3581,7 @@ export function OrderDetail() {
                   <Button
                     size="sm"
                     onClick={() => handleStatusSelect("confirmada")}
-                    disabled={advancingStatus}
+                    disabled={advancingStatus || savingDraft || !canCommit}
                   >
                     {advancingStatus
                       ? t("common.actions.saving")
@@ -2985,6 +3615,32 @@ export function OrderDetail() {
       {/* El PDF se puede descargar aunque no exista factura DIAN (remisión),
           así que su error NO puede vivir dentro de la card de Factura DIAN:
           ahí quedaría invisible justo para los tenants sin DIAN. */}
+      {dispatchApplies && dispatchLoad === "error" && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          <span>{t("orders.detail.errors.loadDispatch")}</span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={reloadDispatchStatus}
+          >
+            {t("common.actions.retry")}
+          </Button>
+        </div>
+      )}
+      {invoicesError && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          <span>{t("orders.detail.errors.loadInvoices")}</span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={reloadInvoices}
+          >
+            {t("common.actions.retry")}
+          </Button>
+        </div>
+      )}
       {invoicePdfError && (
         <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
           {invoicePdfError}

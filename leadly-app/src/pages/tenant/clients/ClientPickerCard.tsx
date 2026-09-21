@@ -33,10 +33,10 @@ function documentLabel(client: Client, t: (key: TranslationKey) => string): stri
  * (mismo ContactDrawer, en modo creación).
  *
  * `onSearch` delega la fuente de candidatos a quien use el componente --
- * OrderDetail.tsx ya tiene la lista completa de contactos del tenant en
- * memoria (filtra ahí, sin red); el POS busca en vivo contra el servidor
- * (searchPosClients, la lista puede ser grande). No le importa a esta
- * tarjeta de dónde vienen los resultados. */
+ * OrderDetail.tsx busca en el servidor (searchClientsForOrder) y el POS
+ * también (searchPosClients): la lista de clientes puede ser grande, así que
+ * ninguno la carga entera. No le importa a esta tarjeta de dónde vienen los
+ * resultados; descarta las respuestas de búsquedas ya obsoletas. */
 export function ClientPickerCard({
   tenantId,
   client,
@@ -85,16 +85,29 @@ export function ClientPickerCard({
   useEffect(() => {
     if (!searchOpen || query.trim().length < 2) {
       setResults([])
+      setSearching(false)
       return
     }
     setSearching(true)
+    // `cancelled`: una respuesta de una búsqueda anterior (o de un término que
+    // ya se acortó/cerró) no debe pintar resultados ni tocar `searching`.
+    let cancelled = false
     const timer = setTimeout(() => {
       onSearch(query)
-        .then(setResults)
-        .catch(() => setResults([]))
-        .finally(() => setSearching(false))
+        .then((found) => {
+          if (!cancelled) setResults(found)
+        })
+        .catch(() => {
+          if (!cancelled) setResults([])
+        })
+        .finally(() => {
+          if (!cancelled) setSearching(false)
+        })
     }, 250)
-    return () => clearTimeout(timer)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchOpen, query])
 

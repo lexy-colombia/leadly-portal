@@ -55,6 +55,11 @@
  * carrito (eso pasa una sola vez, en create-order) -- solo se resuelve
  * cuando la rama `order_id` edita un pedido ya real, igual que siempre.
  *
+ * Guardado de carrito (2026-09-21): la respuesta suma `totals` (misma forma y
+ * mismo cálculo que el de `preview`, con el envío guardado) para que el POS no
+ * tenga que pedir un preview aparte de los mismos ítems; en el 409 de stock no
+ * viaja. Un carrito existente se guarda con la función atómica `save_cart_lines`.
+ *
  * Con `preview: true` no escribe nada: solo devuelve el desglose
  * (base gravable / impuesto por tarifa / total) de los ítems que se le
  * manden, para que el POS pueda mostrar qué va a cobrar antes de cobrar.
@@ -142,15 +147,37 @@ Deno.serve(async (req) => {
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const callerClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } });
 
+  // Medición por fase (ver `[timing]` al final). Las fases que corren en
+  // paralelo (checks, stock) reportan SU PROPIA duración, así que se pueden
+  // solapar entre sí: no suman `total`.
+  const tStart = Date.now();
+  const ms = { auth: 0, profile: 0, checks: 0, stock: 0, totals: 0, write: 0, total: 0 };
+  const logTiming = (mode: "preview" | "save") => {
+    ms.total = Date.now() - tStart;
+    console.log(`[timing] ${JSON.stringify({ mode, ms })}`);
+  };
+  const isCartPath = !body.preview && !body.order_id;
+  const requestedCartId = body.cart_id ?? null;
+
   const {
     data: { user: caller },
     error: callerError,
   } = await callerClient.auth.getUser();
+  ms.auth = Date.now() - tStart;
   if (callerError || !caller) return json({ error: "Invalid session" }, 401);
 
-  const { data: profile } = await callerClient.from("profiles").select("tenant_id").eq("id", caller.id).maybeSingle();
+  // El carrito existente no depende del tenant: se lee en paralelo con el
+  // perfil (RLS del caller, solo para el origin y el estado). Su resultado se
+  // evalúa más abajo, en el mismo orden de precedencia de siempre.
+  const tProfile = Date.now();
+  const [{ data: profile }, existingCartRes] = await Promise.all([
+    callerClient.from("profiles").select("tenant_id").eq("id", caller.id).maybeSingle(),
+    isCartPath && requestedCartId ? callerClient.from("carts").select("id, status, origin").eq("id", requestedCartId).maybeSingle() : Promise.resolve(null),
+  ]);
+  ms.profile = Date.now() - tProfile;
   if (!profile?.tenant_id) return json({ error: "No se pudo resolver el tenant del usuario." }, 403);
   const tenantId = profile.tenant_id as string;
+  const existingCart = existingCartRes?.data ?? null;
 
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
@@ -168,29 +195,101 @@ Deno.serve(async (req) => {
     { field: "shipping_address_id", table: "contact_addresses", id: body.shipping_address_id },
     { field: "billing_address_id", table: "contact_addresses", id: body.billing_address_id },
   ];
-  for (const check of ownershipChecks) {
-    if (!check.id) continue;
-    const { data: owned } = await adminClient.from(check.table).select("id").eq("id", check.id).eq("tenant_id", tenantId).maybeSingle();
-    if (!owned) return json({ error: `${check.field} no pertenece a este tenant.` }, 403);
-  }
+  // Las consultas de dueño son independientes: van en paralelo (mismos
+  // selects, mismo .eq("tenant_id")). El resultado se evalúa en el orden de
+  // la lista, así el 403 que se devuelve es el mismo que en la versión serial.
+  const tChecks = Date.now();
+  const ownershipPromise = Promise.all(
+    ownershipChecks
+      .filter((check) => !!check.id)
+      .map(async (check) => {
+        const { data: owned } = await adminClient.from(check.table).select("id").eq("id", check.id as string).eq("tenant_id", tenantId).maybeSingle();
+        return { field: check.field, owned: !!owned };
+      }),
+  ).then((r) => {
+    ms.checks = Date.now() - tChecks;
+    return r;
+  });
 
-  if (body.preview) {
-    const taxEnabled = await isTenantTaxEnabled(adminClient, tenantId);
-    const productIds = Array.from(new Set(items.map((i) => i.product_id).filter((id): id is string => !!id)));
+  // Chequeo de stock: lectura independiente de los checks de dueño, se lanza
+  // a la vez (solo en preview y en el camino de carrito, y solo si ese camino
+  // va a llegar hasta el chequeo: carrito abierto o carrito nuevo con
+  // contact_id). Un error se captura acá y se relanza recién donde antes se
+  // habría lanzado, para no dejar un rechazo sin manejar si un 403/404/409 se
+  // devuelve antes.
+  const stockItems = items.map((item) => ({ product_id: item.product_id, variant_id: item.variant_id, warehouse_id: item.warehouse_id, product_name: item.product_name, quantity: item.quantity }));
+  const cartRejectedEarly = isCartPath && (requestedCartId ? !existingCart || existingCart.status !== "open" : !body.contact_id);
+  const wantsStock = body.preview || (isCartPath && !cartRejectedEarly);
+  const tStock = Date.now();
+  const stockPromise: Promise<{ ok: true; value: Awaited<ReturnType<typeof findStockShortfalls>> } | { ok: false; error: unknown }> | null = wantsStock
+    ? findStockShortfalls(adminClient, tenantId, stockItems).then(
+        (value) => {
+          ms.stock = Date.now() - tStock;
+          return { ok: true as const, value };
+        },
+        (error) => {
+          ms.stock = Date.now() - tStock;
+          return { ok: false as const, error };
+        },
+      )
+    : null;
+  const takeStock = async () => {
+    const r = await stockPromise!;
+    if (!r.ok) throw r.error;
+    return r.value;
+  };
+
+  // Totales (preview Y guardado de carrito): impuesto del tenant y productos
+  // en paralelo con el chequeo de stock y los de dueño, sin viajes seriales
+  // extra. Mismo criterio que el preview de siempre: el impuesto se resuelve
+  // contra la tabla real acotada al propio tenant, nunca contra el body. El
+  // resultado de productos se ignora si el tenant no tiene impuestos activos.
+  const tTotals = Date.now();
+  const totalsProductIds = wantsStock ? Array.from(new Set(items.map((i) => i.product_id).filter((id): id is string => !!id))) : [];
+  // Las promesas se capturan a resultado ({ok}) para no dejar un rechazo sin
+  // manejar si un 403/404/409 se devuelve antes de esperarlas.
+  const taxPromise = wantsStock
+    ? isTenantTaxEnabled(adminClient, tenantId).then(
+        (value) => ({ ok: true as const, value }),
+        (error) => ({ ok: false as const, error }),
+      )
+    : null;
+  // El builder de PostgREST es perezoso (no dispara la request hasta su
+  // await), así que se envuelve en una función async invocada YA: la consulta
+  // arranca a la vez que las demás. Nunca rechaza (supabase-js devuelve
+  // {data,error}); el .catch convierte cualquier excepción en un error de
+  // resultado que se consume donde se consume el resultado normal.
+  const productsTaxPromise =
+    wantsStock && totalsProductIds.length > 0
+      ? (async () => await adminClient.from("products").select("id, tax_type_code, tax_rate").eq("tenant_id", tenantId).in("id", totalsProductIds))().catch((e) => ({
+          data: null,
+          error: { message: e instanceof Error ? e.message : String(e) },
+        }))
+      : null;
+  type TotalsPayload = {
+    tax_enabled: boolean;
+    subtotal: number;
+    discount_total: number;
+    taxable_base: number;
+    tax_total: number;
+    shipping: number;
+    total: number;
+    tax_lines: ReturnType<typeof computeOrderTotals>["taxLines"];
+  };
+  // Misma función y misma forma para preview y guardado (contrato con el
+  // frontend: `totals` del guardado == `totals` del preview para los mismos
+  // ítems y el mismo envío).
+  const resolveTotals = async (shipping: number): Promise<{ ok: true; totals: TotalsPayload } | { ok: false; message: string }> => {
+    const taxRes = await taxPromise!;
+    if (!taxRes.ok) return { ok: false, message: taxRes.error instanceof Error ? taxRes.error.message : String(taxRes.error) };
+    const taxEnabled = taxRes.value;
     const taxById = new Map<string, { tax_type_code: string | null; tax_rate: number }>();
-    if (taxEnabled && productIds.length > 0) {
-      // Acotado al propio tenant: el impuesto se resuelve contra la tabla
-      // real, nunca contra lo que mande el body (mismo criterio que la
-      // rama con order_id).
-      const { data: products, error: productsError } = await adminClient
-        .from("products")
-        .select("id, tax_type_code, tax_rate")
-        .eq("tenant_id", tenantId)
-        .in("id", productIds);
-      if (productsError) return json({ error: productsError.message }, 500);
+    if (taxEnabled && productsTaxPromise) {
+      const { data: products, error: productsError } = await productsTaxPromise;
+      if (productsError) return { ok: false, message: productsError.message };
       for (const p of products ?? []) taxById.set(p.id, { tax_type_code: p.tax_type_code, tax_rate: p.tax_rate });
     }
-    const totals = computeOrderTotals(
+    const computed = computeOrderTotals(
       items.map((item) => {
         const productTax = item.product_id ? taxById.get(item.product_id) : undefined;
         return {
@@ -201,27 +300,35 @@ Deno.serve(async (req) => {
           tax_rate: productTax?.tax_rate ?? 0,
         };
       }),
-      body.shipping ?? 0,
+      shipping,
       taxEnabled,
     );
-    const shortfalls = await findStockShortfalls(
-      adminClient,
-      tenantId,
-      items.map((item) => ({ product_id: item.product_id, variant_id: item.variant_id, warehouse_id: item.warehouse_id, product_name: item.product_name, quantity: item.quantity })),
-    );
-    return json({
+    ms.totals = Date.now() - tTotals;
+    return {
+      ok: true,
       totals: {
         tax_enabled: taxEnabled,
-        subtotal: totals.subtotal,
-        discount_total: totals.discountTotal,
-        taxable_base: totals.taxableBase,
-        tax_total: totals.taxTotal,
-        shipping: totals.shipping,
-        total: totals.total,
-        tax_lines: totals.taxLines,
+        subtotal: computed.subtotal,
+        discount_total: computed.discountTotal,
+        taxable_base: computed.taxableBase,
+        tax_total: computed.taxTotal,
+        shipping: computed.shipping,
+        total: computed.total,
+        tax_lines: computed.taxLines,
       },
-      stock_shortfalls: shortfalls,
-    });
+    };
+  };
+
+  for (const r of await ownershipPromise) {
+    if (!r.owned) return json({ error: `${r.field} no pertenece a este tenant.` }, 403);
+  }
+
+  if (body.preview) {
+    const totalsRes = await resolveTotals(body.shipping ?? 0);
+    if (!totalsRes.ok) return json({ error: totalsRes.message }, 500);
+    const shortfalls = await takeStock();
+    logTiming("preview");
+    return json({ totals: totalsRes.totals, stock_shortfalls: shortfalls });
   }
 
   const orderId = body.order_id ?? null;
@@ -370,18 +477,18 @@ Deno.serve(async (req) => {
   // Sin order_id: esto opera sobre un CARRITO, nunca sobre sales_orders
   // (ver comentario de cabecera). Sin impuesto resuelto acá -- se calcula
   // una sola vez, en create-order, al convertir.
-  let cartId = body.cart_id ?? null;
+  let cartId = requestedCartId;
 
   // Discriminador POS: `carts.origin`. En un carrito existente sale de la fila
   // guardada (leída con el cliente del caller, RLS) -- nunca de lo que mande
   // el body en esta llamada, así un guardado no puede "cambiarse" de origen
   // para saltarse la regla. En un carrito nuevo es el origin con que se crea
   // (el POS lo crea con 'pos', ver PosOpenTabs). Órdenes del portal es
-  // 'portal' y conserva el comportamiento de siempre.
+  // 'portal' y conserva el comportamiento de siempre. (La fila se leyó arriba,
+  // en paralelo con el perfil.)
   let cartOrigin: string = body.origin ?? "portal";
 
   if (cartId) {
-    const { data: existingCart } = await callerClient.from("carts").select("id, status, origin").eq("id", cartId).maybeSingle();
     if (!existingCart) return json({ error: "Carrito no encontrado." }, 404);
     if (existingCart.status !== "open") return json({ error: "Este carrito ya no está abierto." }, 409);
     cartOrigin = existingCart.origin as string;
@@ -390,18 +497,15 @@ Deno.serve(async (req) => {
   }
 
   // Chequeo de stock -- ver el comentario de `stock_shortfalls` en la
-  // cabecera del archivo. Se corre ANTES de escribir nada (ni cabecera ni
-  // ítems) porque en el carrito de POS un faltante rechaza el guardado
-  // completo: la línea que pide más de lo disponible nunca llega a la base y
-  // el carrito queda exactamente como estaba (este endpoint reemplaza todas
-  // las líneas, así que rechazar el guardado entero es "no guardar esa
-  // línea"). Reversión de la decisión del 2026-09-06 solo para POS; en
-  // Órdenes del portal (origin 'portal') sigue informando sin rechazar.
-  const shortfalls = await findStockShortfalls(
-    adminClient,
-    tenantId,
-    items.map((item) => ({ product_id: item.product_id, variant_id: item.variant_id, warehouse_id: item.warehouse_id, product_name: item.product_name, quantity: item.quantity })),
-  );
+  // cabecera del archivo. Se lanzó arriba en paralelo con los checks de
+  // dueño, pero se evalúa ANTES de escribir nada (ni cabecera ni ítems)
+  // porque en el carrito de POS un faltante rechaza el guardado completo: la
+  // línea que pide más de lo disponible nunca llega a la base y el carrito
+  // queda exactamente como estaba (este endpoint reemplaza todas las líneas,
+  // así que rechazar el guardado entero es "no guardar esa línea").
+  // Reversión de la decisión del 2026-09-06 solo para POS; en Órdenes del
+  // portal (origin 'portal') sigue informando sin rechazar.
+  const shortfalls = await takeStock();
   // Una línea de producto CON variantes que todavía no eligió variante
   // (variant_id null, así nace al agregarla desde el buscador del POS) no es
   // una petición de stock real: findStockShortfalls la compara contra la
@@ -425,23 +529,59 @@ Deno.serve(async (req) => {
       const { data } = await adminClient.from("carts").select("*, items:cart_items(*)").eq("id", cartId).eq("tenant_id", tenantId).maybeSingle();
       currentCart = data ?? null;
     }
+    logTiming("save");
     return json({ error: `Sin stock suficiente para: ${detail}.`, stock_shortfalls: rejectable, cart: currentCart }, 409);
   }
 
-  if (cartId) {
+  const tWrite = Date.now();
+  const itemRows = (id?: string) =>
+    items.map((item) => ({
+      ...(id ? { cart_id: id } : {}),
+      product_id: item.product_id || null,
+      variant_id: item.variant_id || null,
+      warehouse_id: item.warehouse_id || null,
+      product_name: item.product_name,
+      sku: item.sku || null,
+      quantity: item.quantity,
+      unit_price: item.unit_price,
+      discount_amount: item.discount_amount ?? 0,
+    }));
 
-    const cartPatch: Record<string, unknown> = { last_activity_at: new Date().toISOString() };
-    if (body.contact_id !== undefined) cartPatch.contact_id = body.contact_id;
-    if (body.opportunity_id !== undefined) cartPatch.opportunity_id = body.opportunity_id;
-    if (body.notes !== undefined) cartPatch.notes = body.notes;
-    if (body.valid_until !== undefined) cartPatch.valid_until = body.valid_until;
-    if (body.shipping_address_id !== undefined) cartPatch.shipping_address_id = body.shipping_address_id;
-    if (body.billing_address_id !== undefined) cartPatch.billing_address_id = body.billing_address_id;
-    if (body.shipping !== undefined) cartPatch.shipping = body.shipping;
-    if (body.pos_point_id !== undefined) cartPatch.pos_point_id = body.pos_point_id;
-    if (body.label !== undefined) cartPatch.label = body.label;
-    const { error: cartPatchError } = await adminClient.from("carts").update(cartPatch).eq("id", cartId);
-    if (cartPatchError) return json({ error: cartPatchError.message }, 500);
+  let cartRow: Record<string, unknown>;
+  let savedItems: unknown[] = [];
+
+  if (cartId) {
+    // UNA sola llamada atómica (migración save_cart_lines): valida que el
+    // carrito sea del tenant y siga abierto, aplica SOLO las claves presentes
+    // del patch, reemplaza las líneas y devuelve el carrito con `items`. Antes
+    // eran tres viajes sin transacción (update + delete + insert) que dos
+    // guardados solapados podían intercalar duplicando líneas.
+    const patch: Record<string, unknown> = {};
+    if (body.contact_id !== undefined) patch.contact_id = body.contact_id;
+    if (body.opportunity_id !== undefined) patch.opportunity_id = body.opportunity_id;
+    if (body.notes !== undefined) patch.notes = body.notes;
+    if (body.valid_until !== undefined) patch.valid_until = body.valid_until;
+    if (body.shipping_address_id !== undefined) patch.shipping_address_id = body.shipping_address_id;
+    if (body.billing_address_id !== undefined) patch.billing_address_id = body.billing_address_id;
+    if (body.shipping !== undefined) patch.shipping = body.shipping;
+    if (body.pos_point_id !== undefined) patch.pos_point_id = body.pos_point_id;
+    if (body.label !== undefined) patch.label = body.label;
+    const { data: saved, error: saveError } = await adminClient.rpc("save_cart_lines", {
+      p_cart_id: cartId,
+      p_tenant_id: tenantId,
+      p_patch: patch,
+      p_items: itemRows(),
+    });
+    if (saveError) {
+      // SQLSTATE propios de la función: se traducen igual que las
+      // validaciones previas (por si el carrito cambió entre la lectura y el guardado).
+      if (saveError.code === "LX404") return json({ error: "Carrito no encontrado." }, 404);
+      if (saveError.code === "LX409") return json({ error: "Este carrito ya no está abierto." }, 409);
+      return json({ error: saveError.message }, 500);
+    }
+    const { items: rpcItems, ...rpcCart } = saved as Record<string, unknown> & { items?: unknown[] };
+    cartRow = rpcCart;
+    savedItems = rpcItems ?? [];
   } else {
     const { data: newCart, error: cartInsertError } = await adminClient
       .from("carts")
@@ -458,34 +598,27 @@ Deno.serve(async (req) => {
         pos_point_id: body.pos_point_id ?? null,
         label: body.label ?? null,
       })
-      .select("id")
+      .select("*")
       .single();
     if (cartInsertError) return json({ error: cartInsertError.message }, 500);
-    cartId = newCart.id;
+    cartRow = newCart as Record<string, unknown>;
+    cartId = cartRow.id as string;
+    // Carrito recién creado: no tiene ítems que borrar, solo insertar.
+    if (items.length > 0) {
+      const { data: inserted, error: insertItemsError } = await adminClient.from("cart_items").insert(itemRows(cartId)).select();
+      if (insertItemsError) return json({ error: insertItemsError.message }, 500);
+      savedItems = (inserted ?? []) as unknown[];
+    }
   }
+  ms.write = Date.now() - tWrite;
 
-  // Reemplaza todos los cart_items -- mismo criterio "reemplaza todo, no
-  // hace merge/diff" que ya usa persistOrderItems, sin impuesto.
-  const { error: deleteItemsError } = await adminClient.from("cart_items").delete().eq("cart_id", cartId);
-  if (deleteItemsError) return json({ error: deleteItemsError.message }, 500);
-  if (items.length > 0) {
-    const { error: insertItemsError } = await adminClient.from("cart_items").insert(
-      items.map((item) => ({
-        cart_id: cartId,
-        product_id: item.product_id || null,
-        variant_id: item.variant_id || null,
-        warehouse_id: item.warehouse_id || null,
-        product_name: item.product_name,
-        sku: item.sku || null,
-        quantity: item.quantity,
-        unit_price: item.unit_price,
-        discount_amount: item.discount_amount ?? 0,
-      })),
-    );
-    if (insertItemsError) return json({ error: insertItemsError.message }, 500);
-  }
+  // `totals` (contrato con el POS): mismo cálculo que el preview, con el
+  // envío que quedó GUARDADO en el carrito (si el body no lo mandó, es el
+  // que ya tenía). Es opcional: si falla la resolución del impuesto el
+  // guardado ya hecho no se pierde y el frontend cae al preview.
+  const totalsRes = await resolveTotals(Number(cartRow.shipping ?? 0));
+  if (!totalsRes.ok) console.error(`[calculate-order] totals omitidos: ${totalsRes.message}`);
 
-  const { data: cart, error: reloadCartError } = await adminClient.from("carts").select("*, items:cart_items(*)").eq("id", cartId).single();
-  if (reloadCartError) return json({ error: reloadCartError.message }, 500);
-  return json({ cart, stock_shortfalls: shortfalls });
+  logTiming("save");
+  return json({ cart: { ...cartRow, items: savedItems }, stock_shortfalls: shortfalls, ...(totalsRes.ok ? { totals: totalsRes.totals } : {}) });
 });

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { PackageIcon, PlusIcon, XIcon } from 'lucide-react'
 import { useLanguage } from '../../../contexts/LanguageContext'
+import { useToast } from '../../../contexts/ToastContext'
 import { descendantIds } from '../../../lib/api/productCategories'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -75,6 +76,7 @@ export function OrderItemsEditor({
   currency = 'COP',
   locked = false,
   searchAlwaysOpen = false,
+  stockLoading = false,
   onChange,
 }: {
   items: OrderItemInput[]
@@ -101,9 +103,17 @@ export function OrderItemsEditor({
    * muestran, así nunca puede quedar oculto por accidente. Órdenes (fuera
    * del POS) sigue con el buscador colapsado por default. */
   searchAlwaysOpen?: boolean
+  /** true mientras el stock local (`stockRows`) no está disponible (cargando o
+   * sin datos): no se pinta "Disponible"/"Agotado", no se aplica el tope de
+   * cantidad ni se inhabilitan resultados del buscador -- un stock vacío por
+   * no haber llegado no significa "sin stock". NO oculta lo que viene del
+   * servidor: los `shortfalls` siempre se pintan en rojo. Al pasar a false
+   * todo vuelve a comportarse normal. Sin pasarlo no cambia nada. */
+  stockLoading?: boolean
   onChange: (items: OrderItemInput[]) => void
 }) {
   const { t } = useLanguage()
+  const toast = useToast()
   const defaultWarehouseId = warehouses.find((w) => w.is_default)?.id ?? warehouses[0]?.id ?? null
   // Con una sola bodega (o ninguna) elegir "cuál" es redundante -- todo
   // producto ya usa defaultWarehouseId de todas formas (ver addProductLine).
@@ -128,12 +138,35 @@ export function OrderItemsEditor({
    * (la misma que usa addProductLine y que valida el servidor). Sin inventario
    * nunca está agotado; con variantes, solo si todas las activas lo están. */
   function isOutOfStock(p: ProductWithImages): boolean {
-    if (!p.track_inventory) return false
+    if (stockLoading || !p.track_inventory) return false
     if (p.has_variants) {
       const active = p.variants.filter((v) => v.is_active)
       return active.length > 0 && active.every((v) => (availableStock(stockRows, p.id, v.id, defaultWarehouseId) ?? 0) <= 0)
     }
     return (availableStock(stockRows, p.id, null, defaultWarehouseId) ?? 0) <= 0
+  }
+
+  /** Tope de cantidad de una línea (solo POS, `searchAlwaysOpen`): el stock
+   * que el listado ya trae para esa bodega/variante -- la misma fuente que
+   * `isOutOfStock` -- menos lo que piden las OTRAS líneas del mismo
+   * producto/variante/bodega (el servidor las suma antes de comparar). Es un
+   * límite de UX: el backend sigue siendo la autoridad (409 al guardar/cobrar).
+   * null = sin tope: Órdenes del portal (ahí se arman cotizaciones con
+   * faltante), producto sin control de inventario, stock todavía cargando o
+   * sin datos, o producto con variantes sin variante elegida (el servidor no
+   * rechaza esa línea, ver CLAUDE.md 2026-09-20). `excludeIndex` = -1 para una
+   * línea que todavía no existe. Devuelve también el disponible total, para
+   * distinguir "agotado" de "otras líneas ya lo usan todo". */
+  function stockLimit(product: ProductWithImages | undefined, variantId: string | null | undefined, warehouseId: string | null | undefined, excludeIndex: number): { available: number; cap: number } | null {
+    if (!searchAlwaysOpen || stockLoading || !product || !product.track_inventory || stockRows.length === 0) return null
+    if (product.has_variants && !variantId) return null
+    const available = availableStock(stockRows, product.id, variantId, warehouseId)
+    if (available === null) return null
+    const others = items.reduce(
+      (sum, other, i) => (i !== excludeIndex && other.product_id === product.id && (other.variant_id ?? null) === (variantId ?? null) && other.warehouse_id === warehouseId ? sum + other.quantity : sum),
+      0,
+    )
+    return { available, cap: Math.max(0, available - others) }
   }
 
   const results = useMemo(() => {
@@ -143,12 +176,12 @@ export function OrderItemsEditor({
         if (activeOnly && !p.is_active) return false
         if (brandFilter && p.brand?.id !== brandFilter) return false
         if (categoryIds && !p.categories.some((c) => categoryIds.has(c.id))) return false
-        if (stockOnly && !stockRows.some((r) => r.product_id === p.id && r.quantity > 0)) return false
+        if (stockOnly && !stockLoading && !stockRows.some((r) => r.product_id === p.id && r.quantity > 0)) return false
         if (q && !p.name.toLowerCase().includes(q) && !(p.sku ?? '').toLowerCase().includes(q) && !(p.barcode ?? '').toLowerCase().includes(q)) return false
         return true
       })
       .slice(0, 30)
-  }, [products, activeOnly, brandFilter, categoryIds, stockOnly, stockRows, defaultWarehouseId, query])
+  }, [products, activeOnly, brandFilter, categoryIds, stockOnly, stockLoading, stockRows, defaultWarehouseId, query])
 
   function updateItem(index: number, patch: Partial<OrderItemInput>) {
     onChange(items.map((item, i) => (i === index ? { ...item, ...patch } : item)))
@@ -162,6 +195,25 @@ export function OrderItemsEditor({
    * -- clicking a search result never knows the variant upfront, that's
    * still resolved afterwards via the row's own variant Select. */
   function addProductLine(product: ProductWithImages, variant: ProductVariant | null = null, quantity = 1) {
+    // Tope del POS: la cantidad nueva no pasa de lo disponible (descontando lo
+    // que ya hay en la cuenta de ese mismo producto). Sin nada disponible no
+    // se agrega y se avisa; con menos de lo pedido se agrega el máximo.
+    const limit = stockLimit(product, variant?.id ?? null, defaultWarehouseId, -1)
+    if (limit !== null && quantity > limit.cap) {
+      // Agotado de verdad vs. "hay, pero las otras líneas de esta cuenta ya lo usan todo".
+      // Tres casos: agotado de verdad, "las otras líneas de la cuenta ya usan
+      // todo lo disponible" (no se agrega nada) y agregado parcial (recortado).
+      if (limit.available <= 0) {
+        toast.info(t('pos.stock.capNone', { name: product.name }))
+        return
+      }
+      if (limit.cap <= 0) {
+        toast.info(t('pos.stock.capUsed', { name: product.name, count: limit.available }))
+        return
+      }
+      toast.info(t('pos.stock.capReached', { name: product.name, count: limit.available }))
+      quantity = limit.cap
+    }
     onChange([
       ...items,
       {
@@ -328,10 +380,12 @@ export function OrderItemsEditor({
           const selectedProduct = item.product_id ? products.find((p) => p.id === item.product_id) : undefined
           const discountAmount = item.discount_amount ?? 0
           const lineTotal = item.quantity * item.unit_price - discountAmount
-          const available = availableStock(stockRows, item.product_id, item.variant_id, item.warehouse_id)
-          const isShort = shortfalls.some(
-            (s) => s.productId === item.product_id && s.variantId === (item.variant_id ?? null) && s.warehouseId === item.warehouse_id,
-          )
+          const available = stockLoading ? null : availableStock(stockRows, item.product_id, item.variant_id, item.warehouse_id)
+          // Los faltantes vienen del SERVIDOR (no dependen de `stockRows`), así
+          // que se pintan siempre, aunque el stock local todavía esté cargando.
+          const isShort = shortfalls.some((s) => s.productId === item.product_id && s.variantId === (item.variant_id ?? null) && s.warehouseId === item.warehouse_id)
+          const lineCap = stockLimit(selectedProduct, item.variant_id, item.warehouse_id, index)?.cap
+          const lineMax = lineCap === undefined ? undefined : Math.max(1, lineCap)
           return (
             <div key={index} className="border-b border-brand-100 py-2 last:border-b-0">
               {/* flex-nowrap + scroll horizontal a partir de `sm:` -- pedido
@@ -401,9 +455,11 @@ export function OrderItemsEditor({
                                   key={w.id}
                                   value={w.id}
                                   meta={
-                                    <span className={`ml-auto shrink-0 text-[11px] ${wAvailable > 0 ? 'text-brand-400' : 'text-red-500'}`}>
-                                      {t('products.table.available', { count: wAvailable })}
-                                    </span>
+                                    stockLoading ? undefined : (
+                                      <span className={`ml-auto shrink-0 text-[11px] ${wAvailable > 0 ? 'text-brand-400' : 'text-red-500'}`}>
+                                        {t('products.table.available', { count: wAvailable })}
+                                      </span>
+                                    )
                                   }
                                 >
                                   {w.name}
@@ -427,6 +483,9 @@ export function OrderItemsEditor({
                   <QuantityStepper
                     value={item.quantity}
                     onChange={(v) => updateItem(index, { quantity: v })}
+                    // Piso de 1: con tope 0 (o menor que la cantidad) el "−" no
+                    // debe saltar a 0 y dejar una línea de cantidad 0 autoguardada.
+                    max={lineMax}
                     invalid={isShort}
                     disabled={locked}
                     decreaseLabel={t('common.actions.decreaseQuantity')}

@@ -4,8 +4,7 @@ import { computeOrderTotals } from "./computeOrderTotals.ts";
 
 /** ÚNICA implementación de "reemplazar los ítems de un pedido y recalcular
  * sus totales" -- usada por whatsapp-ai-tools (create_quote/add_item_to_quote),
- * storefront (checkout) y el Edge Function sales-order-items (botón
- * "Guardar" del portal). Antes cada uno de los cuatro tenía su propia copia
+ * storefront (checkout) y calculate-order/create-order. Antes cada uno de los cuatro tenía su propia copia
  * casi idéntica de este cálculo -- encontrado en vivo 2026-09-03: el
  * portal sumaba el impuesto al total en vez de extraerlo del precio (doble
  * cobro), un bug que solo existía ahí porque era la única copia

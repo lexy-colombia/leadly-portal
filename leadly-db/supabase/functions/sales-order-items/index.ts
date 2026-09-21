@@ -1,4 +1,17 @@
-/** Único punto de escritura para "reemplazar los ítems de un pedido y
+/** ⚠️ DEPRECADA (2026-09-21) -- NO redesplegar. Se dio de baja en Supabase y se
+ * deja el código solo como referencia histórica.
+ *
+ * Motivo: reescribe ítems y totales de CUALQUIER pedido del tenant sin ningún
+ * candado -- también uno confirmado, facturado por la DIAN o despachado --, así
+ * que esquiva los bloqueos que sí aplica `calculate-order`. Ningún código de
+ * `leadly-app` la llamaba y no tuvo invocaciones en las últimas 24 h. Lo que
+ * hacía lo cubren `calculate-order` (borradores/carritos/pedidos en cotización,
+ * con sus candados) y `create-order`. Ambas comparten el mismo
+ * `_shared/orders/persistOrderItems.ts`.
+ *
+ * Historia (texto original, sin cambios):
+ *
+ * Único punto de escritura para "reemplazar los ítems de un pedido y
  * recalcular sus totales" desde el portal -- antes el frontend (lib/api/orders.ts)
  * hacía este cálculo por su cuenta con supabase-js directo, una tercera
  * reimplementación del mismo impuesto/totales que ya tenían
