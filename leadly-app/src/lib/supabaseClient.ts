@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { resolveFunctionsRegion, withFunctionsRegion } from './functionsRegion'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
@@ -6,6 +7,10 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY environment variables')
 }
+
+// Región de las Edge Functions (ver lib/functionsRegion.ts). `fetchWithSessionGuard`
+// agrega `forceFunctionRegion` solo a URLs `/functions/v1/`; REST/Auth/Storage/RPC no cambian.
+const functionsRegion = resolveFunctionsRegion(import.meta.env.VITE_SUPABASE_FUNCTIONS_REGION as string | undefined)
 
 // Bug real reportado por el usuario: cuando el servidor deja de aceptar el
 // JWT guardado (revocado/expirado sin refresh exitoso, usuario borrado,
@@ -48,7 +53,7 @@ function triggerSessionSignOut(): void {
 }
 
 async function fetchWithSessionGuard(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const response = await fetch(input, init)
+  const response = await fetch(withFunctionsRegion(input, supabaseUrl, functionsRegion), init)
   if (response.status === 401) triggerSessionSignOut()
   return response
 }

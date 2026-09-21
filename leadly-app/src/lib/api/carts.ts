@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient'
-import { mapApiStockShortfalls, type ApiStockShortfall, type OrderItemInput, type StockShortfall } from './orders'
+import { mapApiStockShortfalls, type ApiStockShortfall, type OrderItemInput, type OrderTotalsBreakdown, type StockShortfall } from './orders'
 import type { Cart, CartItem, OrderPaymentMethod, SalesOrder } from '../../types/domain'
 
 export type CartWithItems = Cart & { items: CartItem[] }
@@ -65,6 +65,35 @@ export interface SaveCartDraftInput {
   label?: string | null
 }
 
+// Cola de guardados por carrito. calculate-order reemplaza las líneas con
+// "delete todas + insert todas" sin transacción, así que dos guardados del
+// mismo carrito solapados pueden intercalarse y duplicar líneas o dejarlo
+// vacío. Todo guardado de una cuenta pasa por acá: uno a la vez, el siguiente
+// corre aunque el anterior falle. Vive a nivel de módulo para sobrevivir al
+// desmontaje de la pantalla (Volver navega antes de que termine el guardado).
+const cartSaveQueues = new Map<string, Promise<unknown>>()
+
+export function enqueueCartSave<T>(cartId: string, task: () => Promise<T>): Promise<T> {
+  const previous = cartSaveQueues.get(cartId) ?? Promise.resolve()
+  const run = previous.then(task)
+  const tail = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  cartSaveQueues.set(cartId, tail)
+  void tail.then(() => {
+    if (cartSaveQueues.get(cartId) === tail) cartSaveQueues.delete(cartId)
+  })
+  return run
+}
+
+/** Resuelve cuando no queda ningún guardado pendiente de ese carrito. Toda
+ * lectura (getCart) o acción (cobrar, cancelar, cerrar) que deba ver lo último
+ * guardado espera esto primero. Nunca rechaza. */
+export function waitForCartSaves(cartId: string): Promise<void> {
+  return (cartSaveQueues.get(cartId) ?? Promise.resolve()).then(() => undefined)
+}
+
 /** Arma/edita un carrito -- calculate-order sin order_id, ver el
  * comentario de cabecera de esa Edge Function. Nunca toca sales_orders.
  *
@@ -75,10 +104,11 @@ export interface SaveCartDraftInput {
  * guardando el borrador con la línea problemática incluida. El caller (PosTabAccount.tsx, OrderDetail.tsx)
  * usa esta lista, y solo esta, para pintar esas líneas en rojo y deshabilitar
  * "Cobrar"/"Crear pedido" -- nunca vuelve a calcular esto por su cuenta. */
-export async function saveCartDraft(input: SaveCartDraftInput): Promise<{ cart: CartWithItems; stockShortfalls: StockShortfall[] }> {
-  let response: { cart: CartWithItems; stock_shortfalls?: ApiStockShortfall[] }
+export async function saveCartDraft(input: SaveCartDraftInput): Promise<{ cart: CartWithItems; stockShortfalls: StockShortfall[]; totals: OrderTotalsBreakdown | null }> {
+  type SaveResponse = { cart: CartWithItems; stock_shortfalls?: ApiStockShortfall[]; totals?: OrderTotalsBreakdown | null }
+  let response: SaveResponse
   try {
-    response = await invokeAndUnwrap<{ cart: CartWithItems; stock_shortfalls?: ApiStockShortfall[] }>('calculate-order', input)
+    response = await invokeAndUnwrap<SaveResponse>('calculate-order', input)
   } catch (err) {
     // Carrito de POS con una línea sin stock suficiente (2026-09-20): el
     // servidor no la guardó y devuelve el carrito como quedó.
@@ -86,8 +116,12 @@ export async function saveCartDraft(input: SaveCartDraftInput): Promise<{ cart: 
     if (body?.stock_shortfalls) throw new CartStockRejectedError(err instanceof Error ? err.message : '', body.cart ?? null, mapApiStockShortfalls(body.stock_shortfalls))
     throw err
   }
-  const { cart, stock_shortfalls } = response
-  return { cart, stockShortfalls: mapApiStockShortfalls(stock_shortfalls ?? []) }
+  const { cart, stock_shortfalls, totals } = response
+  // `totals` (2026-09-21): el guardado devuelve, con la misma forma que el
+  // modo preview, el desglose de los ítems que acaba de guardar -- así el
+  // caller no pide un preview aparte de esas mismas líneas. Si el servidor no
+  // lo trae (versión anterior), es null y el caller cae al preview de siempre.
+  return { cart, stockShortfalls: mapApiStockShortfalls(stock_shortfalls ?? []), totals: totals ?? null }
 }
 
 /** Único momento en que un carrito se convierte en un pedido real -- ver

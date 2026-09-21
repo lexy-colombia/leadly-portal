@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { useLanguage } from '../../contexts/LanguageContext'
+import { Button } from '@/components/ui/button'
 import { useAuth } from '../../contexts/AuthContext'
 import { getTenant } from '../../lib/api/tenants'
 import type { Tenant } from '../../types/domain'
@@ -15,13 +17,36 @@ import { PosOpenTabs } from './pos/PosOpenTabs'
 export function Pos() {
   const { profile } = useAuth()
   const tenantId = profile?.tenant_id ?? null
+  const { t } = useLanguage()
   const [tenant, setTenant] = useState<Tenant | null | undefined>(undefined)
+  // Si getTenant falla NO se asume un modo: un tenant con cuentas abiertas
+  // vendería por el flujo equivocado sin ningún aviso. Se muestra el error con
+  // reintento.
+  const [loadFailed, setLoadFailed] = useState(false)
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (!tenantId) return
-    getTenant(tenantId).then(setTenant).catch(() => setTenant(null))
+    setLoadFailed(false)
+    setTenant(undefined)
+    getTenant(tenantId)
+      .then((tn) => (tn ? setTenant(tn) : setLoadFailed(true)))
+      .catch(() => setLoadFailed(true))
   }, [tenantId])
 
+  useEffect(() => {
+    load()
+  }, [load])
+
+  if (loadFailed) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-16 text-center">
+        <p className="text-sm text-red-700">{t('pos.mode.loadError')}</p>
+        <Button type="button" variant="outline" onClick={load}>
+          {t('common.actions.retry')}
+        </Button>
+      </div>
+    )
+  }
   if (!tenantId || tenant === undefined) return <PageSpinner />
   return tenant?.pos_allow_open_tabs ? <PosOpenTabs tenantId={tenantId} /> : <PosFastCheckout />
 }

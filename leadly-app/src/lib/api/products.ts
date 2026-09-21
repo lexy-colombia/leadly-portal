@@ -133,6 +133,9 @@ export interface ListProductsParams {
    * children too, not just that exact category. */
   categoryIds?: string[]
   brandId?: string | null
+  /** Restringe a estos ids (OrderDetail: solo los productos de las líneas de
+   * un pedido ya bloqueado, en vez de todo el catálogo). */
+  productIds?: string[]
   /** Restricts to products with stock (quantity > 0) in this one warehouse --
    * "filtrar con stock de bodega" (Products.tsx). */
   warehouseId?: string | null
@@ -167,7 +170,7 @@ function escapePostgrestPattern(term: string): string {
  * on the real query -- simpler and more robust than nested dot-path filters
  * on a doubly-embedded relation. */
 export async function listProducts(tenantId: string, params: ListProductsParams): Promise<ListProductsResult> {
-  const { page, pageSize, search, categoryIds, brandId, warehouseId, lowStockOnly } = params
+  const { page, pageSize, search, categoryIds, brandId, productIds, warehouseId, lowStockOnly } = params
 
   let idFilter: string[] | null = null
   function intersect(ids: string[]) {
@@ -183,6 +186,8 @@ export async function listProducts(tenantId: string, params: ListProductsParams)
     if (error) throw error
     intersect((data as { product_id: string }[]).map((r) => r.product_id))
   }
+
+  if (productIds) intersect(productIds)
 
   if (warehouseId) {
     intersect(await listProductIdsWithWarehouseStock(tenantId, warehouseId))

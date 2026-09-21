@@ -119,7 +119,38 @@ export interface ProductWarehouseStockRow {
  * picked on each line. listStockTotalsByTenant/ByVariant only give the sum
  * across every warehouse, not "how much in warehouse Y specifically". */
 export async function listStockByWarehouse(tenantId: string): Promise<ProductWarehouseStockRow[]> {
-  const { data, error } = await supabase.from('product_stock').select('product_id, variant_id, warehouse_id, quantity').eq('tenant_id', tenantId)
+  // PostgREST corta cada respuesta en `max_rows` (1000): un tenant con más
+  // filas de product_stock (variantes x bodegas) recibiría la lista truncada y
+  // los productos que quedan fuera aparecerían con disponible 0. Se pagina con
+  // .range() -- con orden estable, si no las páginas pueden repetir/saltar
+  // filas -- hasta traer todo. Misma firma y mismo resultado que antes.
+  const pageSize = 1000
+  const rows: ProductWarehouseStockRow[] = []
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from('product_stock')
+      .select('product_id, variant_id, warehouse_id, quantity')
+      .eq('tenant_id', tenantId)
+      .order('product_id')
+      .order('warehouse_id')
+      .order('variant_id', { nullsFirst: true })
+      .range(from, from + pageSize - 1)
+    if (error) throw error
+    rows.push(...data)
+    if (data.length < pageSize) break
+  }
+  return rows
+}
+
+/** Igual que `listStockByWarehouse` pero solo de estos productos -- para un
+ * pedido bloqueado (OrderDetail) que solo muestra el disponible de sus líneas. */
+export async function listStockByWarehouseForProducts(tenantId: string, productIds: string[]): Promise<ProductWarehouseStockRow[]> {
+  if (productIds.length === 0) return []
+  const { data, error } = await supabase
+    .from('product_stock')
+    .select('product_id, variant_id, warehouse_id, quantity')
+    .eq('tenant_id', tenantId)
+    .in('product_id', productIds)
   if (error) throw error
   return data
 }

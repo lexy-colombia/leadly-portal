@@ -3,10 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import { CheckIcon, PackageIcon, SearchIcon, XIcon } from 'lucide-react'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useLanguage } from '../../../contexts/LanguageContext'
+import { useToast } from '../../../contexts/ToastContext'
 import { getWalkInClient, lookupPosBarcode, posCheckout, searchPosClients, searchPosProducts, type PosCheckoutResult, type PosPaymentMethod, type PosProduct, type PosVariantOption } from '../../../lib/api/pos'
 import { PAYMENT_METHOD_LABEL_KEY } from '../../../lib/api/orderPayments'
 import type { OrderItemInput, OrderTotalsBreakdown } from '../../../lib/api/orders'
-import { useOrderTotalsPreview } from '../../../lib/useOrderTotalsPreview'
+import { useOrderTotalsPreview, orderTotalsSignature } from '../../../lib/useOrderTotalsPreview'
 import { usePosReceiptPrinter } from '../../../lib/usePosReceiptPrinter'
 import { getClientCreditSummary } from '../../../lib/api/credit'
 import { getStoreCreditBalance } from '../../../lib/api/returns'
@@ -77,6 +78,7 @@ function isOutOfStock(p: PosProduct): boolean {
 export function PosFastCheckout() {
   const { profile } = useAuth()
   const { t } = useLanguage()
+  const toast = useToast()
   const navigate = useNavigate()
   const tenantId = profile?.tenant_id ?? null
   const receiptPrinter = usePosReceiptPrinter(tenantId)
@@ -93,7 +95,6 @@ export function PosFastCheckout() {
   const [query, setQuery] = useState('')
   const [searching, setSearching] = useState(false)
   const [results, setResults] = useState<PosProduct[]>([])
-  const [scanError, setScanError] = useState<string | null>(null)
   const [variantPickerFor, setVariantPickerFor] = useState<PosProduct | null>(null)
   const [variantPickerQty, setVariantPickerQty] = useState(1)
   const scanInputRef = useRef<HTMLInputElement>(null)
@@ -118,7 +119,6 @@ export function PosFastCheckout() {
   // cabecera de ese archivo.
   const [paymentLines, setPaymentLines] = useState<PaymentLineDraft[]>([createPaymentLine()])
   const [charging, setCharging] = useState(false)
-  const [chargeError, setChargeError] = useState<string | null>(null)
   const [result, setResult] = useState<PosCheckoutResult | null>(null)
 
   // Facturación electrónica al cobrar (pedido explícito del usuario
@@ -196,31 +196,56 @@ export function PosFastCheckout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customer, storeCreditBalance])
 
-  // Alta libre, sin ningún chequeo acá -- pedido explícito del usuario
-  // 2026-09-06: "no debo hacer validaciones en front de nada en estos
-  // componentes de pos". El único chequeo de stock real es el que devuelve
-  // el servidor (stock_shortfalls, ver useOrderTotalsPreview más abajo),
-  // que resalta la línea en rojo y deshabilita "Cobrar" -- nunca se decide
-  // acá si algo se puede o no se puede agregar.
+  // Tope de cantidad (2026-09-21, aprobado por el usuario como límite de UX):
+  // una línea no pasa del `available` que trajo el buscador (el mismo dato que
+  // `isOutOfStock` usa para inhabilitar el resultado). `available` null = sin
+  // control de inventario, sin tope. El único chequeo que decide es el del
+  // servidor (stock_shortfalls / 409): esto solo evita armar de entrada una
+  // venta que se sabe que no va a pasar. Sigue vigente la regla del proyecto:
+  // el frontend no rechaza nada por su cuenta más allá de este tope.
+  const cartRef = useRef<CartLine[]>([])
+  cartRef.current = cart
   function addToCart(product: PosProduct, variant: PosVariantOption | null, qty = 1) {
     const key = lineKey({ product_id: product.id, variant_id: variant?.id ?? null })
-    setCart((prev) => {
-      const existing = prev.find((l) => lineKey(l) === key)
-      if (existing) return prev.map((l) => (lineKey(l) === key ? { ...l, quantity: l.quantity + qty } : l))
-      return [
-        ...prev,
-        {
-          product_id: product.id,
-          variant_id: variant?.id ?? null,
-          name: product.name,
-          variantLabel: variant?.label ?? null,
-          sku: variant?.sku ?? product.sku,
-          price: variant?.price ?? product.price,
-          quantity: qty,
-          available: variant?.available ?? product.available,
-        },
-      ]
-    })
+    const prev = cartRef.current
+    const existing = prev.find((l) => lineKey(l) === key)
+    // Lo más fresco que se sabe del stock: el del resultado que se acaba de
+    // buscar/escanear, no el de la primera vez que se agregó la línea.
+    const available = variant ? (variant.available ?? null) : (product.available ?? null)
+    let nextQty = (existing?.quantity ?? 0) + qty
+    if (available !== null && nextQty > available) {
+      // Agotado de verdad (nada disponible) vs. línea que ya está en el máximo.
+      if (available <= 0) {
+        toast.info(t('pos.stock.capNone', { name: product.name }))
+        return
+      }
+      // Ya en el máximo (o por encima, con stock desactualizado): no hay nada que sumar.
+      if (available <= (existing?.quantity ?? 0)) {
+        toast.info(t('pos.stock.capUsed', { name: product.name, count: available }))
+        return
+      }
+      toast.info(t('pos.stock.capReached', { name: product.name, count: available }))
+      nextQty = available
+    }
+    const next = existing
+      ? prev.map((l) => (lineKey(l) === key ? { ...l, quantity: nextQty, available } : l))
+      : [
+          ...prev,
+          {
+            product_id: product.id,
+            variant_id: variant?.id ?? null,
+            name: product.name,
+            variantLabel: variant?.label ?? null,
+            sku: variant?.sku ?? product.sku,
+            price: variant?.price ?? product.price,
+            quantity: nextQty,
+            available,
+          },
+        ]
+    // El ref se adelanta al render: dos escaneos seguidos ven la cuenta ya
+    // actualizada del primero.
+    cartRef.current = next
+    setCart(next)
   }
 
   function handlePick(product: PosProduct, quantity = 1) {
@@ -232,18 +257,16 @@ export function PosFastCheckout() {
     }
     setQuery('')
     setResults([])
-    setScanError(null)
   }
 
   async function handleScanSubmit() {
     const code = query.trim()
     if (!code || !tenantId) return
-    setScanError(null)
     setSearching(true)
     try {
       const match = await lookupPosBarcode(tenantId, code)
       if (!match) {
-        setScanError(t('pos.scan.notFound', { code }))
+        toast.error(t('pos.scan.notFound', { code }))
         return
       }
       if (match.variant) {
@@ -260,6 +283,10 @@ export function PosFastCheckout() {
         setQuery('')
         setResults([])
       }
+    } catch (err) {
+      // Un fallo de red o del servidor al buscar el código no puede quedar
+      // mudo: el cajero creería que el producto no existe o que ya se agregó.
+      toast.error(err instanceof Error && err.message ? err.message : t('pos.scan.lookupFailed'))
     } finally {
       setSearching(false)
     }
@@ -270,7 +297,7 @@ export function PosFastCheckout() {
       setCart((prev) => prev.filter((l) => lineKey(l) !== key))
       return
     }
-    setCart((prev) => prev.map((l) => (lineKey(l) === key ? { ...l, quantity } : l)))
+    setCart((prev) => prev.map((l) => (lineKey(l) === key ? { ...l, quantity: l.available !== null ? Math.min(quantity, Math.max(1, l.available)) : quantity } : l)))
   }
 
   function removeLine(key: string) {
@@ -291,7 +318,11 @@ export function PosFastCheckout() {
     unit_price: l.price,
     discount_amount: 0,
   }))
-  const { totals, stockShortfalls, loading: totalsLoading, error: totalsError } = useOrderTotalsPreview(previewItems)
+  const { totals: previewTotals, totalsSignature, stockShortfalls, loading: totalsLoading, error: totalsError } = useOrderTotalsPreview(previewItems)
+  // Solo se usa un desglose si es de ESTAS líneas: entre una edición y el
+  // efecto del hook, `previewTotals` todavía es el de las líneas anteriores y
+  // no debe alimentar el total a cobrar ni el ticket.
+  const totals = previewTotals && totalsSignature === orderTotalsSignature(previewItems) ? previewTotals : null
 
   // Mientras el desglose viaja (o si falla), el botón de cobrar y el vuelto
   // siguen funcionando con la suma de las líneas: el total no depende del
@@ -332,11 +363,10 @@ export function PosFastCheckout() {
 
   async function handleCharge() {
     if (cart.length === 0) {
-      setChargeError(t('pos.errors.emptyCart'))
+      toast.error(t('pos.errors.emptyCart'))
       return
     }
     setCharging(true)
-    setChargeError(null)
     setEinvoicingError(null)
     try {
       const response = await posCheckout({
@@ -373,7 +403,7 @@ export function PosFastCheckout() {
         }
       }
     } catch (err) {
-      setChargeError(err instanceof Error ? err.message : t('pos.errors.checkout'))
+      toast.error(err instanceof Error ? err.message : t('pos.errors.checkout'))
     } finally {
       setCharging(false)
     }
@@ -384,11 +414,9 @@ export function PosFastCheckout() {
     setCustomer(null)
     setPaymentLines([createPaymentLine()])
     setResult(null)
-    setChargeError(null)
     setWantsInvoice(false)
     setEinvoicingError(null)
     setQuery('')
-    setScanError(null)
     // Venta nueva -- nuevo token, para que no quede pegado al intento de
     // cobro anterior (ya cerrado con éxito).
     checkoutTokenRef.current = crypto.randomUUID()
@@ -472,7 +500,6 @@ export function PosFastCheckout() {
             value={query}
             onChange={(v) => {
               setQuery(v)
-              setScanError(null)
             }}
             onEnter={handleScanSubmit}
             results={query.trim().length >= 2 ? results : []}
@@ -483,7 +510,6 @@ export function PosFastCheckout() {
             autoFocus
             inputClassName="h-11"
             hint={<p className="mt-1.5 text-[11px] text-brand-400">{t('pos.scan.hint')}</p>}
-            error={scanError}
             loading={searching && query.trim().length >= 2}
             loadingLabel={
               <span className="flex items-center gap-2">
@@ -553,6 +579,7 @@ export function PosFastCheckout() {
                     <QuantityStepper
                       value={l.quantity}
                       onChange={(v) => updateQuantity(key, v)}
+                      max={l.available !== null ? Math.max(1, l.available) : undefined}
                       invalid={!!shortfall}
                       decreaseLabel={t('common.actions.decreaseQuantity')}
                       increaseLabel={t('common.actions.increaseQuantity')}
@@ -746,8 +773,6 @@ export function PosFastCheckout() {
               )}
             </div>
           )}
-
-          {chargeError && <p className="mb-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-700">{chargeError}</p>}
 
           <Button type="button" size="lg" className="w-full" disabled={!canCharge} onClick={handleCharge}>
             {sendingInvoice ? t('orders.paymentDrawer.einvoicing.sending') : charging ? t('pos.actions.charging') : t('pos.actions.charge', { amount: formatCurrency(total) })}

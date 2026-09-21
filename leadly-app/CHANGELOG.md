@@ -4,6 +4,30 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.16] - 2026-09-21
+
+### Added
+- POS: tope de cantidad con el stock disponible que ya muestra el listado: el campo de cantidad no deja pasar del disponible (no aplica a Órdenes, donde se arman cotizaciones ni a productos sin control de inventario).
+
+### Changed
+- Órdenes: abrir una orden carga menos datos, y solo trae los catálogos completos cuando la orden se puede editar. El selector de cliente busca en el servidor mientras escribes. Las líneas aparecen antes que la disponibilidad de stock.
+- Órdenes: mientras no se sepa si hay facturas, despachos o pagos (cargando o con error), no se ofrecen acciones que dependen de ello, como "Anular" o registrar un pago, y aparece un aviso con "Reintentar". "Confirmar venta" y "Crear pedido" esperan a que carguen las líneas y a que termine cualquier guardado en curso.
+- POS y Órdenes: el guardado del carrito devuelve el resumen de totales, así que se pide una consulta menos tras cada cambio; el guardado de la cuenta es atómico y ya no puede duplicar líneas.
+- POS y Órdenes: las respuestas del servidor se acortan al recordar el navegador la verificación previa durante más tiempo.
+- POS: los errores (stock insuficiente, fallos al guardar o cobrar, etc.) ahora aparecen como avisos emergentes en vez de un cuadro rojo dentro de la pantalla, y desaparece el mensaje "Verificando stock…".
+- POS · Cuentas abiertas: al pulsar "Volver" se sale de inmediato y lo último editado se guarda en segundo plano; si falla, avisa.
+- POS · Cuentas abiertas: los guardados de una misma cuenta se hacen de uno en uno, para que una edición rápida seguida de "Cobrar" nunca duplique líneas.
+- Guardar y calcular totales en Órdenes y POS debería responder más rápido: las operaciones del servidor ahora se ejecutan en la misma región que la base de datos.
+- Órdenes: el listado carga mucho más rápido en comercios con muchos pedidos (de casi medio segundo a una fracción de milisegundo en la consulta principal).
+- Órdenes: al confirmar una cotización se guarda antes lo que se acaba de editar; si el guardado falla, no se confirma.
+
+### Fixed
+- POS: cuando falla la carga de cuentas, puntos de venta, catálogo, bodegas o stock, ahora se muestra el error con "Reintentar" en vez de una lista vacía o un indicador de carga que nunca termina.
+- POS: si no se puede leer la configuración del comercio, ya no se asume el modo de venta rápida por error.
+- POS: una mesa recién abierta y vacía ya no aparece como "Ya cobrada".
+- POS: el escáner de códigos de barras muestra un mensaje cuando falla la red.
+- POS: algunos avisos de error mostraban llaves sueltas en el texto ("{las bodegas}").
+
 ## [1.0.15] - 2026-09-20
 
 ### Added

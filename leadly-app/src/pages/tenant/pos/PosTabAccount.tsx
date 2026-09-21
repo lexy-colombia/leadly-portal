@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import { formatDate, formatTime } from '../../../lib/dates'
 import { usePermission } from '../../../contexts/AuthContext'
-import { saveCartDraft, CartStockRejectedError, listChargesFromCart, createOrderFromCart, closeCart, deleteCart, getCart } from '../../../lib/api/carts'
-import type { CartCharge, CartWithItems } from '../../../lib/api/carts'
+import { useToast } from '../../../contexts/ToastContext'
+import { saveCartDraft, enqueueCartSave, waitForCartSaves, CartStockRejectedError, listChargesFromCart, createOrderFromCart, closeCart, deleteCart, getCart } from '../../../lib/api/carts'
+import type { CartCharge, CartWithItems, SaveCartDraftInput } from '../../../lib/api/carts'
 import { posOpenMark } from '../../../lib/posPerf'
 import { getClient } from '../../../lib/api/clients'
 import { searchPosClients } from '../../../lib/api/pos'
@@ -12,7 +13,7 @@ import { getStoreCreditBalance } from '../../../lib/api/returns'
 import { isDianDirectoConnected } from '../../../lib/api/integrations'
 import { previewOrderTotals, getOrderBare } from '../../../lib/api/orders'
 import type { OrderItemInput, OrderTotalsBreakdown, StockShortfall } from '../../../lib/api/orders'
-import { useOrderTotalsPreview } from '../../../lib/useOrderTotalsPreview'
+import { useOrderTotalsPreview, orderTotalsSignature, type PrefetchedTotals } from '../../../lib/useOrderTotalsPreview'
 import { listProducts } from '../../../lib/api/products'
 import type { ProductWithImages } from '../../../lib/api/products'
 import { listProductCategories } from '../../../lib/api/productCategories'
@@ -65,10 +66,12 @@ export function PosTabAccount({
    * que bloqueaba el render con el spinner. Ausente = se lee del servidor. */
   initialCart?: CartWithItems
   points: PosPoint[]
-  onBack: () => void
+  /** `pending`: guardado en segundo plano de "Volver", para refrescar el listado al terminar. */
+  onBack: (pending?: Promise<unknown>) => void
   onClosed: () => void
 }) {
   const { t, language } = useLanguage()
+  const toast = useToast()
   const canCheckout = usePermission('pos.checkout')
   const receiptPrinter = usePosReceiptPrinter(tenantId)
 
@@ -85,6 +88,16 @@ export function PosTabAccount({
   const [brands, setBrands] = useState<Brand[]>([])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
   const [stockRows, setStockRows] = useState<ProductWarehouseStockRow[]>([])
+  // Estado del stock del listado: 'loading' -> 'ready' (o 'failed' si la
+  // carga inicial falló). Mientras no esté 'ready' el editor no pinta "Agotado"
+  // ni aplica tope (`stockLoading` de OrderItemsEditor: sin datos no se
+  // bloquea nada). 'failed' avisa por toast y se reintenta solo cada 15 s
+  // (y por foco/409), en vez de quedar así para siempre. Los faltantes que
+  // vienen del servidor se ven siempre, en cualquier estado.
+  const [stockStatus, setStockStatus] = useState<'loading' | 'ready' | 'failed'>('loading')
+  // Refresco del stock del listado (tope de cantidad): sin esto, una caja que
+  // repuso stock dejaría bloqueado a este cajero hasta reabrir la cuenta.
+  const stockRefreshRef = useRef({ at: 0, inFlight: false })
 
   const [creditBalance, setCreditBalance] = useState(0)
   const [storeCreditBalance, setStoreCreditBalance] = useState(0)
@@ -97,8 +110,15 @@ export function PosTabAccount({
   // subido ya veía el check acá).
   const [dianConnected, setDianConnected] = useState(false)
 
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  // Falla al abrir la cuenta (getCart lanzó o devolvió null): pantalla de
+  // error con reintento/volver en vez de spinner infinito.
+  const [loadFailed, setLoadFailed] = useState<string | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
+  // Los errores de acciones (guardado, cobro, cerrar, cancelar...) salen por
+  // toast (`toast.error`), no en un bloque inline: son transitorios.
+  // "Volver" no bloquea: este ref solo evita disparar dos veces la salida (y su
+  // guardado en segundo plano) con un doble clic antes de que se desmonte.
+  const leavingRef = useRef(false)
   // Líneas que piden más de lo que hay en stock real -- las devuelve
   // calculate-order (nunca se calculan acá), por dos vías que no se pisan:
   // el preview de totales (`previewShortfalls`, abajo, corre también al abrir
@@ -107,15 +127,25 @@ export function PosTabAccount({
   // las pinta en rojo (prop `shortfalls`) y "Cobrar" queda deshabilitado --
   // el cajero tiene que borrar la línea o cambiarla de bodega para poder
   // seguir. Pedido explícito del usuario 2026-09-06.
-  const [flushShortfalls, setFlushShortfalls] = useState<StockShortfall[]>([])
-  // Cambios que todavía no se sincronizaron con el servidor: mismo valor que
-  // `lastSyncedRef` pero como estado, para que el botón "Cobrar" reaccione
-  // (un ref no vuelve a renderizar). null = aún no se armó la base inicial.
+  const [flushShortfalls, setFlushShortfallsState] = useState<StockShortfall[]>([])
+  // Espejo síncrono de `flushShortfalls`: `handleChargeAll` lo lee después de
+  // esperar guardados, cuando el estado del closure ya puede estar viejo.
+  const flushShortfallsRef = useRef<StockShortfall[]>([])
+  function setFlushShortfalls(next: StockShortfall[]) {
+    flushShortfallsRef.current = next
+    setFlushShortfallsState(next)
+  }
+  // Último snapshot sincronizado con el servidor: mismo valor que
+  // `lastSyncedRef` pero como estado, para que el efecto de autoguardado se
+  // re-evalúe cuando un guardado termina (un ref no vuelve a renderizar).
   const [syncedSnap, setSyncedSnap] = useState<string | null>(null)
-  // Si el último guardado falló, "Cobrar" se habilita de nuevo para que
-  // handleChargeAll reintente el guardado en vez de quedar bloqueado hasta la
-  // próxima edición.
-  const [syncFailed, setSyncFailed] = useState(false)
+  // Desglose que devolvió el último guardado (calculate-order lo trae desde
+  // 2026-09-21) para EXACTAMENTE esos ítems: mientras las líneas en pantalla
+  // sigan siendo esas, el resumen usa esto y no pide un preview aparte.
+  const [prefetched, setPrefetched] = useState<PrefetchedTotals | null>(null)
+  // Firma de las líneas de un guardado en vuelo: el preview de esas mismas
+  // líneas espera a ese guardado (que trae los totales) en vez de duplicarlo.
+  const [inflightItemsSig, setInflightItemsSig] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
   const [confirmingCancel, setConfirmingCancel] = useState(false)
   const [charging, setCharging] = useState(false)
@@ -171,11 +201,23 @@ export function PosTabAccount({
         setProducts(data)
         posOpenMark('catalogo-listo')
       })
-      .catch(() => {})
+      .catch(() => toast.error(t('pos.tabs.errors.loadCatalog', { what: t('pos.tabs.errors.loadCatalogProducts') })))
     listProductCategories(tenantId).then(setCategories).catch(() => {})
     listBrands(tenantId).then(setBrands).catch(() => {})
-    listWarehouses(tenantId).then(setWarehouses).catch(() => {})
-    listStockByWarehouse(tenantId).then(setStockRows).catch(() => {})
+    listWarehouses(tenantId)
+      .then(setWarehouses)
+      .catch(() => toast.error(t('pos.tabs.errors.loadCatalog', { what: t('pos.tabs.errors.loadCatalogWarehouses') })))
+    listStockByWarehouse(tenantId)
+      .then((rows) => {
+        stockRefreshRef.current.at = Date.now()
+        setStockRows(rows)
+        setStockStatus('ready')
+      })
+      .catch(() => {
+        // Sin datos de stock: nada se bloquea por eso (ver stockStatus) y se reintenta solo.
+        setStockStatus('failed')
+        toast.error(t('pos.tabs.errors.loadCatalog', { what: t('pos.tabs.errors.loadCatalogStock') }))
+      })
     isDianDirectoConnected(tenantId)
       .then(setDianConnected)
       .catch(() => setDianConnected(false))
@@ -207,14 +249,23 @@ export function PosTabAccount({
       applyCart(initialCart)
       return
     }
-    getCart(cartId)
+    setLoadFailed(null)
+    // Espera los guardados pendientes (p. ej. el de un "Volver" reciente) para
+    // no leer líneas viejas ni un carrito a medio reescribir.
+    waitForCartSaves(cartId)
+      .then(() => getCart(cartId))
       .then((cart) => {
-        if (!cart) return
+        // Sin carrito no hay nada que pintar: se avisa y se ofrece reintentar
+        // o volver, en vez de dejar el spinner para siempre.
+        if (!cart) {
+          setLoadFailed(t('pos.tabs.errors.cartNotFound'))
+          return
+        }
         applyCart(cart)
       })
-      .catch((err) => setError(err instanceof Error ? err.message : t('pos.tabs.errors.save')))
-    listChargesFromCart(cartId).then(setCharges).catch(() => {})
-  }, [cartId])
+      .catch((err) => setLoadFailed(err instanceof Error && err.message ? err.message : t('pos.tabs.errors.loadCart')))
+    listChargesFromCart(cartId).then(setCharges).catch(() => toast.error(t('pos.tabs.errors.loadCart')))
+  }, [cartId, reloadKey])
 
   useEffect(() => {
     if (loaded) posOpenMark('cuenta-pintada')
@@ -272,29 +323,120 @@ export function PosTabAccount({
   // botón "Cobrar" queda con un estado que no corresponde a lo que hay en
   // pantalla.
   const flushIdRef = useRef(0)
+  // Lo más reciente que hay en pantalla (snapshot + cuerpo del guardado). Un
+  // guardado encolado lee esto cuando le toca correr, no lo que había al pedirlo.
+  const latestRef = useRef<{ snap: string; input: SaveCartDraftInput } | null>(null)
+  // Snapshot que el servidor rechazó por stock (409): el guardado de "Volver"
+  // no lo reintenta (sería un segundo toast por el mismo error).
+  const rejectedSnapRef = useRef<string | null>(null)
+  const mountedRef = useRef(true)
+  // Cerrando o cancelando la cuenta: el autoguardado se ignora (guardar sobre
+  // una cuenta que se está cerrando/borrando solo produce un toast espurio).
+  const windingRef = useRef(false)
+  const winding = closing || cancelling
+  windingRef.current = winding
+  latestRef.current = { snap: currentSnapRef.current, input: { cart_id: cartId, contact_id: contactId, items, pos_point_id: posPointId || null, label: label || null } }
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
-  /** Guarda el borrador y devuelve los faltantes de stock que calculó el
-   * servidor para exactamente lo que se guardó (handleChargeAll los usa para
-   * no abrir el pago si hay alguno). */
-  async function flush(): Promise<StockShortfall[]> {
+  /** Vuelve a leer el stock del listado (silencioso: si falla se conserva el
+   * que hay). `force` se salta el intervalo mínimo (tras un 409 de stock); el
+   * refresco por foco de ventana respeta 30 s entre lecturas. */
+  function refreshStock(force = false) {
+    const state = stockRefreshRef.current
+    if (!mountedRef.current || state.inFlight || (!force && Date.now() - state.at < 30_000)) return
+    state.inFlight = true
+    listStockByWarehouse(tenantId)
+      .then((rows) => {
+        state.at = Date.now()
+        if (mountedRef.current) {
+          setStockRows(rows)
+          setStockStatus('ready')
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        state.inFlight = false
+      })
+  }
+  const refreshStockRef = useRef(refreshStock)
+  refreshStockRef.current = refreshStock
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState === 'visible') refreshStockRef.current()
+    }
+    const onFocus = () => refreshStockRef.current()
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [])
+  // Carga inicial fallida: reintenta cada 15 s hasta lograrlo (silencioso; el
+  // aviso ya salió una vez). Al quedar 'ready' el intervalo se limpia.
+  useEffect(() => {
+    if (stockStatus !== 'failed') return
+    const timer = setInterval(() => refreshStockRef.current(true), 15_000)
+    return () => clearInterval(timer)
+  }, [stockStatus])
+
+  /** Guarda el borrador y devuelve lo que calculó el servidor para
+   * exactamente lo que se guardó: los faltantes de stock (handleChargeAll los
+   * usa para no abrir el pago si hay alguno), esas mismas líneas y su
+   * desglose de totales (null si el servidor no lo trae). */
+  async function flush(): Promise<{ stockShortfalls: StockShortfall[]; items: OrderItemInput[]; totals: OrderTotalsBreakdown | null }> {
     const flushId = ++flushIdRef.current
-    const snap = snapshot()
-    setSaving(true)
-    setError(null)
-    setSyncFailed(false)
+    let snap = snapshot()
+    let savedItems = items
+    setInflightItemsSig(JSON.stringify(items))
     try {
-      const { stockShortfalls } = await saveCartDraft({ cart_id: cartId, contact_id: contactId, items, pos_point_id: posPointId || null, label: label || null })
+      // Todos los guardados de la cuenta van en una sola cola (ver
+      // enqueueCartSave): nunca hay dos en vuelo, y cada uno guarda lo más
+      // reciente que haya en pantalla al momento de correr.
+      const { stockShortfalls, totals: savedTotals } = await enqueueCartSave(cartId, () => {
+        const latest = latestRef.current
+        if (latest) {
+          snap = latest.snap
+          savedItems = latest.input.items
+        }
+        return saveCartDraft(latest ? latest.input : { cart_id: cartId, contact_id: contactId, items, pos_point_id: posPointId || null, label: label || null })
+      })
       if (flushIdRef.current === flushId) {
         lastSyncedRef.current = snap
         setSyncedSnap(snap)
         // Si mientras tanto se editó, esos faltantes son de una versión vieja:
         // no se publican (el efecto de autoguardado vuelve a guardar lo actual).
         setFlushShortfalls(currentSnapRef.current === snap ? stockShortfalls : [])
+        // Los totales quedan asociados a las líneas guardadas: el hook los usa
+        // solo si siguen siendo las de la pantalla (si no, hace su preview).
+        setPrefetched(savedTotals ? { items: savedItems, totals: savedTotals, stockShortfalls } : null)
       }
-      return stockShortfalls
+      return { stockShortfalls, items: savedItems, totals: savedTotals }
     } catch (err) {
+      // El aviso sale SIEMPRE (aunque otro guardado lo haya superado): si no,
+      // el clic de "Cobrar"/"Dividir" que no procede quedaría mudo. Única
+      // excepción: la cuenta se está cerrando/cancelando (ver windingRef).
+      if (err instanceof CartStockRejectedError) {
+        rejectedSnapRef.current = snap
+        // El tope se apoya en el stock del listado: si el servidor dice que no
+        // alcanza, se vuelve a leer para que el tope refleje lo real.
+        refreshStock(true)
+      }
+      if (!windingRef.current) {
+        toast.error(
+          err instanceof CartStockRejectedError
+            ? t(mountedRef.current ? 'pos.tabs.errors.stockRejected' : 'pos.tabs.errors.stockRejectedOnLeave', { detail: err.message })
+            : err instanceof Error
+              ? err.message
+              : t('pos.tabs.errors.save'),
+        )
+      }
       if (flushIdRef.current === flushId) {
-        setError(err instanceof CartStockRejectedError ? t('pos.tabs.errors.stockRejected', { detail: err.message }) : err instanceof Error ? err.message : t('pos.tabs.errors.save'))
         if (err instanceof CartStockRejectedError && err.cart && currentSnapRef.current === snap) {
           // El servidor NO guardó esa línea (stock insuficiente): la pantalla
           // vuelve al carrito tal como quedó allá, sin línea "fantasma", y
@@ -312,16 +454,20 @@ export function PosTabAccount({
           const revertedSnap = JSON.stringify({ contactId, posPointId, label, items: serverItems })
           prevItemCountRef.current = serverItems.length
           lastSyncedRef.current = revertedSnap
+          // Los refs se actualizan ya (no al próximo render): un guardado o un
+          // clic de "Cobrar" encolado que corra antes de repintar debe ver el
+          // carrito revertido, no la línea rechazada.
+          currentSnapRef.current = revertedSnap
+          if (latestRef.current) latestRef.current = { snap: revertedSnap, input: { ...latestRef.current.input, items: serverItems } }
           setItems(serverItems)
           setSyncedSnap(revertedSnap)
           setFlushShortfalls([])
-        } else {
-          setSyncFailed(true)
+          setPrefetched(null)
         }
       }
       throw err
     } finally {
-      if (flushIdRef.current === flushId) setSaving(false)
+      if (flushIdRef.current === flushId) setInflightItemsSig(null)
     }
   }
 
@@ -336,6 +482,8 @@ export function PosTabAccount({
       return
     }
     if (snap === lastSyncedRef.current) return
+    // Cerrando/cancelando la cuenta: no se autoguarda (toast espurio).
+    if (winding) return
     // Un producto recién agregado (la cuenta creció) se guarda al instante
     // -- así el cajero ve de una si esa línea no cumple con el stock (roja +
     // "Cobrar" deshabilitado, ver stockShortfalls) en vez de enterarse 2s
@@ -345,6 +493,7 @@ export function PosTabAccount({
     prevItemCountRef.current = items.length
     const timer = setTimeout(
       () => {
+        if (windingRef.current) return
         flush().catch(() => {})
       },
       justAddedItem ? 0 : 2000,
@@ -354,40 +503,64 @@ export function PosTabAccount({
     // del actual (el cajero revirtió o siguió editando mientras volaba), el
     // efecto se re-evalúa y programa otro guardado. Sin bucle: cuando
     // syncedSnap === snapshot() el efecto retorna arriba, y un guardado fallido
-    // no cambia syncedSnap (no reintenta solo; syncFailed rehabilita el clic).
+    // no cambia syncedSnap (no reintenta solo; el clic en "Cobrar" reintenta).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, contactId, posPointId, label, items, syncedSnap])
+  }, [loaded, contactId, posPointId, label, items, syncedSnap, winding])
 
   // Desglose de la cuenta antes de cobrarla -- hasta ahora esta pantalla no
   // mostraba ningún total (el cajero solo veía las líneas), así que no había
   // forma de saber cuánto iba la mesa ni cuánto de eso era impuesto. Lo
   // calcula el servidor con las mismas reglas del pedido real, ver
   // useOrderTotalsPreview.
-  const { totals, stockShortfalls: previewShortfalls, loading: totalsLoading, error: totalsError } = useOrderTotalsPreview(items)
+  const { totals, totalsSignature, stockShortfalls: previewShortfalls, loading: totalsLoading, error: totalsError } = useOrderTotalsPreview(items, 0, {
+    prefetched,
+    hold: inflightItemsSig !== null && inflightItemsSig === JSON.stringify(items),
+  })
+  // Lo último que muestra el resumen, con la firma de las líneas a las que
+  // corresponde. Un clic de "Cobrar" que espera un guardado lo lee de acá, pero
+  // SOLO lo usa si esa firma coincide con la de las líneas vigentes
+  // (`latestRef`): este ref se escribe en el render y un 409 puede haber
+  // revertido las líneas antes de que React repinte.
+  const totalsRef = useRef<{ totals: OrderTotalsBreakdown | null; signature: string | null; error: string | null; shortfalls: StockShortfall[] }>({
+    totals: null,
+    signature: null,
+    error: null,
+    shortfalls: [],
+  })
+  totalsRef.current = { totals, signature: totalsSignature, error: totalsError, shortfalls: previewShortfalls }
+  // Totales aptos para mostrar/imprimir "lo que hay ahora": solo si son de
+  // estas mismas líneas (en el render entre una edición y el efecto del hook
+  // `totals` todavía es el de las líneas anteriores).
+  const currentTotals = totals && totalsSignature === orderTotalsSignature(items) ? totals : null
+  // Al cambiar las líneas, lo que guardó el último guardado deja de valer (y
+  // con él sus faltantes: si se vuelve a las mismas líneas, se calcula de nuevo).
+  useEffect(() => {
+    if (prefetched && orderTotalsSignature(prefetched.items) !== orderTotalsSignature(items)) setPrefetched(null)
+  }, [items, prefetched])
   // Faltantes que se muestran: lo que devolvió el último guardado si hay
   // alguno, si no lo del preview (que corre también al abrir una cuenta con
   // productos ya cargados, sin esperar a una primera edición). Ambos vienen
   // de calculate-order; acá no se compara nada contra stock cacheado.
   const stockShortfalls = flushShortfalls.length > 0 ? flushShortfalls : previewShortfalls
-  // "Verificando": hay cambios sin sincronizar, un guardado en vuelo o un
-  // preview en vuelo -- los faltantes que se ven todavía pueden no
-  // corresponder a lo que hay en pantalla, así que "Cobrar"/"Dividir cuenta"
-  // no se ofrecen como si estuvieran listos. Si el último guardado falló no
-  // se bloquea: el clic reintenta el guardado (handleChargeAll).
-  const unsynced = syncedSnap === null || snapshot() !== syncedSnap
-  const verifying = !syncFailed && (saving || totalsLoading || unsynced)
+  // "Cobrar"/"Dividir cuenta" no se bloquean mientras se sincroniza: el clic
+  // espera el guardado pendiente (handleChargeAll/handleOpenSplit) y no abre
+  // nada si el servidor devuelve faltantes; create-order/pos-checkout además
+  // rechazan con 409 antes de insertar.
 
   /** Cerrar la mesa: acción propia, nunca un efecto de haber cobrado. Se
    * ofrece recién cuando la cuenta ya no tiene productos por cobrar --
    * mientras queden, o se cobran, o se descarta la cuenta entera con
    * "Cancelar cuenta". */
   async function handleClose() {
+    windingRef.current = true
     setClosing(true)
     try {
+      await waitForCartSaves(cartId)
       await closeCart(cartId)
       onClosed()
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('pos.tabs.errors.close'))
+      toast.error(err instanceof Error ? err.message : t('pos.tabs.errors.close'))
+      windingRef.current = false
       setClosing(false)
       setConfirmingClose(false)
     }
@@ -414,12 +587,15 @@ export function PosTabAccount({
   const posPointName = points.find((p) => p.id === posPointId)?.name ?? null
 
   async function handleCancel() {
+    windingRef.current = true
     setCancelling(true)
     try {
+      await waitForCartSaves(cartId)
       await deleteCart(cartId)
       onClosed()
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('pos.tabs.errors.cancel'))
+      toast.error(err instanceof Error ? err.message : t('pos.tabs.errors.cancel'))
+      windingRef.current = false
       setCancelling(false)
       setConfirmingCancel(false)
     }
@@ -432,22 +608,20 @@ export function PosTabAccount({
    * `getOrderBare` -- sin joins, el fetch más barato posible antes de abrir
    * el drawer. */
   async function handleOpenChargePayment(charge: CartCharge) {
-    setError(null)
     setPayingChargeId(charge.id)
     try {
       const order = await getOrderBare(charge.id)
       if (!order) throw new Error(t('pos.tabs.errors.loadOrder'))
       setPayingCharge({ order, pendingAmount: charge.total - charge.paid })
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('pos.tabs.errors.loadOrder'))
+      toast.error(err instanceof Error ? err.message : t('pos.tabs.errors.loadOrder'))
     } finally {
       setPayingChargeId(null)
     }
   }
 
-  async function handleCharge(selectedItems?: { id: string; quantity: number }[]) {
+  async function handleCharge(selectedItems?: { id: string; quantity: number }[], saved?: { items: OrderItemInput[]; totals: OrderTotalsBreakdown | null }) {
     setCharging(true)
-    setError(null)
     try {
       // Nada se escribe todavía: solo se resuelve, del lado del servidor, el
       // desglose de lo que se va a cobrar (el pedido y su confirmación
@@ -474,39 +648,72 @@ export function PosTabAccount({
                 }
               }),
           )
-        : (totals ?? (await previewOrderTotals(items)))
+        : // `saved`: lo que devolvió el guardado que acaba de esperar
+          // handleChargeAll (sus ítems y su desglose), no lo que había en
+          // pantalla al hacer clic -- si el servidor quitó una línea por stock,
+          // el pago abre con el estado real de la cuenta.
+          (saved?.totals ?? (await previewOrderTotals(saved?.items ?? latestRef.current?.input.items ?? items)))
       setSplitItems(null)
       drawerDoneRef.current = false
       chargeTokenRef.current = crypto.randomUUID()
       setPendingCharge({ items: selectedItems, totals: chargeTotals })
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('pos.tabs.errors.charge'))
+      toast.error(err instanceof Error ? err.message : t('pos.tabs.errors.charge'))
     } finally {
       setCharging(false)
     }
   }
 
   async function handleChargeAll() {
-    // Solo re-guarda si quedó algo sin sincronizar desde el último
-    // autosave -- el caso común (cajero agrega productos, espera un
-    // toque, recién ahí cobra) ya está guardado, forzar un viaje de red
-    // extra ahí no suma nada más que lentitud.
-    if (snapshot() !== lastSyncedRef.current) {
-      setCharging(true)
-      try {
+    setCharging(true)
+    let saved: { items: OrderItemInput[]; totals: OrderTotalsBreakdown | null } | undefined
+    try {
+      // Primero espera el guardado que esté en vuelo (p. ej. el autoguardado
+      // de la línea recién agregada, que puede volver con un 409): decidir
+      // antes dejaba abrir el pago con la línea que el servidor iba a rechazar.
+      await waitForCartSaves(cartId)
+      // Solo re-guarda si quedó algo sin sincronizar -- el caso común (cajero
+      // agrega productos, espera un toque, recién ahí cobra) ya está guardado,
+      // forzar un viaje de red extra ahí no suma nada más que lentitud.
+      if (currentSnapRef.current !== lastSyncedRef.current) {
         // Si el servidor devuelve faltantes para lo que se acaba de guardar,
         // no se abre el pago: quedan en rojo (flush los deja en estado).
-        const shortfalls = await flush()
-        if (shortfalls.length > 0) {
+        const result = await flush()
+        if (result.stockShortfalls.length > 0) {
+          toast.error(t('pos.tabs.errors.stockShortfall'))
           setCharging(false)
           return
         }
-      } catch {
-        setCharging(false)
-        return
+        saved = { items: result.items, totals: result.totals }
+      } else {
+        // Ya sincronizado: se cobra con lo vigente (los refs, no el closure
+        // del clic, que puede ser de antes de un guardado que acaba de volver).
+        // Los totales de pantalla se usan solo si son de EXACTAMENTE esas
+        // líneas; si no (p. ej. un 409 acaba de revertir la cuenta y React no
+        // repintó), handleCharge pide el desglose fresco de las líneas vigentes.
+        const current = totalsRef.current
+        const liveItems = latestRef.current?.input.items ?? items
+        // Faltantes que el servidor ya informó para estas líneas, sea en un
+        // guardado que resolvió mientras se esperaba (sin 409) o en el preview
+        // de exactamente estas líneas: no se abre el pago, igual que en la
+        // rama con guardado.
+        const knownShortfalls = flushShortfallsRef.current.length > 0 ? flushShortfallsRef.current : current.signature === orderTotalsSignature(liveItems) ? current.shortfalls : []
+        if (knownShortfalls.length > 0) {
+          toast.error(t('pos.tabs.errors.stockShortfall'))
+          setCharging(false)
+          return
+        }
+        saved = {
+          items: liveItems,
+          totals: current.totals && !current.error && current.signature === orderTotalsSignature(liveItems) ? current.totals : null,
+        }
       }
+    } catch {
+      // flush ya avisó por toast.
+      setCharging(false)
+      return
     }
-    await handleCharge()
+    await handleCharge(undefined, saved)
   }
 
   /** Abre el selector de "dividir cuenta" -- primero flushea si hace
@@ -515,18 +722,27 @@ export function PosTabAccount({
    * estado local. */
   async function handleOpenSplit() {
     setOpeningSplit(true)
-    setError(null)
     try {
-      if (snapshot() !== lastSyncedRef.current) {
-        const shortfalls = await flush()
-        if (shortfalls.length > 0) return
+      if (currentSnapRef.current !== lastSyncedRef.current) {
+        let result: Awaited<ReturnType<typeof flush>>
+        try {
+          result = await flush()
+        } catch {
+          // flush ya avisó por toast: no repetirlo acá.
+          return
+        }
+        if (result.stockShortfalls.length > 0) {
+          toast.error(t('pos.tabs.errors.stockShortfall'))
+          return
+        }
       }
+      await waitForCartSaves(cartId)
       const cart = await getCart(cartId)
       if (!cart) throw new Error(t('pos.tabs.errors.save'))
       setSplitItems(cart.items)
       setSelectedQuantities(new Map(cart.items.map((i) => [i.id, i.quantity])))
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('pos.tabs.errors.save'))
+      toast.error(err instanceof Error ? err.message : t('pos.tabs.errors.save'))
     } finally {
       setOpeningSplit(false)
     }
@@ -577,6 +793,7 @@ export function PosTabAccount({
     // este setItems, React no lo actualiza en el momento).
     primedRef.current = false
     setFlushShortfalls([])
+    setPrefetched(null)
     setItems(
       cart.items.map((i) => ({
         product_id: i.product_id,
@@ -592,12 +809,57 @@ export function PosTabAccount({
     if (allowAutoClose) await closeIfFullyPaid(cart.items.length, freshCharges)
   }
 
+  /** Volver: sale de inmediato. Si hay una edición sin sincronizar (el
+   * debounce de 2 s se cancela al desmontar), la guarda en segundo plano con
+   * el snapshot de este momento -- sin depender de estado del componente, que
+   * ya no va a existir -- y si falla avisa por toast (el ToastProvider vive en
+   * la raíz). Se le pasa la promesa a onBack para que el listado se refresque
+   * cuando termine. */
+  function handleBack() {
+    if (leavingRef.current) return
+    leavingRef.current = true
+    if (snapshot() === lastSyncedRef.current) {
+      onBack()
+      return
+    }
+    const snap = snapshot()
+    const input = { cart_id: cartId, contact_id: contactId, items, pos_point_id: posPointId || null, label: label || null }
+    // Misma cola que el resto de guardados de la cuenta: corre cuando termine
+    // el que esté en vuelo, y si para entonces ya quedó guardado (o el servidor
+    // ya rechazó exactamente esto por stock) no repite ni vuelve a avisar.
+    const background = enqueueCartSave(cartId, async () => {
+      if (lastSyncedRef.current === snap || rejectedSnapRef.current === snap) return
+      try {
+        await saveCartDraft(input)
+      } catch (err) {
+        toast.error(err instanceof CartStockRejectedError ? t('pos.tabs.errors.stockRejectedOnLeave', { detail: err.message }) : t('pos.tabs.errors.saveBeforeBack'))
+      }
+    })
+    onBack(background)
+  }
+
+  if (loadFailed) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-16 text-center">
+        <p className="text-sm text-red-700">{loadFailed}</p>
+        <div className="flex gap-2">
+          <Button type="button" variant="outline" onClick={() => setReloadKey((k) => k + 1)}>
+            {t('common.actions.retry')}
+          </Button>
+          <Button type="button" variant="ghost" onClick={() => onBack()}>
+            {t('pos.tabs.backToList')}
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   if (!loaded) return <PageSpinner />
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
-        <button type="button" onClick={onBack} className="flex items-center gap-1 text-xs font-medium text-brand-500 hover:text-brand-700">
+        <button type="button" onClick={handleBack} className="flex items-center gap-1 text-xs font-medium text-brand-500 hover:text-brand-700">
           <ChevronLeftIcon width={14} height={14} /> {t('pos.tabs.backToList')}
         </button>
         {createdAt && (
@@ -618,6 +880,7 @@ export function PosTabAccount({
             stockRows={stockRows}
             shortfalls={stockShortfalls}
             searchAlwaysOpen
+            stockLoading={stockStatus !== 'ready'}
             onChange={(next) => {
               setFlushShortfalls([])
               setItems(next)
@@ -766,7 +1029,7 @@ export function PosTabAccount({
                 onClick={() =>
                   receiptPrinter.printPending(
                     items.map((i) => ({ product_name: i.product_name, sku: i.sku ?? null, quantity: i.quantity, subtotal: i.quantity * i.unit_price - (i.discount_amount ?? 0) })),
-                    totals ?? {
+                    currentTotals ?? {
                       tax_enabled: false,
                       subtotal: items.reduce((sum, i) => sum + i.quantity * i.unit_price - (i.discount_amount ?? 0), 0),
                       discount_total: 0,
@@ -800,10 +1063,8 @@ export function PosTabAccount({
             )}
           </div>
 
-          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
-
           <div className="flex gap-2">
-            <Button type="button" variant="outline" className="flex-1" onClick={onBack} disabled={saving}>
+            <Button type="button" variant="outline" className="flex-1" onClick={handleBack}>
               {t('pos.tabs.saveAndBack')}
             </Button>
             {charges.length === 0 && (
@@ -827,8 +1088,7 @@ export function PosTabAccount({
           ) : (
             <>
               {stockShortfalls.length > 0 && <p className="mb-2 text-center text-xs font-medium text-red-600">{t('pos.tabs.errors.stockShortfall')}</p>}
-              {verifying && stockShortfalls.length === 0 && <p className="mb-2 text-center text-xs text-brand-400">{t('pos.tabs.verifyingStock')}</p>}
-              <Button type="button" size="lg" className="w-full" disabled={!canCheckout || charging || verifying || stockShortfalls.length > 0} onClick={handleChargeAll}>
+              <Button type="button" size="lg" className="w-full" disabled={!canCheckout || charging || stockShortfalls.length > 0} onClick={handleChargeAll}>
                 {charging ? t('pos.actions.charging') : t('pos.tabs.charge')}
               </Button>
             </>
@@ -837,7 +1097,7 @@ export function PosTabAccount({
             <button
               type="button"
               onClick={handleOpenSplit}
-              disabled={!canCheckout || openingSplit || charging || verifying || stockShortfalls.length > 0}
+              disabled={!canCheckout || openingSplit || charging || stockShortfalls.length > 0}
               className="block w-full text-center text-xs font-medium text-accent-600 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
             >
               {openingSplit ? t('common.actions.saving') : t('pos.tabs.splitBill')}
@@ -889,7 +1149,7 @@ export function PosTabAccount({
           defaultBuyer={customer}
           onSearchBuyers={(q) => searchPosClients(tenantId, q)}
           onSaved={(chargedOrder, einvoicing) => {
-            if (einvoicing?.error) setError(einvoicing.error)
+            if (einvoicing?.error) toast.error(einvoicing.error)
             if (receiptPrinter.autoPrintEnabled) receiptPrinter.print(chargedOrder.id, posPointName)
             handlePaymentDrawerDone(!einvoicing?.error)
           }}
@@ -915,7 +1175,7 @@ export function PosTabAccount({
           dianConnected={dianConnected}
           onSaved={async (_order, einvoicing) => {
             setPayingCharge(null)
-            if (einvoicing?.error) setError(einvoicing.error)
+            if (einvoicing?.error) toast.error(einvoicing.error)
             const freshCharges = await listChargesFromCart(cartId).catch(() => [] as CartCharge[])
             setCharges(freshCharges)
             if (!einvoicing?.error) await closeIfFullyPaid(items.length, freshCharges)
@@ -968,7 +1228,6 @@ export function PosTabAccount({
               <span className="text-brand-500">{t('pos.tabs.splitSelectedTotal')}</span>
               <span className="font-bold text-brand-800">{formatCurrency(splitSelectedTotal)}</span>
             </div>
-            {error && <p className="mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-700">{error}</p>}
             <Button
               type="button"
               size="lg"

@@ -34,16 +34,18 @@ export async function findStockShortfalls(adminClient: SupabaseClient, tenantId:
   const productIds = Array.from(new Set(items.map((i) => i.product_id).filter((id): id is string => !!id)));
   if (productIds.length === 0) return [];
 
-  const { data: products, error: productsError } = await adminClient.from("products").select("id, track_inventory").eq("tenant_id", tenantId).in("id", productIds);
+  // Las dos lecturas son independientes: se piden en paralelo (un viaje en
+  // vez de dos en serie). El stock se pide para TODOS los productIds y el
+  // filtro por track_inventory se aplica en memoria (las filas de productos
+  // no rastreados nunca se consultan más abajo). Precedencia de errores igual
+  // que antes: primero el de products, luego el de product_stock.
+  const [{ data: products, error: productsError }, { data: stockRows, error: stockError }] = await Promise.all([
+    adminClient.from("products").select("id, track_inventory").eq("tenant_id", tenantId).in("id", productIds),
+    adminClient.from("product_stock").select("product_id, variant_id, warehouse_id, quantity").eq("tenant_id", tenantId).in("product_id", productIds),
+  ]);
   if (productsError) throw new Error(productsError.message);
   const trackedIds = new Set((products ?? []).filter((p) => p.track_inventory).map((p) => p.id as string));
   if (trackedIds.size === 0) return [];
-
-  const { data: stockRows, error: stockError } = await adminClient
-    .from("product_stock")
-    .select("product_id, variant_id, warehouse_id, quantity")
-    .eq("tenant_id", tenantId)
-    .in("product_id", Array.from(trackedIds));
   if (stockError) throw new Error(stockError.message);
 
   const totalByKey = new Map<string, number>();
