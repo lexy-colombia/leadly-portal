@@ -83,6 +83,11 @@ export async function sendTestInvoiceToDian(
   const now = new Date();
   // Hora REAL de Colombia -- ver colombiaTime.ts.
   const { issueDate, issueTime } = colombiaIssueMoment(now);
+  // `now` SIN desplazar -- ver el comentario en sendInvoiceToDian.ts (bug
+  // real FAD09e). Este documento es sintético (no es un documento fiscal
+  // real), pero se hace igual por consistencia, para no dejar un caso que
+  // rompa el día que alguien lo use de referencia.
+  const signingInstant = now;
 
   const xmlInput: BuildInvoiceXmlInput = {
     invoiceId,
@@ -140,7 +145,7 @@ export async function sendTestInvoiceToDian(
   };
 
   const { xml: unsignedXml, cufe } = await buildInvoiceXml(xmlInput);
-  const signedInvoiceXml = await signInvoiceXml({ unsignedXml, privateKey: cert.privateKey, certificateDer: cert.certificateDer });
+  const signedInvoiceXml = await signInvoiceXml({ unsignedXml, privateKey: cert.privateKey, certificateDer: cert.certificateDer, signingInstant });
 
   const zipFileName = `${invoiceId}.zip`;
   const zipBytes = buildInvoiceZip([{ fileName: `${invoiceId}.xml`, content: new TextEncoder().encode(signedInvoiceXml) }]);
@@ -158,6 +163,13 @@ export async function sendTestInvoiceToDian(
 
   const client = createMtlsClient(cert);
   try {
+    // Mismo timeout que sendInvoiceToDian.ts/sendCreditNoteToDian.ts (ver
+    // el comentario ahí): sin esto, un cuelgue de la DIAN corre hasta que
+    // la plataforma mata la función a los ~150s con un 504. Esta ruta no
+    // escribe ninguna fila (documento sintético de prueba de conexión),
+    // así que acá alcanza con no dejar que el fetch cuelgue -- el catch
+    // genérico de dian-submit/index.ts ya convierte la excepción en un
+    // error legible.
     const resp = await fetch(profile.webservice_url, {
       method: "POST",
       client,
@@ -166,6 +178,7 @@ export async function sendTestInvoiceToDian(
         SOAPAction: '"http://wcf.dian.colombia/IWcfDianCustomerServices/SendTestSetAsync"',
       },
       body: envelope,
+      signal: AbortSignal.timeout(100_000),
     });
     const responseBody = await resp.text();
     const zipKeyMatch = responseBody.match(/<b:ZipKey>([^<]+)<\/b:ZipKey>/);

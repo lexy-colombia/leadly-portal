@@ -130,9 +130,59 @@ export interface SendInvoiceOptions {
  * 'pending') del tenant `tenantId`. Actualiza la fila con el resultado
  * (status/cufe/dian_tracking_id/dian_response/sent_at) antes de retornar,
  * tanto en éxito como en fault -- así "Facturas" siempre refleja el último
- * intento real, no queda desactualizada si el caller no vuelve a leer. */
+ * intento real, no queda desactualizada si el caller no vuelve a leer.
+ *
+ * TODA la función (no solo el fetch final) corre dentro de un try/catch que
+ * marca la fila como 'error' ante cualquier falla -- mismo patrón que
+ * sendCreditNoteToDian.ts (agregado ahí el 2026-09-09 para exactamente esta
+ * clase de bug: una excepción ANTES del bloque ya protegido -- ej.
+ * `resolveTechnicalKey`/`GetNumberingRange`, ver getNumberingRange.ts --
+ * dejaba la fila en 'pending' para siempre, sin ningún mensaje ni forma de
+ * reintentar desde la UI. Hallazgo real del review 2026-09-29 (bug #28780):
+ * `sendInvoiceToDian.ts` nunca tuvo esta red de seguridad exterior, solo el
+ * try/catch puntual del fetch (ver más abajo), así que cualquier excepción
+ * fuera de ese bloque reproducía el mismo bug por otra vía.
+ *
+ * Excepción deliberada: en `dryRun` (solo diagnóstico, "no escribe nada en
+ * la base" -- ver SendInvoiceOptions) una excepción NO debe dejar ningún
+ * rastro en sales_invoices, ni siquiera un estado de error -- se relanza
+ * tal cual, sin tocar la fila.
+ *
+ * Segunda salvaguarda, agregada al armar este wrapper (no estaba en
+ * sendCreditNoteToDian.ts, que no la necesitaba distinto): el UPDATE del
+ * catch lleva `.eq("status", "pending")` -- "pending" es el único status
+ * con el que esta función arranca siempre (ver el chequeo de arriba), así
+ * que si algo MÁS ADELANTE en la función ya avanzó la fila a
+ * "sent"/"accepted"/"rejected" (ej. el veredicto síncrono de producción ya
+ * se guardó, y recién después `applyInvoiceVerdict`/el polling de
+ * habilitación lanzan por lo que sea) el catch NO la pisa con "error": la
+ * DIAN ya recibió/validó el documento de verdad, y marcarlo "error" ahí
+ * invitaría a reintentar un envío que ya existe del otro lado (gastando
+ * otro consecutivo sobre un documento que ya está en la DIAN). Sin este
+ * filtro, agregar el timeout de getDianStatus.ts (ver ese archivo) vuelve
+ * catchable justo esa ventana -- antes del timeout, un cuelgue ahí nunca
+ * llegaba a lanzar nada, la plataforma mataba la función entera y la fila
+ * se quedaba tal cual había quedado ("sent"). */
 // deno-lint-ignore no-explicit-any
 export async function sendInvoiceToDian(adminClient: any, tenantId: string, invoiceId: string, options: SendInvoiceOptions = {}): Promise<SendInvoiceResult> {
+  try {
+    return await doSendInvoiceToDian(adminClient, tenantId, invoiceId, options);
+  } catch (err) {
+    if (options.dryRun !== true) {
+      const message = err instanceof Error ? err.message : String(err);
+      await adminClient
+        .from("sales_invoices")
+        .update({ status: "error", status_detail: message })
+        .eq("id", invoiceId)
+        .eq("tenant_id", tenantId)
+        .eq("status", "pending");
+    }
+    throw err;
+  }
+}
+
+// deno-lint-ignore no-explicit-any
+async function doSendInvoiceToDian(adminClient: any, tenantId: string, invoiceId: string, options: SendInvoiceOptions = {}): Promise<SendInvoiceResult> {
   const dryRun = options.dryRun === true;
   const { data: invoicePre, error: invoicePreError } = await adminClient
     .from("sales_invoices")
@@ -224,6 +274,12 @@ export async function sendInvoiceToDian(adminClient: any, tenantId: string, invo
   // Hora REAL de Colombia -- ver colombiaTime.ts (antes se emitía la hora
   // UTC etiquetada como -05:00, cinco horas adelantada).
   const { issueDate, issueTime } = colombiaIssueMoment(now);
+  // `now` SIN desplazar -- signInvoiceXml hace el shift y el formato con el
+  // sufijo real -05:00 por dentro (ver el comentario grande de
+  // `signingInstant` ahí, bug real FAD09e corregido en dos rondas: la
+  // primera pasaba el instante ya desplegado y lo dejaba serializar con "Z",
+  // declarando una hora falsa).
+  const signingInstant = now;
 
   const resolvedKey = await resolveTechnicalKey({
     adminClient,
@@ -329,7 +385,7 @@ export async function sendInvoiceToDian(adminClient: any, tenantId: string, invo
   };
 
   const { xml: unsignedXml, cufe } = await buildInvoiceXml(xmlInput);
-  const signedInvoiceXml = await signInvoiceXml({ unsignedXml, privateKey: cert.privateKey, certificateDer: cert.certificateDer });
+  const signedInvoiceXml = await signInvoiceXml({ unsignedXml, privateKey: cert.privateKey, certificateDer: cert.certificateDer, signingInstant });
 
   if (dryRun) {
     return {
@@ -383,6 +439,26 @@ export async function sendInvoiceToDian(adminClient: any, tenantId: string, invo
   const client = createMtlsClient(cert);
   let responseBody = "";
   let httpStatus = 0;
+  // ⚠️ Sin timeout, un `fetch` colgado (la DIAN no responde) corría hasta
+  // que la plataforma mataba la función a los ~150s con un 504 -- el
+  // frontend se quedaba "cargando" sin ningún mensaje, y la fila de
+  // `sales_invoices` nunca se actualizaba (quedaba en "pending" para
+  // siempre, sin `status_detail`, indistinguible de un envío que nunca se
+  // intentó) porque la excepción de `fetch` no la capturaba nada acá
+  // adentro -- subía sin frenar hasta el catch genérico de
+  // dian-submit/index.ts, que sí le devuelve el error al navegador pero
+  // nunca toca la base. Encontrado en vivo el 2026-09-29 (pedido #28780,
+  // Barriles de la sexta): 150421ms exactos de ejecución, 504, fila
+  // stuck en "pending". 100s de margen (deja ~50s para el resto de la
+  // función antes del límite real de la plataforma) + el mismo camino de
+  // "error" que ya existe más abajo para un veredicto no reconocible --
+  // así un cuelgue real da un mensaje accionable en minuto y medio en vez
+  // de un spinner mudo por dos minutos y medio, y la fila queda
+  // registrada como error en vez de "pending" fantasma. El mensaje avisa
+  // explícitamente que el documento PUEDE haber llegado igual a la DIAN
+  // (un timeout es de la respuesta, no necesariamente del envío) --
+  // reintentar es seguro (mismo CUFE si nada cambió), pero no hay que
+  // asumir que no se recibió nada del otro lado.
   try {
     const resp = await fetch(profile.webservice_url, {
       method: "POST",
@@ -392,9 +468,26 @@ export async function sendInvoiceToDian(adminClient: any, tenantId: string, invo
         SOAPAction: `"${soapAction}"`,
       },
       body: envelope,
+      signal: AbortSignal.timeout(100_000),
     });
     httpStatus = resp.status;
     responseBody = await resp.text();
+  } catch (err) {
+    const transportReason =
+      err instanceof Error && err.name === "TimeoutError"
+        ? "La DIAN no respondió a tiempo (100s) -- el documento puede haber llegado igual; verificar el estado antes de asumir que no se envió."
+        : `Fallo de transporte hacia la DIAN: ${err instanceof Error ? err.message : String(err)}`;
+    await adminClient
+      .from("sales_invoices")
+      .update({
+        status: "error",
+        status_detail: transportReason,
+        cufe,
+        dian_response: { transportError: true, technicalKey: technicalKeyDiagnostics },
+        sent_at: now.toISOString(),
+      })
+      .eq("id", invoiceId);
+    return { status: "error", httpStatus: 0, cufe, dianTrackingId: null, faultReason: transportReason, rejectionDetail: null, invoicePrefix, invoiceNumber: Number(invoiceNumber) };
   } finally {
     client.close?.();
   }

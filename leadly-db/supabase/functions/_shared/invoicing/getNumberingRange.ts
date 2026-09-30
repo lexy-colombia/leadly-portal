@@ -129,6 +129,14 @@ export async function getTenantNumberingRangeFromDian(adminClient: any, tenantId
   let responseBody = "";
   let httpStatus = 0;
   try {
+    // Mismo timeout que sendInvoiceToDian.ts/sendCreditNoteToDian.ts/
+    // sendToDian.ts (ver el comentario ahí) -- esta consulta corre DENTRO
+    // del camino de producción de sendInvoiceToDian.ts (vía
+    // resolveTechnicalKey.ts), ANTES del fetch ya protegido -- sin este
+    // timeout, un cuelgue acá reproducía el bug #28780 tal cual (fila
+    // stuck en "pending" hasta que la plataforma mataba la función a los
+    // ~150s), por una vía distinta a la que ese fix cerró. Hallazgo del
+    // review 2026-09-29.
     const resp = await fetch(profile.webservice_url, {
       method: "POST",
       client,
@@ -137,6 +145,7 @@ export async function getTenantNumberingRangeFromDian(adminClient: any, tenantId
         SOAPAction: `"${ACTION}"`,
       },
       body: envelope,
+      signal: AbortSignal.timeout(100_000),
     });
     httpStatus = resp.status;
     responseBody = await resp.text();

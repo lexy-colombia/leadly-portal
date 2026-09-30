@@ -120,6 +120,17 @@ export async function queryDianTrackStatus(
   let responseBody = "";
   let httpStatus = 0;
   try {
+    // Timeout más CORTO que los 100s de los otros 4 fetches hacia la DIAN
+    // (sendInvoiceToDian.ts/sendCreditNoteToDian.ts/sendToDian.ts/
+    // getNumberingRange.ts) -- a propósito, no un descuido: esta función la
+    // llama `pollDianTrackStatus` hasta 8 veces por intento de envío (con
+    // 3s de espera entre cada una, ver más abajo), así que un timeout de
+    // 100s por intento podría acercar el ciclo completo a los ~800s, muy
+    // por encima de cualquier margen razonable dentro de una sola Edge
+    // Function. Este endpoint responde rápido en la práctica (ver el
+    // comentario de cabecera del archivo) -- 20s alcanza de sobra para un
+    // intento normal y sigue frenando un cuelgue real sin dejar que el
+    // ciclo de reintentos se dispare. Hallazgo del review 2026-09-29.
     const resp = await fetch(profile.webservice_url, {
       method: "POST",
       client,
@@ -128,6 +139,7 @@ export async function queryDianTrackStatus(
         SOAPAction: `"${action}"`,
       },
       body: envelope,
+      signal: AbortSignal.timeout(20_000),
     });
     httpStatus = resp.status;
     responseBody = await resp.text();
