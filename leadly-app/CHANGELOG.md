@@ -4,6 +4,11 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.18] - 2026-09-29
+
+### Added
+- Nuevo módulo **Reportes**: balance financiero (ingresos por método de pago y canal, facturado ante la DIAN vs. no facturado, notas crédito y devoluciones, egresos pagados y pendientes por categoría, balance neto con comparación contra el período anterior) y reportes de productos (más vendido por unidades e ingresos, ventas por día, ranking por categoría y marca, ticket promedio, productos sin ventas recientes, margen bruto aproximado). Se habilita por comercio y por rol, como cualquier módulo nuevo.
+
 ## [1.0.17] - 2026-09-29
 
 ### Fixed

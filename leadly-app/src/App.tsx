@@ -39,6 +39,7 @@ import { Orders } from "./pages/tenant/Orders";
 import { Pos } from "./pages/tenant/Pos";
 import { OrderDetail } from "./pages/tenant/OrderDetail";
 import { Credit } from "./pages/tenant/Credit";
+import { Reports } from "./pages/tenant/Reports";
 import { Returns } from "./pages/tenant/Returns";
 import { Calendar } from "./pages/tenant/Calendar";
 import { Billing as TenantBilling } from "./pages/tenant/Billing";
@@ -274,6 +275,14 @@ export default function App() {
                     element={
                       <RequireModule moduleKey="credit" action="credit.view">
                         <Credit />
+                      </RequireModule>
+                    }
+                  />
+                  <Route
+                    path="reports"
+                    element={
+                      <RequireModule moduleKey="reports" action="reports.view">
+                        <Reports />
                       </RequireModule>
                     }
                   />

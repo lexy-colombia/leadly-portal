@@ -1,4 +1,4 @@
-import { AiSparkleIcon, ArchiveIcon, BoxIcon, BuildingIcon, CalendarIcon, ChatBubbleIcon, CheckIcon, CreditCardIcon, DashboardIcon, DollarIcon, GlobeIcon, KeyIcon, MegaphoneIcon, PhoneIcon, ReceiptIcon, RefreshIcon, ScanIcon, SettingsIcon, TargetIcon, UsersIcon, WalletIcon } from '@/components/atoms/icons'
+import { AiSparkleIcon, ArchiveIcon, BarChartIcon, BoxIcon, BuildingIcon, CalendarIcon, ChatBubbleIcon, CheckIcon, CreditCardIcon, DashboardIcon, DollarIcon, GlobeIcon, KeyIcon, MegaphoneIcon, PhoneIcon, ReceiptIcon, RefreshIcon, ScanIcon, SettingsIcon, TargetIcon, UsersIcon, WalletIcon } from '@/components/atoms/icons'
 import type { TranslationKey } from '../i18n/translations'
 import type { ComponentType } from 'react'
 
@@ -72,6 +72,13 @@ export const TENANT_MODULES: TenantModuleDefinition[] = [
   // segundos. Módulo aparte a propósito, no un modo de Órdenes.
   { key: 'pos', labelKey: 'common.nav.pos', to: '/app/pos', icon: ScanIcon, viewAction: 'pos.view' },
   { key: 'credit', labelKey: 'common.nav.credit', to: '/app/credit', icon: WalletIcon, viewAction: 'credit.view' },
+  // Reportes -- balance financiero + reportes de producto, de solo lectura
+  // (sin CRUD, sin reports.manage). Nace deshabilitado por defecto para todo
+  // tenant, sin backfill (mismo criterio que POS/Gastos al nacer, ver
+  // 20260929120000_reports_module_permission.sql) -- el superadmin lo
+  // habilita por tenant y el tenant_admin otorga reports.view a los roles
+  // que quiera. Ubicado junto a sales/credit por ser contenido financiero.
+  { key: 'reports', labelKey: 'common.nav.reports', to: '/app/reports', icon: BarChartIcon, viewAction: 'reports.view' },
   // Igual que 'inventory': vive dentro de una orden (DispatchDrawer, "Ver
   // detalle" junto a Estado de envío) y dentro de Configuración
   // (DispatchStatusesSection) -- sin ítem de nav propio.
