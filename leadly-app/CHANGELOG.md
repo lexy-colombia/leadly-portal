@@ -4,6 +4,13 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.17] - 2026-09-29
+
+### Fixed
+- La DIAN rechazaba facturas con una línea de un producto gratuito o con descuento del 100% ("Línea de factura informado con LineExtensionAmount en cero y grupo cac:PricingReference no informado"): ahora esas líneas declaran el precio de lista real como referencia, además del precio de $0 que de verdad se cobra.
+- Si la DIAN no respondía a tiempo al enviar una factura, la venta podía quedar "procesando" para siempre sin ningún aviso ni forma de reintentar. Ahora, tras esperar un tiempo razonable, queda marcada con el error y se puede reintentar.
+- El botón "Verificar estado" no podía resolver una factura que la DIAN dejó "en proceso" sin confirmar todavía, y mientras esa factura no se resolvía, no se podía emitir ninguna otra en el mismo comercio. Ahora el botón sí puede consultar ese caso y desatascarlo.
+
 ## [1.0.16] - 2026-09-21
 
 ### Added

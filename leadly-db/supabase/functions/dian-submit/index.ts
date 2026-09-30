@@ -670,7 +670,13 @@ async function handleDebugVerifySignature(req: Request, body: { tenant_id?: stri
       authorizationProviderNit: "800197268",
       payment: { meansId: "1", meansCode: "10" },
     });
-    const signedXml = await signInvoiceXml({ unsignedXml, privateKey: cert.privateKey, certificateDer: cert.certificateDer });
+    // `signingInstant` es siempre el instante REAL sin desplazar (ver el
+    // comentario grande en signInvoiceXml.ts) -- acá no hace falta ningún
+    // trato especial: este diagnóstico firma un XML sintético con fechas
+    // fijas hardcodeadas y nunca se manda a la DIAN, así que no hay ningún
+    // cbc:IssueDate real contra el cual FAD09e pudiera comparar de todos
+    // modos.
+    const signedXml = await signInvoiceXml({ unsignedXml, privateKey: cert.privateKey, certificateDer: cert.certificateDer, signingInstant: new Date() });
 
     const { DOMParser } = await import("npm:@xmldom/xmldom@0.8");
     const xmldsig = await import("npm:xmldsigjs@2");
@@ -750,7 +756,14 @@ async function handleCheckInvoiceStatus(req: Request, body: { invoice_id?: strin
   if (invoiceRow.status !== "sent") {
     return jsonResponse({ error: `Esta factura está en estado "${invoiceRow.status}" -- solo tiene sentido verificar una que quedó "enviada" sin confirmar todavía.` }, 409);
   }
-  if (!invoiceRow.dian_tracking_id) {
+  // Mismo respaldo que handleLookupDianDocument: en producción (SendBillSync)
+  // nunca hay zipKey -- lo que queda guardado para consultar es el CUFE. Sin
+  // este fallback, una factura que quedó "en proceso" (sin
+  // `XmlDocumentKey`, ver applyDianVerdict.ts) nunca podía resolverse a mano
+  // porque este chequeo exigía `dian_tracking_id` aunque el CUFE ya
+  // alcanzaba para preguntarle a la DIAN. Bug real de producción, 2026-09-29.
+  const trackId = invoiceRow.dian_tracking_id ?? invoiceRow.cufe;
+  if (!trackId) {
     return jsonResponse({ error: "Esta factura no tiene un identificador de seguimiento de la DIAN guardado." }, 409);
   }
 
@@ -759,9 +772,9 @@ async function handleCheckInvoiceStatus(req: Request, body: { invoice_id?: strin
     const result = await queryDianTrackStatus(
       adminClient,
       invoiceRow.tenant_id,
-      invoiceRow.dian_tracking_id,
+      trackId,
       undefined,
-      statusOperationFor(invoiceRow.dian_tracking_id, invoiceRow.cufe),
+      statusOperationFor(trackId, invoiceRow.cufe),
     );
     if (!result.faultReason) {
       const verdict = interpretDianStatus(result.statuses[0] ?? null);

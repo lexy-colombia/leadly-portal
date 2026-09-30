@@ -222,7 +222,34 @@
  *    pero no para IVA). Se agregó `taxRates.ts` con la tabla oficial y una
  *    validación previa a firmar/transmitir, para que una combinación
  *    imposible falle con un mensaje accionable en vez de quemar un envío
- *    real contra la DIAN. */
+ *    real contra la DIAN.
+ *
+ * ⚠️ SEXTA RONDA 2026-09-29, rechazos reales recurrentes de producción
+ * (Barriles de la sexta, 4 pedidos distintos entre el 09-14 y el 09-28,
+ * NINGUNO reintentado -- quedaron sin factura desde entonces):
+ * 17. FAW01 ("Línea de factura informado con LineExtensionAmount en cero y
+ *    grupo cac:PricingReference no informado"): cada pedido rechazado tenía
+ *    una línea de un producto genuinamente gratuito ("Huevo x sopa",
+ *    `retail_price=0`, producto activo y en uso real) o una línea 100%
+ *    descontada (subtotal 0 con unit_price > 0) -- en los dos casos
+ *    `netAmount` de la línea redondea a 0.00 y la DIAN rechaza la factura
+ *    ENTERA si esa línea no declara `cac:PricingReference`. No es un caso
+ *    aislado: al momento de este fix había 9 facturas más en cola con el
+ *    mismo patrón, que iban a fallar igual apenas les tocara el turno de
+ *    envío. Arreglo: toda línea con `netAmount` en 0 agrega
+ *    `cbc:FreeOfChargeIndicator=true` + `cac:PricingReference/
+ *    AlternativeConditionPrice` (orden y estructura confirmados contra la
+ *    línea 2 de `Generica.xml`, el único ejemplo oficial de línea gratuita
+ *    que trae el kit de la DIAN). El `PriceAmount` de esa referencia es el
+ *    mismo 0.00 que de verdad se cobra -- esta plataforma no guarda un
+ *    "precio de lista" separado para una línea gratuita/100% descontada
+ *    (`sales_invoice_items` no conserva el descuento aparte), y la regla
+ *    exige que el GRUPO exista, no que su valor sea mayor a cero; inventar
+ *    una cifra sin respaldo real habría sido peor. Las demás líneas (con
+ *    monto real) no cambian en nada. **Sin probar contra la DIAN todavía**
+ *    -- pendiente que el usuario reintente uno de los pedidos afectados
+ *    (#28276, #28322, #28515, #28743) o deje correr la cola de pendientes;
+ *    consume un intento real contra un documento fiscal, no se simula acá. */
 
 import { computeCufe, computeSoftwareSecurityCode } from "./cufe.ts";
 import { computeNitCheckDigit } from "./nit.ts";
@@ -286,7 +313,7 @@ export interface InvoiceXmlLine {
   id: number;
   description: string;
   quantity: number;
-  unitPrice: number; // sin impuesto (BaseQuantity=1 implícito)
+  unitPrice: number; // precio de LISTA, CON impuesto incluido, sin descuento (BaseQuantity=1 implícito) -- ver el comentario en netUnitPrice, más abajo en este archivo
   lineExtensionAmount: number; // subtotal de la línea sin impuesto
   tax: InvoiceXmlLineTax | null;
   /** cac:Item/cac:StandardItemIdentification, regla FAZ09 (notificación) --
@@ -669,11 +696,61 @@ export async function buildInvoiceXml(input: BuildInvoiceXmlInput): Promise<{ xm
             <cbc:ID>${esc(line.sku)}</cbc:ID>
          </cac:SellersItemIdentification>`
         : "";
+      // FAW01 (rechazo real 2026-09-29, Barriles de la sexta -- pedidos
+      // #28276/#28322/#28515/#28743, todos con una línea de un producto
+      // genuinamente gratuito, ej. "Huevo x sopa" a $0, o una línea con
+      // descuento del 100%): la DIAN rechaza la factura ENTERA cuando una
+      // línea tiene LineExtensionAmount en cero y no declara
+      // cac:PricingReference -- no basta con que las demás líneas sí
+      // tengan impuesto/base, alcanza con UNA línea en $0 sin ese grupo.
+      // Orden y estructura confirmados contra el único caso real de línea
+      // gratuita que trae el kit oficial de la DIAN (línea 2 de
+      // dian-reference/ejemplos-xml/Generica.xml): FreeOfChargeIndicator
+      // primero, PricingReference después, los dos entre
+      // LineExtensionAmount y TaxTotal.
+      //
+      // CORREGIDO (review 2026-09-29): la ronda anterior de este fix decía
+      // en este comentario que "esta plataforma no guarda un precio de
+      // lista separado" -- ES FALSO, confirmado trazando el dato de punta a
+      // punta. sales_order_items/sales_invoice_items SÍ tienen unit_price
+      // (precio de LISTA, sin descuento) como columna separada de subtotal
+      // (el monto ya con descuento aplicado) -- ver computeOrderTotals.ts:
+      // `gross = quantity * unit_price` y `lineSubtotal = gross -
+      // discount_amount`, unit_price nunca viene pre-descontado. Los dos
+      // ejemplos oficiales del repo (Generica.xml:471,
+      // EmisorAutoretenedor.xml:524) usan 100.00 en este campo, un valor
+      // DISTINTO de cero, precisamente porque PricingReference declara "lo
+      // que hubiera costado" (precio de lista), no "lo que cobré" (eso ya
+      // lo cubre cac:Price/PriceAmount, en 0.00 más abajo).
+      //
+      // Por eso el valor de referencia se calcula desde line.unitPrice
+      // (precio de lista, con impuesto incluido, ANTES de descuento) por la
+      // cantidad, extrayéndole el impuesto de la línea con la misma tarifa
+      // ya resuelta en `tax` -- misma fórmula que usa computeLineTax
+      // (queueInvoiceGeneration.ts) para extraer impuesto de cualquier
+      // monto bruto. Cuando el producto es GENUINAMENTE gratuito
+      // (unitPrice=0, ej. "Huevo x sopa", sin precio de lista real que
+      // declarar), la misma fórmula da 0.00 sola -- no hace falta una rama
+      // aparte para ese caso, el cálculo cubre los dos escenarios.
+      const isFreeLine = round2(netAmount) === 0;
+      const freeOfChargeXml = isFreeLine ? `\n      <cbc:FreeOfChargeIndicator>true</cbc:FreeOfChargeIndicator>` : "";
+      const listGrossAmount = line.unitPrice * line.quantity;
+      const referencePriceAmount = tax.rate ? listGrossAmount / (1 + tax.rate / 100) : listGrossAmount;
+      const pricingReferenceXml = isFreeLine
+        ? `
+      <cac:PricingReference>
+         <cac:AlternativeConditionPrice>
+            <cbc:PriceAmount currencyID="${input.currency}">${money(referencePriceAmount)}</cbc:PriceAmount>
+            <cbc:PriceTypeCode>03</cbc:PriceTypeCode>
+            <cbc:PriceType>Otro valor</cbc:PriceType>
+         </cac:AlternativeConditionPrice>
+      </cac:PricingReference>`
+        : "";
       return `
    <cac:InvoiceLine>
       <cbc:ID>${line.id}</cbc:ID>
       <cbc:InvoicedQuantity unitCode="EA">${line.quantity.toFixed(6)}</cbc:InvoicedQuantity>
-      <cbc:LineExtensionAmount currencyID="${input.currency}">${money(netAmount)}</cbc:LineExtensionAmount>${lineTax}
+      <cbc:LineExtensionAmount currencyID="${input.currency}">${money(netAmount)}</cbc:LineExtensionAmount>${freeOfChargeXml}${pricingReferenceXml}${lineTax}
       <cac:Item>
          <cbc:Description>${esc(line.description)}</cbc:Description>${sellersItemIdentificationXml}
       </cac:Item>

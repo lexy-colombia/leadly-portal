@@ -9,3 +9,8 @@
 # Supabase CLI local cache (per-machine, includes local pooler/project state)
 leadly-db/supabase/.temp/
 leadly-db/supabase/.branches/
+
+# Orquestación del Líder (planes/briefs/reviews de trabajo en curso) -- es
+# memoria de trabajo efímera, no historial del proyecto. El historial vive en
+# CLAUDE.md ("Estado actual"), que sí se commitea.
+progress/

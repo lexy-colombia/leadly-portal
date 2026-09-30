@@ -187,6 +187,10 @@ async function doSendCreditNoteToDian(adminClient: any, tenantId: string, credit
   const paymentMethod = latestPayment?.method ?? null;
   // Hora REAL de Colombia -- ver colombiaTime.ts.
   const { issueDate, issueTime } = colombiaIssueMoment(now);
+  // `now` SIN desplazar -- ver el comentario en sendInvoiceToDian.ts (bug
+  // real FAD09e: signInvoiceXml hace el shift + formatea con el sufijo real
+  // -05:00 por dentro, no el caller).
+  const signingInstant = now;
 
   const xmlInput: BuildCreditNoteXmlInput = {
     creditNoteId: creditNoteDocId,
@@ -254,7 +258,7 @@ async function doSendCreditNoteToDian(adminClient: any, tenantId: string, credit
   // Bloquearla acá dejaría al tenant sin manera de arreglar una factura
   // ya emitida -- peor que la notificación que la validación evita.
   const { xml: unsignedXml, cude } = await buildCreditNoteXml(xmlInput);
-  const signedXml = await signInvoiceXml({ unsignedXml, privateKey: cert.privateKey, certificateDer: cert.certificateDer });
+  const signedXml = await signInvoiceXml({ unsignedXml, privateKey: cert.privateKey, certificateDer: cert.certificateDer, signingInstant });
   // Misma conservación que la factura -- ver storeSignedXml.ts.
   await storeSignedXml(adminClient, {
     tenantId,
@@ -289,6 +293,12 @@ async function doSendCreditNoteToDian(adminClient: any, tenantId: string, credit
   const client = createMtlsClient(cert);
   let responseBody = "";
   let httpStatus = 0;
+  // Ver el mismo comentario en sendInvoiceToDian.ts (rechazo/cuelgue real
+  // 2026-09-29): sin timeout, un `fetch` colgado corre hasta que la
+  // plataforma mata la función a los ~150s con un 504 y la fila de
+  // `sales_credit_notes` queda en "pending" para siempre, sin ningún
+  // mensaje. 100s de margen + el mismo camino de "error" que ya existe
+  // más abajo para un veredicto no reconocible.
   try {
     const resp = await fetch(profile.webservice_url, {
       method: "POST",
@@ -298,9 +308,20 @@ async function doSendCreditNoteToDian(adminClient: any, tenantId: string, credit
         SOAPAction: `"${soapAction}"`,
       },
       body: envelope,
+      signal: AbortSignal.timeout(100_000),
     });
     httpStatus = resp.status;
     responseBody = await resp.text();
+  } catch (err) {
+    const transportReason =
+      err instanceof Error && err.name === "TimeoutError"
+        ? "La DIAN no respondió a tiempo (100s) -- el documento puede haber llegado igual; verificar el estado antes de asumir que no se envió."
+        : `Fallo de transporte hacia la DIAN: ${err instanceof Error ? err.message : String(err)}`;
+    await adminClient
+      .from("sales_credit_notes")
+      .update({ status: "error", status_detail: transportReason, cude, dian_response: { transportError: true }, sent_at: now.toISOString() })
+      .eq("id", creditNoteId);
+    return { status: "error", httpStatus: 0, cude, dianTrackingId: null, faultReason: transportReason, rejectionDetail: null, creditNotePrefix, creditNoteNumber: Number(creditNoteNumber) };
   } finally {
     client.close?.();
   }

@@ -74,6 +74,7 @@
 import { DOMParser, XMLSerializer } from "npm:@xmldom/xmldom@0.8";
 import * as xmldsig from "npm:xmldsigjs@2";
 import * as xades from "npm:xadesjs@2";
+import { COLOMBIA_UTC_OFFSET_MINUTES, COLOMBIA_OFFSET_SUFFIX } from "./colombiaTime.ts";
 
 let engineReady = false;
 function ensureEngine(): void {
@@ -118,6 +119,47 @@ export interface SignInvoiceXmlInput {
   unsignedXml: string;
   privateKey: CryptoKey;
   certificateDer: ArrayBuffer;
+  /** Instante REAL (sin desplazar -- el mismo `new Date()`/`now` que el
+   * caller ya usa para `colombiaIssueMoment`, nunca un valor pre-shifteado)
+   * en el que se está firmando. Se serializa en `xades:SigningTime`.
+   * OBLIGATORIO a propósito (no hay default silencioso): FAD09e ("Valida que
+   * fecha de generación de la factura sea igual a la fecha de firma")
+   * rechaza si esta fecha calendario no coincide con `cbc:IssueDate` del
+   * propio documento.
+   *
+   * Bug real corregido 2026-09-29 (versión 1 del fix, encontrada por review
+   * ANTES de desplegar -- no llegó a producción): este archivo usaba
+   * `new Date()` suelto para `signingTime.value` (serializado por `xadesjs`
+   * con `.toISOString()`, UTC puro), mientras `cbc:IssueDate`/`cbc:IssueTime`
+   * se arman con `colombiaIssueMoment` (hora de PARED de Colombia, UTC-5) --
+   * entre las ~19:00 y la medianoche hora de Colombia, UTC ya cruzó al día
+   * siguiente y las dos fechas caían en días calendario distintos. La
+   * primera corrección hizo que los 3 emisores reales le pasaran acá el
+   * instante YA desplazado +5h (el mismo truco que `colombiaIssueMoment` usa
+   * por dentro) -- pero entregado crudo a `xadesjs`, que lo serializa con
+   * `.toISOString()` por default (sufijo "Z", UTC real): eso etiquetaba la
+   * hora de Colombia como si fuera UTC real, declarando un instante falso 5
+   * horas antes del real en TODOS los documentos (no solo los de la ventana
+   * nocturna) -- confirmado leyendo `xadesjs@2.6.8`
+   * (`build/esm/xml/date_time.js::OnGetXml`: sin `Format`, usa
+   * `this.Value.toISOString()` tal cual).
+   *
+   * Fix real: el caller pasa el instante SIN tocar, y este archivo hace el
+   * shift + formatea el string con el sufijo real `-05:00` (en vez de "Z")
+   * usando `signingTime.format` (mask de `dateFormat`, que `xadesjs` sí
+   * soporta -- `signed_xml.js::ApplySignOptions` asigna
+   * `sigProps.SigningTime.Format = options.signingTime.format`) -- mismo
+   * criterio que `colombiaTime.ts` ya usa a mano para `cbc:IssueTime` (shift
+   * + leer como si fuera UTC + pegar el sufijo real), pero acá vía el
+   * mecanismo de formato que la librería expone, no escribiendo el string
+   * nosotros mismos (no hay forma de inyectarle un string crudo a un campo
+   * tipado `Date`). Los 2 diagnósticos de dian-submit/index.ts que nunca se
+   * mandan a la DIAN (handleDebugDumpInvoiceXml pasa por sendInvoiceToDian y
+   * ya queda cubierto; handleDebugVerifySignature firma un XML sintético con
+   * fechas fijas hardcodeadas y le pasa un `new Date()`, documentado ahí
+   * mismo por qué no importa) no necesitan ningún trato especial ahora --
+   * este campo siempre es "el instante real", sin excepción. */
+  signingInstant: Date;
 }
 
 export async function signInvoiceXml(input: SignInvoiceXmlInput): Promise<string> {
@@ -203,7 +245,22 @@ export async function signInvoiceXml(input: SignInvoiceXmlInput): Promise<string
         { hash: "SHA-256", uri: `#${keyInfoId}` },
       ],
       signingCertificate: certB64,
-      signingTime: { value: new Date() },
+      // Ver el comentario grande de `signingInstant` en SignInvoiceXmlInput
+      // -- NO pasar `input.signingInstant` crudo como `value` sin `format`
+      // (esa fue la causa de la versión 1, rechazada por review: `xadesjs`
+      // serializa con `.toISOString()`, sufijo "Z", si no se le da un
+      // `format`). `value` lleva el instante YA desplazado a Colombia (mismo
+      // truco que `colombiaIssueMoment`: sumar el offset y leerlo con
+      // getters UTC da el reloj de pared real), y `format` fuerza esa
+      // lectura UTC (prefijo "UTC:", lo consume `dateFormat` de xadesjs
+      // internamente) con el sufijo REAL `-05:00` citado como texto literal
+      // (comillas simples) en vez de dejar que la librería agregue "Z".
+      // `'T'` también va citado -- sin comillas, `dateFormat` lo interpreta
+      // como el token de AM/PM (`[HhMsTt]`), no como el separador literal.
+      signingTime: {
+        value: new Date(input.signingInstant.getTime() + COLOMBIA_UTC_OFFSET_MINUTES * 60_000),
+        format: `UTC:yyyy-mm-dd'T'HH:MM:ss'${COLOMBIA_OFFSET_SUFFIX}'`,
+      },
       policy: {
         identifier: {
           value: DIAN_SIGNATURE_POLICY.identifier,
