@@ -316,6 +316,13 @@ export const AI_TOOLS: AiToolDefinition[] = [
     parameters: { type: "object", properties: {}, required: [] },
   },
   {
+    name: "get_client_custom_fields",
+    skill: "clientes",
+    description:
+      "Devuelve los campos personalizados que el negocio definió para sus clientes y que están habilitados para ti, con el valor guardado del contacto de esta conversación: una lista de { name, type, value } (solo los que tienen valor). Sin parámetros: siempre es el contacto de esta conversación, nunca otro. Solo lectura. Úsala cuando el cliente pregunte por información suya que pueda estar en esos campos; si un dato no aparece en la lista, no lo tienes -- no lo inventes.",
+    parameters: { type: "object", properties: {}, required: [] },
+  },
+  {
     name: "update_client_profile",
     skill: "clientes",
     description:

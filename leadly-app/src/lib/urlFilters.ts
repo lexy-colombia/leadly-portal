@@ -48,3 +48,14 @@ export function useResetOnFilterChange(key: string, reset: () => void): void {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
 }
+
+/** Returns only to the originating list, preserving its query and pagination. */
+export function getListReturnUrl(listPath: string, state: unknown): string {
+  const returnTo = state && typeof state === 'object' && 'returnTo' in state
+    ? (state as { returnTo?: unknown }).returnTo
+    : undefined
+  if (typeof returnTo !== 'string') return listPath
+  return returnTo === listPath || returnTo.startsWith(`${listPath}?`)
+    ? returnTo
+    : listPath
+}

@@ -18,6 +18,8 @@ export interface ClientInput {
   tags: string[]
   assigned_to?: string | null
   credit_enabled?: boolean
+  /** { "<definition_id>": valor } -- validado por el trigger de la base. */
+  custom_fields?: Record<string, unknown>
 }
 
 /** El formulario de cliente (ContactDrawer.tsx) ya no pide `document_type`

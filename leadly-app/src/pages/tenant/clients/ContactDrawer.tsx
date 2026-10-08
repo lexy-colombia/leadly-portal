@@ -1,7 +1,10 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { createClient, updateClient, dianDocumentTypeCodeToGeneric } from '../../../lib/api/clients'
 import { listProfilesByTenant } from '../../../lib/api/users'
-import type { Client, Profile } from '../../../types/domain'
+import { listCustomFieldDefinitions } from '../../../lib/api/customFields'
+import { inputToPayload, payloadToInput } from '../../../lib/customFieldValues'
+import { CustomFieldInput } from './CustomFieldInput'
+import type { Client, CustomFieldDefinition, Profile } from '../../../types/domain'
 import { FieldError } from '@/components/atoms'
 import { ComboboxFilter, PhoneInput, TagInput } from '@/components/molecules'
 import { Drawer } from '@/components/organisms'
@@ -63,6 +66,8 @@ export function ContactDrawer({
   const [dianDocumentTypeCode, setDianDocumentTypeCode] = useState('')
   const [appliesWithholding, setAppliesWithholding] = useState(false)
   const [dianDocumentTypes, setDianDocumentTypes] = useState<DianDocumentType[]>([])
+  const [customDefs, setCustomDefs] = useState<CustomFieldDefinition[]>([])
+  const [customValues, setCustomValues] = useState<Record<string, string | boolean | undefined>>({})
   const [touched, setTouched] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -95,11 +100,39 @@ export function ContactDrawer({
     if (!open) return
     listProfilesByTenant(tenantId).then(setAgents).catch(() => {})
     listDianDocumentTypes().then(setDianDocumentTypes).catch(() => {})
+    listCustomFieldDefinitions(tenantId, 'client').then(setCustomDefs).catch(() => {})
   }, [open, tenantId])
+
+  // Los valores se precargan cuando están las definiciones (el tipo decide
+  // cómo se pinta cada uno) y al abrir/cambiar de cliente.
+  useEffect(() => {
+    if (!open) return
+    const next: Record<string, string | boolean | undefined> = {}
+    for (const def of customDefs) next[def.id] = payloadToInput(def.field_type, contact?.custom_fields?.[def.id])
+    setCustomValues(next)
+  }, [open, contact, customDefs])
 
   const nameError = touched && !isNotBlank(fullName) ? t('contacts.drawer.errors.nameRequired') : undefined
   const phoneError = touched && !isValidE164Phone(phone) ? t('contacts.drawer.errors.invalidPhone') : undefined
   const emailError = touched && isNotBlank(email) && !isValidEmail(email) ? t('contacts.drawer.errors.invalidEmail') : undefined
+
+  /** Devuelve el objeto a enviar, o null si NO debe enviarse la clave:
+   * sin definiciones activas, o sin cambios respecto de lo guardado (en
+   * crear: sin ningún valor). Así un guardado normal de cliente no toca la
+   * columna custom_fields. */
+  function buildCustomFields(): Record<string, unknown> | null {
+    if (customDefs.length === 0) return null
+    const current = contact?.custom_fields ?? {}
+    const next: Record<string, unknown> = { ...current }
+    for (const def of customDefs) {
+      const payload = inputToPayload(def.field_type, customValues[def.id])
+      if (payload === null) delete next[def.id]
+      else next[def.id] = payload
+    }
+    const keys = new Set([...Object.keys(current), ...Object.keys(next)])
+    const changed = [...keys].some((k) => JSON.stringify(current[k]) !== JSON.stringify(next[k]))
+    return changed ? next : null
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -133,7 +166,13 @@ export function ContactDrawer({
         credit_enabled: creditEnabled,
         dian_document_type_code: dianDocumentTypeCode || null,
         applies_withholding: appliesWithholding,
+        // Se parte de lo ya guardado (incluye valores de campos hoy
+        // inactivos, que no se tocan) y se pisan solo los campos activos
+        // del formulario; vacío = se quita la clave. La validación la hace
+        // el trigger de la base y su mensaje se muestra tal cual.
       }
+      const customFields = buildCustomFields()
+      if (customFields) Object.assign(input, { custom_fields: customFields })
       const saved = contact ? await updateClient(contact.id, input) : await createClient(input)
       onSaved(saved)
       onClose()
@@ -188,30 +227,7 @@ export function ContactDrawer({
           </div>
         </Section>
 
-        <Section title={t('contacts.drawer.sections.classification')}>
-          <div>
-            <Label>{t('contacts.drawer.fields.assignedAgent')}</Label>
-            <div className="mt-1">
-              <ComboboxFilter
-                options={agents.map((a) => ({ id: a.id, label: a.full_name }))}
-                value={assignedTo}
-                onChange={setAssignedTo}
-                placeholder={t('contacts.drawer.fields.unassigned')}
-                searchPlaceholder={t('contacts.filters.agent.search')}
-                emptyLabel={t('contacts.filters.agent.noResults')}
-                className="w-full"
-                triggerClassName={COMBOBOX_TRIGGER_CLASS}
-              />
-            </div>
-          </div>
-
-          <div>
-            <Label htmlFor="contact-tags">{t('contacts.drawer.fields.tags')}</Label>
-            <TagInput value={tags} onChange={setTags} placeholder={t('contacts.drawer.fields.tagsPlaceholder')} className="mt-1 !rounded-lg !py-1 text-xs" />
-          </div>
-        </Section>
-
-        <Section title={t('contacts.drawer.sections.additional')}>
+        <Section title={t('contacts.drawer.sections.identification')}>
           {/* Un solo tipo/número de documento -- pedido explícito del
               usuario 2026-09-09: antes se pedía tres veces (NIT suelto,
               "Tipo de documento" genérico, y "Tipo de documento DIAN" en
@@ -274,6 +290,32 @@ export function ContactDrawer({
               </SelectContent>
             </Select>
           </div>
+        </Section>
+
+        <Section title={t('contacts.drawer.sections.classification')}>
+          <div>
+            <Label>{t('contacts.drawer.fields.assignedAgent')}</Label>
+            <div className="mt-1">
+              <ComboboxFilter
+                options={agents.map((a) => ({ id: a.id, label: a.full_name }))}
+                value={assignedTo}
+                onChange={setAssignedTo}
+                placeholder={t('contacts.drawer.fields.unassigned')}
+                searchPlaceholder={t('contacts.filters.agent.search')}
+                emptyLabel={t('contacts.filters.agent.noResults')}
+                className="w-full"
+                triggerClassName={COMBOBOX_TRIGGER_CLASS}
+              />
+            </div>
+          </div>
+
+          <div>
+            <Label htmlFor="contact-tags">{t('contacts.drawer.fields.tags')}</Label>
+            <TagInput value={tags} onChange={setTags} placeholder={t('contacts.drawer.fields.tagsPlaceholder')} className="mt-1 !rounded-lg !py-1 text-xs" />
+          </div>
+        </Section>
+
+        <Section title={t('contacts.drawer.sections.additional')}>
           <div>
             <Label htmlFor="contact-notes">{t('contacts.drawer.fields.notes')}</Label>
             <Textarea id="contact-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className={`mt-1 ${TEXTAREA_CLASS}`} />
@@ -306,6 +348,21 @@ export function ContactDrawer({
             <Switch id="contact-withholding" checked={appliesWithholding} onCheckedChange={setAppliesWithholding} />
           </div>
         </Section>
+
+        {customDefs.length > 0 && (
+          <Section title={t('contacts.customFields.section')}>
+            <div className="grid grid-cols-2 gap-3">
+              {customDefs.map((def) => (
+                <CustomFieldInput
+                  key={def.id}
+                  definition={def}
+                  value={customValues[def.id]}
+                  onChange={(v) => setCustomValues((prev) => ({ ...prev, [def.id]: v }))}
+                />
+              ))}
+            </div>
+          </Section>
+        )}
 
         {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
 

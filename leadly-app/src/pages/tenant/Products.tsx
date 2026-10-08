@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import { useHeaderSearchSlot } from '@/contexts/HeaderSearchSlotContext'
@@ -230,6 +230,7 @@ function QuickStockPopover({
 export function Products() {
   const { profile } = useAuth()
   const { t } = useLanguage()
+  const location = useLocation()
   const navigate = useNavigate()
   const tenantId = profile?.tenant_id
   const { slot: headerSearchSlot } = useHeaderSearchSlot()
@@ -515,7 +516,7 @@ export function Products() {
                   const lowStock = isLowStock(product, stockTotals)
                   const cover = product.images[0]
                   return (
-                    <TableRow key={product.id} onClick={() => navigate(`/app/products/${product.id}`)} className="cursor-pointer">
+                    <TableRow key={product.id} onClick={() => navigate(`/app/products/${product.id}`, { state: { returnTo: location.pathname + location.search } })} className="cursor-pointer">
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <Checkbox checked={selectedIds.has(product.id)} onCheckedChange={(checked) => toggleSelectOne(product.id, checked === true)} />
                       </TableCell>

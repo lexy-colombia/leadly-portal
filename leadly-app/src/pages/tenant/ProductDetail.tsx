@@ -1,5 +1,6 @@
+import { getListReturnUrl } from '../../lib/urlFilters'
 import { useEffect, useState, type ReactNode } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { ArrowRightIcon, Maximize2Icon, MoreHorizontalIcon } from 'lucide-react'
 import { deleteProduct, formatCategoryHierarchy, getProduct, getProductImageUrl, updateProduct } from '../../lib/api/products'
 import type { ProductDetail } from '../../lib/api/products'
@@ -165,6 +166,8 @@ function HistoryTable({ entries }: { entries: MovementHistoryEntry[] }) {
 
 export function ProductDetail() {
   const { id } = useParams<{ id: string }>()
+  const location = useLocation();
+  const listReturnUrl = getListReturnUrl('/app/products', location.state);
   const navigate = useNavigate()
   const { profile } = useAuth()
   const { t } = useLanguage()
@@ -218,7 +221,7 @@ export function ProductDetail() {
     setDeleteError(null)
     try {
       await deleteProduct(product.id)
-      navigate('/app/products')
+      navigate(listReturnUrl)
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : t('products.errors.delete'))
       setDeleting(false)
@@ -231,7 +234,7 @@ export function ProductDetail() {
     return (
       <div className="space-y-4">
         <p className="text-brand-500">{t('products.detail.notFound')}</p>
-        <Link to="/app/products" className="text-xs font-medium text-accent-600 hover:text-accent-700">
+        <Link to={listReturnUrl} className="text-xs font-medium text-accent-600 hover:text-accent-700">
           {t('products.detail.backToList')}
         </Link>
       </div>

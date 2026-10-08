@@ -1,3 +1,4 @@
+import { getListReturnUrl } from '@/lib/urlFilters'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import changelogRaw from '../../../CHANGELOG.md?raw'
@@ -307,7 +308,7 @@ export function AppShell({
             <div className="flex min-w-0 items-center gap-2">
               {pageHeader.backTo ? (
                 <Link
-                  to={pageHeader.backTo}
+                  to={getListReturnUrl(pageHeader.backTo, location.state)}
                   className="flex min-w-0 items-center gap-1 truncate text-xs font-semibold text-brand-800 transition-colors hover:text-accent-700 sm:text-xs"
                 >
                   <ChevronLeftIcon width={16} height={16} className="shrink-0" />

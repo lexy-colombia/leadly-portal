@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Building2, FileText, RotateCcw, ShoppingCart, Store, Truck, Warehouse as WarehouseIcon } from 'lucide-react'
+import { Building2, FileText, ListPlus, RotateCcw, ShoppingCart, Store, Truck, Warehouse as WarehouseIcon } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import { getTenant } from '../../lib/api/tenants'
@@ -13,6 +13,7 @@ import { PosSettingsSection } from './settings/PosSettingsSection'
 import { DocumentsSection } from './settings/DocumentsSection'
 import { DispatchStatusesSection } from './settings/DispatchStatusesSection'
 import { ReturnsSection } from './settings/ReturnsSection'
+import { CustomFieldsSection } from './settings/CustomFieldsSection'
 import { Warehouses } from './Warehouses'
 
 /** Configuración del tenant -- panel organizado por categorías (pedido
@@ -64,6 +65,7 @@ export function Settings() {
     enabledModules.has('inventory') && { key: 'warehouses', label: t('settings.nav.warehouses'), icon: WarehouseIcon },
     enabledModules.has('dispatches') && { key: 'dispatches', label: t('settings.nav.dispatches'), icon: Truck },
     enabledModules.has('returns') && { key: 'returns', label: t('settings.nav.returns'), icon: RotateCcw },
+    isAdmin && { key: 'customFields', label: t('settings.nav.customFields'), icon: ListPlus },
     isAdmin && enabledModules.has('pos') && { key: 'documents', label: t('settings.nav.documents'), icon: FileText },
   ].filter((c): c is SettingsCategory => !!c)
 
@@ -93,6 +95,7 @@ export function Settings() {
           </>
         )}
 
+        {active === 'customFields' && profile?.tenant_id && <CustomFieldsSection tenantId={profile.tenant_id} />}
         {active === 'warehouses' && <Warehouses />}
         {active === 'dispatches' && profile?.tenant_id && <DispatchStatusesSection tenantId={profile.tenant_id} />}
         {active === 'returns' && profile?.tenant_id && <ReturnsSection tenantId={profile.tenant_id} />}

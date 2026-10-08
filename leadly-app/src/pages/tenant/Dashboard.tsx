@@ -30,6 +30,7 @@ import { getAgentActivitySummary, type AgentActivitySummary } from '../../lib/ap
 import { formatDate } from '../../lib/dates'
 import { Badge, PageSpinner } from '@/components/atoms'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { TrendChart } from '@/components/analytics/TrendChart'
 import { Card, EmptyState } from '@/components/molecules'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { CalendarIcon, DollarIcon, InfoIcon, ReceiptIcon, RefreshIcon, TruckIcon, WalletIcon } from '@/components/atoms/icons'
@@ -284,20 +285,20 @@ function KpiCard({
   sparkline?: DayValueBucket[]
 }) {
   return (
-    <Card className="!p-3">
+    <Card>
       <div className="flex items-center gap-2.5">
         <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${tone.bg} ${tone.text}`}>
           <Icon width={17} height={17} />
         </div>
         <div className="min-w-0 flex-1">
           <p className="truncate text-[11px] text-brand-400">{title}</p>
-          <p className="truncate text-xs font-bold leading-tight text-brand-800">{value}</p>
+          <p className="mt-1 text-xl font-bold leading-tight tracking-tight tabular-nums text-brand-800">{value}</p>
         </div>
       </div>
       <div className="mt-1.5 flex items-center justify-between gap-2">
         <div className="min-h-[15px]">{footer}</div>
         {sparkline && (
-          <div className="h-6 w-14 shrink-0">
+          <div className="h-8 w-20 shrink-0">
             <Sparkline data={sparkline} color={tone.line} />
           </div>
         )}
@@ -309,6 +310,8 @@ function KpiCard({
 export function Dashboard() {
   const { profile } = useAuth()
   const { t, language } = useLanguage()
+  const dashboardLoadError = t('analytics.dashboard.loadError')
+  const conversationLoadError = t('dashboard.errors.loadConversations')
   const [tasks, setTasks] = useState<TaskWithRelations[] | null>(null)
   const [conversations, setConversations] = useState<ConversationWithLine[] | null>(null)
   const [messageTimings, setMessageTimings] = useState<MessageTiming[] | null>(null)
@@ -336,10 +339,10 @@ export function Dashboard() {
     const tenantId = profile.tenant_id
 
     listTasks(tenantId).then(setTasks).catch(() => setTasks([]))
-    listOrders(tenantId).then(setOrders).catch(() => setOrders([]))
+    listOrders(tenantId).then(setOrders).catch(() => { setOrders(null); setError(dashboardLoadError) })
     listReturns(tenantId).then(setReturns).catch(() => setReturns([]))
-    listDispatchesForTenant(tenantId).then(setDispatches).catch(() => setDispatches([]))
-    listCreditClients(tenantId).then(setCreditClients).catch(() => setCreditClients([]))
+    listDispatchesForTenant(tenantId).then(setDispatches).catch(() => { setDispatches(null); setError(dashboardLoadError) })
+    listCreditClients(tenantId).then(setCreditClients).catch(() => { setCreditClients(null); setError(dashboardLoadError) })
 
     // Rendimiento del equipo -- solo tenant_admin lo ve (Fase 4, pedido
     // explícito del usuario), un tenant_agent no necesita ver cómo le va a
@@ -358,7 +361,7 @@ export function Dashboard() {
           .catch(() => setMessageTimings([]))
       })
       .catch((err) => {
-        setError(err.message ?? t('dashboard.errors.loadConversations'))
+        setError(err.message ?? conversationLoadError)
         setConversations([])
         setMessageTimings([])
       })
@@ -381,7 +384,7 @@ export function Dashboard() {
           .catch(() => setOpportunities([]))
       })
       .catch(() => setOpportunities([]))
-  }, [profile?.tenant_id])
+  }, [profile?.tenant_id, profile?.role, dashboardLoadError, conversationLoadError])
 
   const nowMs = Date.now()
   const isTaskOverdue = (task: TaskWithRelations) => new Date(task.due_date).getTime() < nowMs
@@ -490,20 +493,17 @@ export function Dashboard() {
     return items.slice(0, 6)
   }, [orders, returns])
 
-  const firstName = profile?.full_name?.trim().split(/\s+/)[0] ?? ''
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xs font-bold text-brand-800">
-            {t('dashboard.greeting.prefix')} <span className="text-accent-600">{firstName}</span>
-          </h1>
-          <p className="mt-0.5 text-xs text-brand-400">{t('dashboard.greeting.subtitle')}</p>
+          <h1 className="font-sans text-2xl font-bold tracking-tight text-brand-800">{t('analytics.dashboard.title')}</h1>
+          <p className="mt-0.5 text-xs text-brand-400">{t('analytics.dashboard.subtitle')}</p>
         </div>
         <div className="flex items-center gap-1.5 rounded-lg border border-brand-100 bg-white px-2.5 py-1">
           <CalendarIcon width={14} height={14} className="shrink-0 text-brand-400" />
-          <Select value={String(kpiRangeDays)} onValueChange={(v) => setKpiRangeDays(Number(v) as RangeDays)}>
+          <Select value={String(kpiRangeDays)} onValueChange={(v) => { setKpiRangeDays(Number(v) as RangeDays); setRangeDays(Number(v) as RangeDays) }}>
             <SelectTrigger className="!h-6 !w-auto !border-0 !bg-transparent !p-0 text-xs font-medium text-brand-600 focus-visible:!ring-0">
               <SelectValue>{t(`dashboard.conversations.range.${kpiRangeDays}`)}</SelectValue>
             </SelectTrigger>
@@ -523,19 +523,19 @@ export function Dashboard() {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard
           icon={DollarIcon}
-          tone={{ bg: 'bg-emerald-50', text: 'text-emerald-600', line: '#10b981' }}
+          tone={{ bg: 'bg-accent-50', text: 'text-accent-600', line: '#2fa9a5' }}
           title={t('dashboard.kpi.sales.title', { days: kpiRangeDays })}
-          value={formatFullCurrency(salesInRange)}
+          value={orders === null ? '—' : formatFullCurrency(salesInRange)}
           footer={salesDeltaPct !== null ? <Delta pct={salesDeltaPct} /> : <span className="text-[11px] text-brand-300">{t('dashboard.vsPreviousPeriod')}</span>}
           sparkline={salesTrend}
         />
         <KpiCard
           icon={ReceiptIcon}
-          tone={{ bg: 'bg-violet-50', text: 'text-violet-600', line: '#8b5cf6' }}
+          tone={{ bg: 'bg-brand-50', text: 'text-brand-600', line: '#253159' }}
           title={t('dashboard.kpi.orders.title', { days: kpiRangeDays })}
-          value={String(ordersInRange)}
+          value={orders === null ? '—' : String(ordersInRange)}
           footer={
-            <Link to="/app/sales" className="text-[11px] font-medium text-sky-600 hover:text-sky-700">
+            <Link to="/app/sales" className="text-[11px] font-medium text-accent-600 hover:text-accent-700">
               {t('common.actions.viewAll')}
             </Link>
           }
@@ -543,11 +543,11 @@ export function Dashboard() {
         />
         <KpiCard
           icon={TruckIcon}
-          tone={{ bg: 'bg-sky-50', text: 'text-sky-600', line: '#0ea5e9' }}
+          tone={{ bg: 'bg-accent-50', text: 'text-accent-600', line: '#63cdc7' }}
           title={t('dashboard.kpi.dispatches.title', { days: kpiRangeDays })}
-          value={String(dispatchesInRange)}
+          value={dispatches === null ? '—' : String(dispatchesInRange)}
           footer={
-            <Link to="/app/sales" className="text-[11px] font-medium text-sky-600 hover:text-sky-700">
+            <Link to="/app/sales" className="text-[11px] font-medium text-accent-600 hover:text-accent-700">
               {t('common.actions.viewAll')}
             </Link>
           }
@@ -557,19 +557,34 @@ export function Dashboard() {
           icon={WalletIcon}
           tone={{ bg: 'bg-amber-50', text: 'text-amber-600', line: '#f59e0b' }}
           title={t('dashboard.kpi.receivable.title')}
-          value={formatFullCurrency(receivableTotal)}
+          value={creditClients === null ? '—' : formatFullCurrency(receivableTotal)}
           footer={
-            <Link to="/app/credit" className="text-[11px] font-medium text-sky-600 hover:text-sky-700">
+            <Link to="/app/credit" className="text-[11px] font-medium text-accent-600 hover:text-accent-700">
               {t('dashboard.kpi.receivable.footer')}
             </Link>
           }
         />
       </div>
 
+      <div className="grid gap-4 xl:grid-cols-[1.8fr_1fr]">
+        <Card>
+          <div className="mb-6 flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-base font-bold text-brand-800">{t('analytics.dashboard.salesTrend')}</h2><p className="mt-1 text-xs text-brand-400">{t('analytics.dashboard.salesTrend.hint')}</p></div><Link to="/app/reports" className="text-xs font-semibold text-accent-600 hover:underline">{t('analytics.viewReports')} →</Link></div>
+          {orders === null ? <PageSpinner /> : <TrendChart points={salesTrend.map((p) => ({label:p.label,value:p.value}))} formatValue={formatCompactCurrency} label={t('analytics.dataTable')} />}
+        </Card>
+        <Card>
+          <h2 className="text-base font-bold text-brand-800">{t('analytics.dashboard.attention')}</h2><p className="mt-1 text-xs text-brand-400">{t('analytics.dashboard.liveHint')}</p>
+          <div className="mt-5 flex flex-col divide-y divide-brand-100">
+            <Link to="/app/sales" className="flex items-center justify-between gap-3 py-4 text-sm hover:text-accent-600"><span>{t('analytics.dashboard.pendingOrders')}</span><strong className="text-xl tabular-nums">{orders === null ? '—' : inProgressOrders.length}</strong></Link>
+            <Link to="/app/calendar" className="flex items-center justify-between gap-3 py-4 text-sm hover:text-accent-600"><span>{t('analytics.dashboard.overdueTasks')}</span><strong className="text-xl tabular-nums">{tasks === null ? '—' : tasks.filter((task) => (task.status==='pendiente'||task.status==='en_proceso') && isTaskOverdue(task)).length}</strong></Link>
+            <Link to="/app/credit" className="flex items-center justify-between gap-3 py-4 text-sm hover:text-accent-600"><span>{t('dashboard.kpi.receivable.title')}</span><strong className="text-lg tabular-nums">{creditClients === null ? '—' : formatFullCurrency(receivableTotal)}</strong></Link>
+          </div>
+        </Card>
+      </div>
+
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <Card className="!p-3.5">
+        <Card className="">
           <div className="mb-2.5 flex items-center justify-between gap-2">
-            <h2 className="text-xs font-semibold text-brand-800">{t('dashboard.pipeline.title')}</h2>
+            <h2 className="text-sm font-bold text-brand-800">{t('dashboard.pipeline.title')}</h2>
             <Select value={pipelineMetric} onValueChange={(v) => setPipelineMetric(v as 'value' | 'count')}>
               <SelectTrigger className="!h-7 !w-auto !rounded-lg !text-xs">
                 <SelectValue>{t(`dashboard.pipeline.metric.${pipelineMetric}`)}</SelectValue>
@@ -602,9 +617,9 @@ export function Dashboard() {
           )}
         </Card>
 
-        <Card className="!p-3.5">
+        <Card className="">
           <div className="mb-2.5 flex items-center justify-between gap-2">
-            <h2 className="text-xs font-semibold text-brand-800">{t('dashboard.conversations.title', { days: rangeDays })}</h2>
+            <h2 className="text-sm font-bold text-brand-800">{t('dashboard.conversations.title', { days: rangeDays })}</h2>
             <Select value={String(rangeDays)} onValueChange={(v) => setRangeDays(Number(v) as RangeDays)}>
               <SelectTrigger className="!h-7 !w-auto !rounded-lg !text-xs">
                 <SelectValue>{t(`dashboard.conversations.range.${rangeDays}`)}</SelectValue>
@@ -640,9 +655,9 @@ export function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <Card className="!p-3.5">
+        <Card className="">
           <div className="mb-2.5 flex items-center justify-between">
-            <h2 className="text-xs font-semibold text-brand-800">{t('dashboard.upcomingTasks.title')}</h2>
+            <h2 className="text-sm font-bold text-brand-800">{t('dashboard.upcomingTasks.title')}</h2>
             <Link to="/app/calendar" className="text-xs font-medium text-accent-600 hover:text-accent-700">
               {t('common.actions.viewAll')}
             </Link>
@@ -671,9 +686,9 @@ export function Dashboard() {
           )}
         </Card>
 
-        <Card className="!p-3.5">
+        <Card className="">
           <div className="mb-2.5 flex items-center justify-between">
-            <h2 className="text-xs font-semibold text-brand-800">{t('dashboard.recentActivity.title')}</h2>
+            <h2 className="text-sm font-bold text-brand-800">{t('dashboard.recentActivity.title')}</h2>
             <Link to="/app/sales" className="text-xs font-medium text-accent-600 hover:text-accent-700">
               {t('common.actions.viewAll')}
             </Link>
@@ -730,9 +745,9 @@ export function Dashboard() {
       </div>
 
       {profile?.role === 'tenant_admin' && (
-        <Card className="!p-3.5">
+        <Card className="">
           <div className="mb-2.5 flex items-center gap-1.5">
-            <h2 className="text-xs font-semibold text-brand-800">{t('dashboard.agentActivity.title')}</h2>
+            <h2 className="text-sm font-bold text-brand-800">{t('dashboard.agentActivity.title')}</h2>
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="text-brand-300 hover:text-brand-500">

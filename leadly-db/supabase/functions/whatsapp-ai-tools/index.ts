@@ -1208,6 +1208,43 @@ async function executeTool(
       return data ?? { full_name: null, document_type: null, document_number: null, email: null, credit_enabled: false };
     }
 
+    case "get_client_custom_fields": {
+      // Solo lectura. Cliente = contactId inyectado por el servidor + tenant;
+      // definiciones = solo las visibles para la IA. El modelo no puede
+      // cambiar nada de esto (la herramienta no recibe parámetros).
+      if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
+      const { data: client, error: clientError } = await adminClient
+        .from("clients")
+        .select("custom_fields")
+        .eq("id", contactId)
+        .eq("tenant_id", tenantId)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (clientError) throw new Error(clientError.message);
+      const values = (client?.custom_fields ?? {}) as Record<string, unknown>;
+      if (!client || Object.keys(values).length === 0) return [];
+
+      const { data: defs, error: defsError } = await adminClient
+        .from("custom_field_definitions")
+        .select("id, name, field_type")
+        .eq("tenant_id", tenantId)
+        .eq("entity_type", "client")
+        .eq("is_active", true)
+        .eq("visible_to_ai", true)
+        .is("deleted_at", null)
+        .order("display_order", { ascending: true })
+        .order("created_at", { ascending: true });
+      if (defsError) throw new Error(defsError.message);
+
+      const result: { name: string; type: string; value: unknown }[] = [];
+      for (const def of (defs ?? []) as { id: string; name: string; field_type: string }[]) {
+        const value = values[def.id];
+        if (value === undefined || value === null || value === "") continue;
+        result.push({ name: def.name, type: def.field_type, value });
+      }
+      return result;
+    }
+
     case "update_client_profile": {
       if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
       const updates: Record<string, string> = {};

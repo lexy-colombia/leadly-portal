@@ -50,21 +50,25 @@ export function Login() {
       topRight={
         <span className="flex items-center gap-3 text-xs">
           <span className="hidden text-brand-400 sm:inline">{t('auth.login.noAccount')}</span>
-          <Link to="/signup" className="rounded-lg border border-accent-200 px-3 py-1.5 font-medium text-accent-600 hover:bg-accent-50">
+          <Link to="/signup" className="rounded-lg border border-accent-200 px-4 py-2 font-medium text-accent-600 transition-colors hover:bg-accent-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400">
             {t('auth.login.signUp')}
           </Link>
         </span>
       }
     >
       <div className="animate-fade-in">
-        <h1 className="text-xs font-extrabold text-brand-800 sm:text-xs">{t('auth.login.title')}</h1>
-        <p className="mt-1 text-brand-400">{t('auth.login.subtitle')}</p>
+        <div aria-hidden="true" className="mb-6 h-1 w-10 rounded-full bg-accent-500" />
+        <h1 className="text-3xl leading-tight font-extrabold tracking-tight text-brand-800 sm:text-4xl">{t('auth.login.title')}</h1>
+        <p className="mt-3 text-sm leading-relaxed text-brand-400">{t('auth.login.subtitle')}</p>
 
-        <form onSubmit={handleSubmit} noValidate className="mt-6 space-y-4">
+        <form onSubmit={handleSubmit} noValidate className="mt-8 flex flex-col gap-5">
           <div>
             <Label htmlFor="email">{t('auth.email')}</Label>
             <IconInput
               id="email"
+              className="h-12"
+              aria-invalid={!!emailError}
+              aria-describedby={emailError ? "login-email-error" : undefined}
               type="email"
               autoComplete="email"
               icon={<MailIcon />}
@@ -73,18 +77,21 @@ export function Login() {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="tu@empresa.com"
             />
-            <FieldError message={emailError} />
+            <div id="login-email-error"><FieldError message={emailError} /></div>
           </div>
 
           <div>
             <div className="flex items-center justify-between">
               <Label htmlFor="password">{t('auth.password')}</Label>
-              <Link to="/forgot-password" className="mb-1 text-xs font-medium text-accent-600 hover:text-accent-700">
+              <Link to="/forgot-password" className="mb-1 text-xs font-medium text-accent-600 hover:text-accent-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400">
                 {t('auth.login.forgotPassword')}
               </Link>
             </div>
             <PasswordInput
               id="password"
+              className="h-12"
+              aria-invalid={!!passwordError}
+              aria-describedby={passwordError ? "login-password-error" : undefined}
               autoComplete="current-password"
               icon={<LockIcon />}
               value={password}
@@ -92,27 +99,27 @@ export function Login() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••••••"
             />
-            <FieldError message={passwordError} />
+            <div id="login-password-error"><FieldError message={passwordError} /></div>
           </div>
 
-          {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
+          {formError && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
 
-          <Button type="submit" variant="secondary" className="w-full" disabled={submitting}>
+          <Button type="submit" variant="secondary" className="mt-1 h-12 w-full" disabled={submitting}>
             {submitting ? t('auth.login.submitting') : t('auth.login.submit')}
           </Button>
         </form>
 
-        <div className="my-5 flex items-center gap-3 text-xs text-brand-300">
+        <div className="my-6 flex items-center gap-3 text-xs text-brand-300">
           <div className="h-px flex-1 bg-brand-100" />
           {t('auth.orContinueWith')}
           <div className="h-px flex-1 bg-brand-100" />
         </div>
 
-        <Button type="button" variant="ghost" className="w-full" onClick={handleGoogle}>
+        <Button type="button" variant="ghost" className="h-12 w-full" onClick={handleGoogle}>
           <GoogleIcon /> {t('auth.continueWithGoogle')}
         </Button>
 
-        <div className="mt-6">
+        <div className="mt-8">
           <AuroraCallout
             message={
               <>

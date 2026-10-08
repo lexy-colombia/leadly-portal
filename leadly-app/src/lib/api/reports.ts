@@ -117,3 +117,50 @@ export async function getProductReport(dateFrom: string, dateTo: string, opts?: 
   if (!data || data.error) throw new Error(data?.error ?? 'No se pudo cargar el reporte de productos.')
   return data.data
 }
+
+/** All sold products, keyset-paginated so the Data API row cap never truncates the report.
+ * Existing RLS applies to both tables; the order's tenant is additionally explicit.
+ * Aggregated one page at a time to keep raw sales rows out of component state. */
+export async function getSoldProducts(tenantId: string, dateFrom: string, dateTo: string, signal?: AbortSignal): Promise<{ rows: ProductSummaryRow[]; dailySeries: DailySeriesPoint[] }> {
+  const products = new Map<string, ProductSummaryRow>()
+  const daily = new Map<string, DailySeriesPoint>()
+  const day = new Date(dateFrom)
+  const end = new Date(dateTo)
+  const dateKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+  while (day < end) {
+    const date = dateKey(day)
+    daily.set(date,{date,quantity:0,revenue:0})
+    day.setDate(day.getDate()+1)
+  }
+  let cursor: string | null = null
+  const pageSize = 500
+  while (true) {
+    let query = supabase.from('sales_order_items')
+      .select('id, product_id, product_name, quantity, subtotal, sales_orders!inner(tenant_id, status, created_at, deleted_at)')
+      .eq('sales_orders.tenant_id', tenantId)
+      .eq('sales_orders.status', 'confirmada')
+      .is('sales_orders.deleted_at', null)
+      .gte('sales_orders.created_at', dateFrom)
+      .lt('sales_orders.created_at', dateTo)
+      .order('id', { ascending: true })
+      .limit(pageSize)
+    if (cursor) query = query.gt('id', cursor)
+    if (signal) query = query.abortSignal(signal)
+    const { data, error } = await query
+    if (error) throw error
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+    for (const item of data ?? []) {
+      const key = item.product_id ?? `name:${item.product_name}`
+      const row = products.get(key) ?? { product_id: item.product_id, product_name: item.product_name, quantity: 0, revenue: 0 }
+      row.quantity += Number(item.quantity)
+      row.revenue += Number(item.subtotal)
+      products.set(key, row)
+      const order = item.sales_orders as unknown as { created_at: string }
+      const point = daily.get(dateKey(new Date(order.created_at)))
+      if (point) { point.quantity += Number(item.quantity); point.revenue += Number(item.subtotal) }
+    }
+    if (!data?.length || data.length < pageSize) break
+    cursor = data[data.length - 1].id
+  }
+  return { rows: [...products.values()].sort((a, b) => b.revenue - a.revenue || a.product_name.localeCompare(b.product_name)), dailySeries: [...daily.values()] }
+}

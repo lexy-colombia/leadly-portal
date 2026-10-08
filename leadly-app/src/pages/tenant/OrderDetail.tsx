@@ -1,3 +1,4 @@
+import { getListReturnUrl } from '../../lib/urlFilters'
 import {
   useEffect,
   useMemo,
@@ -8,6 +9,7 @@ import {
 } from "react";
 import {
   Link,
+  useLocation,
   useNavigate,
   useParams,
   useSearchParams,
@@ -514,6 +516,8 @@ function ThreadColumn({
 export function OrderDetail() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const listReturnUrl = getListReturnUrl('/app/sales', location.state);
   const navigate = useNavigate();
   const { profile, enabledModules } = useAuth();
   const canEditInvoicedOrder = usePermission("sales.edit_invoiced_order");
@@ -1837,7 +1841,7 @@ export function OrderDetail() {
         applyCartId(cart.id);
         const next = new URLSearchParams(window.location.search);
         next.set("cart", cart.id);
-        setSearchParams(next, { replace: true });
+        setSearchParams(next, { replace: true, state: location.state });
       }
       lastSyncedCartSnapshotRef.current = snapshot;
     } catch (err) {
@@ -1879,7 +1883,7 @@ export function OrderDetail() {
           applyCartId(null);
           const next = new URLSearchParams(searchParams);
           next.delete("cart");
-          setSearchParams(next, { replace: true });
+          setSearchParams(next, { replace: true, state: location.state });
         }
         // Solo se marca cargado si la consulta respondió: si falló, no se
         // arma ningún autosave ni se puede crear (guardaría un carrito vacío
@@ -2198,7 +2202,7 @@ export function OrderDetail() {
         cartConsumedRef.current = true;
         if (status === "confirmada")
           await updateOrderStatus(created.id, "confirmada");
-        navigate(`/app/sales/${created.id}`, { replace: true });
+        navigate(`/app/sales/${created.id}`, { replace: true, state: location.state });
       });
     } catch (err) {
       setActionError(
@@ -2217,7 +2221,7 @@ export function OrderDetail() {
    * nada). */
   async function handleCancelDraft() {
     if (!cartIdRef.current && !savingDraft) {
-      navigate("/app/sales");
+      navigate(listReturnUrl);
       return;
     }
     setCancellingDraft(true);
@@ -2228,7 +2232,7 @@ export function OrderDetail() {
         cartConsumedRef.current = true;
         if (cartIdRef.current) await deleteCart(cartIdRef.current);
       });
-      navigate("/app/sales");
+      navigate(listReturnUrl);
     } catch (err) {
       setActionError(
         err instanceof Error
@@ -2307,7 +2311,7 @@ export function OrderDetail() {
     setDeleting(true);
     try {
       await deleteOrder(order.id);
-      navigate("/app/sales");
+      navigate(listReturnUrl);
     } catch (err) {
       setActionError(
         err instanceof Error ? err.message : t("orders.detail.errors.delete"),
@@ -2329,7 +2333,7 @@ export function OrderDetail() {
         <div className="space-y-4">
           <p className="text-brand-500">{t("orders.detail.notFound")}</p>
           <Link
-            to="/app/sales"
+            to={listReturnUrl}
             className="text-xs font-medium text-accent-600 hover:text-accent-700"
           >
             {t("orders.detail.backToList")}

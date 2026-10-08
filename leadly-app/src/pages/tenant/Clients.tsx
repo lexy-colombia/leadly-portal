@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { useLanguage } from "../../contexts/LanguageContext";
 import { useHeaderSearchSlot } from "@/contexts/HeaderSearchSlotContext";
@@ -8,10 +8,12 @@ import type { Language } from "../../i18n/translations";
 import { formatDate } from "../../lib/dates";
 import { useResetOnFilterChange, useUrlFilterSync } from "../../lib/urlFilters";
 import { formatClientPhoneDisplay } from "../../lib/phone";
+import { listCustomFieldDefinitions } from "../../lib/api/customFields";
+import { formatCustomFieldValue, matchesCustomFieldFilter, operatorsFor, type CustomFieldOperator } from "../../lib/customFieldValues";
 import { deleteClient, listClients } from "../../lib/api/clients";
 import { listLastContactTimesByTenant } from "../../lib/api/conversations";
 import { listProfilesByTenant } from "../../lib/api/users";
-import type { Client, Profile } from "../../types/domain";
+import type { Client, CustomFieldDefinition, Profile } from "../../types/domain";
 import { PageSpinner, InitialsAvatar } from "@/components/atoms";
 import {
   Card,
@@ -37,6 +39,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ContactDrawer } from "./clients/ContactDrawer";
+import { CustomFieldFilter } from "./clients/CustomFieldFilter";
+import { CustomFieldColumnsPicker } from "./clients/CustomFieldColumnsPicker";
 
 const PAGE_SIZE = 8;
 
@@ -61,6 +65,7 @@ function formatLastContact(
 export function Clients() {
   const { profile } = useAuth();
   const { t, language } = useLanguage();
+  const location = useLocation()
   const navigate = useNavigate();
   const { slot: headerSearchSlot } = useHeaderSearchSlot();
 
@@ -77,6 +82,14 @@ export function Clients() {
   const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
   const [tagFilter, setTagFilter] = useState<string | null>(() => searchParams.get("tag"));
   const [agentFilter, setAgentFilter] = useState<string | null>(() => searchParams.get("agent"));
+  const [customDefs, setCustomDefs] = useState<CustomFieldDefinition[]>([]);
+  // Filtro por campo personalizado y columnas elegidas: `cf` (id del campo),
+  // `cfop` (operador; el primero del tipo es el default y no se escribe),
+  // `cfv` (valor) y `cols` (ids separados por coma).
+  const [cfField, setCfField] = useState<string | null>(() => searchParams.get("cf"));
+  const [cfOperator, setCfOperator] = useState<CustomFieldOperator | null>(() => searchParams.get("cfop") as CustomFieldOperator | null);
+  const [cfValue, setCfValue] = useState(() => searchParams.get("cfv") ?? "");
+  const [customCols, setCustomCols] = useState<string[]>(() => (searchParams.get("cols") ?? "").split(",").filter(Boolean));
   const [page, setPage] = useState(() => Math.max(1, Number(searchParams.get("page")) || 1));
   const [drawer, setDrawer] = useState<{
     open: boolean;
@@ -91,6 +104,9 @@ export function Clients() {
     listClients(tenantId)
       .then(setContacts)
       .catch((err) => setError(err.message ?? t("contacts.errors.load")));
+    listCustomFieldDefinitions(tenantId, "client")
+      .then(setCustomDefs)
+      .catch(() => {});
     listProfilesByTenant(tenantId)
       .then(setAgents)
       .catch(() => {});
@@ -104,12 +120,21 @@ export function Clients() {
     return Array.from(new Set(contacts.flatMap((c) => c.tags))).sort();
   }, [contacts]);
 
+  const cfDef = useMemo(() => customDefs.find((d) => d.id === cfField) ?? null, [customDefs, cfField]);
+  const cfActiveOperator: CustomFieldOperator = cfDef
+    ? cfOperator && operatorsFor(cfDef.field_type).includes(cfOperator)
+      ? cfOperator
+      : operatorsFor(cfDef.field_type)[0]
+    : "eq";
+  const visibleCols = useMemo(() => customDefs.filter((d) => customCols.includes(d.id)), [customDefs, customCols]);
+
   const filtered = useMemo(() => {
     if (!contacts) return null;
     const term = search.trim().toLowerCase();
     return contacts.filter((c) => {
       if (tagFilter && !c.tags.includes(tagFilter)) return false;
       if (agentFilter && c.assigned_to !== agentFilter) return false;
+      if (cfDef && !matchesCustomFieldFilter(cfDef, c.custom_fields?.[cfDef.id], cfActiveOperator, cfValue)) return false;
       if (!term) return true;
       return (
         c.full_name.toLowerCase().includes(term) ||
@@ -119,14 +144,18 @@ export function Clients() {
         c.tags.some((tag) => tag.toLowerCase().includes(term))
       );
     });
-  }, [contacts, search, tagFilter, agentFilter]);
+  }, [contacts, search, tagFilter, agentFilter, cfDef, cfActiveOperator, cfValue]);
 
-  useResetOnFilterChange(JSON.stringify([search, tagFilter, agentFilter]), () => setPage(1));
+  useResetOnFilterChange(JSON.stringify([search, tagFilter, agentFilter, cfField, cfActiveOperator, cfValue]), () => setPage(1));
 
   useUrlFilterSync({
     q: search || null,
     tag: tagFilter,
     agent: agentFilter,
+    cf: cfField,
+    cfop: cfDef && cfActiveOperator !== operatorsFor(cfDef.field_type)[0] ? cfActiveOperator : null,
+    cfv: cfValue || null,
+    cols: customCols.length > 0 ? customCols.join(",") : null,
     page: page > 1 ? String(page) : null,
   });
 
@@ -198,6 +227,23 @@ export function Clients() {
           </FilterField>
         )}
 
+        {customDefs.length > 0 && (
+          <>
+            <CustomFieldFilter
+              definitions={customDefs}
+              fieldId={cfField}
+              operator={cfOperator}
+              value={cfValue}
+              onChange={(next) => {
+                setCfField(next.fieldId);
+                setCfOperator(next.operator);
+                setCfValue(next.value);
+              }}
+            />
+            <CustomFieldColumnsPicker definitions={customDefs} selected={customCols} onChange={setCustomCols} />
+          </>
+        )}
+
         <span className="shrink-0 pb-1.5 text-xs text-brand-400">
           {filtered?.length ?? 0}{" "}
           {t(
@@ -243,6 +289,9 @@ export function Clients() {
                   <TableHead>{t("contacts.table.phone")}</TableHead>
                   <TableHead>{t("contacts.table.agent")}</TableHead>
                   <TableHead>{t("contacts.table.lastContact")}</TableHead>
+                  {visibleCols.map((def) => (
+                    <TableHead key={def.id}>{def.name}</TableHead>
+                  ))}
                   <TableHead className="text-right">
                     {t("contacts.table.actions")}
                   </TableHead>
@@ -252,7 +301,7 @@ export function Clients() {
                 {pageItems.map((contact) => (
                   <TableRow
                     key={contact.id}
-                    onClick={() => navigate(`/app/clients/${contact.id}`)}
+                    onClick={() => navigate(`/app/clients/${contact.id}`, { state: { returnTo: location.pathname + location.search } })}
                     className="cursor-pointer"
                   >
                     <TableCell className="text-xs font-medium text-brand-800">
@@ -278,6 +327,11 @@ export function Clients() {
                     <TableCell className="text-xs text-brand-500">
                       {formatLastContact(lastContact.get(contact.id), language)}
                     </TableCell>
+                    {visibleCols.map((def) => (
+                      <TableCell key={def.id} className="text-xs text-brand-500">
+                        {formatCustomFieldValue(def, contact.custom_fields?.[def.id], { yes: t("contacts.customFields.yes"), no: t("contacts.customFields.no") }, language === "en" ? "en-US" : "es-CO")}
+                      </TableCell>
+                    ))}
                     <TableCell
                       className="text-right"
                       onClick={(e) => e.stopPropagation()}

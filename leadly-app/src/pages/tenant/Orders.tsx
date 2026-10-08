@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useResetOnFilterChange, useUrlFilterSync } from '../../lib/urlFilters'
 import { MoreHorizontalIcon } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
@@ -155,6 +155,7 @@ function PaymentMethodRow({ label, amount, total, currency }: { label: string; a
 export function Orders() {
   const { profile } = useAuth()
   const { t, language } = useLanguage()
+  const location = useLocation()
   const navigate = useNavigate()
   const { slot: headerSearchSlot } = useHeaderSearchSlot()
 
@@ -437,7 +438,7 @@ export function Orders() {
           {totalCount} {t(totalCount === 1 ? 'orders.count.singular' : 'orders.count.plural')}
         </span>
 
-        <Button onClick={() => navigate('/app/sales/new')} size="sm" className="ml-auto self-center">
+        <Button onClick={() => navigate('/app/sales/new', { state: { returnTo: location.pathname + location.search } })} size="sm" className="ml-auto self-center">
           <PlusIcon width={14} height={14} /> {t('orders.actions.newSale')}
         </Button>
       </div>
@@ -531,7 +532,7 @@ export function Orders() {
               </TableHeader>
               <TableBody>
                 {pageItems.map((order) => (
-                  <TableRow key={order.id} onClick={() => navigate(`/app/sales/${order.id}`)} className="cursor-pointer">
+                  <TableRow key={order.id} onClick={() => navigate(`/app/sales/${order.id}`, { state: { returnTo: location.pathname + location.search } })} className="cursor-pointer">
                     <TableCell onClick={(e) => e.stopPropagation()}>
                       <Checkbox
                         checked={selectedIds.has(order.id)}
@@ -614,7 +615,7 @@ export function Orders() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48">
-                          <DropdownMenuItem onSelect={() => navigate(`/app/sales/${order.id}`)}>{t('orders.actions.viewDetail')}</DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => navigate(`/app/sales/${order.id}`, { state: { returnTo: location.pathname + location.search } })}>{t('orders.actions.viewDetail')}</DropdownMenuItem>
                           {order.status === 'cotizacion' && (
                             <DropdownMenuItem variant="destructive" onSelect={() => setConfirmOrder(order)}>
                               {t('orders.actions.cancelQuote')}

@@ -288,10 +288,33 @@ export interface Client {
    * seed_default_walkin_client) -- el que usa el POS cuando la venta de
    * mostrador no identifica a nadie. */
   is_walk_in: boolean
+  /** Valores de campos personalizados: { "<definition_id>": valor }. El
+   * servidor (trigger de clients) es la única puerta de validación. */
+  custom_fields: Record<string, unknown>
   deleted_at: string | null
   deleted_by: string | null
   created_at: string
   updated_at: string
+}
+
+export type CustomFieldType = 'text' | 'integer' | 'decimal' | 'boolean' | 'date' | 'select'
+export type CustomFieldEntityType = 'client' | 'product'
+
+export interface CustomFieldDefinition {
+  id: string
+  tenant_id: string
+  entity_type: CustomFieldEntityType
+  name: string
+  field_type: CustomFieldType
+  /** Solo para `select`: arreglo de textos. */
+  options: string[] | null
+  visible_to_ai: boolean
+  display_order: number
+  is_active: boolean
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+  deleted_by: string | null
 }
 
 export interface Pipeline {

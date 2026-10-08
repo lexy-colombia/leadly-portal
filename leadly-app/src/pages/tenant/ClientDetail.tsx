@@ -1,5 +1,6 @@
+import { getListReturnUrl } from '../../lib/urlFilters'
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { MoreHorizontalIcon } from 'lucide-react'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { TranslationKey } from '../../i18n/translations'
@@ -47,7 +48,9 @@ import { CreditPaymentDrawer } from './clients/CreditPaymentDrawer'
 import { CreditReceiptDialog } from './clients/CreditReceiptDialog'
 import { OpportunityPanel } from './opportunities/OpportunityPanel'
 import { OpportunityDrawer } from './opportunities/OpportunityDrawer'
-import type { AppointmentStatus } from '../../types/domain'
+import type { AppointmentStatus, CustomFieldDefinition } from '../../types/domain'
+import { listCustomFieldDefinitions } from '../../lib/api/customFields'
+import { formatCustomFieldValue, hasCustomFieldValue } from '../../lib/customFieldValues'
 
 type CreditMovement =
   | { kind: 'charge'; date: string; charge: CreditCharge }
@@ -151,6 +154,8 @@ function AiBadge() {
 }
 
 export function ClientDetail() {
+  const location = useLocation()
+  const listReturnUrl = getListReturnUrl('/app/clients', location.state)
   const { t } = useLanguage()
   const { id } = useParams<{ id: string }>()
   const [contact, setContact] = useState<Client | null | undefined>(undefined)
@@ -174,7 +179,7 @@ export function ClientDetail() {
     return (
       <div className="space-y-4">
         <p className="text-brand-500">{t('contacts.detail.notFound')}</p>
-        <Link to="/app/clients" className="text-xs font-medium text-accent-600 hover:text-accent-700">
+        <Link to={listReturnUrl} className="text-xs font-medium text-accent-600 hover:text-accent-700">
           {t('contacts.detail.backToContacts')}
         </Link>
       </div>
@@ -197,6 +202,8 @@ function ClientDetailContent({
 }) {
   const { profile, enabledModules } = useAuth()
   const { t, language } = useLanguage()
+  const location = useLocation();
+  const listReturnUrl = getListReturnUrl('/app/clients', location.state);
   const navigate = useNavigate()
   // "Oportunidades abiertas" solo tiene sentido si el tenant usa el módulo
   // Pipeline -- si no, siempre sería 0 y confundiría más que informar.
@@ -216,6 +223,7 @@ function ClientDetailContent({
   const [addresses, setAddresses] = useState<ContactAddress[] | null>(null)
   const [tasks, setTasks] = useState<TaskWithRelations[] | null>(null)
   const [pipelines, setPipelines] = useState<Pipeline[]>([])
+  const [customDefs, setCustomDefs] = useState<CustomFieldDefinition[]>([])
   const [noteDraft, setNoteDraft] = useState('')
   const [savingNote, setSavingNote] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
@@ -285,6 +293,7 @@ function ClientDetailContent({
     if (!profile?.tenant_id) return
     listProfilesByTenant(profile.tenant_id).then(setAgents).catch(() => {})
     listPipelinesByTenant(profile.tenant_id).then(setPipelines).catch(() => {})
+    listCustomFieldDefinitions(profile.tenant_id, 'client').then(setCustomDefs).catch(() => {})
   }, [profile?.tenant_id])
 
   // "Tasks pendientes" tile on Resumen -- reuses listTasksForAccount (name
@@ -352,7 +361,7 @@ function ClientDetailContent({
     setDeleteError(null)
     try {
       await deleteClient(contact.id)
-      navigate('/app/clients')
+      navigate(listReturnUrl)
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : t('contacts.detail.deleteConfirm.error'))
       setDeleting(false)
@@ -385,6 +394,8 @@ function ClientDetailContent({
     if (notes?.[0]) dates.push(notes[0].created_at)
     return dates.length > 0 ? dates.reduce((max, d) => (d > max ? d : max)) : null
   }, [conversations, notes])
+
+  const customFieldsWithValue = customDefs.filter((def) => hasCustomFieldValue(contact.custom_fields?.[def.id]))
 
   const assignedAgentName = agents.find((a) => a.id === contact.assigned_to)?.full_name ?? null
 
@@ -487,6 +498,20 @@ function ClientDetailContent({
             <Field label={t('contacts.detail.fields.assignedAgent')} value={assignedAgentName ?? t('contacts.detail.fields.unassigned')} />
           </div>
         </StatCard>
+
+        {customFieldsWithValue.length > 0 && (
+          <StatCard title={t('contacts.customFields.section')}>
+            <div className="grid grid-cols-2 gap-3">
+              {customFieldsWithValue.map((def) => (
+                <Field
+                  key={def.id}
+                  label={def.name}
+                  value={formatCustomFieldValue(def, contact.custom_fields[def.id], { yes: t('contacts.customFields.yes'), no: t('contacts.customFields.no') }, language === 'en' ? 'en-US' : 'es-CO')}
+                />
+              ))}
+            </div>
+          </StatCard>
+        )}
       </div>
 
       {nextAppointment && (

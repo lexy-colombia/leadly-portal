@@ -4,6 +4,18 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.19] - 2026-10-07
+
+### Added
+- **Campos personalizados de clientes**: cada comercio define en Configuración sus propios datos de cliente (texto, número entero o decimal, sí/no, fecha o lista de opciones), los llena en la ficha del cliente y puede filtrar y mostrar cualquiera como columna en el listado. Cada campo se puede marcar como visible para el asistente de IA, que entonces lo consulta cuando el cliente pregunta por su propio dato (por ejemplo su saldo); el asistente solo lee, nunca modifica.
+- Gráficos de tendencia en el Dashboard y en Reportes.
+
+### Changed
+- Drawer de editar cliente: el tipo y el número de documento y el país pasan a su propia sección "Identificación", justo después de la información básica, en vez de quedar entre los "Datos adicionales".
+- Dashboard y Reportes rediseñados con indicadores más grandes y legibles; si falla la carga de pedidos, despachos o cartera ahora se muestra el error en vez de números en cero.
+- Al abrir un pedido, producto o cliente desde un listado y pulsar "Volver", regresas al listado con los mismos filtros y la misma página.
+- Pantalla de inicio de sesión con nuevo panel e imagen.
+
 ## [1.0.18] - 2026-09-29
 
 ### Added
