@@ -1,798 +1,1050 @@
-import { useEffect, useMemo, useState, type SVGProps } from 'react'
+import { dashboardAccess } from './dashboard/access'
+import { useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import {
+  DollarSign,
+  Receipt,
+  Truck,
+  Wallet,
+  Plus,
+  RefreshCw,
+} from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
-import type { Language } from '../../i18n/translations'
-import { listTasks, TASK_PRIORITY_KEY, type TaskWithRelations } from '../../lib/api/tasks'
-import { listConversations, listMessageTimingsForConversations, type ConversationWithLine, type MessageTiming } from '../../lib/api/conversations'
 import {
-  computePipelineMetrics,
+  listOverviewOrders,
+  listOverviewDispatches,
+  listOverviewConversations,
+  listOverviewMessageTimings,
+  getOverviewCredit,
+} from '../../lib/api/dashboardOverview'
+import { listTasks } from '../../lib/api/tasks'
+import { listReturns } from '../../lib/api/returns'
+import {
   getDefaultPipeline,
-  listOpportunities,
-  listStageHistoryForOpportunities,
   listStages,
-  type OpportunityWithRelations,
-  type StageHistoryRow,
+  listOpportunities,
 } from '../../lib/api/opportunities'
+import { getProductReport, getFinancialReport } from '../../lib/api/reports'
+import { listProducts } from '../../lib/api/products'
+import { getAgentActivitySummary } from '../../lib/api/agentActivity'
 import {
-  listOrders,
-  ORDER_STATUS_BADGE_CLASS,
   ORDER_STATUS_LABEL_KEY,
-  DELIVERY_STATUS_BADGE_CLASS,
   DELIVERY_STATUS_LABEL_KEY,
-  type OrderWithRelations,
 } from '../../lib/api/orders'
-import { listReturns, type ReturnWithOrder } from '../../lib/api/returns'
-import { listDispatchesForTenant } from '../../lib/api/dispatches'
-import { listCreditClients, type ClientCreditSummary } from '../../lib/api/credit'
-import type { PipelineStage, OpportunityPriority, Dispatch } from '../../types/domain'
-import { getAgentActivitySummary, type AgentActivitySummary } from '../../lib/api/agentActivity'
 import { formatDate } from '../../lib/dates'
-import { Badge, PageSpinner } from '@/components/atoms'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { TrendChart } from '@/components/analytics/TrendChart'
 import { Card, EmptyState } from '@/components/molecules'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { CalendarIcon, DollarIcon, InfoIcon, ReceiptIcon, RefreshIcon, TruckIcon, WalletIcon } from '@/components/atoms/icons'
+import {
+  SalesAreaChart,
+  HorizontalBars,
+  ChannelsChart,
+} from './dashboard/Charts'
+import {
+  computeAvgResponseMinutes,
+  dailySales,
+  pendingOrders,
+  periodWindow,
+} from './dashboard/metrics'
+import type { TranslationKey } from '../../i18n/translations'
 
-const PRIORITY_TONE: Record<OpportunityPriority, 'neutral' | 'warning' | 'danger'> = { baja: 'neutral', media: 'warning', alta: 'danger' }
-type RangeDays = 7 | 14 | 30
-const RANGE_OPTIONS: RangeDays[] = [7, 14, 30]
-
-function formatCompactCurrency(value: number): string {
-  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
-  if (value >= 1_000) return `$${Math.round(value / 1_000)}K`
-  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(value)
-}
-
-function formatFullCurrency(value: number): string {
-  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(value)
-}
-
-function formatTime(iso: string, language: Language): string {
-  return new Date(iso).toLocaleTimeString(language === 'en' ? 'en-US' : 'es-CO', { hour: '2-digit', minute: '2-digit' })
-}
-
-function formatMinutes(min: number): string {
-  if (min < 60) return `${Math.round(min)} min`
-  return `${(min / 60).toFixed(1).replace(/\.0$/, '')} h`
-}
-
-interface DayBucket {
-  key: string
-  label: string
-  count: number
-}
-
-interface DayValueBucket {
-  key: string
-  label: string
-  value: number
-}
-
-/** Buckets conversations by day of `last_message_at` into a fixed-length
- * window -- `offsetDays` shifts the whole window into the past so the same
- * function builds both the current period and the immediately-preceding one
- * (for the "vs período anterior" deltas), instead of two separate
- * implementations that could drift apart. */
-function bucketByDay(conversations: ConversationWithLine[], days: number, offsetDays: number, language: Language): DayBucket[] {
-  const buckets: DayBucket[] = []
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date()
-    d.setHours(0, 0, 0, 0)
-    d.setDate(d.getDate() - i - offsetDays)
-    buckets.push({
-      key: d.toDateString(),
-      label: d.toLocaleDateString(language === 'en' ? 'en-US' : 'es-CO', { day: '2-digit', month: 'short' }),
-      count: 0,
-    })
-  }
-  const byKey = new Map(buckets.map((b) => [b.key, b]))
-  for (const c of conversations) {
-    if (!c.last_message_at) continue
-    const bucket = byKey.get(new Date(c.last_message_at).toDateString())
-    if (bucket) bucket.count += 1
-  }
-  return buckets
-}
-
-/** Same day-bucketing idea as `bucketByDay`, generalized to sum an arbitrary
- * numeric value instead of just counting rows -- used by the KPI cards
- * (ventas sums order totals, pedidos/despachos just count with
- * `getValue: () => 1`). Same `offsetDays` trick as `bucketByDay`: shifts the
- * whole window into the past so the same function builds both the current
- * period (for the sparkline) and the immediately-preceding one (for the "vs
- * período anterior" delta on Ventas) without a second implementation. */
-function valueByDay<T>(items: T[], days: number, offsetDays: number, language: Language, getDateIso: (item: T) => string, getValue: (item: T) => number): DayValueBucket[] {
-  const buckets: DayValueBucket[] = []
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date()
-    d.setHours(0, 0, 0, 0)
-    d.setDate(d.getDate() - i - offsetDays)
-    buckets.push({
-      key: d.toDateString(),
-      label: d.toLocaleDateString(language === 'en' ? 'en-US' : 'es-CO', { day: '2-digit', month: 'short' }),
-      value: 0,
-    })
-  }
-  const byKey = new Map(buckets.map((b) => [b.key, b]))
-  for (const item of items) {
-    const bucket = byKey.get(new Date(getDateIso(item)).toDateString())
-    if (bucket) bucket.value += getValue(item)
-  }
-  return buckets
-}
-
-/** Average minutes between an inbound message and the next outbound one in
- * the same conversation, restricted to responses that landed inside
- * [windowStart, windowEnd) -- a real "tiempo promedio de respuesta" instead
- * of a fabricated number. Gaps over 24h are excluded (almost certainly a
- * contact re-opening a stale thread, not an agent/IA being slow). */
-function computeAvgResponseMinutes(timings: MessageTiming[], windowStart: Date, windowEnd: Date): number | null {
-  const byConversation = new Map<string, MessageTiming[]>()
-  for (const t of timings) {
-    const list = byConversation.get(t.conversation_id)
-    if (list) list.push(t)
-    else byConversation.set(t.conversation_id, [t])
-  }
-
-  const gaps: number[] = []
-  for (const msgs of byConversation.values()) {
-    for (let i = 1; i < msgs.length; i++) {
-      const prev = msgs[i - 1]
-      const curr = msgs[i]
-      if (prev.direction !== 'inbound' || curr.direction !== 'outbound') continue
-      const respondedAt = new Date(curr.created_at)
-      if (respondedAt < windowStart || respondedAt >= windowEnd) continue
-      const gapMinutes = (respondedAt.getTime() - new Date(prev.created_at).getTime()) / 60_000
-      if (gapMinutes >= 0 && gapMinutes <= 60 * 24) gaps.push(gapMinutes)
-    }
-  }
-  if (gaps.length === 0) return null
-  return gaps.reduce((sum, g) => sum + g, 0) / gaps.length
-}
-
-/** `invert` flips which sign reads as "good" -- more conversations is good
- * (positive = green), but a slower average response time is bad (positive =
- * red), even though both are rendered the same way otherwise. */
-function Delta({ pct, invert = false }: { pct: number; invert?: boolean }) {
-  const { t } = useLanguage()
-  const isGood = invert ? pct <= 0 : pct >= 0
-  return (
-    <span className={`text-[11px] font-medium ${isGood ? 'text-green-600' : 'text-red-600'}`}>
-      {pct >= 0 ? '↑' : '↓'}
-      {Math.abs(pct)}% {t('dashboard.vsPreviousPeriod')}
-    </span>
-  )
-}
-
-function ConversationsChart({ days }: { days: DayBucket[] }) {
-  const [hoverIndex, setHoverIndex] = useState<number | null>(null)
-  const max = Math.max(1, ...days.map((d) => d.count))
-  const labelEvery = Math.max(1, Math.ceil(days.length / 7))
-
-  return (
-    <div>
-      <div className="flex h-28 items-stretch gap-1">
-        {days.map((d, i) => (
-          <div
-            key={d.key}
-            className="relative flex h-full flex-1 items-end"
-            onMouseEnter={() => setHoverIndex(i)}
-            onMouseLeave={() => setHoverIndex((h) => (h === i ? null : h))}
-          >
-            {hoverIndex === i && (
-              <div className="absolute -top-6 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-md bg-brand-800 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-sm">
-                {d.count} · {d.label}
-              </div>
-            )}
-            <div
-              className={`w-full rounded-t transition-colors ${hoverIndex === i ? 'bg-accent-600' : 'bg-accent-500'}`}
-              style={{ height: `${Math.max(3, (d.count / max) * 100)}%` }}
-            />
-          </div>
-        ))}
-      </div>
-      <div className="mt-1.5 flex gap-1">
-        {days.map((d, i) => (
-          <span key={d.key} className="flex-1 truncate text-center text-[9px] text-brand-300">
-            {i % labelEvery === 0 ? d.label : ''}
-          </span>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-/** Colored per-stage tiles (tinted with the stage's own real color, see
- * migration 20260806000010) instead of a generic bar -- works for any
- * pipeline/stage set a tenant configures, not just the 6 default names,
- * since the tint is derived from `stage.color` rather than hardcoded. */
-function PipelineStageTiles({
-  stages,
-  dataByStage,
-  metric,
-}: {
-  stages: PipelineStage[]
-  dataByStage: Map<string, { value: number; count: number }>
-  metric: 'value' | 'count'
-}) {
-  const { t } = useLanguage()
-  return (
-    <div className="flex gap-1.5">
-      {stages.map((stage) => {
-        const data = dataByStage.get(stage.id) ?? { value: 0, count: 0 }
-        return (
-          <div key={stage.id} className="min-w-0 flex-1 rounded-lg p-2" style={{ backgroundColor: `${stage.color}14` }}>
-            <p className="truncate text-[10px] font-medium" style={{ color: stage.color }}>
-              {stage.name}
-            </p>
-            <p className="truncate text-xs font-bold text-brand-800">{metric === 'value' ? formatCompactCurrency(data.value) : String(data.count)}</p>
-            <p className="truncate text-[10px] text-brand-400">{t('dashboard.pipeline.opportunityCount', { count: data.count })}</p>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-/** Tiny inline trend line for a KPI card -- purely decorative (no axes/
- * tooltip, that's what the bigger charts elsewhere on the page are for).
- * `preserveAspectRatio="none"` so it stretches to fill whatever box the
- * card gives it instead of letterboxing. */
-function Sparkline({ data, color }: { data: DayValueBucket[]; color: string }) {
-  const values = data.map((d) => d.value)
-  const max = Math.max(...values, 0)
-  const min = Math.min(...values, 0)
-  const range = max - min || 1
-  const w = 100
-  const h = 30
-  const points = data
-    .map((d, i) => {
-      const x = data.length > 1 ? (i / (data.length - 1)) * w : w / 2
-      const y = h - ((d.value - min) / range) * h
-      return `${x.toFixed(1)},${y.toFixed(1)}`
-    })
-    .join(' ')
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="h-full w-full" preserveAspectRatio="none" aria-hidden="true">
-      <polyline points={points} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
-/** One of the 4 top KPI cards (ventas/pedidos/despachos/cartera). Ícono a la
- * izquierda del bloque de texto, no arriba -- corregido 2026-09-02, feedback
- * directo del usuario ("las tarjetas tienen el icono al lado izquierdo no
- * encima y las quiero mas compactas"): la primera versión apilaba
- * ícono/título/valor uno debajo del otro, más alta de lo que el mockup
- * mostraba. `sparkline` es opcional -- Cartera no tiene una (es un saldo
- * acumulado, no algo que sume día a día de forma honesta sin una consulta
- * nueva de todo el ledger histórico). */
-function KpiCard({
-  icon: Icon,
-  tone,
+function Panel({
   title,
-  value,
-  footer,
-  sparkline,
+  subtitle,
+  action,
+  children,
 }: {
-  icon: (props: SVGProps<SVGSVGElement>) => React.JSX.Element
-  tone: { bg: string; text: string; line: string }
   title: string
-  value: string
-  footer: React.ReactNode
-  sparkline?: DayValueBucket[]
+  subtitle?: string
+  action?: ReactNode
+  children: ReactNode
 }) {
   return (
-    <Card>
-      <div className="flex items-center gap-2.5">
-        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${tone.bg} ${tone.text}`}>
-          <Icon width={17} height={17} />
+    <Card
+      padded={false}
+      className="min-w-0 !rounded-2xl !border-brand-100/60 !shadow-none"
+    >
+      <div className="flex items-start justify-between gap-3 px-5 pt-5">
+        <div className="min-w-0">
+          <h2 className="font-sans text-sm font-extrabold text-brand-800">
+            {title}
+          </h2>
+          {subtitle && (
+            <p className="mt-1.5 text-[11px] leading-relaxed text-brand-400">
+              {subtitle}
+            </p>
+          )}
         </div>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[11px] text-brand-400">{title}</p>
-          <p className="mt-1 text-xl font-bold leading-tight tracking-tight tabular-nums text-brand-800">{value}</p>
-        </div>
+        {action}
       </div>
-      <div className="mt-1.5 flex items-center justify-between gap-2">
-        <div className="min-h-[15px]">{footer}</div>
-        {sparkline && (
-          <div className="h-8 w-20 shrink-0">
-            <Sparkline data={sparkline} color={tone.line} />
-          </div>
-        )}
-      </div>
+      <div className="px-5 pb-5 pt-5">{children}</div>
     </Card>
   )
 }
+function LoadingState() {
+  const { t } = useLanguage()
+  return (
+    <div role="status" className="flex min-h-36 items-center justify-center">
+      <RefreshCw size={20} className="animate-spin text-accent-500" />
+      <span className="sr-only">{t('common.status.loading')}</span>
+    </div>
+  )
+}
+
+function Resource({
+  query,
+  empty,
+  children,
+}: {
+  query: { isPending: boolean; isError: boolean; refetch: () => unknown }
+  empty?: boolean
+  children: ReactNode
+}) {
+  const { t } = useLanguage()
+  if (query.isError)
+    return (
+      <div
+        role="alert"
+        className="rounded-lg bg-red-50 p-3 text-xs leading-relaxed text-red-700"
+      >
+        {t('dashboard.overview.loadError')}
+        <button
+          onClick={() => void query.refetch()}
+          className="mt-2 block font-semibold underline"
+        >
+          {t('dashboard.overview.retry')}
+        </button>
+      </div>
+    )
+  if (query.isPending)
+    return (
+      <div className="flex min-h-36 items-center justify-center">
+        <LoadingState />
+      </div>
+    )
+  if (empty)
+    return (
+      <div className="flex min-h-36 items-center justify-center">
+        <EmptyState>{t('dashboard.overview.noData')}</EmptyState>
+      </div>
+    )
+  return children
+}
 
 export function Dashboard() {
-  const { profile } = useAuth()
+  const { profile, enabledModules, permissions } = useAuth()
   const { t, language } = useLanguage()
-  const dashboardLoadError = t('analytics.dashboard.loadError')
-  const conversationLoadError = t('dashboard.errors.loadConversations')
-  const [tasks, setTasks] = useState<TaskWithRelations[] | null>(null)
-  const [conversations, setConversations] = useState<ConversationWithLine[] | null>(null)
-  const [messageTimings, setMessageTimings] = useState<MessageTiming[] | null>(null)
-  const [stages, setStages] = useState<PipelineStage[]>([])
-  const [opportunities, setOpportunities] = useState<OpportunityWithRelations[] | null>(null)
-  const [history, setHistory] = useState<StageHistoryRow[]>([])
-  const [agentActivity, setAgentActivity] = useState<AgentActivitySummary[] | null>(null)
-  const [orders, setOrders] = useState<OrderWithRelations[] | null>(null)
-  const [returns, setReturns] = useState<ReturnWithOrder[] | null>(null)
-  const [dispatches, setDispatches] = useState<Pick<Dispatch, 'id' | 'created_at'>[] | null>(null)
-  const [creditClients, setCreditClients] = useState<ClientCreditSummary[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [rangeDays, setRangeDays] = useState<RangeDays>(7)
-  // Filtro de fecha del header -- independiente del selector de la tarjeta
-  // de Conversaciones (`rangeDays` arriba), pedido explícito del usuario
-  // (2026-09-02): "el filtro de fecha deberia ser funcional". Escala
-  // Ventas/Pedidos/Despachos (cada uno "creado dentro de los últimos N
-  // días"); Cartera se queda fuera a propósito -- es un saldo vivo ahora
-  // mismo, no algo que tenga sentido acotar a un período.
-  const [kpiRangeDays, setKpiRangeDays] = useState<RangeDays>(7)
-  const [pipelineMetric, setPipelineMetric] = useState<'value' | 'count'>('value')
-
-  useEffect(() => {
-    if (!profile?.tenant_id) return
-    const tenantId = profile.tenant_id
-
-    listTasks(tenantId).then(setTasks).catch(() => setTasks([]))
-    listOrders(tenantId).then(setOrders).catch(() => { setOrders(null); setError(dashboardLoadError) })
-    listReturns(tenantId).then(setReturns).catch(() => setReturns([]))
-    listDispatchesForTenant(tenantId).then(setDispatches).catch(() => { setDispatches(null); setError(dashboardLoadError) })
-    listCreditClients(tenantId).then(setCreditClients).catch(() => { setCreditClients(null); setError(dashboardLoadError) })
-
-    // Rendimiento del equipo -- solo tenant_admin lo ve (Fase 4, pedido
-    // explícito del usuario), un tenant_agent no necesita ver cómo le va a
-    // sus compañeros.
-    if (profile?.role === 'tenant_admin') {
-      getAgentActivitySummary(tenantId)
-        .then(setAgentActivity)
-        .catch(() => setAgentActivity([]))
-    }
-
-    listConversations(tenantId)
-      .then((convs) => {
-        setConversations(convs)
-        listMessageTimingsForConversations(convs.map((c) => c.id))
-          .then(setMessageTimings)
-          .catch(() => setMessageTimings([]))
-      })
-      .catch((err) => {
-        setError(err.message ?? conversationLoadError)
-        setConversations([])
-        setMessageTimings([])
-      })
-
-    getDefaultPipeline(tenantId)
-      .then((pipeline) => {
-        if (!pipeline) {
-          setStages([])
-          setOpportunities([])
-          return
-        }
-        listStages(pipeline.id).then(setStages).catch(() => setStages([]))
-        listOpportunities(tenantId, pipeline.id)
-          .then((opps) => {
-            setOpportunities(opps)
-            listStageHistoryForOpportunities(opps.map((o) => o.id))
-              .then(setHistory)
-              .catch(() => setHistory([]))
-          })
-          .catch(() => setOpportunities([]))
-      })
-      .catch(() => setOpportunities([]))
-  }, [profile?.tenant_id, profile?.role, dashboardLoadError, conversationLoadError])
-
-  const nowMs = Date.now()
-  const isTaskOverdue = (task: TaskWithRelations) => new Date(task.due_date).getTime() < nowMs
-  // Vencidas primero (Fase 2, 2026-09-02) -- antes se mostraban las 5 más
-  // próximas en orden ciego de fecha, así que una tarea vencida podía
-  // quedar afuera de las 5 mientras una futura sin urgencia sí aparecía.
-  const upcomingTasks = (tasks ?? [])
-    .filter((t) => t.status === 'pendiente' || t.status === 'en_proceso')
-    .slice()
-    .sort((a, b) => Number(isTaskOverdue(b)) - Number(isTaskOverdue(a)))
-    .slice(0, 5)
-
-  const dataByStage = useMemo(() => {
-    const map = new Map<string, { value: number; count: number }>()
-    for (const opp of opportunities ?? []) {
-      const entry = map.get(opp.stage_id) ?? { value: 0, count: 0 }
-      entry.value += opp.value
-      entry.count += 1
-      map.set(opp.stage_id, entry)
-    }
-    return map
-  }, [opportunities])
-
-  const metrics = useMemo(() => computePipelineMetrics(opportunities ?? [], history), [opportunities, history])
-
-  const currentBuckets = useMemo(() => bucketByDay(conversations ?? [], rangeDays, 0, language), [conversations, rangeDays, language])
-  const previousBuckets = useMemo(() => bucketByDay(conversations ?? [], rangeDays, rangeDays, language), [conversations, rangeDays, language])
-  const totalCurrent = currentBuckets.reduce((sum, b) => sum + b.count, 0)
-  const totalPrevious = previousBuckets.reduce((sum, b) => sum + b.count, 0)
-  const totalDeltaPct = totalPrevious > 0 ? Math.round(((totalCurrent - totalPrevious) / totalPrevious) * 100) : null
-
-  const avgResponseCurrent = useMemo(() => {
-    if (!messageTimings) return null
-    const windowEnd = new Date()
-    const windowStart = new Date(windowEnd)
-    windowStart.setDate(windowStart.getDate() - rangeDays)
-    return computeAvgResponseMinutes(messageTimings, windowStart, windowEnd)
-  }, [messageTimings, rangeDays])
-
-  const avgResponsePrevious = useMemo(() => {
-    if (!messageTimings) return null
-    const windowEnd = new Date()
-    windowEnd.setDate(windowEnd.getDate() - rangeDays)
-    const windowStart = new Date(windowEnd)
-    windowStart.setDate(windowStart.getDate() - rangeDays)
-    return computeAvgResponseMinutes(messageTimings, windowStart, windowEnd)
-  }, [messageTimings, rangeDays])
-
-  const avgResponseDeltaPct =
-    avgResponseCurrent !== null && avgResponsePrevious !== null && avgResponsePrevious > 0
-      ? Math.round(((avgResponseCurrent - avgResponsePrevious) / avgResponsePrevious) * 100)
+  const [days, setDays] = useState(30)
+  const [view, setView] = useState<'summary' | 'attention'>('summary')
+  const [attentionTab, setAttentionTab] = useState<'orders' | 'credit'>(
+    'orders',
+  )
+  const dateKey = new Date().toDateString()
+  const window = useMemo(
+    () => periodWindow(days, new Date(dateKey)),
+    [days, dateKey],
+  )
+  const tenantId = profile?.tenant_id ?? ''
+  const scope = [tenantId, profile?.id]
+  const access = dashboardAccess(
+    tenantId,
+    profile?.role,
+    enabledModules,
+    permissions,
+  )
+  const {
+    sales,
+    dispatches,
+    credit,
+    reports,
+    pipeline,
+    tasks,
+    conversations,
+    returns,
+  } = access
+  const activeView = access.attention ? view : 'summary'
+  const ordersQuery = useQuery({
+    queryKey: [
+      'dashboard',
+      'orders',
+      ...scope,
+      window.previousStart.toISOString(),
+    ],
+    queryFn: () =>
+      listOverviewOrders(tenantId, window.previousStart.toISOString()),
+    enabled: sales && activeView === 'summary',
+    staleTime: 60_000,
+  })
+  const dispatchQuery = useQuery({
+    queryKey: ['dashboard', 'dispatches', ...scope, window.start.toISOString()],
+    queryFn: () => listOverviewDispatches(tenantId, window.start.toISOString()),
+    enabled: dispatches && activeView === 'summary',
+    staleTime: 60_000,
+  })
+  const creditQuery = useQuery({
+    queryKey: ['dashboard', 'credit', ...scope],
+    queryFn: () => getOverviewCredit(tenantId),
+    enabled: credit && activeView === 'summary',
+    staleTime: 60_000,
+  })
+  const tasksQuery = useQuery({
+    queryKey: ['dashboard', 'tasks', ...scope],
+    queryFn: () => listTasks(tenantId),
+    enabled: tasks && activeView === 'attention',
+    staleTime: 60_000,
+  })
+  const returnsQuery = useQuery({
+    queryKey: ['dashboard', 'returns', ...scope],
+    queryFn: () => listReturns(tenantId),
+    enabled: returns && sales && activeView === 'summary',
+    staleTime: 60_000,
+  })
+  const productReport = useQuery({
+    queryKey: [
+      'dashboard',
+      'product-report',
+      ...scope,
+      window.start.toISOString(),
+      window.end.toISOString(),
+    ],
+    queryFn: () =>
+      getProductReport(window.start.toISOString(), window.end.toISOString(), {
+        limit: 5,
+      }),
+    enabled: reports && activeView === 'summary',
+    staleTime: 60_000,
+  })
+  const financialReport = useQuery({
+    queryKey: [
+      'dashboard',
+      'financial-report',
+      ...scope,
+      window.start.toISOString(),
+      window.end.toISOString(),
+    ],
+    queryFn: () =>
+      getFinancialReport(window.start.toISOString(), window.end.toISOString()),
+    enabled: reports && activeView === 'summary',
+    staleTime: 60_000,
+  })
+  const pipelineQuery = useQuery({
+    queryKey: ['dashboard', 'pipeline', ...scope],
+    queryFn: async () => {
+      const p = await getDefaultPipeline(tenantId)
+      if (!p) return { stages: [], opportunities: [] }
+      const [stages, opportunities] = await Promise.all([
+        listStages(p.id),
+        listOpportunities(tenantId, p.id),
+      ])
+      return { stages, opportunities }
+    },
+    enabled: pipeline && activeView === 'attention',
+    staleTime: 60_000,
+  })
+  const stockQuery = useQuery({
+    queryKey: ['dashboard', 'low-stock', ...scope],
+    queryFn: () =>
+      listProducts(tenantId, { page: 1, pageSize: 5, lowStockOnly: true }),
+    enabled: access.stock && activeView === 'summary',
+    staleTime: 60_000,
+  })
+  const teamQuery = useQuery({
+    queryKey: ['dashboard', 'team', ...scope],
+    queryFn: () => getAgentActivitySummary(tenantId),
+    enabled: access.team && activeView === 'attention',
+    staleTime: 60_000,
+  })
+  const conversationQuery = useQuery({
+    queryKey: [
+      'dashboard',
+      'conversations',
+      ...scope,
+      window.start.toISOString(),
+      window.end.toISOString(),
+    ],
+    queryFn: () =>
+      listOverviewConversations(
+        tenantId,
+        window.start.toISOString(),
+        window.end.toISOString(),
+      ),
+    enabled: conversations && activeView === 'attention',
+    staleTime: 60_000,
+  })
+  const timingsQuery = useQuery({
+    queryKey: [
+      'dashboard',
+      'message-timings',
+      ...scope,
+      window.start.toISOString(),
+      conversationQuery.data?.map((c) => c.id).join(','),
+    ],
+    queryFn: () =>
+      listOverviewMessageTimings(
+        tenantId,
+        (conversationQuery.data ?? []).map((c) => c.id),
+        window.start,
+        window.end,
+      ),
+    enabled:
+      conversations && activeView === 'attention' && !!conversationQuery.data?.length,
+    staleTime: 60_000,
+  })
+  const queries = [
+    ordersQuery,
+    dispatchQuery,
+    creditQuery,
+    tasksQuery,
+    returnsQuery,
+    productReport,
+    financialReport,
+    pipelineQuery,
+    stockQuery,
+    teamQuery,
+    conversationQuery,
+    timingsQuery,
+  ]
+  const money = (value: number) =>
+    new Intl.NumberFormat(language === 'en' ? 'en-US' : 'es-CO', {
+      style: 'currency',
+      currency: 'COP',
+      maximumFractionDigits: 0,
+    }).format(value)
+  const compact = (value: number) =>
+    value >= 1_000_000
+      ? `${money(value / 1_000_000)}M`
+      : value >= 1000
+        ? `${money(value / 1000)}K`
+        : money(value)
+  const series = useMemo(
+    () => dailySales(ordersQuery.data ?? [], window.start, window.end),
+    [ordersQuery.data, window.start, window.end],
+  )
+  const previous = useMemo(
+    () =>
+      dailySales(ordersQuery.data ?? [], window.previousStart, window.start),
+    [ordersQuery.data, window.previousStart, window.start],
+  )
+  const salesTotal = series.reduce((sum, p) => sum + p.value, 0),
+    previousTotal = previous.reduce((sum, p) => sum + p.value, 0)
+  const delta =
+    previousTotal > 0
+      ? ((salesTotal - previousTotal) / previousTotal) * 100
       : null
-
-  // --- KPIs operativos (ventas/pedidos/despachos/cartera) -- pedido
-  // explícito del usuario (2026-09-02): "esto no es un CRM, es la
-  // plataforma que centraliza la operación de una empresa", el Dashboard
-  // tenía que mostrarlo. Ventas/Pedidos/Despachos ahora sí quedan acotados
-  // por `kpiRangeDays` (el selector del header, ya funcional) -- mismo
-  // patrón exacto que ya usa Conversaciones (bucketByDay con offset 0 para
-  // el período actual, offset = kpiRangeDays para el anterior). Cartera
-  // queda deliberadamente afuera del filtro: es un saldo vivo ahora mismo,
-  // no un flujo que tenga sentido acotar a "los últimos N días".
-  const confirmedOrders = useMemo(() => (orders ?? []).filter((o) => o.status === 'confirmada'), [orders])
-  const inProgressOrders = useMemo(() => confirmedOrders.filter((o) => o.delivery_status !== 'entregado'), [confirmedOrders])
-
-  const salesTrend = useMemo(
-    () => valueByDay(confirmedOrders, kpiRangeDays, 0, language, (o) => o.created_at, (o) => o.total),
-    [confirmedOrders, kpiRangeDays, language],
+  const pending = pendingOrders(ordersQuery.data ?? [])
+  const balance = (creditQuery.data ?? []).reduce(
+    (sum, c) => sum + c.balance,
+    0,
   )
-  const salesTrendPrevious = useMemo(
-    () => valueByDay(confirmedOrders, kpiRangeDays, kpiRangeDays, language, (o) => o.created_at, (o) => o.total),
-    [confirmedOrders, kpiRangeDays, language],
+  const pipelineRows = (pipelineQuery.data?.stages ?? []).map((stage) => ({
+    label: stage.name,
+    value: (pipelineQuery.data?.opportunities ?? []).filter(
+      (o) => o.stage_id === stage.id,
+    ).length,
+  }))
+  const pipelineValue = (pipelineQuery.data?.opportunities ?? []).reduce(
+    (sum, o) => sum + o.value,
+    0,
   )
-  const salesInRange = salesTrend.reduce((sum, b) => sum + b.value, 0)
-  const salesPrevRange = salesTrendPrevious.reduce((sum, b) => sum + b.value, 0)
-  const salesDeltaPct = salesPrevRange > 0 ? Math.round(((salesInRange - salesPrevRange) / salesPrevRange) * 100) : null
-
-  const ordersTrend = useMemo(
-    () => valueByDay(inProgressOrders, kpiRangeDays, 0, language, (o) => o.created_at, () => 1),
-    [inProgressOrders, kpiRangeDays, language],
+  const channelLabels: Record<string, TranslationKey> = {
+    pos: 'dashboard.overview.channelPos',
+    whatsapp: 'dashboard.overview.channelWhatsapp',
+    storefront: 'dashboard.overview.channelStorefront',
+    portal: 'dashboard.overview.channelPortal',
+    sin_canal: 'dashboard.overview.channelNone',
+  }
+  const channels = Object.entries(financialReport.data?.by_channel ?? {})
+    .filter(([, value]) => value > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([key, value]) => ({
+      label: channelLabels[key] ? t(channelLabels[key]) : key,
+      value,
+    }))
+  const activity = [
+    ...(ordersQuery.data ?? [])
+      .filter((o) => o.status !== 'cancelada')
+      .map((order) => ({
+        kind: 'order' as const,
+        order,
+        date: order.created_at,
+      })),
+    ...(returnsQuery.data ?? []).map((ret) => ({
+      kind: 'return' as const,
+      ret,
+      date: ret.created_at,
+    })),
+  ]
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    .slice(0, 5)
+  const taskRows = (tasksQuery.data ?? [])
+    .filter(
+      (task) => task.status === 'pendiente' || task.status === 'en_proceso',
+    )
+    .sort(
+      (a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime(),
+    )
+    .slice(0, 4)
+  const dateLabel = (date: Date) =>
+    date.toLocaleDateString(language === 'en' ? 'en-US' : 'es-CO', {
+      day: 'numeric',
+      month: 'short',
+    })
+  const link = (to: string, label: TranslationKey) => (
+    <Link
+      to={to}
+      className="shrink-0 text-[11px] font-semibold text-accent-600 hover:underline"
+    >
+      {t(label)}
+    </Link>
   )
-  const ordersInRange = ordersTrend.reduce((sum, b) => sum + b.value, 0)
-
-  const dispatchesTrend = useMemo(
-    () => valueByDay(dispatches ?? [], kpiRangeDays, 0, language, (d) => d.created_at, () => 1),
-    [dispatches, kpiRangeDays, language],
-  )
-  const dispatchesInRange = dispatchesTrend.reduce((sum, b) => sum + b.value, 0)
-
-  const receivableTotal = useMemo(() => (creditClients ?? []).reduce((sum, c) => sum + c.balance, 0), [creditClients])
-
-  // --- Actividad reciente: pedidos + cotizaciones (misma tabla sales_orders,
-  // distinguibles solo por status) y devoluciones, mezclados por fecha. No
-  // incluye "Facturas" -- a diferencia del resto de esta tarjeta, facturar
-  // al cliente final del tenant todavía no es un módulo real (ver
-  // CLAUDE.md, "Facturación" en el nav es Leadly facturándole al tenant, no
-  // el tenant facturando a sus propios clientes) -- omitido en vez de
-  // inventar datos que no existen.
-  type ActivityItem = { time: string } & ({ kind: 'order'; order: OrderWithRelations } | { kind: 'return'; ret: ReturnWithOrder })
-  const recentActivity = useMemo<ActivityItem[]>(() => {
-    const items: ActivityItem[] = [
-      ...(orders ?? []).filter((o) => o.status !== 'cancelada').map((order): ActivityItem => ({ kind: 'order', order, time: order.created_at })),
-      ...(returns ?? []).map((ret): ActivityItem => ({ kind: 'return', ret, time: ret.created_at })),
-    ]
-    items.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
-    return items.slice(0, 6)
-  }, [orders, returns])
-
-
+  const tabs = [
+    ...(sales
+      ? [
+          {
+            key: 'orders' as const,
+            label: 'dashboard.overview.ordersTab' as const,
+          },
+        ]
+      : []),
+    ...(credit
+      ? [
+          {
+            key: 'credit' as const,
+            label: 'dashboard.overview.creditTab' as const,
+          },
+        ]
+      : []),
+  ]
+  const activeTab = tabs.some((tab) => tab.key === attentionTab)
+    ? attentionTab
+    : tabs[0]?.key
+  const kpis = [
+    ...(sales
+      ? [
+          {
+            icon: DollarSign,
+            title: t('dashboard.overview.sales'),
+            value:
+              ordersQuery.isError || !ordersQuery.data
+                ? '—'
+                : money(salesTotal),
+            note: !ordersQuery.data
+              ? ''
+              : delta === null
+                ? t('dashboard.overview.noPrevious')
+                : `${delta >= 0 ? '↑' : '↓'} ${Math.abs(delta).toFixed(1)}% · ${t('dashboard.overview.previous')}`,
+          },
+          {
+            icon: Receipt,
+            title: t('dashboard.overview.pending'),
+            value:
+              ordersQuery.isError || !ordersQuery.data
+                ? '—'
+                : String(pending.length),
+            note: t('dashboard.overview.current'),
+          },
+          ...(dispatches
+            ? [
+                {
+                  icon: Truck,
+                  title: t('dashboard.overview.periodDispatches'),
+                  value:
+                    dispatchQuery.isError || !dispatchQuery.data
+                      ? '—'
+                      : String(
+                          dispatchQuery.data.filter(
+                            (d) => new Date(d.created_at) < window.end,
+                          ).length,
+                        ),
+                  note: t('dashboard.overview.periodDispatchHint'),
+                },
+              ]
+            : []),
+        ]
+      : []),
+    ...(credit
+      ? [
+          {
+            icon: Wallet,
+            title: t('dashboard.kpi.receivable.title'),
+            value:
+              creditQuery.isError || !creditQuery.data ? '—' : money(balance),
+            note: t('dashboard.overview.current'),
+          },
+        ]
+      : []),
+  ]
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="flex min-w-0 flex-col gap-6">
+      <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="font-sans text-2xl font-bold tracking-tight text-brand-800">{t('analytics.dashboard.title')}</h1>
-          <p className="mt-0.5 text-xs text-brand-400">{t('analytics.dashboard.subtitle')}</p>
+          <h1 className="font-sans text-2xl font-extrabold tracking-tight text-brand-800">
+            {t('dashboard.overview.greeting', {
+              name: profile?.full_name?.split(' ')[0] ?? '—',
+            })}
+          </h1>
+          <p className="mt-1.5 text-xs text-brand-400">
+            {t('dashboard.overview.subtitle')}
+          </p>
         </div>
-        <div className="flex items-center gap-1.5 rounded-lg border border-brand-100 bg-white px-2.5 py-1">
-          <CalendarIcon width={14} height={14} className="shrink-0 text-brand-400" />
-          <Select value={String(kpiRangeDays)} onValueChange={(v) => { setKpiRangeDays(Number(v) as RangeDays); setRangeDays(Number(v) as RangeDays) }}>
-            <SelectTrigger className="!h-6 !w-auto !border-0 !bg-transparent !p-0 text-xs font-medium text-brand-600 focus-visible:!ring-0">
-              <SelectValue>{t(`dashboard.conversations.range.${kpiRangeDays}`)}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {RANGE_OPTIONS.map((days) => (
-                <SelectItem key={days} value={String(days)} className="text-xs">
-                  {t(`dashboard.conversations.range.${days}`)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            aria-label={t('dashboard.overview.period')}
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+            className="rounded-lg border border-brand-100 bg-white px-3 py-2.5 text-xs text-brand-600"
+          >
+            {[7, 14, 30].map((d) => (
+              <option key={d} value={d}>
+                {t(`dashboard.conversations.range.${d}` as TranslationKey)}
+              </option>
+            ))}
+          </select>
+          <button
+            aria-label={t('dashboard.overview.refresh')}
+            onClick={() =>
+              queries
+                .filter((q) => q.isEnabled)
+                .forEach((q) => void q.refetch())
+            }
+            className="rounded-lg border border-brand-100 bg-white p-2.5 text-brand-400"
+          >
+            <RefreshCw
+              size={15}
+              className={
+                queries.some((q) => q.isFetching) ? 'animate-spin' : ''
+              }
+            />
+          </button>
+          {access.newSale && activeView === 'summary' && (
+            <Link
+              to="/app/pos"
+              className="inline-flex items-center gap-2 rounded-lg bg-accent-600 px-3 py-2.5 text-xs font-semibold text-white hover:bg-accent-700"
+            >
+              <Plus size={15} />
+              {t('dashboard.overview.newSale')}
+            </Link>
+          )}
         </div>
-      </div>
-
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
-
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard
-          icon={DollarIcon}
-          tone={{ bg: 'bg-accent-50', text: 'text-accent-600', line: '#2fa9a5' }}
-          title={t('dashboard.kpi.sales.title', { days: kpiRangeDays })}
-          value={orders === null ? '—' : formatFullCurrency(salesInRange)}
-          footer={salesDeltaPct !== null ? <Delta pct={salesDeltaPct} /> : <span className="text-[11px] text-brand-300">{t('dashboard.vsPreviousPeriod')}</span>}
-          sparkline={salesTrend}
-        />
-        <KpiCard
-          icon={ReceiptIcon}
-          tone={{ bg: 'bg-brand-50', text: 'text-brand-600', line: '#253159' }}
-          title={t('dashboard.kpi.orders.title', { days: kpiRangeDays })}
-          value={orders === null ? '—' : String(ordersInRange)}
-          footer={
-            <Link to="/app/sales" className="text-[11px] font-medium text-accent-600 hover:text-accent-700">
-              {t('common.actions.viewAll')}
-            </Link>
-          }
-          sparkline={ordersTrend}
-        />
-        <KpiCard
-          icon={TruckIcon}
-          tone={{ bg: 'bg-accent-50', text: 'text-accent-600', line: '#63cdc7' }}
-          title={t('dashboard.kpi.dispatches.title', { days: kpiRangeDays })}
-          value={dispatches === null ? '—' : String(dispatchesInRange)}
-          footer={
-            <Link to="/app/sales" className="text-[11px] font-medium text-accent-600 hover:text-accent-700">
-              {t('common.actions.viewAll')}
-            </Link>
-          }
-          sparkline={dispatchesTrend}
-        />
-        <KpiCard
-          icon={WalletIcon}
-          tone={{ bg: 'bg-amber-50', text: 'text-amber-600', line: '#f59e0b' }}
-          title={t('dashboard.kpi.receivable.title')}
-          value={creditClients === null ? '—' : formatFullCurrency(receivableTotal)}
-          footer={
-            <Link to="/app/credit" className="text-[11px] font-medium text-accent-600 hover:text-accent-700">
-              {t('dashboard.kpi.receivable.footer')}
-            </Link>
-          }
-        />
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[1.8fr_1fr]">
-        <Card>
-          <div className="mb-6 flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-base font-bold text-brand-800">{t('analytics.dashboard.salesTrend')}</h2><p className="mt-1 text-xs text-brand-400">{t('analytics.dashboard.salesTrend.hint')}</p></div><Link to="/app/reports" className="text-xs font-semibold text-accent-600 hover:underline">{t('analytics.viewReports')} →</Link></div>
-          {orders === null ? <PageSpinner /> : <TrendChart points={salesTrend.map((p) => ({label:p.label,value:p.value}))} formatValue={formatCompactCurrency} label={t('analytics.dataTable')} />}
-        </Card>
-        <Card>
-          <h2 className="text-base font-bold text-brand-800">{t('analytics.dashboard.attention')}</h2><p className="mt-1 text-xs text-brand-400">{t('analytics.dashboard.liveHint')}</p>
-          <div className="mt-5 flex flex-col divide-y divide-brand-100">
-            <Link to="/app/sales" className="flex items-center justify-between gap-3 py-4 text-sm hover:text-accent-600"><span>{t('analytics.dashboard.pendingOrders')}</span><strong className="text-xl tabular-nums">{orders === null ? '—' : inProgressOrders.length}</strong></Link>
-            <Link to="/app/calendar" className="flex items-center justify-between gap-3 py-4 text-sm hover:text-accent-600"><span>{t('analytics.dashboard.overdueTasks')}</span><strong className="text-xl tabular-nums">{tasks === null ? '—' : tasks.filter((task) => (task.status==='pendiente'||task.status==='en_proceso') && isTaskOverdue(task)).length}</strong></Link>
-            <Link to="/app/credit" className="flex items-center justify-between gap-3 py-4 text-sm hover:text-accent-600"><span>{t('dashboard.kpi.receivable.title')}</span><strong className="text-lg tabular-nums">{creditClients === null ? '—' : formatFullCurrency(receivableTotal)}</strong></Link>
-          </div>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <Card className="">
-          <div className="mb-2.5 flex items-center justify-between gap-2">
-            <h2 className="text-sm font-bold text-brand-800">{t('dashboard.pipeline.title')}</h2>
-            <Select value={pipelineMetric} onValueChange={(v) => setPipelineMetric(v as 'value' | 'count')}>
-              <SelectTrigger className="!h-7 !w-auto !rounded-lg !text-xs">
-                <SelectValue>{t(`dashboard.pipeline.metric.${pipelineMetric}`)}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="value" className="text-xs">
-                  {t('dashboard.pipeline.metric.value')}
-                </SelectItem>
-                <SelectItem value="count" className="text-xs">
-                  {t('dashboard.pipeline.metric.count')}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          {stages.length === 0 && opportunities === null && <PageSpinner />}
-          {opportunities !== null && stages.length === 0 && <EmptyState>{t('dashboard.pipeline.notConfigured')}</EmptyState>}
-          {stages.length > 0 && (
-            <>
-              <PipelineStageTiles stages={stages} dataByStage={dataByStage} metric={pipelineMetric} />
-              <div className="mt-3 rounded-lg border border-brand-100 p-3">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-brand-500">{t('dashboard.pipeline.conversion')}</span>
-                  <span className="font-semibold text-brand-800">{metrics.conversionPct === null ? '—' : `${metrics.conversionPct.toFixed(1)}%`}</span>
-                </div>
-                <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-brand-100">
-                  <div className="h-full rounded-full bg-accent-500 transition-all" style={{ width: `${metrics.conversionPct ?? 0}%` }} />
-                </div>
-              </div>
-            </>
-          )}
-        </Card>
-
-        <Card className="">
-          <div className="mb-2.5 flex items-center justify-between gap-2">
-            <h2 className="text-sm font-bold text-brand-800">{t('dashboard.conversations.title', { days: rangeDays })}</h2>
-            <Select value={String(rangeDays)} onValueChange={(v) => setRangeDays(Number(v) as RangeDays)}>
-              <SelectTrigger className="!h-7 !w-auto !rounded-lg !text-xs">
-                <SelectValue>{t(`dashboard.conversations.range.${rangeDays}`)}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {RANGE_OPTIONS.map((days) => (
-                  <SelectItem key={days} value={String(days)} className="text-xs">
-                    {t(`dashboard.conversations.range.${days}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {!conversations && <PageSpinner />}
-          {conversations && (
-            <>
-              <ConversationsChart days={currentBuckets} />
-              <div className="mt-3 grid grid-cols-2 gap-3 border-t border-brand-100 pt-3">
-                <div className="min-w-0">
-                  <p className="text-[11px] text-brand-400">{t('dashboard.conversations.total')}</p>
-                  <p className="text-xs font-bold text-brand-800">{totalCurrent}</p>
-                  {totalDeltaPct !== null && <Delta pct={totalDeltaPct} />}
-                </div>
-                <div className="min-w-0">
-                  <p className="text-[11px] text-brand-400">{t('dashboard.conversations.avgResponseTime')}</p>
-                  <p className="text-xs font-bold text-brand-800">{avgResponseCurrent !== null ? formatMinutes(avgResponseCurrent) : '—'}</p>
-                  {avgResponseDeltaPct !== null && <Delta pct={avgResponseDeltaPct} invert />}
-                </div>
-              </div>
-            </>
-          )}
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <Card className="">
-          <div className="mb-2.5 flex items-center justify-between">
-            <h2 className="text-sm font-bold text-brand-800">{t('dashboard.upcomingTasks.title')}</h2>
-            <Link to="/app/calendar" className="text-xs font-medium text-accent-600 hover:text-accent-700">
-              {t('common.actions.viewAll')}
-            </Link>
-          </div>
-          {!tasks && <PageSpinner />}
-          {tasks && upcomingTasks.length === 0 && <EmptyState>{t('dashboard.upcomingTasks.empty')}</EmptyState>}
-          {tasks && upcomingTasks.length > 0 && (
-            <ul className="space-y-1.5">
-              {upcomingTasks.map((task) => {
-                const overdue = isTaskOverdue(task)
-                return (
-                  <li key={task.id} className={`flex items-start justify-between gap-3 rounded-lg border px-3 py-2 ${overdue ? 'border-red-200 bg-red-50/40' : 'border-brand-100'}`}>
+      </header>
+      {access.attention && (
+        <div
+          className="flex w-fit gap-1 rounded-lg border border-brand-100 bg-white p-1"
+          role="tablist"
+          aria-label={t('analytics.dashboard.title')}
+        >
+          {(['summary', 'attention'] as const).map((tab) => (
+            <button
+              key={tab}
+              role="tab"
+              aria-selected={view === tab}
+              onClick={() => setView(tab)}
+              className={`rounded-md px-4 py-2 text-xs font-semibold ${view === tab ? 'bg-accent-50 text-accent-700' : 'text-brand-400 hover:bg-brand-50'}`}
+            >
+              {t(`dashboard.overview.${tab}`)}
+            </button>
+          ))}
+        </div>
+      )}
+      {queries.some((q) => q.isEnabled && q.isError) && (
+        <p
+          role="status"
+          className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800"
+        >
+          {t('dashboard.overview.partial')}
+        </p>
+      )}
+      {activeView === 'summary' || !access.attention ? (
+        <>
+          {kpis.length > 0 && (
+            <section className="grid grid-cols-2 gap-4 min-[1150px]:grid-cols-4">
+              {kpis.map((kpi) => (
+                <Card
+                  key={kpi.title}
+                  className="min-w-0 !rounded-2xl !border-brand-100/60 !p-4 !shadow-none"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="hidden h-8 w-8 sm:flex shrink-0 items-center justify-center rounded-xl bg-accent-50 text-accent-600">
+                      <kpi.icon size={18} />
+                    </span>
                     <div className="min-w-0">
-                      <p className="truncate text-xs font-medium text-brand-800">{task.title}</p>
-                      <p className={`truncate text-[11px] ${overdue ? 'font-medium text-red-600' : 'text-brand-400'}`}>
-                        {overdue && `${t('calendar.overdue')} · `}
-                        {task.contact?.full_name ?? task.opportunity?.title ?? t('dashboard.upcomingTasks.generalTask')}
-                        {task.due_date && ` · ${formatDate(task.due_date)}`}
+                      <p className="text-[11px] text-brand-400">{kpi.title}</p>
+                      <p className="mt-1 break-words font-sans text-lg font-extrabold tracking-tight tabular-nums text-brand-800 sm:text-xl">
+                        {kpi.value}
                       </p>
                     </div>
-                    <Badge tone={PRIORITY_TONE[task.priority]}>{t(TASK_PRIORITY_KEY[task.priority])}</Badge>
-                  </li>
-                )
-              })}
-            </ul>
+                  </div>
+                  <p className="mt-4 text-[10px] leading-relaxed text-brand-400">
+                    {kpi.note}
+                  </p>
+                </Card>
+              ))}
+            </section>
           )}
-        </Card>
-
-        <Card className="">
-          <div className="mb-2.5 flex items-center justify-between">
-            <h2 className="text-sm font-bold text-brand-800">{t('dashboard.recentActivity.title')}</h2>
-            <Link to="/app/sales" className="text-xs font-medium text-accent-600 hover:text-accent-700">
-              {t('common.actions.viewAll')}
-            </Link>
-          </div>
-          {(!orders || !returns) && <PageSpinner />}
-          {orders && returns && recentActivity.length === 0 && <EmptyState>{t('dashboard.recentActivity.empty')}</EmptyState>}
-          {orders && returns && recentActivity.length > 0 && (
-            <ul className="space-y-1.5">
-              {recentActivity.map((item) => {
-                if (item.kind === 'order') {
-                  const o = item.order
-                  const isQuote = o.status === 'cotizacion'
-                  const badgeClass = isQuote ? ORDER_STATUS_BADGE_CLASS.cotizacion : DELIVERY_STATUS_BADGE_CLASS[o.delivery_status]
-                  const badgeLabel = isQuote ? t(ORDER_STATUS_LABEL_KEY.cotizacion) : t(DELIVERY_STATUS_LABEL_KEY[o.delivery_status])
-                  return (
-                    <li key={`order-${o.id}`} className="flex items-center gap-2.5 rounded-lg border border-brand-100 px-3 py-2">
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-50 text-accent-600">
-                        <ReceiptIcon width={15} height={15} />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-xs font-medium text-brand-800">{t(isQuote ? 'dashboard.recentActivity.quote' : 'dashboard.recentActivity.order', { number: o.number })}</p>
-                        <p className="truncate text-[11px] text-brand-400">{t('dashboard.recentActivity.client', { name: o.contact?.full_name ?? '—' })}</p>
-                      </div>
-                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${badgeClass}`}>{badgeLabel}</span>
-                      <span className="hidden shrink-0 text-[11px] text-brand-300 sm:inline">{formatTime(o.created_at, language)}</span>
-                    </li>
-                  )
-                }
-                const r = item.ret
-                return (
-                  <li key={`return-${r.id}`} className="flex items-center gap-2.5 rounded-lg border border-brand-100 px-3 py-2">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-orange-50 text-orange-600">
-                      <RefreshIcon width={15} height={15} />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs font-medium text-brand-800">{t('dashboard.recentActivity.return', { number: r.sales_order?.number ?? '—' })}</p>
-                      <p className="truncate text-[11px] text-brand-400">{t('dashboard.recentActivity.client', { name: r.sales_order?.contact?.full_name ?? '—' })}</p>
-                    </div>
-                    {r.status && (
-                      <span
-                        className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium"
-                        style={{ backgroundColor: `${r.status.color}1f`, color: r.status.color }}
+          {(sales || reports) && (
+            <section className="grid items-stretch gap-5 md:grid-cols-2 lg:grid-cols-3">
+              {reports && (
+                <Panel
+                  title={t('dashboard.overview.products')}
+                  subtitle={t('dashboard.overview.units')}
+                  action={link(
+                    '/app/reports',
+                    'dashboard.overview.viewReports',
+                  )}
+                >
+                  <Resource
+                    query={productReport}
+                    empty={!productReport.data?.top_by_quantity.length}
+                  >
+                    <HorizontalBars
+                      rows={(productReport.data?.top_by_quantity ?? [])
+                        .slice(0, 5)
+                        .map((p) => ({
+                          label: p.product_name,
+                          value: p.quantity,
+                        }))}
+                      format={(value) =>
+                        t('dashboard.overview.unitCount', { count: value })
+                      }
+                    />
+                  </Resource>
+                </Panel>
+              )}
+              {sales && (
+                <Panel
+                  title={t('dashboard.overview.salesTrend')}
+                  subtitle={t('dashboard.overview.salesHint')}
+                >
+                  <Resource query={ordersQuery} empty={salesTotal === 0}>
+                    <SalesAreaChart
+                      points={series.map((p) => ({
+                        label: dateLabel(p.date),
+                        value: p.value,
+                      }))}
+                      format={compact}
+                      detailFormat={money}
+                      label={t('dashboard.overview.salesTrend')}
+                    />
+                  </Resource>
+                </Panel>
+              )}
+              {reports && (
+                <Panel
+                  title={t('dashboard.overview.channels')}
+                  subtitle={t('dashboard.overview.channelHint')}
+                  action={link(
+                    '/app/reports',
+                    'dashboard.overview.viewReports',
+                  )}
+                >
+                  <Resource
+                    query={financialReport}
+                    empty={channels.length === 0}
+                  >
+                    <ChannelsChart rows={channels} format={money} />
+                  </Resource>
+                </Panel>
+              )}
+            </section>
+          )}
+          {(sales || tabs.length > 0 || access.stock) && (
+            <section className="grid items-stretch gap-5 md:grid-cols-2 lg:grid-cols-3">
+              {sales && (
+                <Panel
+                  title={t('dashboard.overview.recent')}
+                  action={link('/app/sales', 'dashboard.overview.viewAll')}
+                >
+                  <Resource query={ordersQuery} empty={activity.length === 0}>
+                    <ul className="divide-y divide-brand-50">
+                      {activity.map((item) =>
+                        item.kind === 'order' ? (
+                          <li
+                            key={item.order.id}
+                            className="flex items-center gap-3 py-3"
+                          >
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-50 text-[10px] font-semibold text-accent-600">
+                              {item.order.contact?.full_name
+                                ?.slice(0, 2)
+                                .toUpperCase() ?? '—'}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <Link
+                                to={`/app/sales/${item.order.id}`}
+                                className="text-xs font-semibold text-brand-800 hover:text-accent-600"
+                              >
+                                {t(
+                                  item.order.status === 'cotizacion'
+                                    ? 'dashboard.overview.quote'
+                                    : 'dashboard.overview.order',
+                                  { number: item.order.number },
+                                )}
+                              </Link>
+                              <p className="mt-1 truncate text-[10px] text-brand-400">
+                                {item.order.contact?.full_name ??
+                                  t('dashboard.overview.unknownClient')}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <span className="rounded-full bg-brand-50 px-2 py-1 text-[9px] text-brand-500">
+                                {t(
+                                  item.order.status === 'cotizacion'
+                                    ? ORDER_STATUS_LABEL_KEY.cotizacion
+                                    : DELIVERY_STATUS_LABEL_KEY[
+                                        item.order.delivery_status
+                                      ],
+                                )}
+                              </span>
+                              <p className="mt-2 text-[11px] font-medium tabular-nums">
+                                {money(item.order.total)}
+                              </p>
+                            </div>
+                          </li>
+                        ) : (
+                          <li key={item.ret.id} className="py-3">
+                            <Link
+                              to="/app/returns"
+                              className="text-xs font-semibold text-brand-800"
+                            >
+                              {t('dashboard.recentActivity.return', {
+                                number: item.ret.sales_order?.number ?? '—',
+                              })}
+                            </Link>
+                            <p className="mt-1 text-[10px] text-brand-400">
+                              {item.ret.status?.name ?? '—'} ·{' '}
+                              {formatDate(item.ret.created_at)}
+                            </p>
+                          </li>
+                        ),
+                      )}
+                    </ul>
+                  </Resource>
+                </Panel>
+              )}
+              {tabs.length > 0 && (
+                <Panel
+                  title={t('dashboard.overview.needsAttention')}
+                  subtitle={t('dashboard.overview.current')}
+                >
+                  <div
+                    className="mb-4 flex gap-1"
+                    role="tablist"
+                    aria-label={t('dashboard.overview.needsAttention')}
+                  >
+                    {tabs.map((tab) => (
+                      <button
+                        key={tab.key}
+                        role="tab"
+                        aria-selected={activeTab === tab.key}
+                        onClick={() => setAttentionTab(tab.key)}
+                        className={`rounded-md px-3 py-2 text-[11px] font-medium ${activeTab === tab.key ? 'bg-accent-50 text-accent-700' : 'text-brand-400'}`}
                       >
-                        {r.status.name}
-                      </span>
+                        {t(tab.label)}
+                      </button>
+                    ))}
+                  </div>
+                  {activeTab === 'orders' && (
+                    <Resource query={ordersQuery} empty={pending.length === 0}>
+                      <ul className="space-y-3">
+                        {Object.entries(
+                          pending.reduce<Record<string, number>>(
+                            (counts, order) => {
+                              counts[order.delivery_status] =
+                                (counts[order.delivery_status] ?? 0) + 1
+                              return counts
+                            },
+                            {},
+                          ),
+                        ).map(([status, count]) => (
+                          <li key={status}>
+                            <Link
+                              to="/app/sales"
+                              className="flex items-center justify-between rounded-lg border border-brand-100/60 p-3 text-xs hover:border-accent-300"
+                            >
+                              <span>
+                                {t(
+                                  DELIVERY_STATUS_LABEL_KEY[
+                                    status as keyof typeof DELIVERY_STATUS_LABEL_KEY
+                                  ],
+                                )}
+                              </span>
+                              <strong>{count}</strong>
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    </Resource>
+                  )}
+                  {activeTab === 'credit' && (
+                    <Resource
+                      query={creditQuery}
+                      empty={!creditQuery.data?.some((c) => c.balance > 0)}
+                    >
+                      <ul className="space-y-3">
+                        {(creditQuery.data ?? [])
+                          .filter((c) => c.balance > 0)
+                          .sort((a, b) => b.balance - a.balance)
+                          .slice(0, 4)
+                          .map((c) => (
+                            <li key={c.client.id}>
+                              <Link
+                                to="/app/credit"
+                                className="flex items-center justify-between gap-3 rounded-lg border border-brand-100/60 p-3 text-xs hover:border-accent-300"
+                              >
+                                <span className="min-w-0 truncate">
+                                  {c.client.full_name}
+                                </span>
+                                <strong className="shrink-0 tabular-nums">
+                                  {money(c.balance)}
+                                </strong>
+                              </Link>
+                            </li>
+                          ))}
+                      </ul>
+                    </Resource>
+                  )}
+                </Panel>
+              )}
+              {access.stock && (
+                <Panel
+                  title={t('dashboard.overview.inventory')}
+                  subtitle={
+                    stockQuery.data
+                      ? t('dashboard.overview.lowStock', {
+                          count: stockQuery.data.count,
+                        })
+                      : undefined
+                  }
+                  action={link(
+                    '/app/products',
+                    'dashboard.overview.viewInventory',
+                  )}
+                >
+                  <Resource
+                    query={stockQuery}
+                    empty={!stockQuery.data?.data.length}
+                  >
+                    <ul className="space-y-3">
+                      {(stockQuery.data?.data ?? []).map((p) => (
+                        <li key={p.id}>
+                          <Link
+                            to={`/app/products/${p.id}`}
+                            className="block rounded-lg border border-brand-100/60 p-3 hover:border-accent-300"
+                          >
+                            <p className="text-xs font-semibold">{p.name}</p>
+                            <p className="mt-1 text-[10px] text-brand-400">
+                              {t('dashboard.overview.stockThreshold', {
+                                count: p.low_stock_threshold,
+                              })}
+                            </p>
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  </Resource>
+                </Panel>
+              )}
+            </section>
+          )}
+          {!sales && !reports && !credit && !access.stock && (
+            <Card>
+              <EmptyState>{t('dashboard.overview.noModules')}</EmptyState>
+            </Card>
+          )}
+          <p className="text-[11px] leading-relaxed text-brand-400">
+            {t('dashboard.overview.info')}
+          </p>
+        </>
+      ) : (
+        <div className="flex flex-col gap-5">
+          <section className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+            {conversations && (
+              <>
+                <Panel
+                  title={t('dashboard.overview.conversationActivity')}
+                  subtitle={t('dashboard.overview.conversationHint')}
+                  action={link(
+                    '/app/conversations',
+                    'dashboard.overview.viewAll',
+                  )}
+                >
+                  <Resource
+                    query={conversationQuery}
+                    empty={!conversationQuery.data?.length}
+                  >
+                    <p className="mb-5 font-sans text-3xl font-extrabold">
+                      {
+                        (conversationQuery.data ?? []).filter(
+                          (c) =>
+                            c.last_message_at &&
+                            new Date(c.last_message_at) >= window.start &&
+                            new Date(c.last_message_at) < window.end,
+                        ).length
+                      }
+                    </p>
+                    <SalesAreaChart
+                      points={series.map((point) => ({
+                        label: dateLabel(point.date),
+                        value: (conversationQuery.data ?? []).filter(
+                          (c) =>
+                            c.last_message_at &&
+                            new Date(c.last_message_at).toDateString() ===
+                              point.date.toDateString(),
+                        ).length,
+                      }))}
+                      format={String}
+                      label={t('dashboard.overview.conversationActivity')}
+                    />
+                  </Resource>
+                </Panel>
+                <Panel
+                  title={t('dashboard.overview.response')}
+                  subtitle={t('dashboard.overview.responseHint')}
+                >
+                  <Resource
+                    query={conversationQuery}
+                    empty={!conversationQuery.data?.length}
+                  >
+                    {timingsQuery.isError ? (
+                      <Resource query={timingsQuery}>{null}</Resource>
+                    ) : timingsQuery.isPending && timingsQuery.isEnabled ? (
+                      <LoadingState />
+                    ) : (
+                      (() => {
+                        const minutes = computeAvgResponseMinutes(
+                          timingsQuery.data ?? [],
+                          window.start,
+                          window.end,
+                        )
+                        return (
+                          <p className="font-sans text-3xl font-extrabold">
+                            {minutes === null
+                              ? '—'
+                              : minutes < 1
+                                ? t('dashboard.overview.lessMinute')
+                                : minutes < 60
+                                  ? t('dashboard.overview.minutes', {
+                                      count: Math.round(minutes),
+                                    })
+                                  : t('dashboard.overview.hours', {
+                                      count: (minutes / 60).toFixed(1),
+                                    })}
+                          </p>
+                        )
+                      })()
                     )}
-                    <span className="hidden shrink-0 text-[11px] text-brand-300 sm:inline">{formatTime(r.created_at, language)}</span>
-                  </li>
-                )
-              })}
-            </ul>
+                  </Resource>
+                </Panel>
+              </>
+            )}
+            {pipeline && (
+              <Panel
+                title={t('dashboard.overview.pipeline')}
+                action={link(
+                  '/app/opportunities',
+                  'dashboard.overview.viewCrm',
+                )}
+              >
+                <Resource
+                  query={pipelineQuery}
+                  empty={pipelineRows.length === 0}
+                >
+                  <HorizontalBars rows={pipelineRows} format={String} />
+                  <div className="mt-5 flex justify-between gap-3 rounded-lg bg-brand-50 p-3 text-[11px]">
+                    <span className="text-brand-400">
+                      {t('dashboard.overview.pipelineValue')}
+                    </span>
+                    <strong className="tabular-nums">
+                      {money(pipelineValue)}
+                    </strong>
+                  </div>
+                </Resource>
+              </Panel>
+            )}
+          </section>
+          {(tasks || access.team) && <section className={`grid gap-5 ${tasks && access.team ? 'lg:grid-cols-[1fr_2fr]' : 'grid-cols-1'}`}>
+            {tasks && (
+              <Panel
+                title={t('dashboard.overview.tasksTab')}
+                subtitle={t('dashboard.overview.current')}
+                action={link('/app/calendar', 'dashboard.overview.viewAll')}
+              >
+                <Resource query={tasksQuery} empty={taskRows.length === 0}>
+                  <ul className="space-y-3">
+                    {taskRows.map((task) => (
+                      <li key={task.id}>
+                        <Link
+                          to="/app/calendar"
+                          className="block rounded-lg border border-brand-100/60 p-3 hover:border-accent-300"
+                        >
+                          <p className="text-xs font-medium">{task.title}</p>
+                          <p className="mt-1.5 text-[10px] text-brand-400">
+                            {task.due_date && formatDate(task.due_date)}
+                            {task.due_date &&
+                              new Date(task.due_date) < new Date() && (
+                                <span className="ml-2 text-red-600">
+                                  {t('dashboard.overview.overdue')}
+                                </span>
+                              )}
+                          </p>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </Resource>
+              </Panel>
+            )}
+          {access.team && (
+            <Panel
+              title={t('dashboard.overview.team')}
+              subtitle={t('dashboard.overview.humanTeam')}
+            >
+              <Resource query={teamQuery} empty={!teamQuery.data?.length}>
+                <ul className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+                  {(teamQuery.data ?? []).map((agent) => {
+                    const completed =
+                      agent.tasks_completed_on_time + agent.tasks_completed_late
+                    const rate = completed
+                      ? Math.round(
+                          (agent.tasks_completed_on_time / completed) * 100,
+                        )
+                      : null
+                    return (
+                      <li
+                        key={agent.agent_id}
+                        className="rounded-lg border border-brand-100/60 p-4"
+                      >
+                        <strong className="text-xs">{agent.agent_name}</strong>
+                        <p className="mt-2 text-[10px] text-brand-400">
+                          {t('dashboard.overview.teamTasks', {
+                            pending: agent.tasks_pending,
+                            overdue: agent.tasks_overdue,
+                          })}
+                        </p>
+                        <p className="mt-1 text-[10px] text-brand-400">
+                          {t('dashboard.agentActivity.appointmentsOverdue')}:{' '}
+                          {agent.appointments_overdue}
+                        </p>
+                        <div className="mt-3 flex justify-between text-[10px]">
+                          <span className="text-brand-400">
+                            {t('dashboard.overview.teamRate')}
+                          </span>
+                          <span>{rate === null ? '—' : `${rate}%`}</span>
+                        </div>
+                        <div className="mt-2 h-1.5 rounded-full bg-brand-50">
+                          <div
+                            className="h-full rounded-full bg-accent-500"
+                            style={{ width: `${rate ?? 0}%` }}
+                          />
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </Resource>
+            </Panel>
           )}
-        </Card>
-      </div>
-
-      {profile?.role === 'tenant_admin' && (
-        <Card className="">
-          <div className="mb-2.5 flex items-center gap-1.5">
-            <h2 className="text-sm font-bold text-brand-800">{t('dashboard.agentActivity.title')}</h2>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="text-brand-300 hover:text-brand-500">
-                  <InfoIcon width={14} height={14} />
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>{t('dashboard.agentActivity.tooltip')}</TooltipContent>
-            </Tooltip>
-          </div>
-          {!agentActivity && <PageSpinner />}
-          {agentActivity && agentActivity.length === 0 && <EmptyState>{t('dashboard.agentActivity.empty')}</EmptyState>}
-          {agentActivity && agentActivity.length > 0 && (
-            <ul className="space-y-3">
-              {agentActivity.map((agent) => {
-                const completedTotal = agent.tasks_completed_on_time + agent.tasks_completed_late
-                const onTimePct = completedTotal > 0 ? Math.round((agent.tasks_completed_on_time / completedTotal) * 100) : null
-                return (
-                  <li key={agent.agent_id} className="rounded-lg border border-brand-100 px-3 py-2.5">
-                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                      <p className="text-xs font-semibold text-brand-800">{agent.agent_name}</p>
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-brand-400">
-                        <span>
-                          {t('dashboard.agentActivity.pending')}: <span className="font-semibold text-brand-700">{agent.tasks_pending}</span>
-                        </span>
-                        <span className={agent.tasks_overdue > 0 ? 'font-semibold text-red-600' : ''}>
-                          {t('dashboard.agentActivity.tasksOverdue')}: {agent.tasks_overdue}
-                        </span>
-                        <span className={agent.appointments_overdue > 0 ? 'font-semibold text-red-600' : ''}>
-                          {t('dashboard.agentActivity.appointmentsOverdue')}: {agent.appointments_overdue}
-                        </span>
-                        <span>
-                          {t('dashboard.agentActivity.onTimeRate')}:{' '}
-                          <span className="font-semibold text-brand-700">{onTimePct === null ? t('dashboard.agentActivity.noCompletedYet') : `${onTimePct}%`}</span>
-                        </span>
-                      </div>
-                    </div>
-                    <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-brand-100">
-                      <div className="h-full rounded-full bg-accent-500 transition-all" style={{ width: `${onTimePct ?? 0}%` }} />
-                    </div>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </Card>
+          </section>}
+        </div>
       )}
     </div>
   )

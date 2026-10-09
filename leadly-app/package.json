@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:dashboard": "node --experimental-strip-types --test tests/dashboard-*.test.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",
