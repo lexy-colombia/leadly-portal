@@ -56,7 +56,7 @@ const DIAN_PRODUCTION_URL =
  * donde carga su certificado digital (.p12/.pfx), su resolución de
  * facturación, y configura sus propias tarifas de retención. Leadly nunca
  * es Proveedor Tecnológico -- ver CLAUDE.md. Mismo patrón de credenciales
- * que LaFacturaCredentialDrawer/WompiIntegrationDrawer (integration_credentials
+ * que WompiIntegrationDrawer/ShopifyCredentialDrawer (integration_credentials
  * + integration_credential_secrets), más: (1) un campo de archivo para el
  * certificado (bucket privado tenant-certificates, no cabe en config jsonb
  * ni en un secreto de texto), y (2) el perfil DIAN del tenant

@@ -31,15 +31,6 @@
   "integrations.wompi.connected": "Wompi está configurado y listo para usarse.",
   "integrations.wompi.notConnected": "Todavía no configuraste las credenciales de Wompi.",
 
-  "integrations.lafactura.hint": "Facturación electrónica DIAN. La emisión real (CUFE/XML) todavía no está conectada -- esto solo guarda la cuenta para cuando se construya.",
-  "integrations.lafactura.connected": "Cuenta de LaFactura guardada.",
-  "integrations.lafactura.notConnected": "Todavía no guardaste una cuenta de LaFactura para esta cuenta.",
-  "integrations.lafactura.apiUser": "Usuario API",
-  "integrations.lafactura.apiPassword": "Contraseña API",
-  "integrations.lafactura.apiBaseUrl": "URL base de la API",
-  "integrations.lafactura.idApi": "ID API",
-  "integrations.lafactura.rangeKey": "Rango de numeración autorizado",
-  "integrations.lafactura.ivaRate": "Tasa de IVA (%)",
 
   "integrations.shopify.connected": "Tienda de Shopify guardada.",
   "integrations.shopify.notConnected": "Todavía no guardaste una tienda de Shopify para esta cuenta.",

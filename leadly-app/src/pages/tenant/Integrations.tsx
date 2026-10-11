@@ -3,7 +3,7 @@ import { useLanguage } from '../../contexts/LanguageContext'
 import { IntegrationsGrid } from '../shared/integrations/IntegrationsGrid'
 import { Card } from '@/components/molecules'
 import { LockClosedIcon } from '@/components/atoms/icons'
-/** Each tenant's own third-party integrations (LaFactura/Wompi/Shopify/
+/** Each tenant's own third-party integrations (Wompi/Shopify/
  * HubSpot) -- their own accounts with each provider, kept separate from the
  * backoffice's Integrations (Leadly's own accounts) by tenant_id scoping on
  * integration_credentials/tenant_payment_credentials. Same card grid +

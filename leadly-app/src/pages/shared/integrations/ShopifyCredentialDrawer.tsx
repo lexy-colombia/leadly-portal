@@ -20,7 +20,7 @@ const FIELD_CLASS = '!h-7 !rounded-lg !text-xs'
 /** Shopify's own fields (store domain + Admin API access token) -- mapped,
  * not wired: no Edge Function syncs products/orders yet, this only saves
  * the account for when that's built (same "prepared, not connected"
- * treatment as LaFactura). Real Shopify OAuth (like tania-functions'
+ * treatment as the other mapped providers). Real Shopify OAuth (like tania-functions'
  * ShopifyConnection) needs a registered public app with redirect URIs --
  * out of scope until there's an actual product/order sync to build. Shared
  * between the backoffice (platform account, tenantId null) and each

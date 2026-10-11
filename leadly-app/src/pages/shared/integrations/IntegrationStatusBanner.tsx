@@ -1,7 +1,7 @@
 import { CheckIcon } from '@/components/atoms/icons'
 /** Shared connected/not-connected status banner shown at the top of every
  * provider's credential drawer -- same visual language across Wompi/
- * LaFactura/Shopify/HubSpot instead of each one inventing its own, mirrors
+ * Shopify/HubSpot/DIAN directo instead of each one inventing its own, mirrors
  * the colored status card pattern from suppliers-web's connection forms. */
 export function IntegrationStatusBanner({ connected, connectedText, notConnectedText }: { connected: boolean; connectedText: string; notConnectedText: string }) {
   if (connected) {
