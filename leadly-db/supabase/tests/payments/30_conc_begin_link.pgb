@@ -1,0 +1,2 @@
+SET ROLE service_role;
+insert into public.t_conc select (public.payments_begin_link((select id from payments.clients where name='Proyecto A'),'conc-key-1','hash-conc',jsonb_build_object('amount_in_cents',1000,'currency','COP','name','n','description','d','external_reference','CONC'),'sandbox',null))->>'replayed';

@@ -377,3 +377,7 @@ s3_region = "env(S3_REGION)"
 s3_access_key = "env(S3_ACCESS_KEY)"
 # Configures AWS_SECRET_ACCESS_KEY for S3 bucket
 s3_secret_key = "env(S3_SECRET_KEY)"
+
+# payments-api: la API key de proyectos no es un JWT y el receptor de Wompi se autentica por checksum.
+[functions.payments-api]
+verify_jwt = false

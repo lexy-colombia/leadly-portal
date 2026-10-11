@@ -160,6 +160,7 @@
 
   "backoffice.facturacion.tabs.planes": "Plans",
   "backoffice.facturacion.tabs.facturas": "Invoices",
+  "backoffice.facturacion.tabs.links": "Payment links",
   "backoffice.facturacion.errors.loadPlans": "Could not load the plans.",
   "backoffice.facturacion.plansSubtitle": "Subscription plans your clients can pay for.",
   "backoffice.facturacion.newPlan": "New plan",

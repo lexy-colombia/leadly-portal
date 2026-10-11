@@ -2,6 +2,7 @@ import esAccount from './locales/es/account.json'
 import esAuth from './locales/es/auth.json'
 import esBackoffice from './locales/es/backoffice.json'
 import esBilling from './locales/es/billing.json'
+import esPaymentLinks from './locales/es/paymentLinks.json'
 import esCredit from './locales/es/credit.json'
 import esCalendar from './locales/es/calendar.json'
 import esCampaigns from './locales/es/campaigns.json'
@@ -30,6 +31,7 @@ import enAccount from './locales/en/account.json'
 import enAuth from './locales/en/auth.json'
 import enBackoffice from './locales/en/backoffice.json'
 import enBilling from './locales/en/billing.json'
+import enPaymentLinks from './locales/en/paymentLinks.json'
 import enCredit from './locales/en/credit.json'
 import enCalendar from './locales/en/calendar.json'
 import enCampaigns from './locales/en/campaigns.json'
@@ -88,6 +90,7 @@ export const translations = {
     ...esPos,
     ...esCredit,
     ...esBilling,
+    ...esPaymentLinks,
     ...esSettings,
     ...esTemplates,
     ...esBackoffice,
@@ -117,6 +120,7 @@ export const translations = {
     ...enPos,
     ...enCredit,
     ...enBilling,
+    ...enPaymentLinks,
     ...enSettings,
     ...enTemplates,
     ...enBackoffice,

@@ -10,6 +10,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { getAdapter, makeSecretGetter, resolveCredential } from "../_shared/payments/registry.ts";
+import { paymentReturnUrl } from "../_shared/publicAppUrl.ts";
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -77,7 +78,9 @@ Deno.serve(async (req: Request) => {
       amountCents: invoice.amount_cents,
       currency: invoice.currency,
       description: invoice.description ?? `Factura ${invoice.invoice_number ?? invoice.id}`,
-      redirectUrl: redirect_url,
+      // Un redirect_url explícito siempre gana; sin él, la página pública de
+      // resultado del SPA con el id de esta factura.
+      redirectUrl: redirect_url || paymentReturnUrl(invoice.id),
     });
 
     await adminClient.from("payment_invoices").update({ provider_checkout_id: result.providerCheckoutId }).eq("id", invoice.id);

@@ -134,7 +134,7 @@ export function PaymentDrawer({
   // (same "Conectado" criterion as WompiIntegrationDrawer -- a credential
   // row with empty secrets doesn't count). Independent from the manual
   // form below: generating a link doesn't record a payment by itself, only
-  // payment-webhook-wompi does that once the customer actually pays.
+  // payments-api (/v1/events/wompi) does that once the customer actually pays.
   const [wompiConnected, setWompiConnected] = useState(false)
   const [wompiLink, setWompiLink] = useState<{ checkoutUrl: string; amount: number } | null>(null)
   const [wompiGenerating, setWompiGenerating] = useState(false)

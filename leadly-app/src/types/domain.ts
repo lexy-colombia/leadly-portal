@@ -652,7 +652,7 @@ export interface SalesOrderPayment {
   notes: string | null
   created_by: string | null
   /** Only set when method === 'wompi' (payment recorded automatically by
-   * payment-webhook-wompi, see leadly-db) -- null for every manually-typed
+   * payments-api (/v1/events/wompi), see leadly-db) -- null for every manually-typed
    * payment. */
   provider_key: string | null
   provider_transaction_id: string | null

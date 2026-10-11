@@ -16,6 +16,7 @@ import { StorefrontCatalog } from "./pages/storefront/StorefrontCatalog";
 import { StorefrontProductDetail } from "./pages/storefront/StorefrontProductDetail";
 import { StorefrontCart } from "./pages/storefront/StorefrontCart";
 import { Changelog } from "./pages/Changelog";
+import { PaymentResult } from "./pages/PaymentResult";
 import { TenantsList } from "./pages/backoffice/TenantsList";
 import { TenantDetail } from "./pages/backoffice/TenantDetail";
 import { Settings } from "./pages/backoffice/Settings";
@@ -79,6 +80,10 @@ export default function App() {
                   />
                   <Route path="carrito" element={<StorefrontCart />} />
                 </Route>
+                {/* Retorno público de Wompi (también sirve a los tenants): fuera de
+              RequireAuth y de los layouts. Solo muestra el estado que el backend
+              ya conoce por el webhook; nunca decide si el pago fue aprobado. */}
+                <Route path="/pago/resultado" element={<PaymentResult />} />
                 <Route path="/" element={<RootRedirect />} />
 
                 <Route

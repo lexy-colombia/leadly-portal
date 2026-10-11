@@ -4,6 +4,20 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.21] - 2026-10-11
+
+### Added
+- **Links de pago propios de Lexy Colombia**: nueva pestaña "Links de pago" en Facturación del backoffice para registrar proyectos (Leadly, Bedly, Lexy Legal…), obtener su API key, generar links de pago de Wompi y ver su estado. Cada proyecto recibe un aviso firmado cuando un pago cambia de estado.
+- **Página pública de retorno** `/pago/resultado`: a donde vuelve el cliente al terminar de pagar en Wompi, también para los pagos de los comercios. Solo muestra el estado que el servidor ya conoce; nunca decide si el pago fue aprobado.
+
+### Changed
+- **Un solo receptor de eventos de Wompi** para todos los cobros (links propios, cobro de suscripciones a los comercios y pagos de pedidos). La URL de eventos en el dashboard de Wompi es ahora `…/functions/v1/payments-api/v1/events/wompi`.
+- Cada pago aprobado se confirma directamente con Wompi, se compara el monto cobrado con el esperado y una misma transacción ya no puede acreditar dos pagos distintos. Un pago cobrado a un destino cancelado o vencido queda marcado con una alerta en vez de perderse en silencio.
+- Los links de pago generados sin URL de retorno vuelven por defecto a la página de resultado.
+
+### Removed
+- La función `payment-webhook-wompi`, reemplazada por el receptor único.
+
 ## [1.0.20] - 2026-10-10
 
 ### Fixed
