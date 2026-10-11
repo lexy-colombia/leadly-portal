@@ -7,7 +7,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { json } from "../_shared/cors.ts";
-import { AI_TOOLS, isToolAllowed } from "../_shared/aiTools.ts";
+import { ADMINISTRATOR_ONLY, AI_TOOLS, isAdministratorContact, isToolAllowed } from "../_shared/aiTools.ts";
 import { sendWhatsappImage } from "../_shared/whatsapp.ts";
 import { chargeSalesOrderToCredit, createSalesOrderPaymentLink } from "../_shared/payments/salesOrderPayments.ts";
 import { confirmSalesOrder, getStockTotals, getVariantStock, isPlaceholderAddressText } from "../_shared/orders/confirmSalesOrder.ts";
@@ -85,6 +85,7 @@ Deno.serve(async (req: Request) => {
     // too, in case that ever drifts (a stale cached tool list, a bug), so a
     // disabled skill's tool can never actually execute even if requested.
     const enabledSkillKeys = await getEnabledSkillKeys(adminClient, conversationId);
+    if (await isAdministratorContact(adminClient, tenantId, contactId)) enabledSkillKeys.add(ADMINISTRATOR_ONLY);
     if (!isToolAllowed(functionName, enabledSkillKeys)) {
       throw new Error(`Tool ${functionName} is not enabled for this assistant`);
     }
@@ -351,6 +352,324 @@ async function executeTool(
         status: opportunity.status,
         stage: stage?.name ?? null,
       };
+    }
+
+    case "get_pipeline_report": {
+      // Consulta de administración sobre TODO un pipeline (no solo el
+      // contacto de la conversación). La autorización vive aquí, no en el
+      // prompt: el modelo no puede saltársela diciendo "soy el
+      // administrador". Quién es administrador lo decide la etiqueta
+      // "administrador" del cliente de esta conversación (contactId lo
+      // inyecta el servidor), que solo se asigna desde el CRM.
+      if (!contactId) throw new Error("not_authorized: esta consulta es solo para la administración del negocio.");
+      const { data: caller, error: callerError } = await adminClient
+        .from("clients")
+        .select("tags")
+        .eq("id", contactId)
+        .eq("tenant_id", tenantId)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (callerError) throw new Error(callerError.message);
+      const callerTags = ((caller?.tags ?? []) as string[]).map((t) => String(t).trim().toLowerCase());
+      if (!callerTags.includes("administrador")) {
+        throw new Error("not_authorized: esta consulta es solo para la administración del negocio.");
+      }
+
+      const { data: pipelines, error: pipelinesError } = await adminClient
+        .from("pipelines")
+        .select("id, name")
+        .eq("tenant_id", tenantId)
+        .eq("is_active", true)
+        .order("created_at", { ascending: true });
+      if (pipelinesError) throw new Error(pipelinesError.message);
+      const pipelineList = (pipelines ?? []) as { id: string; name: string }[];
+      const normalize = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+
+      const requestedName = parameters.pipeline_name ? String(parameters.pipeline_name).trim() : "";
+      let pipeline: { id: string; name: string } | undefined;
+      if (requestedName) {
+        pipeline = pipelineList.find((p) => normalize(p.name) === normalize(requestedName));
+        if (!pipeline) {
+          throw new Error(`No existe el pipeline "${requestedName}". Disponibles: ${pipelineList.map((p) => p.name).join(", ")}.`);
+        }
+      } else if (pipelineList.length === 1) {
+        pipeline = pipelineList[0];
+      } else {
+        throw new Error(`Indica pipeline_name. Disponibles: ${pipelineList.map((p) => p.name).join(", ")}.`);
+      }
+
+      const { data: stages, error: stagesError } = await adminClient
+        .from("pipeline_stages")
+        .select("id, name, display_order")
+        .eq("pipeline_id", pipeline.id)
+        .order("display_order", { ascending: true });
+      if (stagesError) throw new Error(stagesError.message);
+      const stageList = (stages ?? []) as { id: string; name: string; display_order: number }[];
+
+      // Paginado de a 1000: PostgREST corta en silencio en db.max_rows.
+      type OppRow = { id: string; title: string; description: string | null; stage_id: string; priority: string | null; status: string; contact_id: string | null; created_at: string };
+      const opps: OppRow[] = [];
+      for (let from = 0; from < 20000; from += 1000) {
+        const { data, error } = await adminClient
+          .from("opportunities")
+          .select("id, title, description, stage_id, priority, status, contact_id, created_at")
+          .eq("tenant_id", tenantId)
+          .eq("pipeline_id", pipeline.id)
+          .is("deleted_at", null)
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: true })
+          .range(from, from + 999);
+        if (error) throw new Error(error.message);
+        const page = (data ?? []) as OppRow[];
+        opps.push(...page);
+        if (page.length < 1000) break;
+      }
+
+      // Datos de quien reportó (nombre + Proyecto/Unidad de campos personalizados).
+      const contactIds = [...new Set(opps.map((o) => o.contact_id).filter((id): id is string => !!id))];
+      const { data: defs } = await adminClient
+        .from("custom_field_definitions")
+        .select("id, name")
+        .eq("tenant_id", tenantId)
+        .eq("entity_type", "client")
+        .eq("is_active", true)
+        .is("deleted_at", null);
+      const defId = (n: string) => ((defs ?? []) as { id: string; name: string }[]).find((d) => normalize(d.name) === normalize(n))?.id;
+      const projectDefId = defId("Proyecto o propiedad");
+      const unitDefId = defId("Unidad");
+
+      const contacts = new Map<string, { full_name: string; custom_fields: Record<string, unknown> }>();
+      for (let i = 0; i < contactIds.length; i += 200) {
+        const { data, error } = await adminClient
+          .from("clients")
+          .select("id, full_name, custom_fields")
+          .eq("tenant_id", tenantId)
+          .in("id", contactIds.slice(i, i + 200));
+        if (error) throw new Error(error.message);
+        for (const c of (data ?? []) as { id: string; full_name: string; custom_fields: Record<string, unknown> | null }[]) {
+          contacts.set(c.id, { full_name: c.full_name, custom_fields: c.custom_fields ?? {} });
+        }
+      }
+
+      const project = parameters.project ? normalize(String(parameters.project)) : "";
+      const filtered = project
+        ? opps.filter((o) => {
+            const text = normalize(`${o.title ?? ""} ${o.description ?? ""}`);
+            const contactProject = o.contact_id && projectDefId
+              ? normalize(String(contacts.get(o.contact_id)?.custom_fields?.[projectDefId] ?? ""))
+              : "";
+            return text.includes(project) || (contactProject !== "" && contactProject.includes(project));
+          })
+        : opps;
+
+      const stageName = new Map(stageList.map((s) => [s.id, s.name]));
+      const byStage = stageList.map((s) => ({ stage: s.name, count: filtered.filter((o) => o.stage_id === s.id).length }));
+      const detailSource = parameters.only_open === true ? filtered.filter((o) => o.status === "open") : filtered;
+      const DETAIL_LIMIT = 15;
+      const colombiaDate = (iso: string) => new Date(new Date(iso).getTime() - 5 * 3600 * 1000).toISOString().slice(0, 10);
+
+      return {
+        pipeline: pipeline.name,
+        project: parameters.project ? String(parameters.project).trim() : null,
+        total: filtered.length,
+        open: filtered.filter((o) => o.status === "open").length,
+        resolved: filtered.filter((o) => o.status === "won").length,
+        closed_unresolved: filtered.filter((o) => o.status === "lost").length,
+        by_stage: byStage,
+        tickets_shown: Math.min(detailSource.length, DETAIL_LIMIT),
+        tickets_matching: detailSource.length,
+        tickets: detailSource.slice(0, DETAIL_LIMIT).map((o) => {
+          const c = o.contact_id ? contacts.get(o.contact_id) : undefined;
+          return {
+            title: o.title,
+            stage: stageName.get(o.stage_id) ?? null,
+            priority: o.priority,
+            reported_on: colombiaDate(o.created_at),
+            reported_by: c?.full_name ?? null,
+            unit: c && unitDefId ? (c.custom_fields[unitDefId] ?? null) : null,
+            detail: o.description ? o.description.slice(0, 200) : null,
+          };
+        }),
+      };
+    }
+
+    case "list_unlinked_conversations": {
+      await assertCallerIsAdministrator(adminClient, tenantId, contactId);
+      const unitDefId = await findClientFieldDefId(adminClient, tenantId, "Unidad");
+      const rows = await listUnlinkedConversations(adminClient, tenantId, unitDefId, conversationId);
+      return {
+        conversations: rows.map((r, i) => ({
+          option: i + 1,
+          conversation_id: r.id,
+          name: r.contact_name,
+          last_message_at: r.last_message_at,
+          last_message: r.last_message,
+        })),
+        note: rows.length === 0 ? "No hay conversaciones pendientes de asociar." : undefined,
+      };
+    }
+
+    case "link_conversation_to_unit": {
+      await assertCallerIsAdministrator(adminClient, tenantId, contactId);
+      const unitDefId = await findClientFieldDefId(adminClient, tenantId, "Unidad");
+      const projectDefId = await findClientFieldDefId(adminClient, tenantId, "Proyecto o propiedad");
+      if (!unitDefId) throw new Error('Este negocio no tiene configurado el campo personalizado "Unidad".');
+
+      // 1) Conversación objetivo: número de opción (de la lista que vio el
+      // modelo, mismo orden) o id real. Nunca la propia conversación del admin.
+      const candidates = await listUnlinkedConversations(adminClient, tenantId, unitDefId, conversationId);
+      const convRef = String(parameters.conversation ?? "").trim();
+      let target = candidates.find((c) => c.id === convRef);
+      if (!target && /^\d{1,2}$/.test(convRef)) target = candidates[Number(convRef) - 1];
+      if (!target) {
+        throw new Error(
+          candidates.length === 0
+            ? "No hay conversaciones pendientes de asociar."
+            : `No encontré esa conversación. Opciones: ${candidates.map((c, i) => `${i + 1}) ${c.contact_name ?? "sin nombre"}`).join("; ")}. Usa list_unlinked_conversations y reintenta.`,
+        );
+      }
+
+      // 2) Cliente de la unidad: coincidencia por tokens significativos de
+      // "Unidad", opcionalmente filtrada por proyecto.
+      const unitQuery = String(parameters.unit ?? "").trim();
+      if (!unitQuery) throw new Error("Indica la unidad.");
+      const wantedTokens = significantUnitTokens(unitQuery);
+      if (wantedTokens.length === 0) throw new Error("No entendí la unidad. Pide el número o nombre exacto del consultorio o apartamento.");
+      const projectQuery = parameters.project ? normalizeText(String(parameters.project)) : "";
+
+      const matches: { id: string; full_name: string; unit: string; project: string | null }[] = [];
+      for (let from = 0; from < 20000; from += 1000) {
+        const { data, error } = await adminClient
+          .from("clients")
+          .select("id, full_name, custom_fields")
+          .eq("tenant_id", tenantId)
+          .is("deleted_at", null)
+          .order("id", { ascending: true })
+          .range(from, from + 999);
+        if (error) throw new Error(error.message);
+        const page = (data ?? []) as { id: string; full_name: string; custom_fields: Record<string, unknown> | null }[];
+        for (const c of page) {
+          const cf = c.custom_fields ?? {};
+          const unitValue = String(cf[unitDefId] ?? "").trim();
+          if (!unitValue) continue;
+          const tokens = significantUnitTokens(unitValue);
+          if (tokens.length !== wantedTokens.length || !wantedTokens.every((t) => tokens.includes(t))) continue;
+          const projectValue = projectDefId ? String(cf[projectDefId] ?? "").trim() : "";
+          if (projectQuery && !normalizeText(projectValue).includes(projectQuery)) continue;
+          matches.push({ id: c.id, full_name: c.full_name, unit: unitValue, project: projectValue || null });
+        }
+        if (page.length < 1000) break;
+      }
+
+      const explicitClientId = String(parameters.client_id ?? "").trim();
+      let client = explicitClientId ? matches.find((m) => m.id === explicitClientId) : undefined;
+      if (!client) {
+        if (matches.length === 0) {
+          throw new Error(`No encontré ninguna unidad "${unitQuery}"${projectQuery ? ` en ${String(parameters.project).trim()}` : ""}. Verifica el número con el administrador.`);
+        }
+        if (matches.length > 1) {
+          return {
+            linked: false,
+            ambiguous: true,
+            message: "Hay más de una coincidencia. Pregúntale al administrador cuál es y vuelve a llamar con client_id.",
+            matches: matches.map((m) => ({ client_id: m.id, name: m.full_name, unit: m.unit, project: m.project })),
+          };
+        }
+        client = matches[0];
+      }
+
+      const preview = {
+        conversation_name: target.contact_name,
+        unit: client.unit,
+        project: client.project,
+        client_name: client.full_name,
+      };
+
+      if (parameters.confirm !== true) {
+        return {
+          linked: false,
+          requires_confirmation: true,
+          target_conversation_id: target.id,
+          client_id: client.id,
+          will_link: preview,
+          message: "Díselo al administrador y pídele que confirme. No ejecutes el paso 2 hasta que responda en un mensaje nuevo.",
+        };
+      }
+
+      // Paso 2: exige una vista previa de ESTE mismo par y que el
+      // administrador haya escrito DESPUÉS de ella (no basta con que el
+      // modelo pase confirm=true en el mismo turno).
+      const { data: previews, error: previewError } = await adminClient
+        .from("ai_tool_executions")
+        .select("result, created_at")
+        .eq("conversation_id", conversationId)
+        .eq("function_name", "link_conversation_to_unit")
+        .is("error_message", null)
+        .order("created_at", { ascending: false })
+        .limit(10);
+      if (previewError) throw new Error(previewError.message);
+      const previewRow = ((previews ?? []) as { result: Record<string, unknown> | null; created_at: string }[]).find(
+        (r) => r.result?.requires_confirmation === true && r.result?.target_conversation_id === target!.id && r.result?.client_id === client!.id,
+      );
+      if (!previewRow) throw new Error("confirmation_required: primero llama sin confirm para mostrar la vista previa al administrador.");
+      const { data: lastInbound } = await adminClient
+        .from("whatsapp_messages")
+        .select("created_at")
+        .eq("conversation_id", conversationId)
+        .eq("direction", "inbound")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!lastInbound || new Date(lastInbound.created_at).getTime() <= new Date(previewRow.created_at).getTime()) {
+        throw new Error("confirmation_required: espera a que el administrador confirme con un mensaje nuevo.");
+      }
+      if (Date.now() - new Date(previewRow.created_at).getTime() > 30 * 60 * 1000) {
+        throw new Error("confirmation_required: la vista previa venció; vuelve a mostrarla y pedir confirmación.");
+      }
+
+      // Enlazar. Si la conversación tenía un cliente auto-creado vacío (la IA
+      // crea uno la primera vez que usa una herramienta), se reasignan sus
+      // reportes y se archiva para no dejar basura en el CRM.
+      const { data: current } = await adminClient
+        .from("whatsapp_conversations")
+        .select("contact_id")
+        .eq("id", target.id)
+        .eq("tenant_id", tenantId)
+        .maybeSingle();
+      const previousClientId = (current?.contact_id as string | null) ?? null;
+
+      const { error: linkError } = await adminClient
+        .from("whatsapp_conversations")
+        .update({ contact_id: client.id })
+        .eq("id", target.id)
+        .eq("tenant_id", tenantId);
+      if (linkError) throw new Error(linkError.message);
+
+      let archivedPlaceholder = false;
+      if (previousClientId && previousClientId !== client.id) {
+        const { data: prev } = await adminClient
+          .from("clients")
+          .select("id, custom_fields")
+          .eq("id", previousClientId)
+          .eq("tenant_id", tenantId)
+          .is("deleted_at", null)
+          .maybeSingle();
+        const prevFields = (prev?.custom_fields ?? {}) as Record<string, unknown>;
+        if (prev && Object.keys(prevFields).length === 0) {
+          await adminClient.from("opportunities").update({ contact_id: client.id }).eq("tenant_id", tenantId).eq("contact_id", previousClientId);
+          const { count: orderCount } = await adminClient
+            .from("sales_orders")
+            .select("id", { count: "exact", head: true })
+            .eq("tenant_id", tenantId)
+            .eq("contact_id", previousClientId);
+          if (!orderCount) {
+            await adminClient.from("clients").update({ deleted_at: new Date().toISOString() }).eq("id", previousClientId).eq("tenant_id", tenantId);
+            archivedPlaceholder = true;
+          }
+        }
+      }
+
+      return { linked: true, ...preview, placeholder_client_archived: archivedPlaceholder };
     }
 
     case "flag_interest_for_followup": {
@@ -1682,6 +2001,93 @@ async function resolveOrCreateContact(
 
   await adminClient.from("whatsapp_conversations").update({ contact_id: newContactId }).eq("id", conversationId);
   return newContactId;
+}
+
+// ---------------------------------------------------------------------------
+// Administración por chat (list_unlinked_conversations / link_conversation_to_unit)
+// ---------------------------------------------------------------------------
+
+function normalizeText(s: string): string {
+  return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+}
+
+const UNIT_STOPWORDS = new Set(["consultorio", "apartamento", "apto", "apt", "oficina", "local", "unidad", "casa", "torre", "el", "la", "de", "del", "numero", "no", "n"]);
+
+/** Tokens alfanuméricos de una unidad sin palabras genéricas, ordenados, para
+ * comparar "Consultorio 305" == "305" sin que "1305" coincida con "305". */
+function significantUnitTokens(value: string): string[] {
+  return normalizeText(value)
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t && !UNIT_STOPWORDS.has(t))
+    .sort();
+}
+
+/** La autorización vive aquí, no en el prompt (misma regla que get_pipeline_report). */
+// deno-lint-ignore no-explicit-any
+async function assertCallerIsAdministrator(adminClient: any, tenantId: string, contactId: string | undefined): Promise<void> {
+  const denied = "not_authorized: esta acción es solo para la administración del negocio.";
+  if (!contactId) throw new Error(denied);
+  const { data: caller, error } = await adminClient
+    .from("clients")
+    .select("tags")
+    .eq("id", contactId)
+    .eq("tenant_id", tenantId)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const tags = ((caller?.tags ?? []) as string[]).map((t) => String(t).trim().toLowerCase());
+  if (!tags.includes("administrador")) throw new Error(denied);
+}
+
+// deno-lint-ignore no-explicit-any
+async function findClientFieldDefId(adminClient: any, tenantId: string, name: string): Promise<string | undefined> {
+  const { data } = await adminClient
+    .from("custom_field_definitions")
+    .select("id, name")
+    .eq("tenant_id", tenantId)
+    .eq("entity_type", "client")
+    .eq("is_active", true)
+    .is("deleted_at", null);
+  return ((data ?? []) as { id: string; name: string }[]).find((d) => normalizeText(d.name) === normalizeText(name))?.id;
+}
+
+/** Conversaciones recientes sin unidad asociada: sin cliente, o con un cliente
+ * que no tiene el campo "Unidad" (p. ej. el vacío que auto-crea la IA). */
+// deno-lint-ignore no-explicit-any
+async function listUnlinkedConversations(adminClient: any, tenantId: string, unitDefId: string | undefined, excludeConversationId: string) {
+  const { data, error } = await adminClient
+    .from("whatsapp_conversations")
+    .select("id, contact_name, contact_id, last_message_at")
+    .eq("tenant_id", tenantId)
+    .neq("id", excludeConversationId)
+    .order("last_message_at", { ascending: false })
+    .limit(60);
+  if (error) throw new Error(error.message);
+  const convs = (data ?? []) as { id: string; contact_name: string | null; contact_id: string | null; last_message_at: string | null }[];
+
+  const clientIds = [...new Set(convs.map((c) => c.contact_id).filter((id): id is string => !!id))];
+  const hasUnit = new Set<string>();
+  if (clientIds.length > 0 && unitDefId) {
+    const { data: clients } = await adminClient.from("clients").select("id, custom_fields").eq("tenant_id", tenantId).in("id", clientIds);
+    for (const c of (clients ?? []) as { id: string; custom_fields: Record<string, unknown> | null }[]) {
+      if (String(c.custom_fields?.[unitDefId] ?? "").trim()) hasUnit.add(c.id);
+    }
+  }
+
+  const pending = convs.filter((c) => !c.contact_id || !hasUnit.has(c.contact_id)).slice(0, 10);
+  const out: { id: string; contact_name: string | null; last_message_at: string | null; last_message: string | null }[] = [];
+  for (const c of pending) {
+    const { data: msg } = await adminClient
+      .from("whatsapp_messages")
+      .select("content")
+      .eq("conversation_id", c.id)
+      .eq("direction", "inbound")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    out.push({ id: c.id, contact_name: c.contact_name, last_message_at: c.last_message_at, last_message: msg?.content ? String(msg.content).slice(0, 120) : null });
+  }
+  return out;
 }
 
 /** Resolves "the customer's most recent order" (cotización or venta -- same

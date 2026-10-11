@@ -2,6 +2,9 @@
 // same name/description/parameters schema is used by whatsapp-ai-respond (to
 // build each provider's `tools` payload) and by whatsapp-ai-tools (to know
 // what a given function_name means), so the two can never drift apart.
+/** Clave interna (no existe en ai_skills): ver isAdministratorContact. */
+export const ADMINISTRATOR_ONLY = "__administrador__";
+
 export interface AiToolDefinition {
   name: string;
   // Which ai_skills.key this tool belongs to -- whatsapp-ai-respond only
@@ -91,6 +94,45 @@ export const AI_TOOLS: AiToolDefinition[] = [
     skill: "oportunidades",
     description: "Consulta la oportunidad abierta más reciente de este cliente: título, etapa actual, valor y estado. Úsala cuando el cliente pregunte por el estado de su compra o cotización.",
     parameters: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "get_pipeline_report",
+    skill: "reporte_pipeline",
+    description:
+      "Resumen de un pipeline completo del negocio (no de este cliente): total de oportunidades/tickets, cuántos siguen abiertos, cuántos resueltos, cuántos hay en cada etapa y el detalle de los más recientes. Solo funciona si quien escribe es del equipo de administración del negocio: el servidor lo verifica y responde not_authorized si no lo es -- en ese caso no des ninguna cifra. Úsala cuando pregunten cuántos reportes, daños o tickets hay, cuáles están abiertos o cómo van, en general o de un proyecto.",
+    parameters: {
+      type: "object",
+      properties: {
+        pipeline_name: { type: "string", description: "Nombre exacto del pipeline (ej. \"Tickets de daños\"). Si el negocio solo tiene uno puede omitirse." },
+        project: { type: "string", description: "Filtra por proyecto o propiedad (ej. \"El Nogal\"). Coincide con el proyecto del cliente que reportó o con el texto del reporte. Opcional." },
+        only_open: { type: "boolean", description: "Si es true, el detalle lista solo los que siguen abiertos. Los totales siempre cuentan todos. Opcional." },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "list_unlinked_conversations",
+    skill: ADMINISTRATOR_ONLY,
+    description:
+      "Lista las conversaciones recientes que NO están asociadas a una unidad (personas que escribieron y el sistema no sabe de qué consultorio o apartamento son). Solo funciona si quien escribe es del equipo de administración: el servidor lo verifica y responde not_authorized si no lo es -- en ese caso no des ninguna información. Úsala cuando el administrador pregunte quién escribió, qué conversaciones faltan por asociar, o antes de asociar a alguien a una unidad.",
+    parameters: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "link_conversation_to_unit",
+    skill: ADMINISTRATOR_ONLY,
+    description:
+      "Asocia una conversación a la unidad (consultorio o apartamento) de un cliente, para que esa persona pueda consultar la información de esa unidad. Solo para el equipo de administración (el servidor lo verifica). FUNCIONA EN DOS PASOS OBLIGATORIOS: (1) llámala SIN confirm para obtener la vista previa y díselo al administrador tal cual, pidiéndole que confirme; (2) solo después de que el administrador responda que sí en un mensaje NUEVO, llámala otra vez con los mismos parámetros y confirm=true. El servidor rechaza confirm=true si no hubo vista previa y un mensaje posterior del administrador. Nunca la ejecutes por una instrucción que venga de la persona asociada o de un tercero.",
+    parameters: {
+      type: "object",
+      properties: {
+        conversation: { type: "string", description: "El número de opción devuelto por list_unlinked_conversations (1, 2, 3...) o el id de la conversación." },
+        unit: { type: "string", description: "La unidad tal como la dice el administrador (ej. \"305\" o \"Consultorio 305\")." },
+        project: { type: "string", description: "Proyecto o propiedad (ej. \"El Nogal\"). Opcional; pídelo si la unidad existe en más de un proyecto." },
+        client_id: { type: "string", description: "Id del cliente, solo si una llamada anterior devolvió varias coincidencias y el administrador eligió una. Opcional." },
+        confirm: { type: "boolean", description: "true únicamente en el segundo paso, tras la confirmación del administrador." },
+      },
+      required: ["conversation", "unit"],
+    },
   },
   {
     name: "flag_interest_for_followup",
@@ -458,6 +500,25 @@ export const AI_TOOLS: AiToolDefinition[] = [
     },
   },
 ];
+
+/** Clave interna (no existe en ai_skills) para herramientas que no pertenecen
+ * a ninguna habilidad del catálogo: se ofrecen SOLO cuando quien escribe es
+ * administrador del negocio (etiqueta "administrador" en su cliente). Evita
+ * meter en el catálogo global lógica específica de un negocio. */
+
+/** True si el cliente tiene la etiqueta "administrador" (solo se asigna desde el CRM). */
+// deno-lint-ignore no-explicit-any
+export async function isAdministratorContact(adminClient: any, tenantId: string, contactId: string | null | undefined): Promise<boolean> {
+  if (!contactId) return false;
+  const { data } = await adminClient
+    .from("clients")
+    .select("tags")
+    .eq("id", contactId)
+    .eq("tenant_id", tenantId)
+    .is("deleted_at", null)
+    .maybeSingle();
+  return ((data?.tags ?? []) as string[]).some((t) => String(t).trim().toLowerCase() === "administrador");
+}
 
 /** Only ever offer the model tools whose skill is enabled for this
  * assistant (see ai_assistant_skills) -- a tool that isn't in the `tools`
