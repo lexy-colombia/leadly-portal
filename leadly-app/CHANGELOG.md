@@ -4,6 +4,12 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.20] - 2026-10-10
+
+### Fixed
+- Notas crédito sobre facturas emitidas entre las 7:00 p. m. y la medianoche: la factura referenciada se declaraba con la fecha del día siguiente. Ahora la nota crédito cita la misma fecha con la que se emitió la factura (hora de Colombia).
+- El campo "Expedición" del PDF de la factura usaba esa misma fecha desfasada y se corrigió.
+
 ## [1.0.19] - 2026-10-07
 
 ### Added

@@ -21,6 +21,7 @@
  * complejidad de un bucket/columna nueva para esto todavía. */
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type RGB } from "npm:pdf-lib@1.17.1";
 import QRCode from "npm:qrcode@1.5.4";
+import { colombiaDateOfInstant } from "./colombiaTime.ts";
 
 export interface InvoicePdfBuyer {
   full_name: string | null;
@@ -127,6 +128,12 @@ const TAX_TYPE_LABEL: Record<string, string> = { "01": "IVA", "02": "IC", "03": 
 
 function money(value: number): string {
   return new Intl.NumberFormat("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+}
+
+/** Fecha de expedición tal como el documento la declaró ante la DIAN
+ * (cbc:IssueDate = fecha de pared de Colombia del instante issue_date). */
+function formatIssueDateCo(iso: string | null): string {
+  return colombiaDateOfInstant(iso) ?? "—";
 }
 
 function formatDateEs(iso: string | null): string {
@@ -444,7 +451,7 @@ export async function buildInvoicePdf(input: BuildInvoicePdfInput): Promise<Uint
   ]
   // "Expedición" es la fecha en que la DIAN recibió el documento: en una
   // remisión no existe ese concepto, así que la fila no se dibuja.
-  if (!input.isRemision) rightBoxLines.push(["Expedición:", isValidated ? formatDateEs(input.issueDate) : "Pendiente"])
+  if (!input.isRemision) rightBoxLines.push(["Expedición:", isValidated ? formatIssueDateCo(input.issueDate) : "Pendiente"])
   rightBoxLines.push(["Método de pago:", input.paymentMethodLabel ?? "—"])
   if (input.referenceNote) rightBoxLines.push(["Referencia:", input.referenceNote])
   // Mismo cuerpo de texto (7.5pt) e interlineado proporcional que el bloque

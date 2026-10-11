@@ -31,3 +31,14 @@ export function colombiaIssueMoment(instant: Date = new Date()): ColombiaIssueMo
   const iso = shifted.toISOString();
   return { issueDate: iso.slice(0, 10), issueTime: iso.slice(11, 19) + COLOMBIA_OFFSET_SUFFIX };
 }
+
+/** Fecha (YYYY-MM-DD) de pared de Colombia de un instante guardado como
+ * timestamptz (string ISO tal como lo devuelve PostgREST, o Date). Devuelve
+ * null si el valor es null/vacío o no es una fecha válida, para que el
+ * caller aplique su propio fallback. */
+export function colombiaDateOfInstant(value: string | Date | null | undefined): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return colombiaIssueMoment(d).issueDate;
+}
