@@ -4,6 +4,14 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.26] - 2026-10-13
+
+### Added
+- Los **4 planes de Leadly** cargados con los nombres y precios de la página pública: Starter ($69.900), Business ($140.000), Business AI ($299.000) y Enterprise (a medida), con sus límites de usuarios, bodegas, puntos de venta, líneas de WhatsApp y agentes de IA, y los módulos que incluye cada uno.
+
+### Removed
+- Los tres planes de prueba (Starter $199.000, Growth y Scale) y las dos suscripciones del comercio de pruebas que dependían de ellos.
+
 ## [1.0.25] - 2026-10-13
 
 ### Added
