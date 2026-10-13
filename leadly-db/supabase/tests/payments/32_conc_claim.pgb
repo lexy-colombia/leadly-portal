@@ -1,0 +1,2 @@
+SET ROLE service_role;
+insert into public.t_claim select (x->>'delivery_id')::uuid from jsonb_array_elements(public.payments_claim_deliveries(7)) x;

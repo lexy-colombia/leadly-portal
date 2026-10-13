@@ -3,27 +3,30 @@ import { listBillingPlans } from '../../lib/api/billing'
 import type { BillingPlan } from '../../types/domain'
 import { PageSpinner } from '@/components/atoms'
 import { Card, EmptyState, Pagination } from '@/components/molecules'
-import { CreditCardIcon, PencilIcon, PlusIcon, ReceiptIcon } from '@/components/atoms/icons'
+import { CreditCardIcon, PencilIcon, PlusIcon, ReceiptIcon, WalletIcon } from '@/components/atoms/icons'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PlanDrawer } from './billing/PlanDrawer'
 import { InvoicesSection } from './billing/InvoicesSection'
+import { PaymentLinksSection } from './billing/PaymentLinksSection'
 import { useLanguage } from '../../contexts/LanguageContext'
 import type { TranslationKey } from '../../i18n/translations'
 
 const PAGE_SIZE = 8
 
-const TABS = ['planes', 'facturas'] as const
+const TABS = ['planes', 'facturas', 'links'] as const
 type Tab = (typeof TABS)[number]
 const TAB_LABEL_KEY: Record<Tab, TranslationKey> = {
   planes: 'backoffice.facturacion.tabs.planes',
   facturas: 'backoffice.facturacion.tabs.facturas',
+  links: 'backoffice.facturacion.tabs.links',
 }
 const TAB_ICON: Record<Tab, typeof CreditCardIcon> = {
   planes: CreditCardIcon,
   facturas: ReceiptIcon,
+  links: WalletIcon,
 }
 
 function PlansSection() {
@@ -83,7 +86,11 @@ function PlansSection() {
                   {pageItems.map((plan) => (
                     <TableRow key={plan.id} onClick={() => setDrawer({ open: true, plan })} className="cursor-pointer">
                       <TableCell className="font-medium text-brand-800">{plan.name}</TableCell>
-                      <TableCell>{new Intl.NumberFormat('es-CO', { style: 'currency', currency: plan.currency, maximumFractionDigits: 0 }).format(plan.amount_cents / 100)}</TableCell>
+                      <TableCell>
+                        {plan.is_custom
+                          ? t('backoffice.facturacion.table.custom')
+                          : new Intl.NumberFormat('es-CO', { style: 'currency', currency: plan.currency, maximumFractionDigits: 0 }).format(plan.amount_cents / 100)}
+                      </TableCell>
                       <TableCell>{plan.billing_interval === 'monthly' ? t('backoffice.facturacion.interval.monthly') : t('backoffice.facturacion.interval.yearly')}</TableCell>
                       <TableCell className="text-brand-500">{plan.max_users ?? t('backoffice.facturacion.table.maxUsers.unlimited')}</TableCell>
                       <TableCell className="text-brand-500">{plan.max_whatsapp_lines ?? t('backoffice.facturacion.table.maxUsers.unlimited')}</TableCell>
@@ -138,6 +145,9 @@ export function Billing() {
         </TabsContent>
         <TabsContent value="facturas">
           <InvoicesSection />
+        </TabsContent>
+        <TabsContent value="links">
+          <PaymentLinksSection />
         </TabsContent>
       </Tabs>
     </div>

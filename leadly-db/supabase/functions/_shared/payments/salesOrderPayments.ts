@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { getAdapter, makeSecretGetter, resolveCredential } from "./registry.ts";
+import { paymentReturnUrl } from "../publicAppUrl.ts";
 
 function formatOrderCode(number: number): string {
   return String(number).padStart(3, "0");
@@ -42,7 +43,7 @@ async function resolveConfirmedOrderBalance(
 
 /** Creates a real Wompi payment link for a confirmed sales order, for its
  * exact remaining balance. Persists a sales_order_payment_links row so
- * payment-webhook-wompi can find its way back to this specific order once
+ * payments-api (/v1/events/wompi) can find its way back to this specific order once
  * the customer actually pays -- without this bridge (which didn't exist
  * before 2026-08-25), a completed Wompi payment had nowhere to land: the
  * checkout worked but the order never found out. Called from both
@@ -54,12 +55,11 @@ export async function createSalesOrderPaymentLink(
   tenantId: string,
   orderId: string,
   createdBy: string | null,
-  // Opcional a propósito: quien paga desde WhatsApp (generate_payment_link
-  // de la IA, o el link manual de create-sales-order-payment-link) no tiene
-  // sesión en ningún portal -- no hay todavía un destino público razonable
-  // para esos dos, así que siguen sin redirect (decisión explícita del
-  // usuario, 2026-08-26). Solo el checkout de la tienda pública lo manda: el
-  // comprador SÍ sigue en un browser real, en esa misma tienda.
+  // Opcional. Un redirectUrl explícito SIEMPRE gana (la tienda pública manda el
+  // suyo, `?payment=return`, y su contrato no cambia). Sin él, el comprador
+  // vuelve a la página pública de resultado del SPA (/pago/resultado?link=<id de
+  // esta fila>), que solo muestra el estado que el backend ya conoce por el
+  // webhook: nunca decide si el pago fue aprobado.
   redirectUrl?: string,
 ): Promise<{ checkoutUrl: string; amount: number; orderCode: string }> {
   const order = await resolveConfirmedOrderBalance(adminClient, tenantId, orderId);
@@ -71,15 +71,19 @@ export async function createSalesOrderPaymentLink(
   const orderCode = formatOrderCode(order.number);
   const currency = order.currency ?? "COP";
 
+  // El id de la fila se genera ANTES de crear el checkout para poder armar el
+  // redirect por defecto con él; se inserta la fila con ese mismo id.
+  const linkRowId = crypto.randomUUID();
   const result = await adapter.createCheckout(credential, getSecret, {
     invoiceId: `order-${order.number}-${Date.now()}`,
     amountCents: Math.round(balanceDue * 100),
     currency,
     description: `Pago pedido ${orderCode}`,
-    redirectUrl,
+    redirectUrl: redirectUrl ?? paymentReturnUrl(linkRowId),
   });
 
   const { error: linkError } = await adminClient.from("sales_order_payment_links").insert({
+    id: linkRowId,
     tenant_id: tenantId,
     order_id: orderId,
     provider_key: "wompi",
@@ -129,7 +133,7 @@ export async function chargeSalesOrderToCredit(
   return { amount: order.balanceDue, orderCode: formatOrderCode(order.number) };
 }
 
-/** The receiving half of the bridge above -- called from payment-webhook-wompi
+/** The receiving half of the bridge above -- called from payments-api (/v1/events/wompi)
  * after a `payment_invoices` lookup misses (that table is Leadly's own SaaS
  * billing to its tenants, a completely different concern, see that
  * function's header). Idempotent the same way applyWebhookEvent.ts is: a
@@ -169,10 +173,19 @@ export async function applySalesOrderPaymentWebhookEvent(
     payment_link_id: link.id,
   });
   if (insertError) {
-    // 23505 = sales_order_payments_payment_link_idx already has a row for
-    // this link (a redelivered webhook racing an earlier one that already
-    // succeeded) -- already handled, not a real failure.
-    if (insertError.code === "23505") return { handled: true, orderId: link.order_id };
+    // 23505 = violacion de un indice unico. Se distingue POR NOMBRE de constraint:
+    //  - sales_order_payments_payment_link_idx: ya hay un pago para este link (una
+    //    reentrega concurrente que gano la carrera) -> ya manejado, no es un fallo.
+    //  - sales_order_payments_wompi_transaction_uidx (propuesta 20261011210100): la
+    //    MISMA transaccion ya acredito otro pago -> conflicto real, NUNCA "ya manejado".
+    //  - cualquier otro 23505: se conserva el comportamiento historico (ya manejado).
+    if (insertError.code === "23505") {
+      const msg = `${insertError.message ?? ""} ${(insertError as { details?: string }).details ?? ""}`;
+      if (msg.includes("sales_order_payments_wompi_transaction_uidx")) {
+        throw new Error("transaction_already_applied_to_another_payment");
+      }
+      return { handled: true, orderId: link.order_id };
+    }
     throw new Error(insertError.message);
   }
 

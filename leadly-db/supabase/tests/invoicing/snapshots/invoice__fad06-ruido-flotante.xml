@@ -1,0 +1,261 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?><Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2" xmlns:ds="http://www.w3.org/2000/09/xmldsig#" xmlns:ext="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2" xmlns:sts="dian:gov:co:facturaelectronica:Structures-2-1" xmlns:xades="http://uri.etsi.org/01903/v1.3.2#" xmlns:xades141="http://uri.etsi.org/01903/v1.4.1#" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2     http://docs.oasis-open.org/ubl/os-UBL-2.1/xsd/maindoc/UBL-Invoice-2.1.xsd">
+   <ext:UBLExtensions>
+      <ext:UBLExtension>
+         <ext:ExtensionContent>
+            <sts:DianExtensions>
+               <sts:InvoiceControl>
+                  <sts:InvoiceAuthorization>18760000000001</sts:InvoiceAuthorization>
+                  <sts:AuthorizationPeriod>
+                     <cbc:StartDate>2026-01-01</cbc:StartDate>
+                     <cbc:EndDate>2027-12-31</cbc:EndDate>
+                  </sts:AuthorizationPeriod>
+                  <sts:AuthorizedInvoices>
+                     <sts:Prefix>FE</sts:Prefix>
+                     <sts:From>1</sts:From>
+                     <sts:To>1000</sts:To>
+                  </sts:AuthorizedInvoices>
+               </sts:InvoiceControl>
+               <sts:InvoiceSource>
+                  <cbc:IdentificationCode listAgencyID="6" listAgencyName="United Nations Economic Commission for Europe" listSchemeURI="urn:oasis:names:specification:ubl:codelist:gc:CountryIdentificationCode-2.1">CO</cbc:IdentificationCode>
+               </sts:InvoiceSource>
+               <sts:SoftwareProvider>
+                  <sts:ProviderID schemeAgencyID="195" schemeAgencyName="CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)" schemeID="0" schemeName="31">900100200</sts:ProviderID>
+                  <sts:SoftwareID schemeAgencyID="195" schemeAgencyName="CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)">00000000-0000-4000-8000-000000000000</sts:SoftwareID>
+               </sts:SoftwareProvider>
+               <sts:SoftwareSecurityCode schemeAgencyID="195" schemeAgencyName="CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)">d67795aef592b3753f6113412b017142206f9c0f1446f0e069c19af66141d2f6530c8edac6bd2c79eb740167a7703c29</sts:SoftwareSecurityCode>
+               <sts:AuthorizationProvider>
+                  <sts:AuthorizationProviderID schemeAgencyID="195" schemeAgencyName="CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)" schemeID="4" schemeName="31">800197268</sts:AuthorizationProviderID>
+               </sts:AuthorizationProvider>
+               <sts:QRCode>NroFactura=FE104
+NitFacturador=900100200
+NitAdquiriente=1000000001
+FechaFactura=2026-09-12
+ValorTotalFactura=80000.00
+CUFE=3ddcfa90b7f64642a10b1c309ec8240a51de61b660c4866e391903ad55faf72fd4cde32167548c61539de914f9091abd
+URL=https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=3ddcfa90b7f64642a10b1c309ec8240a51de61b660c4866e391903ad55faf72fd4cde32167548c61539de914f9091abd</sts:QRCode>
+            </sts:DianExtensions>
+         </ext:ExtensionContent>
+      </ext:UBLExtension>
+      <ext:UBLExtension><ext:ExtensionContent/></ext:UBLExtension>
+   </ext:UBLExtensions>
+   <cbc:UBLVersionID>UBL 2.1</cbc:UBLVersionID>
+   <cbc:CustomizationID>10</cbc:CustomizationID>
+   <cbc:ProfileID>DIAN 2.1: Factura Electrónica de Venta</cbc:ProfileID>
+   <cbc:ProfileExecutionID>1</cbc:ProfileExecutionID>
+   <cbc:ID>FE104</cbc:ID>
+   <cbc:UUID schemeID="1" schemeName="CUFE-SHA384">3ddcfa90b7f64642a10b1c309ec8240a51de61b660c4866e391903ad55faf72fd4cde32167548c61539de914f9091abd</cbc:UUID>
+   <cbc:IssueDate>2026-09-12</cbc:IssueDate>
+   <cbc:IssueTime>15:00:00-05:00</cbc:IssueTime>
+   <cbc:InvoiceTypeCode>01</cbc:InvoiceTypeCode>
+   <cbc:DocumentCurrencyCode listAgencyID="6" listAgencyName="United Nations Economic Commission for Europe" listID="ISO 4217 Alpha">COP</cbc:DocumentCurrencyCode>
+   <cbc:LineCountNumeric>3</cbc:LineCountNumeric>
+   <cac:AccountingSupplierParty>
+      <cbc:AdditionalAccountID>1</cbc:AdditionalAccountID>
+      <cac:Party>
+         <cac:PartyName>
+            <cbc:Name>COMERCIAL DE PRUEBA S.A.S.</cbc:Name>
+         </cac:PartyName>
+         <cac:PhysicalLocation>
+            <cac:Address>
+               <cbc:ID>11001</cbc:ID>
+               <cbc:CityName>Bogotá D.C.</cbc:CityName>
+               <cbc:CountrySubentity>Bogotá D.C.</cbc:CountrySubentity>
+               <cbc:CountrySubentityCode>11</cbc:CountrySubentityCode>
+               <cac:AddressLine>
+                  <cbc:Line>Calle 1 # 2-3</cbc:Line>
+               </cac:AddressLine>
+               <cac:Country>
+                  <cbc:IdentificationCode>CO</cbc:IdentificationCode>
+                  <cbc:Name languageID="es">Colombia</cbc:Name>
+               </cac:Country>
+            </cac:Address>
+         </cac:PhysicalLocation>
+         <cac:PartyTaxScheme>
+            <cbc:RegistrationName>COMERCIAL DE PRUEBA S.A.S.</cbc:RegistrationName>
+            <cbc:CompanyID schemeAgencyID="195" schemeAgencyName="CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)" schemeID="0" schemeName="31">900100200</cbc:CompanyID>
+            <cbc:TaxLevelCode>R-99-PN</cbc:TaxLevelCode>
+            <cac:RegistrationAddress>
+               <cbc:ID>11001</cbc:ID>
+               <cbc:CityName>Bogotá D.C.</cbc:CityName>
+               <cbc:CountrySubentity>Bogotá D.C.</cbc:CountrySubentity>
+               <cbc:CountrySubentityCode>11</cbc:CountrySubentityCode>
+               <cac:AddressLine>
+                  <cbc:Line>Calle 1 # 2-3</cbc:Line>
+               </cac:AddressLine>
+               <cac:Country>
+                  <cbc:IdentificationCode>CO</cbc:IdentificationCode>
+                  <cbc:Name languageID="es">Colombia</cbc:Name>
+               </cac:Country>
+            </cac:RegistrationAddress>
+            <cac:TaxScheme>
+               <cbc:ID>01</cbc:ID>
+               <cbc:Name>IVA</cbc:Name>
+            </cac:TaxScheme>
+         </cac:PartyTaxScheme>
+         <cac:PartyLegalEntity>
+            <cbc:RegistrationName>COMERCIAL DE PRUEBA S.A.S.</cbc:RegistrationName>
+            <cbc:CompanyID schemeAgencyID="195" schemeAgencyName="CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)" schemeID="0" schemeName="31">900100200</cbc:CompanyID>
+            <cac:CorporateRegistrationScheme>
+               <cbc:ID>FE</cbc:ID>
+            </cac:CorporateRegistrationScheme>
+         </cac:PartyLegalEntity>
+         <cac:Contact>
+            <cbc:ElectronicMail>facturacion@example.invalid</cbc:ElectronicMail>
+         </cac:Contact>
+      </cac:Party>
+   </cac:AccountingSupplierParty>
+   <cac:AccountingCustomerParty>
+      <cbc:AdditionalAccountID>2</cbc:AdditionalAccountID>
+      <cac:Party>
+         <cac:PartyIdentification>
+            <cbc:ID schemeAgencyID="195" schemeAgencyName="CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)" schemeID="9" schemeName="13">1000000001</cbc:ID>
+         </cac:PartyIdentification>
+         <cac:PartyName>
+            <cbc:Name>COMPRADOR DE PRUEBA</cbc:Name>
+         </cac:PartyName>
+         <cac:PhysicalLocation>
+            <cac:Address>
+               <cbc:ID>05001</cbc:ID>
+               <cbc:CityName>Medellín</cbc:CityName>
+               <cbc:CountrySubentity>Antioquia</cbc:CountrySubentity>
+               <cbc:CountrySubentityCode>05</cbc:CountrySubentityCode>
+               <cac:AddressLine>
+                  <cbc:Line>Carrera 4 # 5-6</cbc:Line>
+               </cac:AddressLine>
+               <cac:Country>
+                  <cbc:IdentificationCode>CO</cbc:IdentificationCode>
+                  <cbc:Name languageID="es">Colombia</cbc:Name>
+               </cac:Country>
+            </cac:Address>
+         </cac:PhysicalLocation>
+         <cac:PartyTaxScheme>
+            <cbc:RegistrationName>COMPRADOR DE PRUEBA</cbc:RegistrationName>
+            <cbc:CompanyID schemeAgencyID="195" schemeAgencyName="CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)" schemeID="9" schemeName="13">1000000001</cbc:CompanyID>
+            <cbc:TaxLevelCode>R-99-PN</cbc:TaxLevelCode>
+            <cac:RegistrationAddress>
+               <cbc:ID>05001</cbc:ID>
+               <cbc:CityName>Medellín</cbc:CityName>
+               <cbc:CountrySubentity>Antioquia</cbc:CountrySubentity>
+               <cbc:CountrySubentityCode>05</cbc:CountrySubentityCode>
+               <cac:AddressLine>
+                  <cbc:Line>Carrera 4 # 5-6</cbc:Line>
+               </cac:AddressLine>
+               <cac:Country>
+                  <cbc:IdentificationCode>CO</cbc:IdentificationCode>
+                  <cbc:Name languageID="es">Colombia</cbc:Name>
+               </cac:Country>
+            </cac:RegistrationAddress>
+            <cac:TaxScheme>
+               <cbc:ID>01</cbc:ID>
+               <cbc:Name>IVA</cbc:Name>
+            </cac:TaxScheme>
+         </cac:PartyTaxScheme>
+         <cac:PartyLegalEntity>
+            <cbc:RegistrationName>COMPRADOR DE PRUEBA</cbc:RegistrationName>
+            <cbc:CompanyID schemeAgencyID="195" schemeAgencyName="CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)" schemeID="9" schemeName="13">1000000001</cbc:CompanyID>
+         </cac:PartyLegalEntity>
+      </cac:Party>
+   </cac:AccountingCustomerParty>
+   <cac:PaymentMeans>
+      <cbc:ID>1</cbc:ID>
+      <cbc:PaymentMeansCode>10</cbc:PaymentMeansCode>
+   </cac:PaymentMeans>
+   <cac:TaxTotal>
+      <cbc:TaxAmount currencyID="COP">5925.93</cbc:TaxAmount>
+      <cac:TaxSubtotal>
+         <cbc:TaxableAmount currencyID="COP">74074.07</cbc:TaxableAmount>
+         <cbc:TaxAmount currencyID="COP">5925.93</cbc:TaxAmount>
+         <cac:TaxCategory>
+            <cbc:Percent>8.00</cbc:Percent>
+            <cac:TaxScheme>
+               <cbc:ID>04</cbc:ID>
+               <cbc:Name>INC</cbc:Name>
+            </cac:TaxScheme>
+         </cac:TaxCategory>
+      </cac:TaxSubtotal>
+   </cac:TaxTotal>
+   <cac:LegalMonetaryTotal>
+      <cbc:LineExtensionAmount currencyID="COP">74074.07</cbc:LineExtensionAmount>
+      <cbc:TaxExclusiveAmount currencyID="COP">74074.07</cbc:TaxExclusiveAmount>
+      <cbc:TaxInclusiveAmount currencyID="COP">80000.00</cbc:TaxInclusiveAmount>
+      <cbc:PayableAmount currencyID="COP">80000.00</cbc:PayableAmount>
+   </cac:LegalMonetaryTotal>
+   <cac:InvoiceLine>
+      <cbc:ID>1</cbc:ID>
+      <cbc:InvoicedQuantity unitCode="EA">1.000000</cbc:InvoicedQuantity>
+      <cbc:LineExtensionAmount currencyID="COP">52777.78</cbc:LineExtensionAmount>
+      <cac:TaxTotal>
+         <cbc:TaxAmount currencyID="COP">4222.22</cbc:TaxAmount>
+         <cac:TaxSubtotal>
+            <cbc:TaxableAmount currencyID="COP">52777.78</cbc:TaxableAmount>
+            <cbc:TaxAmount currencyID="COP">4222.22</cbc:TaxAmount>
+            <cac:TaxCategory>
+               <cbc:Percent>8.00</cbc:Percent>
+               <cac:TaxScheme>
+                  <cbc:ID>04</cbc:ID>
+                  <cbc:Name>INC</cbc:Name>
+               </cac:TaxScheme>
+            </cac:TaxCategory>
+         </cac:TaxSubtotal>
+      </cac:TaxTotal>
+      <cac:Item>
+         <cbc:Description>L1</cbc:Description>
+      </cac:Item>
+      <cac:Price>
+         <cbc:PriceAmount currencyID="COP">52777.78</cbc:PriceAmount>
+         <cbc:BaseQuantity unitCode="EA">1.000000</cbc:BaseQuantity>
+      </cac:Price>
+   </cac:InvoiceLine>
+   <cac:InvoiceLine>
+      <cbc:ID>2</cbc:ID>
+      <cbc:InvoicedQuantity unitCode="EA">1.000000</cbc:InvoicedQuantity>
+      <cbc:LineExtensionAmount currencyID="COP">17592.59</cbc:LineExtensionAmount>
+      <cac:TaxTotal>
+         <cbc:TaxAmount currencyID="COP">1407.41</cbc:TaxAmount>
+         <cac:TaxSubtotal>
+            <cbc:TaxableAmount currencyID="COP">17592.59</cbc:TaxableAmount>
+            <cbc:TaxAmount currencyID="COP">1407.41</cbc:TaxAmount>
+            <cac:TaxCategory>
+               <cbc:Percent>8.00</cbc:Percent>
+               <cac:TaxScheme>
+                  <cbc:ID>04</cbc:ID>
+                  <cbc:Name>INC</cbc:Name>
+               </cac:TaxScheme>
+            </cac:TaxCategory>
+         </cac:TaxSubtotal>
+      </cac:TaxTotal>
+      <cac:Item>
+         <cbc:Description>L2</cbc:Description>
+      </cac:Item>
+      <cac:Price>
+         <cbc:PriceAmount currencyID="COP">17592.59</cbc:PriceAmount>
+         <cbc:BaseQuantity unitCode="EA">1.000000</cbc:BaseQuantity>
+      </cac:Price>
+   </cac:InvoiceLine>
+   <cac:InvoiceLine>
+      <cbc:ID>3</cbc:ID>
+      <cbc:InvoicedQuantity unitCode="EA">1.000000</cbc:InvoicedQuantity>
+      <cbc:LineExtensionAmount currencyID="COP">3703.70</cbc:LineExtensionAmount>
+      <cac:TaxTotal>
+         <cbc:TaxAmount currencyID="COP">296.30</cbc:TaxAmount>
+         <cac:TaxSubtotal>
+            <cbc:TaxableAmount currencyID="COP">3703.70</cbc:TaxableAmount>
+            <cbc:TaxAmount currencyID="COP">296.30</cbc:TaxAmount>
+            <cac:TaxCategory>
+               <cbc:Percent>8.00</cbc:Percent>
+               <cac:TaxScheme>
+                  <cbc:ID>04</cbc:ID>
+                  <cbc:Name>INC</cbc:Name>
+               </cac:TaxScheme>
+            </cac:TaxCategory>
+         </cac:TaxSubtotal>
+      </cac:TaxTotal>
+      <cac:Item>
+         <cbc:Description>L3</cbc:Description>
+      </cac:Item>
+      <cac:Price>
+         <cbc:PriceAmount currencyID="COP">3703.70</cbc:PriceAmount>
+         <cbc:BaseQuantity unitCode="EA">1.000000</cbc:BaseQuantity>
+      </cac:Price>
+   </cac:InvoiceLine>
+</Invoice>

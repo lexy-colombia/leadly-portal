@@ -105,7 +105,7 @@ Deno.serve(async (req) => {
   }
   // Mismo catálogo que sales_order_payments.method en el resto del sistema
   // (ver PAYMENT_METHOD_LABEL_KEY en orderPayments.ts) -- 'wompi' queda
-  // afuera porque ese método solo lo escribe payment-webhook-wompi cuando
+  // afuera porque ese método solo lo escribe payments-api (/v1/events/wompi) cuando
   // un link se paga de verdad, nunca una selección manual. 'credito' y
   // 'saldo_favor' se aceptan acá igual que en el portal: la validación real
   // (¿el cliente tiene crédito habilitado? ¿alcanza el saldo a favor?) la

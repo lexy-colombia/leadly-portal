@@ -1,0 +1,22 @@
+{
+  "paymentResult.loading": "Checking your payment...",
+  "paymentResult.paid.title": "Payment received",
+  "paymentResult.paid.description": "We confirmed your payment. You can close this page.",
+  "paymentResult.pending.title": "We are confirming your payment",
+  "paymentResult.pending.description": "This can take a few seconds. Please keep this page open.",
+  "paymentResult.pending.timeout": "We are still confirming your payment; we will let you know.",
+  "paymentResult.declined.title": "Your last attempt was declined",
+  "paymentResult.declined.description": "You can try again with the same payment link.",
+  "paymentResult.declined.checking": "If you already tried again, we are still waiting for the confirmation.",
+  "paymentResult.closed.title": "This payment link is no longer available",
+  "paymentResult.closed.description": "The link expired or was cancelled. If you still need to pay, ask for a new one.",
+  "paymentResult.voided.title": "Payment voided",
+  "paymentResult.voided.description": "This payment was voided. If you have questions, contact whoever sent you the link.",
+  "paymentResult.error.title": "There was a problem with this charge",
+  "paymentResult.error.description": "This payment link could not be completed. Ask whoever sent it for a new one.",
+  "paymentResult.unknown.title": "We could not find this payment",
+  "paymentResult.unknown.description": "Make sure you opened the full link, or ask for a new one.",
+  "paymentResult.network.title": "We could not check your payment",
+  "paymentResult.network.description": "Check your connection and try again.",
+  "paymentResult.network.retry": "Try again"
+}

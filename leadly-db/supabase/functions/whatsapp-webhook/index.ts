@@ -6,7 +6,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/cors.ts";
-import { downloadWhatsappMedia, verifyMetaSignature } from "../_shared/whatsapp.ts";
+import { downloadWhatsappMedia, isBsuid, verifyMetaSignature } from "../_shared/whatsapp.ts";
 import { splitPhone } from "../_shared/phone.ts";
 
 const ATTACHMENT_MIME_TO_EXT: Record<string, string> = {
@@ -93,8 +93,22 @@ Deno.serve(async (req: Request) => {
         const { data: alreadyProcessed } = await adminClient.from("whatsapp_messages").select("id").eq("wamid", message.id).maybeSingle();
         if (alreadyProcessed) continue;
 
-        const contactPhone = message.from;
-        const contactName = value.contacts?.find((c) => c.wa_id === contactPhone)?.profile?.name ?? null;
+        // Con nombres de usuario de WhatsApp, `from` puede venir vacío y el
+        // identificador llega como BSUID (`from_user_id`/`user_id`). Antes eso
+        // tumbaba el webhook (contact_phone null) y el mensaje se perdía.
+        const contactEntry = value.contacts?.[0];
+        const contactPhone = message.from ?? message.from_user_id ?? message.user_id ?? contactEntry?.wa_id ?? contactEntry?.user_id;
+        if (!contactPhone) {
+          console.error("Inbound message without any sender identifier", JSON.stringify({ message: { ...message, text: undefined }, contacts: value.contacts }));
+          continue;
+        }
+        if (!message.from) {
+          console.warn("Inbound message without `from`, using alternate id", JSON.stringify({ id: message.id, keys: Object.keys(message), contacts: value.contacts }));
+        }
+        const contactName =
+          value.contacts?.find((c) => c.wa_id === contactPhone || c.user_id === contactPhone)?.profile?.name ??
+          contactEntry?.profile?.name ??
+          null;
         const content = extractMessageText(message);
 
         let media: { path: string; mimeType: string; sizeBytes: number } | null = null;
@@ -140,15 +154,20 @@ Deno.serve(async (req: Request) => {
         // 20260904000000_clients_phone_prefix_split.sql -- contactPhone acá
         // sigue siendo el wa_id completo que manda Meta, hay que partirlo
         // para matchear contra las dos columnas.
-        const { dialCode: contactDialCode, localNumber: contactLocalNumber } = splitPhone(contactPhone);
-        const { data: existingContact } = await adminClient
-          .from("clients")
-          .select("id")
-          .eq("tenant_id", line.tenant_id)
-          .eq("phone_prefix", contactDialCode)
-          .eq("phone", contactLocalNumber)
-          .is("deleted_at", null)
-          .maybeSingle();
+        // Un BSUID no es un teléfono: no hay cliente que matchear por número.
+        let existingContact: { id: string } | null = null;
+        if (!isBsuid(contactPhone)) {
+          const { dialCode: contactDialCode, localNumber: contactLocalNumber } = splitPhone(contactPhone);
+          const { data } = await adminClient
+            .from("clients")
+            .select("id")
+            .eq("tenant_id", line.tenant_id)
+            .eq("phone_prefix", contactDialCode)
+            .eq("phone", contactLocalNumber)
+            .is("deleted_at", null)
+            .maybeSingle();
+          existingContact = data;
+        }
 
         const contactId = existingContact?.id ?? null;
 
@@ -166,7 +185,11 @@ Deno.serve(async (req: Request) => {
                   whatsapp_line_id: line.id,
                   contact_phone: contactPhone,
                   contact_name: contactName,
-                  contact_id: contactId ?? null,
+                  // Solo se envía contact_id si se resolvió uno: con `null` el
+                  // upsert PISABA un enlace hecho a mano (Inbox o el chat de
+                  // administración) en cada mensaje entrante cuando el número
+                  // no coincide con ningún cliente (siempre el caso de un BSUID).
+                  ...(contactId ? { contact_id: contactId } : {}),
                 },
                 { onConflict: "whatsapp_line_id,contact_phone", ignoreDuplicates: false },
               )
@@ -313,7 +336,9 @@ function extractMessageText(message: MetaMessage): string {
 }
 
 interface MetaMessage {
-  from: string;
+  from?: string;
+  from_user_id?: string;
+  user_id?: string;
   id: string;
   type: string;
   text?: { body: string };
@@ -328,7 +353,7 @@ interface MetaWebhookPayload {
       field: string;
       value: {
         metadata?: { phone_number_id: string };
-        contacts?: { wa_id: string; profile?: { name?: string } }[];
+        contacts?: { wa_id?: string; user_id?: string; profile?: { name?: string } }[];
         messages?: MetaMessage[];
       };
     }[];

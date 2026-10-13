@@ -16,45 +16,10 @@ import { resolveTenantIntegrationCredential, makeIntegrationSecretGetter } from 
 import { loadTenantCertificate, createMtlsClient, uint8ToBase64 } from "./dianClient.ts";
 import { pollDianTrackStatus, parseOneStatus } from "./getDianStatus.ts";
 import { interpretDianStatus, applyCreditNoteVerdict } from "./applyDianVerdict.ts";
-import { colombiaIssueMoment } from "./colombiaTime.ts";
+import { buildCreditNoteXmlInput, type CreditNoteBuyerSnapshot as BuyerSnapshot, type CreditNoteSellerSnapshot as SellerSnapshot } from "./creditNoteInput.ts";
 import { storeSignedXml } from "./storeSignedXml.ts";
 
 const PROVIDER_KEY = "dian_directo";
-
-interface BuyerSnapshot {
-  document_type_code: string | null;
-  document_number: string | null;
-  full_name: string | null;
-  applies_withholding?: boolean;
-  /** Correo del cliente -- ya viene en el snapshot desde
-   * queueInvoiceGeneration.ts. Lo exige la regla CAK55 de la NOTA CRÉDITO
-   * (en la factura el correo obligatorio es el del emisor, FAJ71; acá es
-   * también el del comprador). */
-  email?: string | null;
-  address: {
-    line1: string | null;
-    line2: string | null;
-    city: string | null;
-    state_province: string | null;
-    country: string | null;
-    city_code?: string | null;
-    state_code?: string | null;
-  } | null;
-}
-interface SellerSnapshot {
-  legal_name: string | null;
-  document_number: string | null;
-  city: string | null;
-  city_code?: string | null;
-  state_code?: string | null;
-  billing_address: string | null;
-  country: string | null;
-  state_province: string | null;
-  is_self_withholding_agent?: boolean;
-  /** Ver buildInvoiceXml.ts (regla FAJ71) -- copiado tal cual del
-   * seller_snapshot de la factura referenciada. */
-  contact_email?: string | null;
-}
 
 export interface SendCreditNoteResult {
   /** Mismo criterio que SendInvoiceResult (ver sendInvoiceToDian.ts) --
@@ -178,74 +143,24 @@ async function doSendCreditNoteToDian(adminClient: any, tenantId: string, credit
     .order("paid_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  const PAYMENT_MEANS_CODE: Record<string, string> = {
-    efectivo: "10",
-    transferencia: "42",
-    wompi: "42",
-    tarjeta: "48",
-  };
   const paymentMethod = latestPayment?.method ?? null;
-  // Hora REAL de Colombia -- ver colombiaTime.ts.
-  const { issueDate, issueTime } = colombiaIssueMoment(now);
   // `now` SIN desplazar -- ver el comentario en sendInvoiceToDian.ts (bug
   // real FAD09e: signInvoiceXml hace el shift + formatea con el sufijo real
   // -05:00 por dentro, no el caller).
   const signingInstant = now;
 
-  const xmlInput: BuildCreditNoteXmlInput = {
-    creditNoteId: creditNoteDocId,
-    issueDate,
-    issueTime,
-    currency: creditNote.currency ?? "COP",
-    environment: isProduction ? 1 : 2,
-    seller: {
-      legalName: seller.legal_name,
-      documentTypeCode: "31",
-      documentNumber: seller.document_number,
-      addressLine: seller.billing_address ?? null,
-      city: seller.city ?? null,
-      stateProvince: seller.state_province ?? null,
-      countryCode: seller.country ?? "CO",
-      cityCode: seller.city_code ?? null,
-      stateCode: seller.state_code ?? null,
-      taxLevelCode: seller.is_self_withholding_agent ? "O-15" : "R-99-PN",
-      electronicMail: seller.contact_email ?? null,
-    },
-    buyer: {
-      legalName: buyer.full_name ?? "N/A",
-      documentTypeCode: buyer.document_type_code,
-      documentNumber: buyer.document_number,
-      addressLine: buyer.address?.line1 ?? null,
-      city: buyer.address?.city ?? null,
-      stateProvince: buyer.address?.state_province ?? null,
-      countryCode: buyer.address?.country ?? "CO",
-      cityCode: buyer.address?.city_code ?? null,
-      stateCode: buyer.address?.state_code ?? null,
-      taxLevelCode: buyer.applies_withholding ? "O-15" : "R-99-PN",
-      electronicMail: buyer.email ?? null,
-    },
-    referencedInvoice: {
-      id: `${invoice.invoice_prefix}${invoice.invoice_number}`,
-      cufe: invoice.cufe,
-      issueDate: invoice.issue_date ? String(invoice.issue_date).slice(0, 10) : issueDate,
-    },
-    reasonCode: creditNote.reason_code,
-    reasonDescription: creditNote.reason_description,
-    line: {
-      description: `Ajuste según nota crédito -- ${creditNote.reason_description}`,
-      amount: creditNote.total,
-      tax: creditNote.tax_type_code
-        ? { code: creditNote.tax_type_code, rate: creditNote.tax_rate, taxableAmount: creditNote.subtotal, taxAmount: creditNote.tax_total }
-        : null,
-    },
-    payment: {
-      meansId: "1",
-      meansCode: (paymentMethod && PAYMENT_MEANS_CODE[paymentMethod]) || "1",
-    },
+  const xmlInput: BuildCreditNoteXmlInput = buildCreditNoteXmlInput({
+    creditNoteDocId,
+    now,
+    isProduction,
+    creditNote,
+    invoice,
+    buyer,
+    seller,
+    paymentMethod,
     softwareId: profile.software_id,
     softwarePin,
-    authorizationProviderNit: "800197268",
-  };
+  });
 
   // ⚠️ ACÁ NO VA la validación de tarifas de taxRates.ts que sí corre en
   // sendInvoiceToDian.ts, y es a propósito: una nota crédito tiene que

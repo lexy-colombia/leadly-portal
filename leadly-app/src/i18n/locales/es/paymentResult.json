@@ -1,0 +1,22 @@
+{
+  "paymentResult.loading": "Consultando tu pago...",
+  "paymentResult.paid.title": "Pago recibido",
+  "paymentResult.paid.description": "Confirmamos tu pago. Ya puedes cerrar esta página.",
+  "paymentResult.pending.title": "Estamos confirmando tu pago",
+  "paymentResult.pending.description": "Esto puede tardar unos segundos. No cierres esta página.",
+  "paymentResult.pending.timeout": "Seguimos confirmando tu pago; te avisaremos.",
+  "paymentResult.declined.title": "Tu último intento fue rechazado",
+  "paymentResult.declined.description": "Puedes volver a intentarlo con el mismo enlace de pago.",
+  "paymentResult.declined.checking": "Si ya lo intentaste de nuevo, seguimos pendientes de la confirmación.",
+  "paymentResult.closed.title": "Este enlace de pago ya no está disponible",
+  "paymentResult.closed.description": "El enlace venció o fue cancelado. Si todavía necesitas pagar, pide uno nuevo.",
+  "paymentResult.voided.title": "Pago anulado",
+  "paymentResult.voided.description": "Este pago fue anulado. Si tienes dudas, comunícate con quien te envió el enlace.",
+  "paymentResult.error.title": "Hubo un problema con este cobro",
+  "paymentResult.error.description": "No se pudo completar este enlace de pago. Pide uno nuevo a quien te lo envió.",
+  "paymentResult.unknown.title": "No encontramos este pago",
+  "paymentResult.unknown.description": "Revisa que hayas abierto el enlace completo o pide uno nuevo.",
+  "paymentResult.network.title": "No pudimos consultar tu pago",
+  "paymentResult.network.description": "Revisa tu conexión e inténtalo de nuevo.",
+  "paymentResult.network.retry": "Reintentar"
+}

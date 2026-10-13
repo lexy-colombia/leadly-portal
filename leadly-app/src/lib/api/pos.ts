@@ -227,7 +227,7 @@ export async function searchPosClients(tenantId: string, term: string, limit = 8
 
 /** Mismo catálogo que el resto de la app (PAYMENT_METHOD_LABEL_KEY en
  * orderPayments.ts) menos 'wompi' -- ese método solo lo escribe
- * payment-webhook-wompi cuando un link se paga de verdad, nunca una
+ * payments-api (/v1/events/wompi) cuando un link se paga de verdad, nunca una
  * selección manual del cajero. */
 export type PosPaymentMethod = Exclude<OrderPaymentMethod, 'wompi'>
 

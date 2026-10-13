@@ -1,5 +1,13 @@
 import { useEffect, useState } from 'react'
-import { assignTenantToPlan, cancelSubscription, getActiveSubscriptionForTenant, listBillingPlans, reactivateSubscription } from '../../../lib/api/billing'
+import {
+  assignTenantToPlan,
+  cancelSubscription,
+  getActiveSubscriptionForTenant,
+  getTenantEntitlements,
+  listBillingPlans,
+  reactivateSubscription,
+  type TenantEntitlements,
+} from '../../../lib/api/billing'
 import type { BillingPlan, BillingSubscription } from '../../../types/domain'
 import { PageSpinner } from '@/components/atoms'
 import { ConfirmDialog } from '@/components/organisms'
@@ -9,6 +17,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useLanguage } from '../../../contexts/LanguageContext'
 import type { TranslationKey } from '../../../i18n/translations'
 import { formatDate } from '../../../lib/dates'
+import { ApplyPlanDialog } from './ApplyPlanDialog'
+import { NegotiationDrawer } from './NegotiationDrawer'
+
+const LIMIT_ROWS: { key: keyof NonNullable<TenantEntitlements['limits']>; labelKey: TranslationKey }[] = [
+  { key: 'max_users', labelKey: 'backoffice.planDrawer.limits.maxUsers' },
+  { key: 'max_warehouses', labelKey: 'backoffice.planDrawer.limits.maxWarehouses' },
+  { key: 'max_pos_points', labelKey: 'backoffice.planDrawer.limits.maxPosPoints' },
+  { key: 'max_whatsapp_lines', labelKey: 'backoffice.planDrawer.limits.maxWhatsappLines' },
+  { key: 'max_ai_agents', labelKey: 'backoffice.planDrawer.limits.maxAiAgents' },
+  { key: 'max_ai_messages_month', labelKey: 'backoffice.planDrawer.limits.maxAiMessagesMonth' },
+]
 
 const SUBSCRIPTION_STATUS_LABEL_KEY: Record<BillingSubscription['status'], TranslationKey> = {
   ACTIVE: 'backoffice.tenantBilling.subscriptionStatus.active',
@@ -39,6 +58,17 @@ export function TenantPlanSection({ tenantId, onPlanChange }: { tenantId: string
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [reactivating, setReactivating] = useState(false)
+  const [entitlements, setEntitlements] = useState<TenantEntitlements | null>(null)
+  const [entitlementsError, setEntitlementsError] = useState(false)
+  const [negotiationOpen, setNegotiationOpen] = useState(false)
+  const [applyOpen, setApplyOpen] = useState(false)
+
+  function reloadEntitlements() {
+    setEntitlementsError(false)
+    getTenantEntitlements(tenantId)
+      .then(setEntitlements)
+      .catch(() => setEntitlementsError(true))
+  }
 
   function reload() {
     getActiveSubscriptionForTenant(tenantId)
@@ -47,6 +77,12 @@ export function TenantPlanSection({ tenantId, onPlanChange }: { tenantId: string
   }
 
   useEffect(reload, [tenantId])
+  // Effective limits/modules depend on which subscription/plan is current, so
+  // they're re-read whenever either changes.
+  useEffect(() => {
+    if (subscription) reloadEntitlements()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantId, subscription?.id, subscription?.plan_id, subscription?.custom_base_amount_cents])
   useEffect(() => {
     listBillingPlans().then(setPlans).catch(() => setPlans([]))
   }, [])
@@ -170,6 +206,41 @@ export function TenantPlanSection({ tenantId, onPlanChange }: { tenantId: string
           ) : (
             <p className="text-xs text-brand-400">{t('backoffice.tenantBilling.expires', { date: formatDate(subscription.current_period_end) })}</p>
           )}
+          {plan?.is_custom && (
+            <p className="text-xs text-brand-500">
+              {subscription.custom_base_amount_cents != null
+                ? t('backoffice.tenantPlan.customBase', { amount: formatMoney(subscription.custom_base_amount_cents, plan.currency) })
+                : t('backoffice.tenantPlan.customPending')}
+            </p>
+          )}
+          {entitlementsError && <p className="text-xs text-red-600">{t('backoffice.tenantPlan.entitlementsError')}</p>}
+          {entitlements?.limits && (
+            <div className="mt-2 rounded-lg border border-brand-100 px-2.5 py-2">
+              <p className="mb-1 text-[11px] font-semibold tracking-wide text-brand-400 uppercase">{t('backoffice.tenantPlan.limits')}</p>
+              <dl className="space-y-0.5">
+                {LIMIT_ROWS.map((row) => {
+                  const value = entitlements.limits?.[row.key]
+                  return (
+                    <div key={row.key} className="flex items-center justify-between gap-2 text-xs">
+                      <dt className="text-brand-500">{t(row.labelKey)}</dt>
+                      <dd className="font-medium text-brand-800">{value == null ? t('backoffice.facturacion.table.maxUsers.unlimited') : value}</dd>
+                    </div>
+                  )
+                })}
+              </dl>
+              <p className="mt-1.5 text-xs text-brand-500">{t('backoffice.tenantPlan.modulesCount', { count: String(entitlements.modules.length) })}</p>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {plan?.is_custom && (
+              <Button size="xs" onClick={() => setNegotiationOpen(true)}>
+                {t('backoffice.tenantPlan.negotiate')}
+              </Button>
+            )}
+            <Button size="xs" variant="outline" onClick={() => setApplyOpen(true)}>
+              {t('backoffice.tenantPlan.applyToModules')}
+            </Button>
+          </div>
           <div className="flex gap-1.5 pt-0.5">
             <button type="button" onClick={() => setChangingPlan(true)} className="text-xs font-medium text-accent-600 hover:text-accent-700">
               {t('backoffice.tenantPlan.change')}
@@ -191,6 +262,20 @@ export function TenantPlanSection({ tenantId, onPlanChange }: { tenantId: string
       )}
 
       {error && <p className="mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-700">{error}</p>}
+
+      {subscription && plan?.is_custom && (
+        <NegotiationDrawer
+          open={negotiationOpen}
+          onClose={() => setNegotiationOpen(false)}
+          subscription={subscription}
+          plan={plan}
+          onSaved={(saved) => {
+            setSubscription(saved)
+            reloadEntitlements()
+          }}
+        />
+      )}
+      <ApplyPlanDialog open={applyOpen} onClose={() => setApplyOpen(false)} tenantId={tenantId} onApplied={reloadEntitlements} />
 
       <ConfirmDialog
         open={cancelConfirmOpen}

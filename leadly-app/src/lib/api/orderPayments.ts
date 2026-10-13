@@ -77,7 +77,7 @@ export async function updatePaymentMethod(id: string, method: OrderPaymentMethod
  * counterpart to the AI's generate_payment_link tool, same underlying
  * createSalesOrderPaymentLink helper. The link isn't recorded as a payment
  * yet: that only happens once the customer actually pays and
- * payment-webhook-wompi records it, same as the AI path. Same error-message
+ * payments-api (/v1/events/wompi) records it, same as the AI path. Same error-message
  * extraction pattern as createCheckoutForInvoice in billing.ts. */
 export async function createWompiPaymentLink(orderId: string): Promise<{ checkoutUrl: string; amount: number; orderCode: string }> {
   const { data, error } = await supabase.functions.invoke<{ checkout_url: string; amount: number; order_code: string; error?: string }>(

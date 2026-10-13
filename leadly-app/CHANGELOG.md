@@ -4,6 +4,75 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.27] - 2026-10-13
+
+### Added
+- Suscripción **Enterprise de Barriles de la sexta**: $140.000 mensuales, todos los módulos habilitados a $0 y sin costo de implementación, con la factura del 10 de septiembre al 10 de octubre registrada como pagada y la del 10 de octubre al 10 de noviembre pendiente. Vence el 10 de cada mes.
+- Suscripción **Enterprise de Faiver Moyano** con el período del 5 de octubre al 5 de noviembre y su factura de $400.000 (base $200.000 más implementación $200.000) con vencimiento el 5 de noviembre.
+
+### Fixed
+- **Una factura mensual se saltaba en silencio**: el período de una suscripción avanzaba dos veces por ciclo, una por el cron y otra al pagar la factura. Ahora solo el cron avanza el período de una suscripción activa, y el pago solo activa la que estaba pendiente. Una suscripción cancelada o expirada que paga ya no se reactiva sola.
+- Se eliminó una suscripción Business pendiente de Barriles creada por error, con su factura de $490.000 sin pagos.
+
+## [1.0.26] - 2026-10-13
+
+### Added
+- Los **4 planes de Leadly** cargados con los nombres y precios de la página pública: Starter ($69.900), Business ($140.000), Business AI ($299.000) y Enterprise (a medida), con sus límites de usuarios, bodegas, puntos de venta, líneas de WhatsApp y agentes de IA, y los módulos que incluye cada uno.
+
+### Removed
+- Los tres planes de prueba (Starter $199.000, Growth y Scale) y las dos suscripciones del comercio de pruebas que dependían de ellos.
+
+## [1.0.25] - 2026-10-13
+
+### Added
+- **Los planes limitan los módulos del comercio.** Cada plan define qué módulos incluye, y al asignarle un plan a un comercio se habilitan solos. Los módulos habilitados a mano no se tocan.
+- **Plan a medida (Enterprise):** el plan se marca como "a medida" y el precio base y el precio de cada módulo se negocian por comercio, con la implementación ajustable. El total mensual se calcula en la suscripción.
+- **Aplicar plan a los módulos del comercio** con vista previa de lo que se agrega y lo que se quitaría, antes de confirmar.
+- Etiqueta de origen (manual, plan o suscripción) en cada módulo del comercio.
+- Nuevos campos de plan: costo de implementación, límites de bodegas, puntos de venta, agentes y mensajes de IA, orden y visibilidad pública. Nuevos módulos de derecho: facturación electrónica y tienda en línea.
+
+### Changed
+- La primera factura de una suscripción incluye la implementación una sola vez. Un plan a medida sin precio pactado no genera factura ni se activa solo.
+
+## [1.0.24] - 2026-10-13
+
+### Removed
+- Las facturas de suscripción de prueba (falsas) del comercio de pruebas, con sus ítems e intentos de pago. Quedó un respaldo previo fuera del repositorio.
+
+### Security
+- Tres funciones internas de facturación (generar facturas recurrentes, marcar vencidas y desactivar comercios con mora) podían ejecutarlas usuarios anónimos o sin sesión. Ahora solo las ejecuta el sistema (cron y service role).
+
+## [1.0.23] - 2026-10-11
+
+### Added
+- **Administración por chat** para el comercio Faiver Moyano: quien tenga la etiqueta "administrador" puede, escribiéndole al asistente por WhatsApp, consultar cuántos reportes o daños hay en el pipeline y asociar a una persona con la unidad (consultorio o apartamento) de un cliente. Las herramientas solo se ofrecen a quien tiene esa etiqueta.
+- Carga de los propietarios de El Nogal y campo personalizado "Unidad", para que el asistente sepa de qué consultorio o apartamento le hablan.
+
+## [1.0.22] - 2026-10-11
+
+### Removed
+- Integración con **LaFactura.co**: su tarjeta en Integraciones, su formulario y su proveedor. La facturación electrónica propia con la DIAN no cambia.
+
+## [1.0.21] - 2026-10-11
+
+### Added
+- **Links de pago propios de Lexy Colombia**: nueva pestaña "Links de pago" en Facturación del backoffice para registrar proyectos (Leadly, Bedly, Lexy Legal…), obtener su API key, generar links de pago de Wompi y ver su estado. Cada proyecto recibe un aviso firmado cuando un pago cambia de estado.
+- **Página pública de retorno** `/pago/resultado`: a donde vuelve el cliente al terminar de pagar en Wompi, también para los pagos de los comercios. Solo muestra el estado que el servidor ya conoce; nunca decide si el pago fue aprobado.
+
+### Changed
+- **Un solo receptor de eventos de Wompi** para todos los cobros (links propios, cobro de suscripciones a los comercios y pagos de pedidos). La URL de eventos en el dashboard de Wompi es ahora `…/functions/v1/payments-api/v1/events/wompi`.
+- Cada pago aprobado se confirma directamente con Wompi, se compara el monto cobrado con el esperado y una misma transacción ya no puede acreditar dos pagos distintos. Un pago cobrado a un destino cancelado o vencido queda marcado con una alerta en vez de perderse en silencio.
+- Los links de pago generados sin URL de retorno vuelven por defecto a la página de resultado.
+
+### Removed
+- La función `payment-webhook-wompi`, reemplazada por el receptor único.
+
+## [1.0.20] - 2026-10-10
+
+### Fixed
+- Notas crédito sobre facturas emitidas entre las 7:00 p. m. y la medianoche: la factura referenciada se declaraba con la fecha del día siguiente. Ahora la nota crédito cita la misma fecha con la que se emitió la factura (hora de Colombia).
+- El campo "Expedición" del PDF de la factura usaba esa misma fecha desfasada y se corrigió.
+
 ## [1.0.19] - 2026-10-07
 
 ### Added

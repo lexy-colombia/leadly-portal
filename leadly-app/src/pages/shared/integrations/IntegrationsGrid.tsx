@@ -5,7 +5,6 @@ import type { IntegrationCategory, IntegrationProvider } from '../../../types/do
 import { PageSpinner } from '@/components/atoms'
 import { GlobeIcon } from '@/components/atoms/icons'
 import { Button } from '@/components/ui/button'
-import { LaFacturaCredentialDrawer } from './LaFacturaCredentialDrawer'
 import { WompiIntegrationDrawer } from './WompiIntegrationDrawer'
 import { ShopifyCredentialDrawer } from './ShopifyCredentialDrawer'
 import { HubSpotCredentialDrawer } from './HubSpotCredentialDrawer'
@@ -26,7 +25,6 @@ const CATEGORY_LABEL_KEY: Record<IntegrationCategory, TranslationKey> = {
 // Providers with their own brand mark (public/integrations/<key>.png|svg) --
 // falls back to the generic GlobeIcon for anything without one yet.
 const PROVIDER_LOGO: Record<string, string> = {
-  lafactura: '/integrations/lafactura.png',
   wompi: '/integrations/wompi.svg',
   shopify: '/integrations/shopify.png',
   hubspot: '/integrations/hubspot.png',
@@ -54,7 +52,7 @@ async function checkConnected(providerKey: string, tenantId: string | null): Pro
 }
 
 /** Card grid + drawers for the third-party integrations catalog
- * (LaFactura/Wompi/Shopify/HubSpot today). Shared between the backoffice
+ * (Wompi/Shopify/HubSpot/DIAN directo today). Shared between the backoffice
  * (tenantId null -- Leadly's own accounts with each provider) and each
  * tenant's own Integrations page (tenantId set -- that tenant's own
  * accounts) -- same catalog, same drawers, different credential rows
@@ -143,7 +141,6 @@ export function IntegrationsGrid({ tenantId, drawerDescription }: { tenantId: st
       )}
 
       {drawerProvider?.key === 'wompi' && <WompiIntegrationDrawer open onClose={closeDrawer} tenantId={tenantId} description={drawerDescription} />}
-      {drawerProvider?.key === 'lafactura' && <LaFacturaCredentialDrawer open onClose={closeDrawer} tenantId={tenantId} description={drawerDescription} />}
       {drawerProvider?.key === 'shopify' && <ShopifyCredentialDrawer open onClose={closeDrawer} tenantId={tenantId} description={drawerDescription} />}
       {drawerProvider?.key === 'hubspot' && <HubSpotCredentialDrawer open onClose={closeDrawer} tenantId={tenantId} description={drawerDescription} />}
       {drawerProvider?.key === 'dian_directo' && <DianDirectoCredentialDrawer open onClose={closeDrawer} tenantId={tenantId} description={drawerDescription} />}

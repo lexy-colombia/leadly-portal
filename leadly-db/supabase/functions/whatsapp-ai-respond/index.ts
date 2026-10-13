@@ -14,7 +14,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { json } from "../_shared/cors.ts";
 import { requestsHumanHandoff, sendWhatsappText, toWhatsappMarkup } from "../_shared/whatsapp.ts";
-import { toolsForSkills, type AiToolDefinition } from "../_shared/aiTools.ts";
+import { ADMINISTRATOR_ONLY, isAdministratorContact, toolsForSkills, type AiToolDefinition } from "../_shared/aiTools.ts";
 import { splitPhone } from "../_shared/phone.ts";
 
 const CONTEXT_MESSAGE_LIMIT = 10;
@@ -160,6 +160,11 @@ async function respondToConversation(
   if (enabledSkillKeys.has("credito") && !(await isTenantCreditModuleEnabled(adminClient, conversation.tenant_id))) {
     enabledSkills = enabledSkills.filter((s) => s.key !== "credito");
     enabledSkillKeys = new Set(enabledSkills.map((s) => s.key));
+  }
+  // Herramientas de administración: no son una habilidad del catálogo, se
+  // ofrecen solo si quien escribe tiene la etiqueta "administrador".
+  if (await isAdministratorContact(adminClient, conversation.tenant_id, conversation.contact_id)) {
+    enabledSkillKeys = new Set([...enabledSkillKeys, ADMINISTRATOR_ONLY]);
   }
   const enabledTools = toolsForSkills(enabledSkillKeys);
   // Global, not per-skill and not per-tenant -- every assistant gets this

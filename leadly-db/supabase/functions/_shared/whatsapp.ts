@@ -26,6 +26,20 @@ export async function verifyMetaSignature(rawBody: string, signatureHeader: stri
   return diff === 0;
 }
 
+/** Business-scoped user ID (BSUID) de WhatsApp: "CO.1234567890abc". Meta lo
+ * manda en lugar del teléfono cuando el usuario adoptó un nombre de usuario y
+ * no comparte su número (2026-10-10: mensajes sin `from` tumbaban el webhook).
+ * Formato según documentación de terceros; confirmar contra un payload real. */
+export function isBsuid(value: string | null | undefined): boolean {
+  return !!value && /^[A-Za-z]{2}\.[A-Za-z0-9]+$/.test(value);
+}
+
+/** Un teléfono va en `to`; un BSUID va en `recipient` (campo documentado por
+ * proveedores de la API, SIN verificar contra Meta todavía). */
+function recipientFields(to: string): Record<string, string> {
+  return isBsuid(to) ? { recipient: to } : { to };
+}
+
 export interface SendTextMessageResult {
   ok: boolean;
   wamid: string | null;
@@ -62,7 +76,7 @@ async function postGraphMessage(phoneNumberId: string, accessToken: string, payl
 /** Sends a plain text message via the Graph API using the line's own
  * (already-decrypted) access token. */
 export async function sendWhatsappText(phoneNumberId: string, accessToken: string, to: string, body: string): Promise<SendTextMessageResult> {
-  return postGraphMessage(phoneNumberId, accessToken, { to, type: "text", text: { body } });
+  return postGraphMessage(phoneNumberId, accessToken, { ...recipientFields(to), type: "text", text: { body } });
 }
 
 /** Sends an image by link -- Meta fetches `link` itself, so it must be
@@ -76,7 +90,7 @@ export async function sendWhatsappImage(
   link: string,
   caption?: string,
 ): Promise<SendTextMessageResult> {
-  return postGraphMessage(phoneNumberId, accessToken, { to, type: "image", image: caption ? { link, caption } : { link } });
+  return postGraphMessage(phoneNumberId, accessToken, { ...recipientFields(to), type: "image", image: caption ? { link, caption } : { link } });
 }
 
 /** Sends an approved HSM template -- the only business-initiated message
@@ -92,7 +106,7 @@ export async function sendWhatsappTemplate(
   components: Record<string, unknown>[],
 ): Promise<SendTextMessageResult> {
   return postGraphMessage(phoneNumberId, accessToken, {
-    to,
+    ...recipientFields(to),
     type: "template",
     template: { name: templateName, language: { code: languageCode }, components },
   });
