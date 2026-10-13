@@ -4,6 +4,18 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.25] - 2026-10-13
+
+### Added
+- **Los planes limitan los módulos del comercio.** Cada plan define qué módulos incluye, y al asignarle un plan a un comercio se habilitan solos. Los módulos habilitados a mano no se tocan.
+- **Plan a medida (Enterprise):** el plan se marca como "a medida" y el precio base y el precio de cada módulo se negocian por comercio, con la implementación ajustable. El total mensual se calcula en la suscripción.
+- **Aplicar plan a los módulos del comercio** con vista previa de lo que se agrega y lo que se quitaría, antes de confirmar.
+- Etiqueta de origen (manual, plan o suscripción) en cada módulo del comercio.
+- Nuevos campos de plan: costo de implementación, límites de bodegas, puntos de venta, agentes y mensajes de IA, orden y visibilidad pública. Nuevos módulos de derecho: facturación electrónica y tienda en línea.
+
+### Changed
+- La primera factura de una suscripción incluye la implementación una sola vez. Un plan a medida sin precio pactado no genera factura ni se activa solo.
+
 ## [1.0.24] - 2026-10-13
 
 ### Removed

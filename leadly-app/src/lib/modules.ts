@@ -119,6 +119,14 @@ export const TENANT_MODULES: TenantModuleDefinition[] = [
   { key: 'channels', labelKey: 'common.nav.channels', to: '/app/channels', icon: PhoneIcon, viewAction: 'channels.view' },
   { key: 'billing', labelKey: 'common.nav.billing', to: '/app/billing', icon: CreditCardIcon },
   { key: 'integrations', labelKey: 'common.nav.integrations', to: '/app/integrations', icon: GlobeIcon },
+  // Derechos de plan (plans-entitlements, 2026-10-13): no son pantallas ni
+  // ítems de menú propios -- la facturación electrónica vive en la ficha del
+  // pedido/Integraciones y la tienda pública en Configuración. Existen como
+  // claves de tenant_enabled_modules para que un plan pueda incluirlas o no.
+  // Sin rutas nuevas ni gating de UI todavía (la etapa 2 los hará cumplir en
+  // el backend); por eso `to` apunta a Configuración, igual que 'inventory'.
+  { key: 'einvoicing', labelKey: 'backoffice.modules.einvoicing', to: '/app/settings', icon: ReceiptIcon, hideFromNav: true },
+  { key: 'storefront', labelKey: 'backoffice.modules.storefront', to: '/app/settings', icon: GlobeIcon, hideFromNav: true },
   { key: 'users', labelKey: 'common.nav.users', to: '/app/users', icon: UsersIcon, alwaysEnabled: true, adminOnly: true },
   { key: 'roles', labelKey: 'common.nav.roles', to: '/app/roles', icon: KeyIcon, alwaysEnabled: true, adminOnly: true },
   { key: 'settings', labelKey: 'common.nav.settings', to: '/app/settings', icon: SettingsIcon },

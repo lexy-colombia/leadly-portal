@@ -86,7 +86,11 @@ function PlansSection() {
                   {pageItems.map((plan) => (
                     <TableRow key={plan.id} onClick={() => setDrawer({ open: true, plan })} className="cursor-pointer">
                       <TableCell className="font-medium text-brand-800">{plan.name}</TableCell>
-                      <TableCell>{new Intl.NumberFormat('es-CO', { style: 'currency', currency: plan.currency, maximumFractionDigits: 0 }).format(plan.amount_cents / 100)}</TableCell>
+                      <TableCell>
+                        {plan.is_custom
+                          ? t('backoffice.facturacion.table.custom')
+                          : new Intl.NumberFormat('es-CO', { style: 'currency', currency: plan.currency, maximumFractionDigits: 0 }).format(plan.amount_cents / 100)}
+                      </TableCell>
                       <TableCell>{plan.billing_interval === 'monthly' ? t('backoffice.facturacion.interval.monthly') : t('backoffice.facturacion.interval.yearly')}</TableCell>
                       <TableCell className="text-brand-500">{plan.max_users ?? t('backoffice.facturacion.table.maxUsers.unlimited')}</TableCell>
                       <TableCell className="text-brand-500">{plan.max_whatsapp_lines ?? t('backoffice.facturacion.table.maxUsers.unlimited')}</TableCell>

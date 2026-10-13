@@ -9,12 +9,21 @@ export interface BillingPlanInput {
   currency: string
   billing_interval: 'monthly' | 'yearly'
   is_active: boolean
+  /** Limits: null = unlimited, 0 = none (plans-entitlements contract). */
   max_users: number | null
   max_whatsapp_lines: number | null
+  max_warehouses: number | null
+  max_pos_points: number | null
+  max_ai_agents: number | null
+  max_ai_messages_month: number | null
+  setup_fee_cents: number
+  is_custom: boolean
+  sort_order: number
+  is_public: boolean
 }
 
 export async function listBillingPlans(): Promise<BillingPlan[]> {
-  const { data, error } = await supabase.from('billing_plans').select('*').order('amount_cents')
+  const { data, error } = await supabase.from('billing_plans').select('*').order('sort_order').order('amount_cents')
   if (error) throw error
   return data
 }
@@ -29,6 +38,178 @@ export async function updateBillingPlan(id: string, input: BillingPlanInput): Pr
   const { data, error } = await supabase.from('billing_plans').update(input).eq('id', id).select().single()
   if (error) throw error
   return data
+}
+
+// --- Plan <-> modules (billing_plan_modules) -------------------------------
+
+export async function listPlanModuleKeys(planId: string): Promise<Set<string>> {
+  const { data, error } = await supabase.from('billing_plan_modules').select('module_key').eq('plan_id', planId)
+  if (error) throw error
+  return new Set(data.map((row) => row.module_key as string))
+}
+
+/** Makes the plan's module set equal to `keys` with a diff (insert what's
+ * new, delete what's gone) instead of delete-all + insert-all: every row
+ * change re-syncs the tenants on this plan server-side, so rewriting
+ * untouched rows would churn them for nothing. Bridge table with no
+ * business identity -> real DELETE (same exception as ai_assistant_skills). */
+export async function setPlanModules(planId: string, keys: Set<string>): Promise<void> {
+  const current = await listPlanModuleKeys(planId)
+  const toInsert = [...keys].filter((k) => !current.has(k))
+  const toDelete = [...current].filter((k) => !keys.has(k))
+  if (toInsert.length > 0) {
+    const { error } = await supabase.from('billing_plan_modules').insert(toInsert.map((module_key) => ({ plan_id: planId, module_key })))
+    if (error) throw error
+  }
+  if (toDelete.length > 0) {
+    const { error } = await supabase.from('billing_plan_modules').delete().eq('plan_id', planId).in('module_key', toDelete)
+    if (error) throw error
+  }
+}
+
+// --- Enterprise negotiation (billing_subscription_modules) -----------------
+
+export interface BillingSubscriptionModule {
+  subscription_id: string
+  module_key: string
+  price_cents: number
+  note: string | null
+}
+
+export async function listSubscriptionModules(subscriptionId: string): Promise<BillingSubscriptionModule[]> {
+  const { data, error } = await supabase.from('billing_subscription_modules').select('*').eq('subscription_id', subscriptionId)
+  if (error) throw error
+  return data as BillingSubscriptionModule[]
+}
+
+export interface SubscriptionNegotiationInput {
+  /** null = no negotiated base price (counts as 0 server-side). */
+  customBaseAmountCents: number | null
+  /** null = use the plan's setup fee; 0 = explicitly free. */
+  setupFeeOverrideCents: number | null
+  modules: { module_key: string; price_cents: number; note: string | null }[]
+}
+
+/** Saves the per-tenant negotiation of a custom (Enterprise) plan: the two
+ * subscription columns plus the contracted module set (presence = contracted,
+ * at that monthly price). Diff on modules, same reasoning as setPlanModules. */
+export async function saveSubscriptionNegotiation(subscriptionId: string, input: SubscriptionNegotiationInput): Promise<BillingSubscription> {
+  const { data: subscription, error: subscriptionError } = await supabase
+    .from('billing_subscriptions')
+    .update({ custom_base_amount_cents: input.customBaseAmountCents, setup_fee_override_cents: input.setupFeeOverrideCents })
+    .eq('id', subscriptionId)
+    .select()
+    .single()
+  if (subscriptionError) throw subscriptionError
+
+  const current = await listSubscriptionModules(subscriptionId)
+  const wanted = new Set(input.modules.map((m) => m.module_key))
+  const toDelete = current.filter((m) => !wanted.has(m.module_key)).map((m) => m.module_key)
+
+  if (input.modules.length > 0) {
+    const { error } = await supabase
+      .from('billing_subscription_modules')
+      .upsert(
+        input.modules.map((m) => ({ subscription_id: subscriptionId, ...m })),
+        { onConflict: 'subscription_id,module_key' },
+      )
+    if (error) throw error
+  }
+  if (toDelete.length > 0) {
+    const { error } = await supabase.from('billing_subscription_modules').delete().eq('subscription_id', subscriptionId).in('module_key', toDelete)
+    if (error) throw error
+  }
+  return subscription as BillingSubscription
+}
+
+export interface CreatedSubscriptionInvoice {
+  invoiceId: string
+  /** Null if the invoice has no number assigned yet. */
+  invoiceNumber: string | null
+}
+
+/** Issues the invoice for the subscription's current period via the
+ * create_invoice_for_subscription RPC (superadmin-only, guarded inside).
+ * Returns null when there is nothing to bill or the period already has one
+ * (the RPC itself returns null) -- not an error. */
+export async function createInvoiceForSubscription(subscriptionId: string): Promise<CreatedSubscriptionInvoice | null> {
+  const { data, error } = await supabase.rpc('create_invoice_for_subscription', { p_subscription_id: subscriptionId })
+  if (error) throw error
+  if (!data) return null
+  const invoiceId = data as string
+  const { data: invoice } = await supabase.from('payment_invoices').select('invoice_number').eq('id', invoiceId).maybeSingle()
+  return { invoiceId, invoiceNumber: (invoice?.invoice_number as string | null | undefined) ?? null }
+}
+
+// --- Apply plan to the tenant's modules + effective entitlements -----------
+
+/** Diff returned by preview_apply_plan_to_tenant -- nothing is written. */
+export interface PlanApplyPreview {
+  to_add: string[]
+  to_remove_if_replace: string[]
+  kept_manual: string[]
+}
+
+export interface PlanApplyResult {
+  added: string[]
+  removed: string[]
+  kept_manual: string[]
+  desired: string[]
+}
+
+export interface TenantEntitlements {
+  plan: { id: string; key: string; name: string; is_custom: boolean } | null
+  subscription: { id: string; status: string } | null
+  limits: {
+    max_users: number | null
+    max_warehouses: number | null
+    max_pos_points: number | null
+    max_whatsapp_lines: number | null
+    max_ai_agents: number | null
+    max_ai_messages_month: number | null
+  } | null
+  modules: { key: string; source: 'manual' | 'plan' | 'subscription'; price_cents: number | null }[]
+  setup_fee_cents: number | null
+}
+
+/** The RPCs return module lists as arrays; tolerate an element being a bare
+ * key or an object carrying it, so a small shape difference doesn't blank the
+ * dialog. */
+function normalizeKeys(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => (typeof item === 'string' ? item : ((item as { key?: string; module_key?: string } | null)?.key ?? (item as { module_key?: string } | null)?.module_key)))
+    .filter((k): k is string => typeof k === 'string')
+}
+
+export async function previewApplyPlanToTenant(tenantId: string): Promise<PlanApplyPreview> {
+  const { data, error } = await supabase.rpc('preview_apply_plan_to_tenant', { p_tenant_id: tenantId })
+  if (error) throw error
+  const raw = (data ?? {}) as Record<string, unknown>
+  return { to_add: normalizeKeys(raw.to_add), to_remove_if_replace: normalizeKeys(raw.to_remove_if_replace), kept_manual: normalizeKeys(raw.kept_manual) }
+}
+
+/** Superadmin-only. With replaceManual=false it only adds/removes plan-managed
+ * rows and never touches manual ones; true also removes manual modules that
+ * aren't in the plan's set -- only call it after showing the preview. */
+export async function applyPlanToTenant(tenantId: string, replaceManual: boolean): Promise<PlanApplyResult> {
+  const { data, error } = await supabase.rpc('apply_plan_to_tenant', { p_tenant_id: tenantId, p_replace_manual: replaceManual })
+  if (error) throw error
+  const raw = (data ?? {}) as Record<string, unknown>
+  return { added: normalizeKeys(raw.added), removed: normalizeKeys(raw.removed), kept_manual: normalizeKeys(raw.kept_manual), desired: normalizeKeys(raw.desired) }
+}
+
+export async function getTenantEntitlements(tenantId: string): Promise<TenantEntitlements> {
+  const { data, error } = await supabase.rpc('get_tenant_entitlements', { p_tenant_id: tenantId })
+  if (error) throw error
+  const raw = (data ?? {}) as Partial<TenantEntitlements>
+  return {
+    plan: raw.plan ?? null,
+    subscription: raw.subscription ?? null,
+    limits: raw.limits ?? null,
+    modules: raw.modules ?? [],
+    setup_fee_cents: raw.setup_fee_cents ?? null,
+  }
 }
 
 /** Assigns a tenant to a plan, creating (or re-pointing) its subscription.

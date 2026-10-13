@@ -9,6 +9,17 @@ export async function listEnabledModuleKeys(tenantId: string): Promise<Set<strin
   return new Set(data.map((row) => row.module_key))
 }
 
+export type TenantModuleSource = 'manual' | 'plan' | 'subscription'
+
+/** Same rows as listEnabledModuleKeys but keeping where each came from:
+ * 'manual' (superadmin toggled it), 'plan' / 'subscription' (managed by the
+ * tenant's plan or Enterprise negotiation, see sync_tenant_modules_from_plan). */
+export async function listEnabledModuleSources(tenantId: string): Promise<Map<string, TenantModuleSource>> {
+  const { data, error } = await supabase.from('tenant_enabled_modules').select('module_key, source').eq('tenant_id', tenantId)
+  if (error) throw error
+  return new Map(data.map((row) => [row.module_key as string, ((row as { source?: TenantModuleSource }).source ?? 'manual') as TenantModuleSource]))
+}
+
 /** Enabling/disabling is a superadmin-only action (RLS-enforced) -- the
  * bridge row has no business identity of its own, so this is a real
  * insert/delete, not a soft-delete (same exception as ai_assistant_skills). */

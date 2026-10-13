@@ -1027,6 +1027,21 @@ export interface BillingPlan {
    * NULL = unlimited. Enforced by a DB trigger on whatsapp_lines, see
    * 20260811000007_billing_plans_max_whatsapp_lines.sql. */
   max_whatsapp_lines: number | null
+  /** Plan limits added with plans-entitlements (migration 20261013130000).
+   * Same semantics as max_users: NULL = unlimited, 0 = none. Display only in
+   * this stage -- not enforced server-side yet. */
+  max_warehouses: number | null
+  max_pos_points: number | null
+  max_ai_agents: number | null
+  max_ai_messages_month: number | null
+  /** One-time implementation fee, in cents (0 = none). */
+  setup_fee_cents: number
+  /** Enterprise-style plan: price and modules are negotiated per tenant on
+   * its subscription, not defined here. */
+  is_custom: boolean
+  sort_order: number
+  /** Whether the plan is shown on the public website. */
+  is_public: boolean
   created_at: string
   updated_at: string
 }
@@ -1044,6 +1059,11 @@ export interface BillingSubscription {
    * in-progress period -- stays ACTIVE (usable) until current_period_end,
    * then the cron flips it to CANCELLED instead of billing a renewal. */
   cancel_at_period_end: boolean
+  /** Negotiated monthly base price, only meaningful when the plan is_custom. */
+  custom_base_amount_cents: number | null
+  /** Per-tenant override of the plan's setup fee (null = use the plan's). */
+  setup_fee_override_cents: number | null
+  setup_fee_billed_at: string | null
   created_at: string
   updated_at: string
   cancelled_at: string | null
