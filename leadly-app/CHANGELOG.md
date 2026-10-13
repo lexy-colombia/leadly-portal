@@ -4,6 +4,14 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.24] - 2026-10-13
+
+### Removed
+- Las facturas de suscripción de prueba (falsas) del comercio de pruebas, con sus ítems e intentos de pago. Quedó un respaldo previo fuera del repositorio.
+
+### Security
+- Tres funciones internas de facturación (generar facturas recurrentes, marcar vencidas y desactivar comercios con mora) podían ejecutarlas usuarios anónimos o sin sesión. Ahora solo las ejecuta el sistema (cron y service role).
+
 ## [1.0.23] - 2026-10-11
 
 ### Added
