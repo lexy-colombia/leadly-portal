@@ -4,6 +4,16 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.27] - 2026-10-13
+
+### Added
+- Suscripción **Enterprise de Barriles de la sexta**: $140.000 mensuales, todos los módulos habilitados a $0 y sin costo de implementación, con la factura del 10 de septiembre al 10 de octubre registrada como pagada y la del 10 de octubre al 10 de noviembre pendiente. Vence el 10 de cada mes.
+- Suscripción **Enterprise de Faiver Moyano** con el período del 5 de octubre al 5 de noviembre y su factura de $400.000 (base $200.000 más implementación $200.000) con vencimiento el 5 de noviembre.
+
+### Fixed
+- **Una factura mensual se saltaba en silencio**: el período de una suscripción avanzaba dos veces por ciclo, una por el cron y otra al pagar la factura. Ahora solo el cron avanza el período de una suscripción activa, y el pago solo activa la que estaba pendiente. Una suscripción cancelada o expirada que paga ya no se reactiva sola.
+- Se eliminó una suscripción Business pendiente de Barriles creada por error, con su factura de $490.000 sin pagos.
+
 ## [1.0.26] - 2026-10-13
 
 ### Added
