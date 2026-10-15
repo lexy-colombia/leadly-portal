@@ -67,5 +67,15 @@
   "campaigns.newDrawer.errors.createFailed": "Couldn't create the campaign.",
   "campaigns.newDrawer.errors.updateFailed": "Couldn't save the changes.",
   "campaigns.newDrawer.errors.manualPhoneRequired": "Enter a phone number.",
-  "campaigns.newDrawer.errors.manualDuplicate": "That phone number is already in the list."
+  "campaigns.newDrawer.errors.manualDuplicate": "That phone number is already in the list.",
+  "campaigns.newDrawer.variablesTitle": "Value of each variable",
+  "campaigns.newDrawer.variablesHint": "Pick which client field each variable comes from, or type free text. You can still fix any cell afterwards.",
+  "campaigns.newDrawer.sourceFree": "Free text",
+  "campaigns.newDrawer.sharedValuePlaceholder": "Same value for everyone (optional)",
+  "campaigns.newDrawer.field.full_name": "Full name",
+  "campaigns.newDrawer.field.first_name": "First name",
+  "campaigns.newDrawer.field.email": "Email",
+  "campaigns.newDrawer.field.company": "Company",
+  "campaigns.newDrawer.field.phone": "Phone",
+  "campaigns.newDrawer.field.document_number": "Document number"
 }

@@ -67,5 +67,15 @@
   "campaigns.newDrawer.errors.createFailed": "No se pudo crear la campaña.",
   "campaigns.newDrawer.errors.updateFailed": "No se pudieron guardar los cambios.",
   "campaigns.newDrawer.errors.manualPhoneRequired": "Ingresa un teléfono.",
-  "campaigns.newDrawer.errors.manualDuplicate": "Ese teléfono ya está en la lista."
+  "campaigns.newDrawer.errors.manualDuplicate": "Ese teléfono ya está en la lista.",
+  "campaigns.newDrawer.variablesTitle": "Valor de cada variable",
+  "campaigns.newDrawer.variablesHint": "Elige de qué campo del cliente sale cada variable, o escribe un texto libre. Después puedes corregir cualquier celda.",
+  "campaigns.newDrawer.sourceFree": "Texto libre",
+  "campaigns.newDrawer.sharedValuePlaceholder": "Mismo valor para todos (opcional)",
+  "campaigns.newDrawer.field.full_name": "Nombre completo",
+  "campaigns.newDrawer.field.first_name": "Primer nombre",
+  "campaigns.newDrawer.field.email": "Correo electrónico",
+  "campaigns.newDrawer.field.company": "Empresa",
+  "campaigns.newDrawer.field.phone": "Teléfono",
+  "campaigns.newDrawer.field.document_number": "Número de documento"
 }

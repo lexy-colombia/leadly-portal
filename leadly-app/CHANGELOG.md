@@ -4,6 +4,17 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.30] - 2026-10-15
+
+### Added
+- **Campañas: el valor de cada variable de la plantilla puede salir de un campo del cliente** (nombre completo, primer nombre, correo, empresa, teléfono, documento) **o de cualquier campo personalizado**, o ser texto libre con un mismo valor para todos. La tabla de destinatarios se precarga y cada celda sigue editable.
+- **Etiqueta "no contactar"**: la herramienta `update_client_profile` acepta `do_not_contact` y marca al contacto con una etiqueta fija del servidor (el modelo no elige el texto). Se usa cuando el cliente pide expresamente no recibir más mensajes.
+- Plantilla `actualizar_datos_administracion` y sección 5 del asistente de Moyano para actualizar el correo de los propietarios; carga de residentes de Portal de la Sierra y etiquetas de proyecto (EL NOGAL / PORTAL DE LA SIERRA).
+
+### Changed
+- **`run-campaigns` omite a los contactos con la etiqueta "no contactar"** al momento de enviar, incluso en campañas ya programadas. El destinatario queda como fallido con el motivo.
+- La conversación de WhatsApp reinicia el contexto de la IA cuando el contacto vuelve después de 24 h, para que no imite respuestas viejas del historial.
+
 ## [1.0.28] - 2026-10-15
 
 ### Added

@@ -14,6 +14,8 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { json } from "../_shared/cors.ts";
 import { sendWhatsappTemplate } from "../_shared/whatsapp.ts";
+import { combinePhone } from "../_shared/phone.ts";
+import { DO_NOT_CONTACT_TAG } from "../_shared/clientTags.ts";
 
 const RECIPIENTS_PER_TICK = 20;
 
@@ -98,8 +100,28 @@ async function processCampaignTick(
   let sentCount = 0;
   let failedCount = 0;
 
+  // Contactos del tenant que pidieron no recibir mensajes (etiqueta
+  // "no contactar", ver _shared/clientTags.ts). Se consulta al enviar y no al
+  // armar la campaña: cubre también campañas ya programadas y a quien lo pide
+  // entre la programación y el envío. Números completos (prefijo + local).
+  const { data: blocked } = await adminClient
+    .from("clients")
+    .select("phone_prefix, phone")
+    .eq("tenant_id", campaign.tenant_id)
+    .is("deleted_at", null)
+    .contains("tags", [DO_NOT_CONTACT_TAG]);
+  const blockedPhones = new Set(
+    (blocked ?? []).map((c: { phone_prefix: string | null; phone: string | null }) => combinePhone(c.phone_prefix, c.phone).replace(/\D/g, "")),
+  );
+
   for (const recipient of recipients ?? []) {
     const variables = (recipient.variables as string[] | null) ?? [];
+
+    if (blockedPhones.has(String(recipient.contact_phone).replace(/\D/g, ""))) {
+      await markRecipientFailed(adminClient, recipient.id, "Omitido: el contacto pidió no recibir mensajes (no contactar).");
+      failedCount++;
+      continue;
+    }
 
     // Find-or-create de la conversación -- mismo criterio que
     // whatsapp-send-template, reimplementado acá porque este loop nunca

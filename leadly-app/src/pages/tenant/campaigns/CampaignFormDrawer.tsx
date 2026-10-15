@@ -6,7 +6,16 @@ import type { ParsedRecipient } from '../../../lib/api/campaigns'
 import { listApprovedTemplates } from '../../../lib/api/templates'
 import { listWhatsappLinesByTenant } from '../../../lib/api/whatsappLines'
 import { listClients } from '../../../lib/api/clients'
-import type { Client, WhatsappLine, WhatsappMessageTemplate } from '../../../types/domain'
+import { listCustomFieldDefinitions } from '../../../lib/api/customFields'
+import {
+  FREE_SOURCE,
+  STANDARD_CLIENT_FIELDS,
+  decodeSource,
+  encodeSource,
+  resolveVariable,
+  type VariableSource,
+} from '../../../lib/campaignVariables'
+import type { Client, CustomFieldDefinition, WhatsappLine, WhatsappMessageTemplate } from '../../../types/domain'
 import { FieldError } from '@/components/atoms'
 import { PhoneInput } from '@/components/molecules'
 import { combinePhone, formatClientPhoneDisplay, formatPhoneDisplay, splitPhone } from '../../../lib/phone'
@@ -84,6 +93,12 @@ export function CampaignFormDrawer({
   const [templates, setTemplates] = useState<WhatsappMessageTemplate[]>([])
   const [lines, setLines] = useState<WhatsappLine[]>([])
   const [clients, setClients] = useState<Client[]>([])
+  const [customDefs, setCustomDefs] = useState<CustomFieldDefinition[]>([])
+  // Origen de cada variable de la plantilla (campo de la ficha, campo
+  // personalizado o libre) y, para las libres, un valor común opcional que se
+  // copia a todos los destinatarios. Cada celda de la tabla sigue editable.
+  const [sources, setSources] = useState<VariableSource[]>([])
+  const [sharedValues, setSharedValues] = useState<string[]>([])
   // Inicializados directamente desde `initial` (lazy init de useState) en vez
   // de con un useEffect que los pisa después del primer render -- el caller
   // (Campaigns.tsx) le pasa un `key` distinto por cada apertura (crear/editar/
@@ -107,6 +122,7 @@ export function CampaignFormDrawer({
   useEffect(() => {
     listApprovedTemplates(tenantId).then(setTemplates).catch(() => setTemplates([]))
     listWhatsappLinesByTenant(tenantId).then((all) => setLines(all.filter((l) => l.status === 'active'))).catch(() => setLines([]))
+    listCustomFieldDefinitions(tenantId, 'client').then(setCustomDefs).catch(() => setCustomDefs([]))
     listClients(tenantId)
       .then((all) => {
         setClients(all)
@@ -150,14 +166,47 @@ export function CampaignFormDrawer({
   // tratar de mapear variables de una plantilla a otra.
   useEffect(() => {
     setRecipients((prev) => prev.map((r) => (r.variables.length === variableCount ? r : { ...r, variables: Array(variableCount).fill('') })))
+    setSources((prev) => (prev.length === variableCount ? prev : Array(variableCount).fill(FREE_SOURCE)))
+    setSharedValues((prev) => (prev.length === variableCount ? prev : Array(variableCount).fill('')))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [variableCount])
+
+  /** Variables iniciales de un destinatario según el origen elegido por
+   * variable. Un número agregado a mano (sin ficha) solo recibe los valores
+   * comunes de las variables libres. */
+  function initialVariables(client: Client | null): string[] {
+    return Array.from({ length: variableCount }, (_, i) => {
+      const source = sources[i] ?? FREE_SOURCE
+      if (source.kind === 'free' || !client) return sharedValues[i] ?? ''
+      return resolveVariable(source, client)
+    })
+  }
+
+  function handleSourceChange(index: number, value: string) {
+    const source = decodeSource(value)
+    setSources((prev) => prev.map((s, i) => (i === index ? source : s)))
+    if (source.kind === 'free') return
+    // Reaplica a los destinatarios que tienen ficha; los manuales no tienen
+    // de dónde sacar el dato y quedan como estaban (editables).
+    setRecipients((prev) =>
+      prev.map((r) => {
+        const client = clients.find((c) => c.id === r.key)
+        if (!client) return r
+        return { ...r, variables: r.variables.map((v, i) => (i === index ? resolveVariable(source, client) : v)) }
+      }),
+    )
+  }
+
+  function handleSharedValueChange(index: number, value: string) {
+    setSharedValues((prev) => prev.map((v, i) => (i === index ? value : v)))
+    setRecipients((prev) => prev.map((r) => ({ ...r, variables: r.variables.map((v, i) => (i === index ? value : v)) })))
+  }
 
   function toggleClient(client: Client) {
     setRecipients((prev) => {
       const idx = prev.findIndex((r) => r.key === client.id)
       if (idx >= 0) return prev.filter((_, i) => i !== idx)
-      return [...prev, { key: client.id, contact_phone: combinePhone(client.phone_prefix, client.phone), contact_name: client.full_name, variables: Array(variableCount).fill('') }]
+      return [...prev, { key: client.id, contact_phone: combinePhone(client.phone_prefix, client.phone), contact_name: client.full_name, variables: initialVariables(client) }]
     })
   }
 
@@ -175,7 +224,7 @@ export function CampaignFormDrawer({
       setManualError(t('campaigns.newDrawer.errors.manualDuplicate'))
       return
     }
-    setRecipients((prev) => [...prev, { key: crypto.randomUUID(), contact_phone: phone, contact_name: manualName.trim(), variables: Array(variableCount).fill('') }])
+    setRecipients((prev) => [...prev, { key: crypto.randomUUID(), contact_phone: phone, contact_name: manualName.trim(), variables: initialVariables(null) }])
     setManualName('')
     setManualPhone('')
     setManualError(null)
@@ -379,6 +428,51 @@ export function CampaignFormDrawer({
               </Popover>
             </div>
             <FieldError message={recipientsError} />
+
+            {variableCount > 0 && (
+              <div className="space-y-2 rounded-2xl border border-brand-100 bg-white p-3">
+                <p className="text-xs font-medium text-brand-800">{t('campaigns.newDrawer.variablesTitle')}</p>
+                <p className="text-xs text-brand-400">{t('campaigns.newDrawer.variablesHint')}</p>
+                {Array.from({ length: variableCount }).map((_, i) => {
+                  const source = sources[i] ?? FREE_SOURCE
+                  return (
+                    <div key={i} className="grid grid-cols-[4.5rem_1fr] items-center gap-2">
+                      <Label className="text-xs">{t('campaigns.newDrawer.tableVariable', { n: i + 1 })}</Label>
+                      <div className="space-y-1">
+                        <Select value={encodeSource(source)} onValueChange={(v) => handleSourceChange(i, v)}>
+                          <SelectTrigger className={`w-full ${FIELD_CLASS}`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="free" className="text-xs">
+                              {t('campaigns.newDrawer.sourceFree')}
+                            </SelectItem>
+                            {STANDARD_CLIENT_FIELDS.map((f) => (
+                              <SelectItem key={f} value={`field:${f}`} className="text-xs">
+                                {t(`campaigns.newDrawer.field.${f}`)}
+                              </SelectItem>
+                            ))}
+                            {customDefs.map((d) => (
+                              <SelectItem key={d.id} value={`custom:${d.id}`} className="text-xs">
+                                {d.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {source.kind === 'free' && (
+                          <Input
+                            value={sharedValues[i] ?? ''}
+                            onChange={(e) => handleSharedValueChange(i, e.target.value)}
+                            placeholder={t('campaigns.newDrawer.sharedValuePlaceholder')}
+                            className={FIELD_CLASS}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
 
             {recipients.length > 0 && variableCount > 0 && (
               <div className="overflow-hidden rounded-2xl border border-brand-100 bg-white">

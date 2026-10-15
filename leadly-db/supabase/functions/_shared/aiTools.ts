@@ -368,7 +368,7 @@ export const AI_TOOLS: AiToolDefinition[] = [
     name: "update_client_profile",
     skill: "clientes",
     description:
-      "Guarda o actualiza datos del contacto de esta conversación -- nunca de otra persona. Actualiza solo los campos que recibe. Necesario antes de facturar una venta (documento de identidad) o para completar el nombre si el de WhatsApp no es el nombre real del cliente.",
+      "Guarda o actualiza datos del contacto de esta conversación -- nunca de otra persona. Actualiza solo los campos que recibe. Necesario antes de facturar una venta (documento de identidad) o para completar el nombre si el de WhatsApp no es el nombre real del cliente. Con do_not_contact=true (y sin ningún otro campo) marca al contacto como \"no contactar\" para excluirlo de futuras campañas; solo úsalo cuando el propio cliente pide expresamente no recibir más mensajes.",
     parameters: {
       type: "object",
       properties: {
@@ -376,6 +376,7 @@ export const AI_TOOLS: AiToolDefinition[] = [
         document_type: { type: "string", enum: ["NIT", "CC", "CE", "RUC", "RFC", "PASAPORTE", "OTRO"], description: "Tipo de documento de identidad (opcional)." },
         document_number: { type: "string", description: "Número de documento de identidad (opcional)." },
         email: { type: "string", description: "Correo electrónico del cliente (opcional)." },
+        do_not_contact: { type: "boolean", description: "true para marcar al contacto como \"no contactar\" (el servidor aplica la etiqueta; no se puede elegir otra). Solo cuando el cliente pide expresamente no recibir más mensajes. Puede enviarse solo, sin otros campos (opcional)." },
       },
       required: [],
     },

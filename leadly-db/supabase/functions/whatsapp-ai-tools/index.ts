@@ -8,6 +8,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { json } from "../_shared/cors.ts";
 import { ADMINISTRATOR_ONLY, AI_TOOLS, isAdministratorContact, isToolAllowed } from "../_shared/aiTools.ts";
+import { updateClientProfile } from "../_shared/clientTags.ts";
 import { sendWhatsappImage } from "../_shared/whatsapp.ts";
 import { chargeSalesOrderToCredit, createSalesOrderPaymentLink } from "../_shared/payments/salesOrderPayments.ts";
 import { confirmSalesOrder, getStockTotals, getVariantStock, isPlaceholderAddressText } from "../_shared/orders/confirmSalesOrder.ts";
@@ -1566,22 +1567,7 @@ async function executeTool(
 
     case "update_client_profile": {
       if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
-      const updates: Record<string, string> = {};
-      for (const field of ["full_name", "document_type", "document_number", "email"] as const) {
-        if (typeof parameters[field] === "string" && (parameters[field] as string).trim()) {
-          updates[field] = (parameters[field] as string).trim();
-        }
-      }
-      if (Object.keys(updates).length === 0) throw new Error("No se recibió ningún campo para actualizar.");
-
-      const { data, error } = await adminClient
-        .from("clients")
-        .update(updates)
-        .eq("id", contactId)
-        .select("full_name, document_type, document_number, email")
-        .single();
-      if (error) throw new Error(error.message);
-      return { updated: true, ...data };
+      return await updateClientProfile(adminClient, tenantId, contactId, parameters);
     }
 
     case "list_contact_addresses": {

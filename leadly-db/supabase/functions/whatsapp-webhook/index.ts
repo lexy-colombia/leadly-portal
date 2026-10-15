@@ -9,6 +9,9 @@ import { corsHeaders, json } from "../_shared/cors.ts";
 import { downloadWhatsappMedia, isBsuid, verifyMetaSignature } from "../_shared/whatsapp.ts";
 import { splitPhone } from "../_shared/phone.ts";
 
+// Ventana de servicio al cliente de Meta: 24 h desde el último mensaje del contacto.
+const SERVICE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 const ATTACHMENT_MIME_TO_EXT: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
@@ -229,6 +232,29 @@ Deno.serve(async (req: Request) => {
             .eq("id", conversation.id);
           conversation.status = "open";
           conversation.mode = "ia";
+        } else {
+          // La ventana de servicio de Meta (24 h desde el último mensaje del
+          // contacto) también marca el inicio de una conversación nueva: si el
+          // contacto vuelve después de eso, la IA no debe imitar respuestas
+          // viejas de días o semanas atrás (visto 2026-10-14: el saludo salía
+          // en el estilo del prompt anterior, copiado del historial). Solo se
+          // mueve el límite de contexto; el modo (ia/humano) no se toca, para
+          // no quitarle la conversación a un agente que la tomó. Debe correr
+          // ANTES de insertar este mensaje, que así queda dentro del contexto.
+          const { data: lastInbound } = await adminClient
+            .from("whatsapp_messages")
+            .select("created_at")
+            .eq("conversation_id", conversation.id)
+            .eq("direction", "inbound")
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (lastInbound && Date.now() - new Date(lastInbound.created_at).getTime() > SERVICE_WINDOW_MS) {
+            await adminClient
+              .from("whatsapp_conversations")
+              .update({ context_reset_at: new Date().toISOString() })
+              .eq("id", conversation.id);
+          }
         }
 
         // Race backstop for the wamid check above (two redeliveries landing
