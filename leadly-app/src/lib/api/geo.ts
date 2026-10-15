@@ -37,3 +37,25 @@ export async function listCities(): Promise<City[]> {
   citiesCache = data
   return data
 }
+
+export interface Country {
+  code: string
+  name: string
+  is_enabled: boolean
+}
+
+let countriesCache: Country[] | null = null
+
+/** Países que la UI ofrece (`is_enabled`). El catálogo completo (ISO 3166-1,
+ * 249) está en la base, pero solo se muestran los habilitados -- ver la
+ * migración 20261015120000_tenant_country_state_city.sql. */
+export async function listCountries(): Promise<Country[]> {
+  if (countriesCache) return countriesCache
+  const { data, error } = await supabase.from('countries').select('*').eq('is_enabled', true).order('name')
+  if (error) throw error
+  countriesCache = data
+  return data
+}
+
+/** DIVIPOLA (departamento/ciudad) solo existe para Colombia. */
+export const GEO_COUNTRY_CODE = 'CO'

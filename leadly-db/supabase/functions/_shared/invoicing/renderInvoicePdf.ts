@@ -13,6 +13,7 @@
  * aislamiento por tenant ya lo hizo quien llama (el endpoint verifica el
  * pedido con el JWT del usuario antes de delegar; el envío por correo sale
  * de una factura que ya se resolvió por tenant). */
+import { resolveCityName } from "./cityName.ts";
 import { buildInvoicePdf, invoiceDisplayLabel, type InvoicePdfBuyer, type InvoicePdfItem, type InvoicePdfSeller } from "./buildInvoicePdf.ts";
 
 const PAYMENT_METHOD_LABEL: Record<string, string> = {
@@ -63,8 +64,8 @@ export async function renderInvoicePdfForOrder(adminClient: any, orderId: string
     order.billing_address_id
       ? adminClient.from("contact_addresses").select("line1, line2, city, state_province, country").eq("id", order.billing_address_id).maybeSingle()
       : Promise.resolve({ data: null }),
-    adminClient.from("tenants").select("legal_name, document_type, document_number, country, state_province, billing_address, contact_email, contact_phone, logo_url").eq("id", order.tenant_id).maybeSingle(),
-    adminClient.from("tenant_dian_profile").select("fiscal_regime, is_self_withholding_agent, city, resolution_number, resolution_prefix, resolution_range_from, resolution_range_to, resolution_valid_from, resolution_valid_until").eq("tenant_id", order.tenant_id).maybeSingle(),
+    adminClient.from("tenants").select("legal_name, document_type, document_number, country, state_province, billing_address, contact_email, contact_phone, logo_url, fiscal_regime, is_self_withholding_agent, city_code").eq("id", order.tenant_id).maybeSingle(),
+    adminClient.from("tenant_dian_profile").select("resolution_number, resolution_prefix, resolution_range_from, resolution_range_to, resolution_valid_from, resolution_valid_until").eq("tenant_id", order.tenant_id).maybeSingle(),
     adminClient.from("integration_credentials").select("mode").eq("tenant_id", order.tenant_id).eq("provider_key", "dian_directo").eq("is_active", true).is("deleted_at", null).maybeSingle(),
     adminClient.from("sales_order_payments").select("method, paid_at").eq("order_id", order.id).order("paid_at", { ascending: false }).limit(1).maybeSingle(),
     // Solo el hilo público -- `is_internal = true` son las "Notas" del
@@ -102,12 +103,12 @@ export async function renderInvoicePdfForOrder(adminClient: any, orderId: string
     legal_name: tenant?.legal_name ?? null,
     document_type: tenant?.document_type ?? null,
     document_number: tenant?.document_number ?? null,
-    city: dianProfile?.city ?? null,
+    city: await resolveCityName(adminClient, tenant?.city_code),
     billing_address: tenant?.billing_address ?? null,
     country: tenant?.country ?? null,
     state_province: tenant?.state_province ?? null,
-    fiscal_regime: isRemision ? null : (dianProfile?.fiscal_regime ?? null),
-    is_self_withholding_agent: !isRemision && Boolean(dianProfile?.is_self_withholding_agent),
+    fiscal_regime: isRemision ? null : (tenant?.fiscal_regime ?? null),
+    is_self_withholding_agent: !isRemision && Boolean(tenant?.is_self_withholding_agent),
     resolution: isRemision || !dianProfile
       ? null
       : {

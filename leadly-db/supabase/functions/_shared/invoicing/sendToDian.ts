@@ -14,6 +14,7 @@
  * vez de rechazar el formato -- consistente con que solo falta un
  * certificado real y registrado (se probó con uno de descarte). Sin Basic
  * Auth -- no dio 401, así que no parece hacer falta. */
+import { resolveCityName } from "./cityName.ts";
 import { buildInvoiceXml, type BuildInvoiceXmlInput } from "./buildInvoiceXml.ts";
 import { signInvoiceXml } from "./signInvoiceXml.ts";
 import { buildInvoiceZip } from "./zip.ts";
@@ -49,7 +50,7 @@ export async function sendTestInvoiceToDian(
 ): Promise<SendTestSetResult> {
   const { data: profile, error: profileError } = await adminClient
     .from("tenant_dian_profile")
-    .select("test_set_id, webservice_url, software_id, city, resolution_number, resolution_prefix, resolution_range_from, resolution_range_to, resolution_valid_from, resolution_valid_until")
+    .select("test_set_id, webservice_url, software_id, resolution_number, resolution_prefix, resolution_range_from, resolution_range_to, resolution_valid_from, resolution_valid_until")
     .eq("tenant_id", tenantId)
     .maybeSingle();
   if (profileError || !profile) throw new Error("Este tenant no tiene perfil DIAN configurado.");
@@ -69,7 +70,7 @@ export async function sendTestInvoiceToDian(
 
   const { data: tenant, error: tenantError } = await adminClient
     .from("tenants")
-    .select("legal_name, document_number, country, state_province")
+    .select("legal_name, document_number, country, state_province, city_code")
     .eq("id", tenantId)
     .maybeSingle();
   if (tenantError || !tenant?.legal_name || !tenant?.document_number) {
@@ -105,7 +106,7 @@ export async function sendTestInvoiceToDian(
       // 2026-09-10: un placeholder de texto dispara rechazos de código
       // inválido, la ausencia del grupo es a lo sumo una notificación).
       addressLine: null,
-      city: profile.city ?? null,
+      city: await resolveCityName(adminClient, tenant.city_code),
       stateProvince: tenant.state_province ?? null,
       countryCode: "CO",
     },

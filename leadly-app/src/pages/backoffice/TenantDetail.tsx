@@ -5,6 +5,7 @@ import { getTenant, setTenantStatus } from '../../lib/api/tenants'
 import { listProfilesByTenant } from '../../lib/api/users'
 import type { BillingPlan, Profile, Tenant } from '../../types/domain'
 import { COUNTRIES, DOCUMENT_TYPES, LANGUAGES } from '../../lib/referenceData'
+import { useCityName } from '../../lib/useCityName'
 import { InitialsAvatar, PageSpinner } from '@/components/atoms'
 import { Card } from '@/components/molecules'
 import { BuildingIcon, CreditCardIcon, GlobeIcon, IdCardIcon, MailIcon, MapPinIcon, MenuIcon, PencilIcon, PhoneIcon, PlusIcon, ReceiptIcon, UserIcon, UsersIcon } from '@/components/atoms/icons'
@@ -127,6 +128,7 @@ function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onT
   const activeUserCount = users?.filter((u) => u.active).length ?? 0
   const atUserCapacity = maxUsers !== null && activeUserCount >= maxUsers
 
+  const cityName = useCityName(tenant.city_code)
   const countryLabelKey = COUNTRIES.find((c) => c.code === tenant.country)?.labelKey
   const countryLabel = countryLabelKey ? t(countryLabelKey) : (tenant.country ?? '—')
   const documentTypeLabelKey = DOCUMENT_TYPES.find((d) => d.value === tenant.document_type)?.labelKey
@@ -223,7 +225,7 @@ function ClienteDetalleContent({ tenant, onTenantChange }: { tenant: Tenant; onT
             <Field
               icon={<MapPinIcon width={14} height={14} />}
               label={t('backoffice.clienteDetalle.fields.country')}
-              value={tenant.state_province ? `${countryLabel}, ${tenant.state_province}` : countryLabel}
+              value={[countryLabel, tenant.state_province, cityName].filter(Boolean).join(', ')}
             />
             <Field icon={<GlobeIcon width={14} height={14} />} label={t('backoffice.clienteDetalle.fields.preferredLanguage')} value={languageLabel} />
             <Field icon={<ReceiptIcon width={14} height={14} />} label={t('backoffice.clienteDetalle.fields.billingAddress')} value={tenant.billing_address ?? '—'} />

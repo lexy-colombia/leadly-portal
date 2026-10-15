@@ -8,6 +8,7 @@ import { Card, CardSection } from '@/components/molecules'
 import { Button } from '@/components/ui/button'
 import { PencilIcon, XCircleIcon } from '@/components/atoms/icons'
 import { useTenantForm } from '../../backoffice/useTenantForm'
+import { useCityName } from '../../../lib/useCityName'
 import { TenantFormFields } from '../../backoffice/TenantFormFields'
 
 /** Label-above-value field, same shape ProductDetail/ClientDetail use for
@@ -66,6 +67,7 @@ function LogoPreviewModal({ src, alt, onClose }: { src: string; alt: string; onC
  * changed from a slide-out Drawer to inline content. */
 export function CompanyProfileSection({ tenant, onSaved }: { tenant: Tenant; onSaved: (tenant: Tenant) => void }) {
   const { t } = useLanguage()
+  const cityName = useCityName(tenant.city_code)
   const [editing, setEditing] = useState(false)
   const [logoUploading, setLogoUploading] = useState(false)
   const [logoError, setLogoError] = useState<string | null>(null)
@@ -171,6 +173,19 @@ export function CompanyProfileSection({ tenant, onSaved }: { tenant: Tenant; onS
               <Field label={t('backoffice.tenantForm.contactPhone')} value={tenant.contact_phone} />
               <Field label={t('backoffice.tenantForm.country')} value={tenant.country} />
               <Field label={t('backoffice.tenantForm.stateProvince')} value={tenant.state_province} />
+              <Field label={t('backoffice.clienteDetalle.fields.city')} value={cityName} />
+              <Field
+                label={t('backoffice.tenantForm.taxEnabled')}
+                value={tenant.tax_enabled ? t('common.yes') : t('common.no')}
+              />
+              <Field
+                label={t('backoffice.tenantForm.fiscalRegime')}
+                value={
+                  tenant.fiscal_regime
+                    ? t(tenant.fiscal_regime === 'responsable_iva' ? 'backoffice.tenantForm.fiscalRegime.responsable' : 'backoffice.tenantForm.fiscalRegime.noResponsable')
+                    : null
+                }
+              />
               <Field label={t('backoffice.tenantForm.billingAddress')} value={tenant.billing_address} />
             </dl>
           )}

@@ -4,6 +4,21 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.28] - 2026-10-15
+
+### Added
+- **País, departamento y ciudad del comercio**, elegidos de un catálogo real: 249 países (ISO 3166-1, 11 habilitados en pantalla) y los municipios de Colombia (DIVIPOLA). Departamento y ciudad solo aplican cuando el país es Colombia, y la base de datos impide guardar una ciudad que no pertenece al departamento elegido.
+- **Régimen fiscal, autorretenedor y "calcular impuestos en las ventas"** en los datos de la empresa, junto a su vista de detalle.
+
+### Changed
+- La integración de **facturación electrónica DIAN** conserva solo lo propio de la emisión (resolución, consecutivos, software, set de pruebas y URL del servicio). Los datos del contribuyente pasan a los datos del comercio.
+- El nombre de la ciudad del emisor en la factura sale del catálogo; el código DIVIPOLA es el que valida la DIAN. Bogotá aparece como "Bogotá, D.C.".
+- El departamento y el nombre del departamento ya no se escriben a mano: se mantienen sincronizados con el catálogo.
+
+### Removed
+- Del formulario de la integración DIAN: régimen fiscal, autorretenedor, departamento, ciudad y cálculo de impuestos. Ya no viven en la tabla de la integración.
+- La opción "Otro" como país del comercio, porque no es un código válido ante la DIAN.
+
 ## [1.0.27] - 2026-10-13
 
 ### Added

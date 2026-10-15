@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
+import { resolveCityName } from "./cityName.ts";
 
 /** Fase 1 (cimientos) de facturación electrónica DIAN: reserva una fila en
  * sales_invoices si el tenant tiene una credencial activa de 'dian_directo'
@@ -227,17 +228,19 @@ async function buildOrderSnapshot(
   const { data: tenant } = await adminClient
     .from("tenants")
     .select(
-      "legal_name, document_type, document_number, country, state_province, billing_address, contact_email",
+      "legal_name, document_type, document_number, country, state_province, billing_address, contact_email, fiscal_regime, is_self_withholding_agent, city_code, state_code",
     )
     .eq("id", tenantId)
     .maybeSingle();
   const { data: dianProfile } = await adminClient
     .from("tenant_dian_profile")
     .select(
-      "fiscal_regime, is_self_withholding_agent, city, city_code, state_code, resolution_number, resolution_prefix, resolution_range_from, resolution_range_to, resolution_valid_from, resolution_valid_until, software_id",
+      "resolution_number, resolution_prefix, resolution_range_from, resolution_range_to, resolution_valid_from, resolution_valid_until, software_id",
     )
     .eq("tenant_id", tenantId)
     .maybeSingle();
+
+  const cityName = await resolveCityName(adminClient, tenant?.city_code);
 
   const buyerSnapshot = {
     client_id: client?.id ?? null,
@@ -254,11 +257,11 @@ async function buildOrderSnapshot(
     legal_name: tenant?.legal_name ?? null,
     document_type: tenant?.document_type ?? null,
     document_number: tenant?.document_number ?? null,
-    fiscal_regime: dianProfile?.fiscal_regime ?? null,
-    is_self_withholding_agent: dianProfile?.is_self_withholding_agent ?? false,
-    city: dianProfile?.city ?? null,
-    city_code: dianProfile?.city_code ?? null,
-    state_code: dianProfile?.state_code ?? null,
+    fiscal_regime: tenant?.fiscal_regime ?? null,
+    is_self_withholding_agent: tenant?.is_self_withholding_agent ?? false,
+    city: cityName,
+    city_code: tenant?.city_code ?? null,
+    state_code: tenant?.state_code ?? null,
     billing_address: tenant?.billing_address ?? null,
     country: tenant?.country ?? null,
     state_province: tenant?.state_province ?? null,
@@ -305,7 +308,7 @@ async function buildOrderSnapshot(
   };
 }
 
-/** Resuelve si el tenant tiene impuestos activados (tenant_dian_profile.tax_enabled)
+/** Resuelve si el tenant tiene impuestos activados (tenants.tax_enabled)
  * -- usado por whatsapp-ai-tools/storefront al armar cada sales_order_item,
  * antes de decidir si calculan tax_type_code/tax_rate/tax_amount/taxable_base
  * o dejan esas columnas en su default (0/null, comportamiento idéntico al de
@@ -314,9 +317,9 @@ export async function isTenantTaxEnabled(
   adminClient: SupabaseClient,
   tenantId: string,
 ): Promise<boolean> {
-  const { data } = await adminClient.from("tenant_dian_profile").select(
+  const { data } = await adminClient.from("tenants").select(
     "tax_enabled",
-  ).eq("tenant_id", tenantId).maybeSingle();
+  ).eq("id", tenantId).maybeSingle();
   return data?.tax_enabled ?? false;
 }
 

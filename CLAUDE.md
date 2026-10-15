@@ -5,6 +5,22 @@
 > **Aviso de depuración (2026-09-06)**: este archivo estuvo sin actualizar desde el 2026-08-29 hasta hoy pese a una semana entera de trabajo real (módulo POS completo, facturación electrónica DIAN, rediseño de Calendario/Dashboard, rebranding a Lexy — ver la entrada del 2026-09-06 más abajo). Además, las secciones de referencia **3 (Modelo de datos)**, **4 (Layouts y navegación)** y **6 (Edge Functions)** describen el esquema y la arquitectura del MVP original (tablas `crm_*`, 4 Edge Functions, nav de 5 módulos) — ese esquema fue reemplazado por uno sin prefijo (`clients`, `products`, `sales_orders`, etc.) desde el pivote a ERP del 2026-08-15, y hoy hay decenas de tablas y Edge Functions más. Se dejan esas secciones tal cual (reescribirlas a fondo es trabajo aparte, requiere catalogar el esquema actual completo) pero **no son confiables como estado vigente** — para eso, confiar en el código y en el historial cronológico de "Estado actual" de abajo, empezando por las entradas más recientes.
 
 
+## Estado actual (2026-10-15) — Identidad fiscal y geografía del tenant fuera de la integración DIAN
+
+**Principio (corrección explícita del usuario):** `tenant_dian_profile` guarda solo configuración propia de la emisión; todo lo demás es dato del tenant y vive en `tenants`. Quedó así: `tenant_dian_profile` = `resolution_*`, `next_invoice_number`, `next_credit_note_number`, `credit_note_prefix`, `software_id`, `test_set_id`, `webservice_url`, `is_configured`. `tenants` ganó `state_code`, `city_code`, `fiscal_regime`, `is_self_withholding_agent` y `tax_enabled`.
+
+**Geografía (migración `20261015120000`):** tabla `countries` (ISO 3166-1, 249; `is_enabled` marca los 11 que la UI ofrece; se quitó "OT" porque no es ISO). `tenants.country` ahora tiene FK; `state_code`/`city_code` solo con `country = 'CO'` (CHECK) y FK compuesta `(state_code, city_code) → cities(department_code, code)`. `state_province` (texto) se conserva y lo sincroniza un trigger desde el catálogo. El nombre de la ciudad ya no se guarda: `_shared/invoicing/cityName.ts` lo resuelve por JOIN a `cities`. El selector (`GeoSelect`) solo se muestra si el país es Colombia.
+
+**Corolario operativo:** el seller snapshot de la factura se arma en DOS lugares y ambos leen de `tenants` — `queueInvoiceGeneration.ts` y la función SQL `apply_sales_order_confirmed_effects` (que además ahora incluye `city_code`/`state_code`). Si cambia uno, cambiar el otro. Esa función envuelve todo en `exception when others` y solo emite un warning: un nombre de columna equivocado deja de reservar facturas en silencio.
+
+**Orden de despliegue que se siguió (repetir en cambios parecidos):** migración aditiva con backfill → código que lee de `tenants` → desplegar TODAS las funciones que empaquetan el módulo (`deno info --json` por función, no por `grep` del `index.ts`) → recién ahí migración que borra la columna, con una guarda que aborta si algún dato no se copió. Las migraciones `20261015140000` y `20261015160000` ya borraron las columnas.
+
+**Pendiente / límites:**
+- Faltan ciudad en Faiver Andres y Universidad del Norte, y país en Lexy Colombia y Pragma Consulting (no se adivinaron).
+- Barriles de la sexta emitió una factura de punta a punta después del cambio (confirmado por el usuario). No se probó una nota crédito ni el PDF tras el borrado.
+- `tenants.billing_address` sigue siendo texto y la dirección de facturación de los clientes de los tenants (`contact_addresses.is_billing`) no se tocó: queda para una ronda aparte. La misma estandarización de `companies` en Lexy Legal está pendiente, y Bedly quedó fuera de alcance.
+- Los nombres de país se guardan en español; en la UI en inglés solo los 11 habilitados salen traducidos.
+
 ## Estado actual (2026-10-08) — Dashboard con Resumen operativo y Atención/CRM
 
 Rediseño frontend aprobado desde una propuesta inspirada en Bedly, conservando azul/turquesa de Leadly. `Dashboard.tsx` tiene dos vistas: **Resumen** solo para ventas, pedidos, despachos, cartera, reportes de productos/canales e inventario; **Atención** reúne conversaciones, tiempos de respuesta, oportunidades, tareas y rendimiento de usuarios. Se respeta `enabledModules` y el permiso de lectura de cada módulo; equipo solo para administradores. CRM no exige que WhatsApp esté habilitado.

@@ -22,12 +22,10 @@ import {
 } from "../../../lib/api/dianCertificate";
 import type { TaxType, TenantWithholdingConfig } from "../../../types/domain";
 import { FieldError } from "@/components/atoms";
-import { GeoSelect } from "@/components/molecules";
 import { Drawer } from "@/components/organisms";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -83,14 +81,6 @@ export function DianDirectoCredentialDrawer({
   const [softwarePin, setSoftwarePin] = useState("");
   const [configuredSecrets, setConfiguredSecrets] = useState<string[]>([]);
 
-  const [taxEnabled, setTaxEnabled] = useState(false);
-  const [fiscalRegime, setFiscalRegime] = useState<
-    "responsable_iva" | "no_responsable_iva" | ""
-  >("");
-  const [isSelfWithholdingAgent, setIsSelfWithholdingAgent] = useState(false);
-  const [city, setCity] = useState("");
-  const [cityCode, setCityCode] = useState("");
-  const [stateCode, setStateCode] = useState("");
   const [resolutionNumber, setResolutionNumber] = useState("");
   const [resolutionPrefix, setResolutionPrefix] = useState("");
   const [resolutionRangeFrom, setResolutionRangeFrom] = useState("");
@@ -158,12 +148,6 @@ export function DianDirectoCredentialDrawer({
             : [],
         );
 
-        setTaxEnabled(profile?.tax_enabled ?? false);
-        setFiscalRegime(profile?.fiscal_regime ?? "");
-        setIsSelfWithholdingAgent(profile?.is_self_withholding_agent ?? false);
-        setCity(profile?.city ?? "");
-        setCityCode(profile?.city_code ?? "");
-        setStateCode(profile?.state_code ?? "");
         setResolutionNumber(profile?.resolution_number ?? "");
         setResolutionPrefix(profile?.resolution_prefix ?? "");
         setResolutionRangeFrom(
@@ -366,12 +350,6 @@ export function DianDirectoCredentialDrawer({
         resolutionRangeTo.trim()
       );
       await updateTenantDianProfile(tenantId, {
-        tax_enabled: taxEnabled,
-        fiscal_regime: fiscalRegime || null,
-        is_self_withholding_agent: isSelfWithholdingAgent,
-        city: city.trim() || null,
-        city_code: cityCode.trim() || null,
-        state_code: stateCode.trim() || null,
         resolution_number: resolutionNumber.trim() || null,
         resolution_prefix: resolutionPrefix.trim() || null,
         resolution_range_from: resolutionRangeFrom.trim()
@@ -615,13 +593,6 @@ export function DianDirectoCredentialDrawer({
           <IntegrationSection
             title={t("integrations.dianDirecto.section.profile")}
           >
-            <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
-              <p className="text-xs font-medium text-brand-700">
-                {t("integrations.dianDirecto.taxEnabled")}
-              </p>
-              <Switch checked={taxEnabled} onCheckedChange={setTaxEnabled} />
-            </div>
-
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <IntegrationFieldLabel
@@ -655,47 +626,6 @@ export function DianDirectoCredentialDrawer({
                   </p>
                 )}
               </div>
-              <div>
-                <IntegrationFieldLabel
-                  htmlFor="dian-fiscal-regime"
-                  label={t("integrations.dianDirecto.fiscalRegime")}
-                />
-                <Select
-                  value={fiscalRegime}
-                  onValueChange={(v) =>
-                    setFiscalRegime(
-                      v as "responsable_iva" | "no_responsable_iva",
-                    )
-                  }
-                >
-                  <SelectTrigger
-                    id="dian-fiscal-regime"
-                    className={`w-full ${FIELD_CLASS}`}
-                  >
-                    <SelectValue
-                      placeholder={t("common.form.selectPlaceholder")}
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="responsable_iva" className="text-xs">
-                      {t("integrations.dianDirecto.fiscalRegime.responsable")}
-                    </SelectItem>
-                    <SelectItem value="no_responsable_iva" className="text-xs">
-                      {t("integrations.dianDirecto.fiscalRegime.noResponsable")}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
-              <p className="text-xs font-medium text-brand-700">
-                {t("integrations.dianDirecto.selfWithholding")}
-              </p>
-              <Switch
-                checked={isSelfWithholdingAgent}
-                onCheckedChange={setIsSelfWithholdingAgent}
-              />
             </div>
 
             <div>
@@ -710,30 +640,6 @@ export function DianDirectoCredentialDrawer({
                 className={`sm:w-1/2 ${FIELD_CLASS}`}
               />
             </div>
-
-            {/* Departamento/ciudad elegidos de la lista real de la DIAN
-                (DIVIPOLA) -- ya trae el código correcto, sin que nadie
-                tenga que saberlo de memoria (antes era un campo de texto
-                libre para el código, pedido explícito del usuario
-                2026-09-09: "cargar eso a la base de datos"). `city` (el
-                nombre legible que ya usaba el XML) se completa solo desde
-                la elección -- ya no es un campo aparte. */}
-            <GeoSelect
-              stateCode={stateCode || null}
-              cityCode={cityCode || null}
-              onChange={({
-                stateCode: nextState,
-                cityCode: nextCity,
-                cityName,
-              }) => {
-                setStateCode(nextState ?? "");
-                setCityCode(nextCity ?? "");
-                setCity(cityName ?? "");
-              }}
-              stateLabel={t("integrations.dianDirecto.state")}
-              cityLabel={t("integrations.dianDirecto.city")}
-              idPrefix="dian-geo"
-            />
 
             <div className="grid gap-3 sm:grid-cols-2">
               {/* El Test Set ID solo aplica en habilitación -- en producción

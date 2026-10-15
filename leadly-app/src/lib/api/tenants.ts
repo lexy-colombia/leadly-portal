@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient'
-import type { Tenant, TenantDocumentType, TenantEntityType, TenantLanguage, TenantStatus } from '../../types/domain'
+import type { Tenant, TenantDocumentType, TenantEntityType, TenantFiscalRegime, TenantLanguage, TenantStatus } from '../../types/domain'
 import { TENANT_LOGO_ALLOWED_TYPES, TENANT_LOGO_MAX_BYTES } from '../referenceData'
 
 export interface TenantInput {
@@ -12,6 +12,11 @@ export interface TenantInput {
   contact_phone: string | null
   country: string | null
   state_province: string | null
+  state_code: string | null
+  city_code: string | null
+  fiscal_regime: TenantFiscalRegime | null
+  is_self_withholding_agent: boolean
+  tax_enabled: boolean
   billing_address: string | null
   preferred_language: TenantLanguage
   notes: string | null

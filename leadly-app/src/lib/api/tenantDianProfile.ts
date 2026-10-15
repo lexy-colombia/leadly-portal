@@ -74,12 +74,6 @@ async function ensureTenantDianProfile(tenantId: string): Promise<TenantDianProf
 export type TenantDianProfileInput = Partial<
   Pick<
     TenantDianProfile,
-    | 'tax_enabled'
-    | 'fiscal_regime'
-    | 'is_self_withholding_agent'
-    | 'city'
-    | 'city_code'
-    | 'state_code'
     | 'resolution_number'
     | 'resolution_prefix'
     | 'resolution_range_from'

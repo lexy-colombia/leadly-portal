@@ -16,6 +16,7 @@
  * quién mandarle" -- queda registrada en `sales_document_emails`, que es
  * append-only: un reenvío es una fila nueva, nunca una edición. Esa
  * bitácora es la evidencia de cumplimiento de la entrega. */
+import { resolveCityName } from "./cityName.ts";
 import { renderInvoicePdfForOrder, bytesToBase64 } from "./renderInvoicePdf.ts";
 import { renderCreditNotePdf } from "./renderCreditNotePdf.ts";
 import { fetchStoredXml } from "./storeSignedXml.ts";
@@ -103,10 +104,10 @@ async function doSend(adminClient: any, tenantId: string, target: Target, trigge
 
   const { data: tenant } = await adminClient
     .from("tenants")
-    .select("name, legal_name, document_number, contact_email, logo_url")
+    .select("name, legal_name, document_number, contact_email, logo_url, city_code")
     .eq("id", tenantId)
     .maybeSingle();
-  const { data: dianProfile } = await adminClient.from("tenant_dian_profile").select("city").eq("tenant_id", tenantId).maybeSingle();
+  const sellerCity = await resolveCityName(adminClient, tenant?.city_code);
   const { data: credential } = await adminClient
     .from("integration_credentials")
     .select("mode")
@@ -173,7 +174,7 @@ async function doSend(adminClient: any, tenantId: string, target: Target, trigge
     sellerName,
     sellerLegalName: tenant?.legal_name ?? null,
     sellerDocument: tenant?.document_number ?? null,
-    sellerCity: dianProfile?.city ?? null,
+    sellerCity,
     sellerEmail: tenant?.contact_email ?? null,
     sellerLogoUrl: tenant?.logo_url ?? null,
     buyerName: buyer.full_name ?? null,

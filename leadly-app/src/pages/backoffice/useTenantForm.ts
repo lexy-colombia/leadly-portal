@@ -1,16 +1,18 @@
 import { useState } from 'react'
 import type { TenantInput } from '../../lib/api/tenants'
-import type { TenantDocumentType, TenantEntityType, TenantLanguage } from '../../types/domain'
+import type { TenantDocumentType, TenantEntityType, TenantFiscalRegime, TenantLanguage } from '../../types/domain'
 import { isNotBlank, isValidE164Phone, isValidEmail } from '../../lib/validation'
 import { useLanguage } from '../../contexts/LanguageContext'
+import { GEO_COUNTRY_CODE } from '../../lib/api/geo'
 
 /** Shared form state + validation for both "Nuevo cliente" and the edit form
  * on the client detail page -- one place to change validation rules instead
  * of two forms drifting apart.
  *
  * Required-ness reflects real use cases, not "everything optional":
- * - name, entity_type, document_type/number, contact email/phone, country,
- *   state and language are always required -- a client Leadly actually bills
+ * - name, entity_type, document_type/number, contact email/phone, country
+ *   and language are always required; departamento y ciudad (DIVIPOLA)
+ *   solo se piden -- y solo se guardan -- cuando el país es Colombia -- a client Leadly actually bills
  *   and messages needs all of this.
  * - legal_name is required only for `empresa` (a `persona natural` doesn't
  *   have a separate razón social from their own name).
@@ -25,9 +27,32 @@ export function useTenantForm(initial?: Partial<TenantInput>) {
   const [documentNumber, setDocumentNumber] = useState(initial?.document_number ?? '')
   const [contactEmail, setContactEmail] = useState(initial?.contact_email ?? '')
   const [contactPhone, setContactPhone] = useState(initial?.contact_phone ?? '')
-  const [country, setCountry] = useState(initial?.country ?? '')
+  const [country, setCountryRaw] = useState(initial?.country ?? '')
   const [stateProvince, setStateProvince] = useState(initial?.state_province ?? '')
+  const [stateCode, setStateCode] = useState(initial?.state_code ?? '')
+  const [cityCode, setCityCode] = useState(initial?.city_code ?? '')
+  const isColombia = country === GEO_COUNTRY_CODE
+
+  // Cambiar a un país que no es Colombia limpia departamento y ciudad: la
+  // base rechaza (CHECK) guardarlos con otro país.
+  function setCountry(next: string) {
+    setCountryRaw(next)
+    if (next !== GEO_COUNTRY_CODE) {
+      setStateCode('')
+      setCityCode('')
+      setStateProvince('')
+    }
+  }
+
+  function setGeo(next: { stateCode: string | null; stateName: string | null; cityCode: string | null }) {
+    setStateCode(next.stateCode ?? '')
+    setStateProvince(next.stateName ?? '')
+    setCityCode(next.cityCode ?? '')
+  }
   const [billingAddress, setBillingAddress] = useState(initial?.billing_address ?? '')
+  const [fiscalRegime, setFiscalRegime] = useState<TenantFiscalRegime | ''>(initial?.fiscal_regime ?? '')
+  const [isSelfWithholdingAgent, setIsSelfWithholdingAgent] = useState(initial?.is_self_withholding_agent ?? false)
+  const [taxEnabled, setTaxEnabled] = useState(initial?.tax_enabled ?? false)
   const [preferredLanguage, setPreferredLanguage] = useState<TenantLanguage>(initial?.preferred_language ?? 'es')
   const [notes, setNotes] = useState(initial?.notes ?? '')
   const [touched, setTouched] = useState(false)
@@ -40,7 +65,8 @@ export function useTenantForm(initial?: Partial<TenantInput>) {
   const emailError = touched && !isValidEmail(contactEmail) ? t('auth.errors.invalidEmail') : undefined
   const phoneError = touched && !isValidE164Phone(contactPhone) ? t('backoffice.tenantForm.errors.phone') : undefined
   const countryError = touched && !country ? t('backoffice.tenantForm.errors.country') : undefined
-  const stateProvinceError = touched && !isNotBlank(stateProvince) ? t('backoffice.tenantForm.errors.stateProvince') : undefined
+  const stateProvinceError = touched && isColombia && !stateCode ? t('backoffice.tenantForm.errors.stateProvince') : undefined
+  const cityError = touched && isColombia && !cityCode ? t('backoffice.tenantForm.errors.city') : undefined
 
   function isValid() {
     return (
@@ -51,7 +77,7 @@ export function useTenantForm(initial?: Partial<TenantInput>) {
       isValidEmail(contactEmail) &&
       isValidE164Phone(contactPhone) &&
       !!country &&
-      isNotBlank(stateProvince)
+      (!isColombia || (!!stateCode && !!cityCode))
     )
   }
 
@@ -65,7 +91,12 @@ export function useTenantForm(initial?: Partial<TenantInput>) {
       contact_email: contactEmail.trim() || null,
       contact_phone: contactPhone.trim() || null,
       country: country || null,
-      state_province: stateProvince.trim() || null,
+      state_province: isColombia ? stateProvince.trim() || null : null,
+      state_code: isColombia ? stateCode || null : null,
+      city_code: isColombia ? cityCode || null : null,
+      fiscal_regime: fiscalRegime || null,
+      is_self_withholding_agent: isSelfWithholdingAgent,
+      tax_enabled: taxEnabled,
       billing_address: billingAddress.trim() || null,
       preferred_language: preferredLanguage,
       notes: notes.trim() || null,
@@ -90,9 +121,18 @@ export function useTenantForm(initial?: Partial<TenantInput>) {
     country,
     setCountry,
     stateProvince,
-    setStateProvince,
+    stateCode,
+    cityCode,
+    isColombia,
+    setGeo,
     billingAddress,
     setBillingAddress,
+    fiscalRegime,
+    setFiscalRegime,
+    isSelfWithholdingAgent,
+    setIsSelfWithholdingAgent,
+    taxEnabled,
+    setTaxEnabled,
     preferredLanguage,
     setPreferredLanguage,
     notes,
@@ -107,6 +147,7 @@ export function useTenantForm(initial?: Partial<TenantInput>) {
     phoneError,
     countryError,
     stateProvinceError,
+    cityError,
     isValid,
     toInput,
   }

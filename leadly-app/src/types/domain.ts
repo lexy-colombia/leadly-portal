@@ -3,6 +3,7 @@ export type TenantStatus = 'active' | 'inactive'
 export type TenantEntityType = 'persona' | 'empresa'
 export type TenantDocumentType = 'NIT' | 'CC' | 'CE' | 'RUC' | 'RFC' | 'PASAPORTE' | 'OTRO'
 export type TenantLanguage = 'es' | 'en'
+export type TenantFiscalRegime = 'responsable_iva' | 'no_responsable_iva'
 export type WhatsappLineStatus = 'pending_verification' | 'active' | 'suspended' | 'disconnected'
 export type AiProvider = 'openai' | 'gemini'
 export type ConversationMode = 'ia' | 'humano'
@@ -24,6 +25,14 @@ export interface Tenant {
   document_number: string | null
   country: string | null
   state_province: string | null
+  /** DIVIPOLA. Solo con country = 'CO'; la base lo impone. */
+  state_code: string | null
+  city_code: string | null
+  /** Contribuyente: lo usa la facturación electrónica (antes vivía en el perfil DIAN). */
+  fiscal_regime: TenantFiscalRegime | null
+  is_self_withholding_agent: boolean
+  /** Calcula/discrimina impuestos en las ventas (antes vivía en el perfil DIAN). */
+  tax_enabled: boolean
   billing_address: string | null
   preferred_language: TenantLanguage
   logo_url: string | null
@@ -1098,6 +1107,8 @@ export interface PaymentInvoice {
   buyer_address: string | null
   buyer_country: string | null
   buyer_state_province: string | null
+  buyer_state_code: string | null
+  buyer_city_code: string | null
   subtotal_cents: number | null
   tax_cents: number | null
   tax_rate: number
@@ -1262,16 +1273,8 @@ export interface DianDocumentType {
 export interface TenantDianProfile {
   id: string
   tenant_id: string
-  tax_enabled: boolean
-  fiscal_regime: 'responsable_iva' | 'no_responsable_iva' | null
-  is_self_withholding_agent: boolean
-  city: string | null
-  // Código DANE (DIVIPOLA) de municipio/departamento -- exigido por la DIAN
-  // en la dirección del emisor (reglas FAJ09/FAJ12/FAJ29/FAJ32, rechazo
-  // real, ver buildInvoiceXml.ts). Sin catálogo autocompletado -- el tenant
-  // lo carga a mano una vez.
-  city_code: string | null
-  state_code: string | null
+  // Solo configuración propia de la emisión. Régimen fiscal, autorretenedor y
+  // ciudad/departamento son datos del tenant (ver `Tenant`), no de la integración.
   resolution_number: string | null
   resolution_prefix: string | null
   resolution_range_from: number | null

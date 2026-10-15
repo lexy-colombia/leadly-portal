@@ -71,6 +71,8 @@
   "common.status.optional": "Optional",
   "common.status.required": "Required",
   "common.status.active": "Active",
+  "common.yes": "Yes",
+  "common.no": "No",
   "common.status.inactive": "Inactive",
   "common.pagination.previous": "Previous",
   "common.pagination.next": "Next",

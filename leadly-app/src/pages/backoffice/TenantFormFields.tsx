@@ -1,9 +1,13 @@
 import { FieldError } from '@/components/atoms'
+import { useEffect, useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { COUNTRIES, DOCUMENT_TYPES, LANGUAGES } from '../../lib/referenceData'
+import { GeoSelect } from '../../components/molecules/GeoSelect'
+import { listCountries, type Country } from '../../lib/api/geo'
 import type { TenantFormState } from './useTenantForm'
 import { useLanguage } from '../../contexts/LanguageContext'
 
@@ -18,6 +22,18 @@ export function TenantFormFields({ form, hideNotes = false, compact = false }: {
   const rowGap = compact ? 'gap-3' : 'gap-4'
   const rowCols2 = 'grid sm:grid-cols-2'
   const rowCols3 = compact ? 'grid sm:grid-cols-2' : 'grid sm:grid-cols-3'
+  const [countries, setCountries] = useState<Country[]>([])
+  useEffect(() => {
+    listCountries().then(setCountries).catch(() => setCountries([]))
+  }, [])
+  // El país ya guardado puede no estar habilitado hoy; se muestra igual.
+  const countryOptions = countries.some((c) => c.code === form.country) || !form.country
+    ? countries
+    : [...countries, { code: form.country, name: form.country, is_enabled: false }]
+  const countryLabel = (c: Country) => {
+    const key = COUNTRIES.find((x) => x.code === c.code)?.labelKey
+    return key ? t(key) : c.name
+  }
 
   return (
     <div className={sectionGap}>
@@ -140,27 +156,14 @@ export function TenantFormFields({ form, hideNotes = false, compact = false }: {
               <SelectValue placeholder={t('common.form.selectPlaceholder')} />
             </SelectTrigger>
             <SelectContent>
-              {COUNTRIES.map((c) => (
+              {countryOptions.map((c) => (
                 <SelectItem key={c.code} value={c.code}>
-                  {t(c.labelKey)}
+                  {countryLabel(c)}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
           <FieldError message={form.countryError} />
-        </div>
-
-        <div>
-          <Label htmlFor="tenant-state">{t('backoffice.tenantForm.stateProvince')}</Label>
-          <Input
-            id="tenant-state"
-            value={form.stateProvince}
-            aria-invalid={!!form.stateProvinceError}
-            onChange={(e) => form.setStateProvince(e.target.value)}
-            placeholder={t('backoffice.tenantForm.stateProvince.placeholder')}
-            className="mt-1"
-          />
-          <FieldError message={form.stateProvinceError} />
         </div>
 
         <div>
@@ -179,6 +182,46 @@ export function TenantFormFields({ form, hideNotes = false, compact = false }: {
           </Select>
         </div>
       </div>
+
+      <div className={`${rowCols2} ${rowGap}`}>
+        <div>
+          <Label htmlFor="tenant-fiscal-regime">{t('backoffice.tenantForm.fiscalRegime')}</Label>
+          <Select value={form.fiscalRegime} onValueChange={(v) => form.setFiscalRegime(v as 'responsable_iva' | 'no_responsable_iva')}>
+            <SelectTrigger id="tenant-fiscal-regime" className="mt-1 w-full">
+              <SelectValue placeholder={t('common.form.selectPlaceholder')} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="responsable_iva">{t('backoffice.tenantForm.fiscalRegime.responsable')}</SelectItem>
+              <SelectItem value="no_responsable_iva">{t('backoffice.tenantForm.fiscalRegime.noResponsable')}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-end">
+          <div className="flex w-full items-center justify-between rounded-lg border border-brand-100 px-3 py-2">
+            <Label htmlFor="tenant-self-withholding" className="text-xs">{t('backoffice.tenantForm.selfWithholding')}</Label>
+            <Switch id="tenant-self-withholding" checked={form.isSelfWithholdingAgent} onCheckedChange={form.setIsSelfWithholdingAgent} />
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2">
+        <Label htmlFor="tenant-tax-enabled" className="text-xs">{t('backoffice.tenantForm.taxEnabled')}</Label>
+        <Switch id="tenant-tax-enabled" checked={form.taxEnabled} onCheckedChange={form.setTaxEnabled} />
+      </div>
+
+      {form.isColombia && (
+        <div>
+          <GeoSelect
+            stateCode={form.stateCode || null}
+            cityCode={form.cityCode || null}
+            onChange={(g) => form.setGeo(g)}
+            stateLabel={t('backoffice.tenantForm.stateProvince')}
+            cityLabel={t('backoffice.tenantForm.city')}
+            idPrefix="tenant-geo"
+          />
+          <FieldError message={form.stateProvinceError ?? form.cityError} />
+        </div>
+      )}
 
       <div>
         <Label htmlFor="tenant-billing-address">{t('backoffice.tenantForm.billingAddress')}</Label>
