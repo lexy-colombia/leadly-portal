@@ -36,8 +36,7 @@ export function publicAppUrl(): string {
 }
 
 /** URL de retorno por defecto de un cobro: `${APP}/pago/resultado?link=<id>`.
- * `linkId` es el id de la fila propia (payments.payment_links.id,
- * sales_order_payment_links.id o payment_invoices.id): nunca el id de Wompi. */
+ * `linkId` es el id de la fila propia (payments.payment_links.id): nunca el id de Wompi. */
 export function paymentReturnUrl(linkId: string, base?: string | null): string {
   const root = base ? resolvePublicAppUrl(base) : publicAppUrl();
   return `${root}/pago/resultado?link=${encodeURIComponent(linkId)}`;

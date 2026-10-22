@@ -1150,7 +1150,10 @@ export function PosTabAccount({
           onSearchBuyers={(q) => searchPosClients(tenantId, q)}
           onSaved={(chargedOrder, einvoicing) => {
             if (einvoicing?.error) toast.error(einvoicing.error)
-            if (receiptPrinter.autoPrintEnabled) receiptPrinter.print(chargedOrder.id, posPointName)
+            // Una factura aceptada se imprime SIEMPRE, con o sin el flag de
+            // auto-impresión (ese flag solo gobierna el ticket de una venta
+            // sin factura).
+            if (einvoicing?.accepted || receiptPrinter.autoPrintEnabled) receiptPrinter.print(chargedOrder.id, posPointName)
             handlePaymentDrawerDone(!einvoicing?.error)
           }}
         />
@@ -1173,9 +1176,10 @@ export function PosTabAccount({
           creditEnabled={customer?.credit_enabled ?? false}
           storeCreditBalance={storeCreditBalance}
           dianConnected={dianConnected}
-          onSaved={async (_order, einvoicing) => {
+          onSaved={async (paidOrder, einvoicing) => {
             setPayingCharge(null)
             if (einvoicing?.error) toast.error(einvoicing.error)
+            if (einvoicing?.accepted) receiptPrinter.print(paidOrder.id, posPointName)
             const freshCharges = await listChargesFromCart(cartId).catch(() => [] as CartCharge[])
             setCharges(freshCharges)
             if (!einvoicing?.error) await closeIfFullyPaid(items.length, freshCharges)

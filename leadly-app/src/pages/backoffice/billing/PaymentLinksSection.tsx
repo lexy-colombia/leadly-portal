@@ -24,7 +24,6 @@ const HEALTH_KEYS: (keyof PaymentHealth)[] = [
   'transaction_conflict',
   'amount_mismatch',
   'duplicate_payment',
-  'legacy_not_applied',
   'deliveries_failed',
   'stale_pending_links',
 ]

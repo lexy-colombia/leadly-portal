@@ -4,15 +4,13 @@ import { useLanguage } from '../../contexts/LanguageContext'
 import type { TranslationKey } from '../../i18n/translations'
 import { formatDate } from '../../lib/dates'
 import {
-  createCheckoutForInvoice,
   getActiveSubscriptionForTenant,
   listBillingPlans,
   listInvoicesForTenant,
 } from '../../lib/api/billing'
 import type { BillingPlan, BillingSubscription, PaymentInvoice, PaymentInvoiceStatus } from '../../types/domain'
 import { PageSpinner } from '@/components/atoms'
-import { Card, CardSection, EmptyState, Pagination } from '@/components/molecules'
-import { Button } from '@/components/ui/button'
+import { Card, CardSection, EmptyState, InvoicePayButton, Pagination } from '@/components/molecules'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 const PAGE_SIZE = 8
@@ -57,32 +55,14 @@ function formatMoney(amountCents: number, currency: string): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amountCents / 100)
 }
 
-function PayButton({ invoice }: { invoice: PaymentInvoice }) {
-  const { t } = useLanguage()
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  async function handlePay() {
-    setLoading(true)
-    setError(null)
-    try {
-      const checkoutUrl = await createCheckoutForInvoice(invoice.id, window.location.href)
-      window.open(checkoutUrl, '_blank', 'noopener,noreferrer')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('billing.errors.payLinkFailed'))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <div className="text-right">
-      <Button onClick={handlePay} disabled={loading} size="sm">
-        {loading ? t('billing.invoices.generating') : t('billing.invoices.payNow')}
-      </Button>
-      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
-    </div>
-  )
+/** Vencimiento del proximo comprobante NO pagado (el mas cercano), no el fin del periodo de la suscripcion. */
+function nextUnpaidDueDate(invoices: PaymentInvoice[] | null): string | null {
+  if (!invoices) return null
+  const due = invoices
+    .filter((i) => (i.status === 'PENDING' || i.status === 'OVERDUE') && i.due_date)
+    .map((i) => i.due_date as string)
+    .sort()
+  return due[0] ?? null
 }
 
 export function Billing() {
@@ -108,6 +88,7 @@ export function Billing() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId])
 
+  const nextDue = nextUnpaidDueDate(invoices)
   const plan = plans?.find((p) => p.id === subscription?.plan_id)
   const totalPages = invoices ? Math.max(1, Math.ceil(invoices.length / PAGE_SIZE)) : 1
   const pageItems = invoices ? invoices.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE) : null
@@ -137,7 +118,11 @@ export function Billing() {
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-brand-400">{t('billing.plan.nextDue', { date: formatDate(subscription.current_period_end) })}</span>
+                {invoices && (
+                  <span className="text-brand-400">
+                    {nextDue ? t('billing.plan.nextDue', { date: formatDate(nextDue) }) : t('billing.plan.nextDueNone')}
+                  </span>
+                )}
                 <Badge variant="outline" className={SUBSCRIPTION_STATUS_BADGE_CLASS[subscription.status]}>
                   {t(SUBSCRIPTION_STATUS_KEY[subscription.status])}
                 </Badge>
@@ -147,6 +132,7 @@ export function Billing() {
         </CardSection>
 
         <CardSection title={t('billing.invoices.title')}>
+          <p className="mb-2 text-xs text-brand-400">{t('billing.invoices.notElectronic')}</p>
           {!invoices && <PageSpinner />}
           {invoices && invoices.length === 0 && <EmptyState>{t('billing.invoices.empty')}</EmptyState>}
           {pageItems && pageItems.length > 0 && (
@@ -156,6 +142,7 @@ export function Billing() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>{t('billing.invoices.table.invoice')}</TableHead>
+                      <TableHead>{t('billing.invoices.table.period')}</TableHead>
                       <TableHead>{t('billing.invoices.table.amount')}</TableHead>
                       <TableHead>{t('billing.invoices.table.status')}</TableHead>
                       <TableHead>{t('billing.invoices.table.dueDate')}</TableHead>
@@ -166,12 +153,17 @@ export function Billing() {
                     {pageItems.map((invoice) => (
                       <TableRow key={invoice.id}>
                         <TableCell className="font-medium text-brand-800">{invoice.invoice_number ?? invoice.id.slice(0, 8)}</TableCell>
+                        <TableCell className="text-brand-400">
+                          {invoice.period_start && invoice.period_end
+                            ? `${formatDate(invoice.period_start)} → ${formatDate(invoice.period_end)}`
+                            : '—'}
+                        </TableCell>
                         <TableCell>{formatMoney(invoice.amount_cents, invoice.currency)}</TableCell>
                         <TableCell>
                           <Badge variant="outline" className={STATUS_BADGE_CLASS[invoice.status]}>{t(STATUS_KEY[invoice.status])}</Badge>
                         </TableCell>
                         <TableCell className="text-brand-400">{formatDate(invoice.due_date)}</TableCell>
-                        <TableCell>{invoice.status === 'PENDING' || invoice.status === 'OVERDUE' ? <PayButton invoice={invoice} /> : null}</TableCell>
+                        <TableCell>{invoice.status === 'PENDING' || invoice.status === 'OVERDUE' ? <InvoicePayButton invoiceId={invoice.id} /> : null}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

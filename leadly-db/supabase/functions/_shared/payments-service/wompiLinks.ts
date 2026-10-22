@@ -1,5 +1,5 @@
-// Creación y consulta de links de pago. NO usa wompiAdapter.createCheckout
-// (manda IVA 19% fijo, wompi.ts:96-113): arma su propia llamada a
+// Creación y consulta de links de pago. Única vía de creación (el antiguo
+// wompiAdapter.createCheckout, con IVA 19% fijo, se retiró): arma su llamada a
 // POST {api}/payment_links, sin `taxes` salvo que vengan explícitos.
 import { wompiAdapter } from "../payments/wompi.ts";
 import { ApiError, callRpc, logEvent, redact } from "./errors.ts";
@@ -25,7 +25,9 @@ const ALLOWED_FIELDS = new Set([
   "taxes",
   "customer",
 ]);
-const FORBIDDEN_FIELDS = new Set(["client_id", "account", "environment"]);
+// `merchant`/`merchant_tenant_id`: solo el cliente interno fija el comercio, y lo
+// hace en proceso (CreateLinkInput.merchantTenantId), nunca por el cuerpo publico.
+const FORBIDDEN_FIELDS = new Set(["client_id", "account", "environment", "merchant", "merchant_tenant_id"]);
 const IDEMPOTENCY_RE = /^[A-Za-z0-9._:-]{1,128}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isUuid = (v: unknown): v is string => typeof v === "string" && UUID_RE.test(v);
@@ -67,7 +69,7 @@ export function validateLinkRequest(raw: unknown, nowMs: number): LinkRequest {
   }
   const body = raw as Record<string, unknown>;
   for (const k of Object.keys(body)) {
-    if (FORBIDDEN_FIELDS.has(k)) invalid("field_not_allowed", `El campo "${k}" no se permite: el proyecto y el ambiente se derivan de la API key.`);
+    if (FORBIDDEN_FIELDS.has(k)) invalid("field_not_allowed", `El campo "${k}" no se permite: el proyecto, el comercio y el ambiente no se envían en el cuerpo.`);
   }
   for (const k of Object.keys(body)) {
     if (!ALLOWED_FIELDS.has(k)) invalid("field_not_allowed", `El campo "${k}" no es parte del contrato.`);
@@ -209,6 +211,9 @@ export interface CreateLinkInput {
   environment: PayEnvironment | null;
   idempotencyKey: string;
   request: LinkRequest;
+  /** Comercio (tenant) a cuyo nombre se cobra; null/ausente = cuenta de plataforma.
+   * Solo lo usan los creadores internos (payments_begin_link lo exige `internal`). */
+  merchantTenantId?: string | null;
 }
 
 export interface CreateLinkResult {
@@ -234,17 +239,38 @@ async function postWompi(deps: Deps, env: PayEnvironment, privateKey: string, bo
 
 export async function createPaymentLink(deps: Deps, input: CreateLinkInput): Promise<CreateLinkResult> {
   const { request } = input;
-  // Para el hash de idempotencia solo cuenta lo que define el pedido.
-  const requestHash = await sha256Hex(canonicalJson(request));
+  const merchant = input.merchantTenantId ?? null;
+  if (merchant !== null && !isUuid(merchant)) invalid("invalid_merchant", "merchant_tenant_id debe ser un uuid.");
+  // Para el hash de idempotencia solo cuenta lo que define el pedido. El comercio
+  // entra al hash solo cuando existe: los links de plataforma conservan su hash
+  // historico (misma Idempotency-Key => mismo resultado que antes).
+  const requestHash = await sha256Hex(canonicalJson(merchant === null ? request : { ...request, merchant_tenant_id: merchant }));
 
-  // Ambiente: el de la API key (v1) o el de la credencial (admin). Para admin
-  // hay que conocer la credencial antes de begin_link.
-  let credential = null as Awaited<ReturnType<Deps["getPlatformCredential"]>>;
+  // Credencial: la del comercio (null = plataforma). Falla CERRADO: un comercio
+  // sin credencial activa NUNCA cae a la cuenta de plataforma.
+  const loadCredential = async () => {
+    if (merchant === null) return await deps.getPlatformCredential();
+    try {
+      return await deps.getMerchantCredential(merchant);
+    } catch {
+      return null;
+    }
+  };
+  const credentialMissing = (): ApiError =>
+    merchant === null
+      ? new ApiError(503, "platform_credential_unavailable", "La credencial de Wompi de la plataforma no está configurada.")
+      : new ApiError(409, "merchant_credential_unavailable", "El comercio no tiene una credencial de Wompi activa y completa.");
+  const credentialDetail = merchant === null ? "platform_credential_unavailable" : "merchant_credential_unavailable";
+
+  // Ambiente (D4): interno/admin (environment null) = modo de la credencial del
+  // comercio o de la plataforma; externo = el de la API key.
+  let credential = await loadCredential();
   let environment = input.environment;
   if (environment === null) {
-    credential = await deps.getPlatformCredential();
-    if (!credential) throw new ApiError(503, "platform_credential_unavailable", "La credencial de Wompi de la plataforma no está configurada.");
-    environment = credential.mode;
+    if (!credential && merchant === null) throw credentialMissing();
+    // Comercio sin credencial: se registra igual el intento (fila en error) con un
+    // ambiente de marcador; nunca se llama a Wompi.
+    environment = credential ? credential.mode : "sandbox";
   }
 
   const begun = await callRpc<{ link: Record<string, unknown>; replayed: boolean }>(
@@ -257,6 +283,7 @@ export async function createPaymentLink(deps: Deps, input: CreateLinkInput): Pro
       p_request: request,
       p_environment: environment,
       p_created_by: input.createdBy,
+      p_merchant_tenant_id: merchant,
     },
     { PY409: "idempotency_key_reused" },
   );
@@ -278,19 +305,40 @@ export async function createPaymentLink(deps: Deps, input: CreateLinkInput): Pro
     }
   };
 
-  if (!credential) credential = await deps.getPlatformCredential();
+  // Solo en la CREACION: tenant inexistente o inactivo -> falla cerrada.
+  if (merchant !== null) {
+    let active = false;
+    try {
+      active = await deps.isMerchantActive(merchant);
+    } catch { /* falla cerrada */ }
+    if (!active) {
+      await failLink("merchant_not_active");
+      throw new ApiError(409, "merchant_not_active", "El comercio no existe o no está activo.");
+    }
+  }
   if (!credential) {
-    await failLink("platform_credential_unavailable");
-    throw new ApiError(503, "platform_credential_unavailable", "La credencial de Wompi de la plataforma no está configurada.");
+    await failLink(credentialDetail);
+    throw credentialMissing();
   }
   if (credential.mode !== environment) {
     await failLink("environment_unavailable");
-    throw new ApiError(409, "environment_unavailable", `La plataforma opera en ${credential.mode}; esta clave es de ${environment}.`);
+    throw new ApiError(409, "environment_unavailable", `${merchant === null ? "La plataforma" : "El comercio"} opera en ${credential.mode}; esta clave es de ${environment}.`);
   }
-  const privateKey = await credential.getSecret("private_key");
-  if (!privateKey) {
-    await failLink("platform_credential_unavailable");
-    throw new ApiError(503, "platform_credential_unavailable", "La llave privada de Wompi de la plataforma no está configurada.");
+  // Se exigen AMBAS llaves: sin events_key el receptor no podria verificar los
+  // eventos y un pago real quedaria sin acreditar (401 permanentes).
+  let privateKey: string | null = null;
+  let eventsKey: string | null = null;
+  try {
+    privateKey = await credential.getSecret("private_key");
+    eventsKey = await credential.getSecret("events_key");
+  } catch {
+    privateKey = null;
+  }
+  if (!privateKey || !eventsKey) {
+    await failLink(credentialDetail);
+    throw merchant === null
+      ? new ApiError(503, "platform_credential_unavailable", "Las llaves de Wompi de la plataforma (privada y de eventos) no están configuradas.")
+      : new ApiError(409, "merchant_credential_unavailable", "El comercio no tiene configuradas la llave privada y el secreto de eventos de Wompi.");
   }
 
   const wompiBody: Record<string, unknown> = {

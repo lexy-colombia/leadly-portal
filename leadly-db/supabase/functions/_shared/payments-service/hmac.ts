@@ -44,6 +44,38 @@ export async function signEnvelope(signingSecret: string, rawBody: string, unixS
   return `t=${unixSeconds},v1=${v1}`;
 }
 
+export const ENVELOPE_TOLERANCE_SECONDS = 300;
+
+/** Verifica la cabecera Payments-Signature de un aviso (inverso de signEnvelope):
+ * HMAC sobre `t + "." + rawBody` (bytes crudos), comparación en tiempo constante
+ * y tolerancia de reloj de ±toleranceSeconds (anti-replay). Cualquier forma
+ * inválida de la cabecera devuelve false (sin distinguir el motivo). */
+export async function verifyEnvelopeSignature(
+  signingSecret: string,
+  header: string | null,
+  rawBody: string,
+  nowUnixSeconds: number,
+  toleranceSeconds = ENVELOPE_TOLERANCE_SECONDS,
+): Promise<boolean> {
+  if (!header || header.length > 512 || !signingSecret) return false;
+  let t: number | null = null;
+  const candidates: string[] = [];
+  for (const part of header.split(",")) {
+    const eq = part.indexOf("=");
+    if (eq < 0) continue;
+    const k = part.slice(0, eq).trim();
+    const v = part.slice(eq + 1).trim();
+    if (k === "t" && /^\d{1,12}$/.test(v)) t = Number(v);
+    else if (k === "v1" && /^[0-9a-fA-F]{64}$/.test(v)) candidates.push(v.toLowerCase());
+  }
+  if (t === null || candidates.length === 0) return false;
+  if (Math.abs(nowUnixSeconds - t) > toleranceSeconds) return false;
+  const expected = await hmacSha256Hex(signingSecret, `${t}.${rawBody}`);
+  let ok = false;
+  for (const c of candidates) ok = (await timingSafeEqual(expected, c)) || ok;
+  return ok;
+}
+
 export const REQUIRED_SIGNED_PROPERTIES = ["transaction.id", "transaction.status", "transaction.amount_in_cents"] as const;
 
 function resolvePath(obj: unknown, path: string): unknown {
@@ -52,9 +84,9 @@ function resolvePath(obj: unknown, path: string): unknown {
 
 /** Checksum de un evento de Wompi (docs.wompi.co/docs/colombia/eventos):
  * SHA-256( valores de signature.properties (rutas relativas a `data`) + timestamp + secreto de eventos ).
- * Devuelve null si el evento no trae lo necesario. Mismo algoritmo que
- * wompiAdapter.verifyWebhookSignature (_shared/payments/wompi.ts), probado en
- * producción; aquí sin log del hash y con comparación en tiempo constante. */
+ * Devuelve null si el evento no trae lo necesario. Algoritmo probado en
+ * producción (el de la integración original de Wompi, ya retirada); sin log
+ * del hash y con comparación en tiempo constante. */
 export async function wompiExpectedChecksum(payload: unknown, eventsKey: string): Promise<string | null> {
   const body = payload as {
     data?: unknown;

@@ -59,8 +59,6 @@ export interface PaymentHealth {
   transaction_conflict: number
   amount_mismatch: number
   duplicate_payment: number
-  /** Pagos cobrados por Wompi que no se pudieron acreditar a su pedido o factura. */
-  legacy_not_applied: number
   deliveries_failed: number
   stale_pending_links: number
 }

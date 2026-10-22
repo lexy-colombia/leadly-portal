@@ -119,7 +119,9 @@ export function PaymentDrawer({
    * este cobro: `error` no-nulo significa que la DIAN rechazó o el envío
    * falló -- el pago YA quedó registrado igual (nunca se revierte por
    * esto), es el caller quien decide qué mostrar/qué hacer con ese error. */
-  onSaved: (order: SalesOrder, einvoicing?: { attempted: boolean; error: string | null }) => void
+  /** `einvoicing.accepted`: la DIAN aceptó la factura de este cobro (veredicto
+   * real, con CUFE) -- quien llama imprime el documento de una vez. */
+  onSaved: (order: SalesOrder, einvoicing?: { attempted: boolean; error: string | null; accepted: boolean }) => void
 }) {
   const { t } = useLanguage()
   const currencyCode = order?.currency ?? currency
@@ -304,7 +306,7 @@ export function PaymentDrawer({
       // documento fiscal se pudo emitir. Solo se intenta cuando este mismo
       // pago deja el saldo en $0 -- una venta parcial no se factura todavía
       // (mismo candado que ya aplica el servidor, ver dian-submit).
-      let einvoicing: { attempted: boolean; error: string | null } | undefined
+      let einvoicing: { attempted: boolean; error: string | null; accepted: boolean } | undefined
       if (wantsInvoice && pendingAmount - assignedTotal <= 0) {
         setSendingInvoice(true)
         try {
@@ -317,9 +319,13 @@ export function PaymentDrawer({
           // 'rejected' ya es el veredicto real de la DIAN (el propio envío
           // lo consulta antes de responder, ver sendInvoiceToDian.ts).
           const failureDetail = result.status === 'error' ? result.faultReason : result.status === 'rejected' ? result.rejectionDetail : null
-          einvoicing = { attempted: true, error: failureDetail !== null ? failureDetail || t('orders.paymentDrawer.einvoicing.errors.send') : null }
+          einvoicing = {
+            attempted: true,
+            error: failureDetail !== null ? failureDetail || t('orders.paymentDrawer.einvoicing.errors.send') : null,
+            accepted: result.status === 'accepted',
+          }
         } catch (err) {
-          einvoicing = { attempted: true, error: err instanceof Error ? err.message : t('orders.paymentDrawer.einvoicing.errors.send') }
+          einvoicing = { attempted: true, error: err instanceof Error ? err.message : t('orders.paymentDrawer.einvoicing.errors.send'), accepted: false }
         } finally {
           setSendingInvoice(false)
         }

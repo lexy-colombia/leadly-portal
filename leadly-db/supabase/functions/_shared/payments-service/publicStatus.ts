@@ -43,11 +43,7 @@ export async function getPublicLinkStatus(deps: Deps, id: string): Promise<Publi
     ? (row.last_attempt as PublicStatusBody["last_attempt"])
     : null;
 
-  if (row?.found) {
-    const status = NATIVE_STATUS[String(row.status)] ?? "unknown";
-    return { status, last_attempt: attempt, updated_at: iso(row.updated_at) };
-  }
-  const legacy = await deps.legacy.publicStatus(id.toLowerCase());
-  if (!legacy) return { ...UNKNOWN_STATUS };
-  return { status: legacy.status, last_attempt: attempt, updated_at: iso(legacy.updatedAt) };
+  if (!row?.found) return { ...UNKNOWN_STATUS };
+  const status = NATIVE_STATUS[String(row.status)] ?? "unknown";
+  return { status, last_attempt: attempt, updated_at: iso(row.updated_at) };
 }

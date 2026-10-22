@@ -1,16 +1,16 @@
-// Creates (or reuses) a hosted checkout for a pending payment_invoices row.
+// Creates (or reuses) a hosted checkout for a pending payment_invoices row,
+// THROUGH the unified payments service (in-process, as Leadly's internal client,
+// merchant = the invoice's merchant: the platform, null, for Lexy's own billing).
 // Authorization mirrors whatsapp-send-human: the caller's own JWT decides
 // what they can even see (RLS on payment_invoices scopes SELECT to
 // payer_tenant_id = their tenant, or superadmin) -- once that's confirmed,
-// the actual provider call and the write-back of provider_checkout_id use
-// the service-role admin client, since payment_invoices writes are
-// superadmin/service_role-only by RLS and the credential secret can only be
-// read by service_role (see get_payment_credential_secret).
+// the link creation and the write-back of payments_link_id use the service
+// role (payment_invoices writes are superadmin/service_role-only by RLS).
+// The link <-> invoice bridge and the tax (from the row) live in _shared/payments/invoiceCheckout.ts.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/cors.ts";
-import { getAdapter, makeSecretGetter, resolveCredential } from "../_shared/payments/registry.ts";
-import { paymentReturnUrl } from "../_shared/publicAppUrl.ts";
+import { ensureInvoiceCheckout } from "../_shared/payments/invoiceCheckout.ts";
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -52,39 +52,24 @@ Deno.serve(async (req: Request) => {
 
   const { data: invoice } = await callerClient
     .from("payment_invoices")
-    .select("id, merchant_tenant_id, provider_key, amount_cents, currency, description, status, provider_checkout_id, invoice_number")
+    .select("id, merchant_tenant_id, payer_tenant_id, provider_key, amount_cents, currency, description, status, payments_link_id, invoice_number, tax_rate, tax_cents, period_start, period_end, deleted_at")
     .eq("id", invoice_id)
     .maybeSingle();
 
   if (!invoice) {
-    return json({ error: "Invoice not found" }, 404);
+    return json({ error: "Comprobante no encontrado" }, 404);
+  }
+  // Anulado (soft-delete): RLS no lo oculta y su status sigue PENDING/OVERDUE; cobrarlo dejaria un pago sin acreditar.
+  if (invoice.deleted_at) {
+    return json({ error: "Este comprobante fue anulado." }, 409);
   }
   if (!["PENDING", "OVERDUE"].includes(invoice.status)) {
-    return json({ error: "La factura no está pendiente de pago" }, 400);
-  }
-
-  const adapter = getAdapter(invoice.provider_key);
-
-  if (invoice.provider_checkout_id) {
-    return json({ checkoutUrl: adapter.checkoutUrlFor(invoice.provider_checkout_id) });
+    return json({ error: "El comprobante no está pendiente de pago" }, 400);
   }
 
   try {
-    const credential = await resolveCredential(adminClient, invoice.merchant_tenant_id, invoice.provider_key);
-    const getSecret = makeSecretGetter(adminClient, credential.id);
-
-    const result = await adapter.createCheckout(credential, getSecret, {
-      invoiceId: invoice.id,
-      amountCents: invoice.amount_cents,
-      currency: invoice.currency,
-      description: invoice.description ?? `Factura ${invoice.invoice_number ?? invoice.id}`,
-      // Un redirect_url explícito siempre gana; sin él, la página pública de
-      // resultado del SPA con el id de esta factura.
-      redirectUrl: redirect_url || paymentReturnUrl(invoice.id),
-    });
-
-    await adminClient.from("payment_invoices").update({ provider_checkout_id: result.providerCheckoutId }).eq("id", invoice.id);
-
+    const result = await ensureInvoiceCheckout(adminClient, invoice, caller.id, redirect_url);
+    if (!result.ok) return json({ error: result.error }, result.status);
     return json({ checkoutUrl: result.checkoutUrl });
   } catch (err) {
     console.error("create-payment-checkout error:", err);

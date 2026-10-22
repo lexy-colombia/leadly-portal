@@ -17,6 +17,8 @@
   "integrations.integrityKey": "Integrity Key",
   "integrations.eventsKey": "Secreto de eventos",
   "integrations.eventsKeyHint": "No es el mismo que el Integrity Key -- se genera aparte en el dashboard de Wompi, en la sección de Eventos/Webhooks. Sin este, los pagos nunca se confirman solos.",
+  "integrations.wompi.eventsUrl": "URL de eventos",
+  "integrations.wompi.eventsUrlHint": "Regístrala en tu cuenta de Wompi, en Eventos/Webhooks (URL de eventos). Sin este registro, Wompi no nos avisa de los pagos y no se confirman solos.",
   "integrations.section.credentials": "Credenciales",
   "integrations.section.settings": "Configuración",
   "integrations.configSaved": "Guardado.",

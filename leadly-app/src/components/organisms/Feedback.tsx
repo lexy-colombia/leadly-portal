@@ -1,4 +1,5 @@
 import { Button } from '@/components/atoms/Button'
+import { useLanguage } from '@/contexts/LanguageContext'
 
 export function AccessDenied() {
   return (
@@ -9,22 +10,17 @@ export function AccessDenied() {
   )
 }
 
+/** Bloqueo MANUAL del superadmin (suspension_reason null). El bloqueo por mora usa TenantSuspendedNonpayment. */
 export function TenantDeactivated({ tenantName, onSignOut }: { tenantName: string | undefined; onSignOut: () => void }) {
+  const { t } = useLanguage()
   return (
     <div className="flex h-screen w-full flex-col items-center justify-center gap-3 p-6 text-center">
-      <h2 className="text-xs font-semibold text-brand-700">Tu empresa está desactivada</h2>
+      <h2 className="text-xs font-semibold text-brand-700">{t('billing.suspended.title')}</h2>
       <p className="max-w-sm text-xs text-brand-400">
-        {tenantName ? (
-          <>
-            La cuenta de <span className="font-medium">{tenantName}</span> en Leadly está desactivada
-          </>
-        ) : (
-          'La cuenta de tu empresa en Leadly está desactivada'
-        )}
-        . Contacta a tu administrador de Leadly para reactivarla.
+        {tenantName ? t('billing.suspended.description', { name: tenantName }) : t('billing.suspended.descriptionNoName')}
       </p>
       <Button variant="ghost" onClick={onSignOut} className="mt-2">
-        Cerrar sesión
+        {t('billing.wall.signOut')}
       </Button>
     </div>
   )

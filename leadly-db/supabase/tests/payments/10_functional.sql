@@ -248,8 +248,8 @@ select t.ok((public.payments_find_link_by_wompi_id('wl_1') ->> 'id') = (select v
             and (public.payments_find_link_by_wompi_id('wl_1') ->> 'status') = 'voided'
             and (public.payments_find_link_by_wompi_id('wl_1') ->> 'amount_in_cents') = '5000000'
             and (public.payments_find_link_by_wompi_id('wl_1') ->> 'currency') = 'COP'
-            and (select count(*) from jsonb_object_keys(public.payments_find_link_by_wompi_id('wl_1'))) = 6,
-  '14: find_link_by_wompi_id devuelve exactamente {id,client_id,environment,status,amount_in_cents,currency}');
+            and (select count(*) from jsonb_object_keys(public.payments_find_link_by_wompi_id('wl_1'))) = 7,
+  '14: find_link_by_wompi_id devuelve exactamente {id,client_id,environment,status,amount_in_cents,currency,merchant_tenant_id}');
 select t.ok(public.payments_find_link_by_wompi_id('no_existe') is null and public.payments_find_link_by_wompi_id(null) is null,'14: find_link_by_wompi_id desconocido/null -> null');
 select t.ok((select count(*) from payments.events) = (select count(*) from payments.events) and not exists (select 1 from payments.events where id > (select max(id) from payments.events)),'14: find_link_by_wompi_id es solo lectura (no registra eventos)');
 
@@ -407,7 +407,7 @@ update payments.payment_links set created_at = now() - interval '2 days' where w
 set role service_role;
 create temp table hs as select public.payments_health_summary() h;
 grant all on hs to service_role;
-select t.ok((select array_agg(k order by k) from hs, jsonb_object_keys(h) k) = array['amount_mismatch','deliveries_failed','duplicate_payment','invalid_signature','legacy_not_applied','stale_pending_links','transaction_conflict','unverified','verification_mismatch'],'R2: health_summary tiene exactamente las 9 claves (legacy_not_applied agregada en la fusion del webhook)');
+select t.ok((select array_agg(k order by k) from hs, jsonb_object_keys(h) k) = array['amount_mismatch','deliveries_failed','duplicate_payment','invalid_signature','stale_pending_links','transaction_conflict','unverified','verification_mismatch'],'R2: health_summary tiene exactamente las 8 claves (sin legacy_not_applied tras el retiro de la rama legacy)');
 select t.ok((select (h->>'invalid_signature')::int from hs) = (select count(*) from payments.events where classification='invalid_signature')
         and (select (h->>'unverified')::int from hs) = (select count(*) from payments.events where classification='unverified')
         and (select (h->>'verification_mismatch')::int from hs) = 7

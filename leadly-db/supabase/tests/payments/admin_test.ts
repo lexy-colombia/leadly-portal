@@ -2,7 +2,7 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import { addClient, handler, newWorld, req, SECRETS, validLink } from "./harness.ts";
 
 const ADMIN = { authorization: `Bearer ${SECRETS.adminJwt}` };
-const CLIENT_KEYS = ["callback_url", "created_at", "id", "key_prefix", "name", "revoked_at", "status"];
+const CLIENT_KEYS = ["callback_url", "created_at", "id", "key_prefix", "kind", "name", "revoked_at", "status"];
 const errShape = (b: any) => {
   assertEquals(Object.keys(b).sort(), ["error"]);
   assertEquals(Object.keys(b.error).sort(), ["code", "message", "request_id"]);

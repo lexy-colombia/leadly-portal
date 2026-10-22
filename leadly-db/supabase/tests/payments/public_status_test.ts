@@ -1,8 +1,8 @@
 // Ruta publica de estado (GET /v1/public/payment-links/{id}/status) y redirect
-// por defecto. Arnes: RPC falso + LegacyStore falso (la version con SQL real vive
-// en integration_real.ts seccion 18).
+// por defecto. Arnes: RPC falso (la version con SQL real vive en integration_real.ts
+// seccion 18). Sin fallback: solo existen los links de payments.payment_links.
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { addClient, addLegacyTarget, createOwnLink, handler, newWorld, req, SECRETS, TENANT_KEYS, wompiEvent } from "./harness.ts";
+import { addClient, createOwnLink, handler, newWorld, req, wompiEvent } from "./harness.ts";
 import { paymentReturnUrl, resolvePublicAppUrl, DEFAULT_PUBLIC_APP_URL } from "../../functions/_shared/publicAppUrl.ts";
 
 const EXACT_KEYS = ["last_attempt", "status", "updated_at"];
@@ -104,39 +104,35 @@ Deno.test("un evento de firma invalida NO cambia last_attempt (no se puede false
   assertEquals((await (await pub(h, body.id)).json()).last_attempt, null);
 });
 
-for (const origin of ["invoice", "order_link"] as const) {
-  Deno.test(`origen legacy ${origin}: pending -> paid; last_attempt desde los eventos legacy; borrada -> unknown`, async () => {
-    const w = newWorld();
-    const h = handler(w);
-    const t = addLegacyTarget(w, { origin, wompiLinkId: `wl_pub_${origin}` });
-    let b = await (await pub(h, t.id)).json();
-    assertEquals(Object.keys(b).sort(), EXACT_KEYS);
-    assertEquals(b.status, "pending");
-    assertEquals(b.last_attempt, null);
-    const keys = origin === "invoice" ? { eventsKey: SECRETS.eventsKey } : { eventsKey: TENANT_KEYS.eventsKey };
-    if (origin === "invoice") {
-      await h(req("POST", "/v1/events/wompi", { body: await wompiEvent({ linkId: t.wompiLinkId, txId: "tx-L-d", status: "DECLINED", amount: 1_500_000, ...keys }) }));
-      b = await (await pub(h, t.id)).json();
-      assertEquals(b.last_attempt, "DECLINED");
-    }
-    await h(req("POST", "/v1/events/wompi", { body: await wompiEvent({ linkId: t.wompiLinkId, txId: "tx-L-a", status: "APPROVED", amount: 1_500_000, ...keys }) }));
-    b = await (await pub(h, t.id)).json();
-    assertEquals(b.status, "paid");
-    assertEquals(b.last_attempt, "APPROVED");
-    t.deleted = true;
-    assertEquals(await (await pub(h, t.id)).json(), UNKNOWN);
-  });
-}
-
-Deno.test("estados legacy: factura OVERDUE->pending, CANCELLED->cancelled, REFUNDED->voided; link expired", async () => {
+Deno.test("sin fallback: un uuid que no es de payments.payment_links (p. ej. una factura/link de pedido ex-legacy) responde el MISMO unknown que uno inexistente", async () => {
   const w = newWorld();
+  const { apiKey } = await addClient(w);
   const h = handler(w);
-  for (const [st, exp] of [["OVERDUE", "pending"], ["CANCELLED", "cancelled"], ["REFUNDED", "voided"]]) {
-    const t = addLegacyTarget(w, { origin: "invoice", wompiLinkId: `w_${st}`, status: st });
-    assertEquals((await (await pub(h, t.id)).json()).status, exp, st);
+  await createOwnLink(w, h, apiKey); // hay datos propios: el unknown no depende de que la base este vacia
+  const exLegacy = crypto.randomUUID(); // id de una fila que existio en public.payment_invoices / sales_order_payment_links
+  const never = crypto.randomUUID();
+  const a = await pub(h, exLegacy);
+  const b = await pub(h, never);
+  assertEquals(a.status, 200);
+  assertEquals(b.status, 200);
+  assertEquals(await a.json(), UNKNOWN);
+  assertEquals(await b.json(), UNKNOWN);
+  // una sola consulta por peticion: el RPC propio; ninguna otra rama de lectura
+  const calls = w.rpcCalls.filter((c) => c.fn === "payments_public_link_status");
+  assertEquals(calls.length, 2);
+  assertEquals(w.rpcCalls.filter((c) => c.fn.includes("legacy")).length, 0);
+});
+
+Deno.test("estados nativos: expired y cancelled se publican tal cual, creating como pending", async () => {
+  const w = newWorld();
+  const { apiKey } = await addClient(w);
+  const h = handler(w);
+  const { body } = await createOwnLink(w, h, apiKey);
+  const l = w.links.find((x) => x.id === body.id)!;
+  for (const [st, exp] of [["expired", "expired"], ["cancelled", "cancelled"], ["creating", "pending"], ["voided", "voided"]]) {
+    l.status = st;
+    assertEquals((await (await pub(h, body.id)).json()).status, exp, st);
   }
-  const l = addLegacyTarget(w, { origin: "order_link", wompiLinkId: "w_exp", status: "expired" });
-  assertEquals((await (await pub(h, l.id)).json()).status, "expired");
 });
 
 Deno.test("la ruta publica NO acepta el id de Wompi ni requiere/usa API key", async () => {

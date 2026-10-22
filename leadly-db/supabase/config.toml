@@ -381,3 +381,8 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 # payments-api: la API key de proyectos no es un JWT y el receptor de Wompi se autentica por checksum.
 [functions.payments-api]
 verify_jwt = false
+
+# payments-internal: consumidor del aviso firmado del servicio de pagos; se autentica por
+# Payments-Signature (HMAC), no por JWT.
+[functions.payments-internal]
+verify_jwt = false

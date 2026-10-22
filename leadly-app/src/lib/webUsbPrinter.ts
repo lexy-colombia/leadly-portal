@@ -8,6 +8,7 @@
  * nativa del navegador, solo Chrome/Edge (`isWebUsbSupported`). */
 
 const EPSON_VENDOR_ID = 0x04b8 // Seiko Epson Corp.
+const PRINTER_CLASS_CODE = 7 // USB Printer class
 
 export function isWebUsbSupported(): boolean {
   return typeof navigator !== 'undefined' && 'usb' in navigator
@@ -18,7 +19,11 @@ export function isWebUsbSupported(): boolean {
  * usuario otorga acá queda guardado por el navegador a nivel de este
  * origen; `getPairedPrinter()` lo recupera solo, sin volver a preguntar. */
 export async function requestPrinter(): Promise<USBDevice> {
-  return navigator.usb.requestDevice({ filters: [{ vendorId: EPSON_VENDOR_ID }] })
+  // Antes solo se filtraba por Epson, así que cualquier otra marca (ej. las
+  // genéricas POS-80 con VID 0x0416) nunca aparecía en el selector ("No se
+  // han podido encontrar dispositivos compatibles"). `classCode: 7` es la
+  // clase USB Printer, que cubre cualquier térmica sin listar marcas.
+  return navigator.usb.requestDevice({ filters: [{ vendorId: EPSON_VENDOR_ID }, { classCode: PRINTER_CLASS_CODE }] })
 }
 
 /** La impresora ya emparejada en una sesión anterior, si existe -- filtra
@@ -29,7 +34,7 @@ export async function requestPrinter(): Promise<USBDevice> {
 export async function getPairedPrinter(): Promise<USBDevice | null> {
   if (!isWebUsbSupported()) return null
   const devices = await navigator.usb.getDevices()
-  return devices.find((d) => d.vendorId === EPSON_VENDOR_ID) ?? devices[0] ?? null
+  return devices.find((d) => d.vendorId === EPSON_VENDOR_ID) ?? devices.find((d) => d.configurations.some((c) => c.interfaces.some((i) => i.alternates.some((a) => a.interfaceClass === PRINTER_CLASS_CODE)))) ?? devices[0] ?? null
 }
 
 export async function forgetPrinter(device: USBDevice): Promise<void> {

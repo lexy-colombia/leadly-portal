@@ -9,8 +9,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { IntegrationStatusBanner } from './IntegrationStatusBanner'
 import { IntegrationFieldLabel, IntegrationSection } from './IntegrationFieldLabel'
 import { useLanguage } from '../../../contexts/LanguageContext'
+import { CopyButton } from '../../backoffice/billing/CopyButton'
 
 const FIELD_CLASS = '!h-7 !rounded-lg !text-xs'
+
+// Misma base de Supabase que usa lib/supabaseClient.ts.
+const EVENTS_URL = `${import.meta.env.VITE_SUPABASE_URL as string}/functions/v1/payments-api/v1/events/wompi`
 
 /** Wompi is not mapped-only like the others -- it's the real, working
  * payment system already powering invoice checkout/webhooks. It reads/writes
@@ -186,6 +190,14 @@ export function WompiIntegrationDrawer({
                 <p className="mt-1 text-[11px] text-brand-400">{t('integrations.eventsKeyHint')}</p>
               </div>
             </div>
+          </IntegrationSection>
+
+          <IntegrationSection title={t('integrations.wompi.eventsUrl')}>
+            <div className="flex items-center gap-2">
+              <Input readOnly value={EVENTS_URL} onFocus={(e) => e.currentTarget.select()} aria-label={t('integrations.wompi.eventsUrl')} className={FIELD_CLASS} />
+              <CopyButton value={EVENTS_URL} />
+            </div>
+            <p className="mt-1 text-[11px] text-brand-400">{t('integrations.wompi.eventsUrlHint')}</p>
           </IntegrationSection>
 
           <IntegrationSection title={t('integrations.section.settings')}>

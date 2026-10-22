@@ -1,6 +1,7 @@
 export { Drawer } from './Drawer'
 export { ConfirmDialog } from './ConfirmDialog'
 export { AccessDenied, TenantDeactivated } from './Feedback'
+export { TenantSuspendedNonpayment } from './TenantSuspendedNonpayment'
 export { AppShell, type NavItem } from './AppShell'
 export { AppSidebarNav } from './AppSidebarNav'
 export { NotificationsBell } from './NotificationsBell'

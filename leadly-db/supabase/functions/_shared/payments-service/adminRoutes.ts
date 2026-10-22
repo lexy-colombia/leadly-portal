@@ -26,6 +26,7 @@ function projectClient(c: Row): Row {
   return {
     id: c.id,
     name: c.name,
+    kind: c.kind ?? "external",
     status: c.status,
     key_prefix: c.key_prefix ?? null,
     callback_url: c.callback_url ?? null,
@@ -97,8 +98,12 @@ export async function handleAdmin(deps: Deps, req: Request, segments: string[], 
       const name = typeof body.name === "string" ? body.name.trim() : "";
       if (name.length < 1 || name.length > 80) throw new ApiError(422, "invalid_field", "name debe tener entre 1 y 80 caracteres.");
       for (const k of Object.keys(body)) {
-        if (k !== "name" && k !== "callback_url") throw new ApiError(422, "field_not_allowed", `El campo "${k}" no se permite.`);
+        if (k !== "name" && k !== "callback_url" && k !== "kind") throw new ApiError(422, "field_not_allowed", `El campo "${k}" no se permite.`);
       }
+      // `kind`: solo el superadmin lo fija, al crear. `internal` = creador interno de
+      // Leadly (puede pedir links a nombre de un comercio); default `external`.
+      const kind = body.kind === undefined ? "external" : body.kind;
+      if (kind !== "external" && kind !== "internal") throw new ApiError(422, "invalid_field", 'kind debe ser "external" o "internal".');
       const callback = body.callback_url === undefined || body.callback_url === null ? null : await validateCallback(deps, body.callback_url);
       const mode = await requireMode(deps);
       const key = await generateApiKey(mode);
@@ -114,6 +119,7 @@ export async function handleAdmin(deps: Deps, req: Request, segments: string[], 
         p_key_prefix: key.keyPrefix,
         p_signing_secret_name: secretName,
         p_created_by: userId,
+        p_kind: kind,
       }, { PY409: "client_name_taken" });
       return { status: 201, body: { client: projectClient(client), api_key: key.apiKey, signing_secret: signingSecret } };
     }

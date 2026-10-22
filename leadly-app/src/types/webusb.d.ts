@@ -8,6 +8,7 @@ interface USBEndpoint {
 }
 
 interface USBAlternateInterface {
+  interfaceClass: number
   endpoints: USBEndpoint[]
 }
 
@@ -25,6 +26,7 @@ interface USBDevice {
   productId: number
   productName?: string
   configuration: USBConfiguration | null
+  configurations: USBConfiguration[]
   open(): Promise<void>
   close(): Promise<void>
   selectConfiguration(configurationValue: number): Promise<void>
@@ -37,6 +39,7 @@ interface USBDevice {
 interface USBDeviceFilter {
   vendorId?: number
   productId?: number
+  classCode?: number
 }
 
 interface USBDeviceRequestOptions {

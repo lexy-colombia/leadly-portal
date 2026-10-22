@@ -2,7 +2,7 @@
 -- 20260807173601 / 20260807173612 / 20260825190000 / 20260822020001), las tablas
 -- legacy de `public` contra las que el receptor resuelve origenes (2) y (3).
 -- Solo para la prueba de integracion: NO es parte de ninguna migracion.
-create table public.tenants (id uuid primary key default gen_random_uuid(), name text);
+create table public.tenants (id uuid primary key default gen_random_uuid(), name text, status text not null default 'active');
 create table public.profiles (id uuid primary key);
 create table public.sales_orders (id uuid primary key default gen_random_uuid(), tenant_id uuid not null references public.tenants(id), number int, status text, total numeric(14,2), currency text default 'COP', deleted_at timestamptz);
 create table public.payment_providers (key text primary key);
@@ -21,6 +21,10 @@ create table public.payment_invoices (
   invoice_number text,
   description text,
   due_date date,
+  tax_rate numeric not null default 19,
+  tax_cents integer,
+  period_start date,
+  period_end date,
   provider_checkout_id text,
   provider_transaction_id text,
   provider_payment_method text,
@@ -95,6 +99,13 @@ create table public.sales_order_payments (
 );
 create unique index sales_order_payments_payment_link_idx
   on public.sales_order_payments (payment_link_id) where payment_link_id is not null;
+
+-- indices unicos REALES por transaccion (migracion 20261011220000)
+create unique index payment_invoices_provider_transaction_uidx
+  on public.payment_invoices (provider_transaction_id) where provider_transaction_id is not null;
+create unique index sales_order_payments_wompi_transaction_uidx
+  on public.sales_order_payments (provider_transaction_id)
+  where provider_key = 'wompi' and provider_transaction_id is not null and deleted_at is null;
 
 create table public.tenant_payment_credentials (
   id uuid primary key default gen_random_uuid(),

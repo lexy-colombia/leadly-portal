@@ -1,6 +1,6 @@
 // Emulador MINIMO de supabase-js (query builder + rpc) sobre un cliente
-// `postgres` real, solo para ejercitar legacyStore.ts / applyWebhookEvent.ts /
-// salesOrderPayments.ts / registry.ts contra SQL real en la prueba de integracion.
+// `postgres` real, solo para ejercitar salesOrderPayments.ts / invoiceCheckout.ts /
+// syncInvoice.ts / registry.ts contra SQL real en la prueba de integracion.
 // Cubre exactamente los patrones que esos modulos usan; cualquier otro lanza.
 // deno-lint-ignore-file no-explicit-any
 import type postgres from "npm:postgres@3";

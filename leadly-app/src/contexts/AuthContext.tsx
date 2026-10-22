@@ -3,9 +3,10 @@ import type { Session, User } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabaseClient'
 import { listEnabledModuleKeys } from '../lib/api/tenantModules'
 import { listMyPermissionKeys } from '../lib/api/permissions'
+import { resolveRefresh, type ReadResult } from '../lib/authRefresh'
 import type { Profile, Tenant } from '../types/domain'
 
-type TenantSummary = Pick<Tenant, 'id' | 'name' | 'status'>
+type TenantSummary = Pick<Tenant, 'id' | 'name' | 'status' | 'suspension_reason'>
 
 interface AuthContextValue {
   session: Session | null
@@ -38,24 +39,36 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined)
 
-async function fetchProfile(userId: string): Promise<Profile | null> {
+async function readProfile(userId: string): Promise<ReadResult<Profile>> {
   const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
 
   if (error) {
     console.error('Failed to load profile', error)
-    return null
+    return { ok: false }
   }
-  return data as Profile | null
+  return { ok: true, data: data as Profile | null }
 }
 
-async function fetchTenant(tenantId: string): Promise<TenantSummary | null> {
-  const { data, error } = await supabase.from('tenants').select('id, name, status').eq('id', tenantId).maybeSingle()
+async function readTenant(tenantId: string): Promise<ReadResult<TenantSummary>> {
+  const { data, error } = await supabase.from('tenants').select('id, name, status, suspension_reason').eq('id', tenantId).maybeSingle()
 
   if (error) {
     console.error('Failed to load tenant', error)
-    return null
+    return { ok: false }
   }
-  return data
+  return { ok: true, data }
+}
+
+// Carga inicial: un fallo se trata como "no hay dato" (comportamiento previo). El refresco usa readProfile/readTenant
+// y conserva el estado anterior si la lectura falla.
+async function fetchProfile(userId: string): Promise<Profile | null> {
+  const r = await readProfile(userId)
+  return r.ok ? r.data : null
+}
+
+async function fetchTenant(tenantId: string): Promise<TenantSummary | null> {
+  const r = await readTenant(tenantId)
+  return r.ok ? r.data : null
 }
 
 /** Fails closed (empty set = no modules visible) rather than throwing --
@@ -195,24 +208,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function refreshProfile() {
-    if (session?.user) {
-      const nextProfile = await fetchProfile(session.user.id)
-      setProfile(nextProfile)
-      setUnprovisioned(nextProfile === null)
-      if (nextProfile?.tenant_id) {
-        const [nextTenant, nextModules, nextPermissions] = await Promise.all([
-          fetchTenant(nextProfile.tenant_id),
-          fetchEnabledModules(nextProfile.tenant_id),
-          fetchPermissions(nextProfile.role, nextProfile.tenant_role_id),
-        ])
-        setTenant(nextTenant)
-        setEnabledModules(nextModules)
-        setPermissions(nextPermissions)
-      } else {
-        setTenant(null)
-        setEnabledModules(null)
-        setPermissions(nextProfile ? await fetchPermissions(nextProfile.role, nextProfile.tenant_role_id) : null)
-      }
+    if (!session?.user) return
+    // Si una lectura FALLA (red), se conserva el estado previo: no se marca unprovisioned ni se deja el tenant en null.
+    const profileRead = await readProfile(session.user.id)
+    if (!profileRead.ok) return
+    const nextProfile = profileRead.data
+    setProfile(nextProfile)
+    setUnprovisioned(nextProfile === null)
+    if (nextProfile?.tenant_id) {
+      const [tenantRead, nextModules, nextPermissions] = await Promise.all([
+        readTenant(nextProfile.tenant_id),
+        fetchEnabledModules(nextProfile.tenant_id),
+        fetchPermissions(nextProfile.role, nextProfile.tenant_role_id),
+      ])
+      setTenant((prev) => resolveRefresh(prev, tenantRead))
+      setEnabledModules(nextModules)
+      setPermissions(nextPermissions)
+    } else {
+      setTenant(null)
+      setEnabledModules(null)
+      setPermissions(nextProfile ? await fetchPermissions(nextProfile.role, nextProfile.tenant_role_id) : null)
     }
   }
 

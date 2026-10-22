@@ -5,7 +5,7 @@ import { createHandler } from "../../functions/_shared/payments-service/router.t
 import { generateApiKey } from "../../functions/_shared/payments-service/apiKeys.ts";
 import { hmacSha256Hex, sha256Hex } from "../../functions/_shared/payments-service/hmac.ts";
 import { ApiError } from "../../functions/_shared/payments-service/errors.ts";
-import type { Deps, LegacyTarget, PayEnvironment } from "../../functions/_shared/payments-service/types.ts";
+import type { Deps, PayEnvironment } from "../../functions/_shared/payments-service/types.ts";
 
 export const SUPABASE_URL = "https://proj.supabase.co";
 export const SECRETS = {
@@ -32,16 +32,10 @@ export interface World {
   wompi: { status: number; body: unknown; throws: "abort" | "network" | null; created: number };
   callbacks: Map<string, (init: RequestInit) => Promise<Response> | Response>;
   buggyAmount: boolean;
-  /** Origenes legacy simulados (public.payment_invoices / sales_order_payment_links). */
-  legacy: {
-    targets: Map<string, LegacyTarget>;
-    /** key = tenant id o "platform" */
-    credentials: Map<string, { mode: PayEnvironment; privateKey: string | null; eventsKey: string | null } | null>;
-    /** transaccion -> id del destino que la acredito (para transactionUsedElsewhere) */
-    usedTx: Map<string, string>;
-    applied: Array<{ targetId: string; txId: string; status: string }>;
-    ambiguous: Set<string>;
-  };
+  /** Credenciales Wompi de comercios (tenant id -> credencial); ausente/null = sin credencial activa. */
+  /** Tenants desactivados (tenants.status != 'active'). */
+  inactiveMerchants: Set<string>;
+  merchants: Map<string, { mode: PayEnvironment; privateKey: string | null; eventsKey: string | null } | null>;
   /** Wompi GET /transactions/{id}: echo = devuelve la transacción real registrada por wompiEvent(). */
   verify: { mode: "echo" | "notfound" | "unauthorized" | "server_error" | "network" | "timeout" | "override"; override?: Row; calls: string[] };
   healthSummary: Row;
@@ -57,7 +51,7 @@ export function newWorld(): World {
     credential: { mode: "sandbox", privateKey: SECRETS.privateKey, eventsKey: SECRETS.eventsKey },
     wompi: { status: 201, body: null, throws: null, created: 0 },
     callbacks: new Map(), buggyAmount: false,
-    legacy: { targets: new Map(), credentials: new Map(), usedTx: new Map(), applied: [], ambiguous: new Set() },
+    merchants: new Map(), inactiveMerchants: new Set(),
     verify: { mode: "echo", calls: [] }, healthSummary: { invalid_signature: 0, unverified: 0 },
   };
 }
@@ -68,12 +62,14 @@ function rpcImpl(w: World, fn: string, a: Record<string, any>) {
   switch (fn) {
     case "payments_lookup_client": {
       const c = w.clients.find((x) => x.api_key_hash === a.p_key_hash && x.status === "active" && !x.revoked_at);
-      return ok(c ? { id: c.id, name: c.name, status: c.status, callback_url: c.callback_url, signing_secret_name: c.signing_secret_name } : null);
+      return ok(c ? { id: c.id, name: c.name, status: c.status, callback_url: c.callback_url, signing_secret_name: c.signing_secret_name, kind: c.kind ?? "external" } : null);
     }
     case "payments_begin_link": {
+      const cl = w.clients.find((x) => x.id === a.p_client_id);
+      if (a.p_merchant_tenant_id != null && (cl?.kind ?? "external") !== "internal") return pyErr("PY424", "el proyecto no puede fijar un comercio");
       const ex = w.links.find((l) => l.client_id === a.p_client_id && l.idempotency_key === a.p_idempotency_key);
       if (ex) {
-        if (ex.request_hash !== a.p_request_hash) return pyErr("PY409", "Idempotency-Key reutilizada con otro cuerpo");
+        if (ex.request_hash !== a.p_request_hash || (ex.merchant_tenant_id ?? null) !== (a.p_merchant_tenant_id ?? null)) return pyErr("PY409", "Idempotency-Key reutilizada con otro cuerpo");
         return ok({ link: ex, replayed: true });
       }
       const r = a.p_request;
@@ -82,6 +78,7 @@ function rpcImpl(w: World, fn: string, a: Record<string, any>) {
         idempotency_key: a.p_idempotency_key, request_hash: a.p_request_hash, amount_in_cents: r.amount_in_cents,
         currency: r.currency, environment: a.p_environment, name: r.name, description: r.description,
         redirect_url: r.redirect_url, expires_at: r.expires_at, metadata: r.metadata, status: "creating",
+        merchant_tenant_id: a.p_merchant_tenant_id ?? null,
         checkout_url: null, paid_transaction_id: null, paid_at: null, created_by: a.p_created_by, created_at: now, updated_at: now,
       };
       w.links.push(l);
@@ -113,15 +110,15 @@ function rpcImpl(w: World, fn: string, a: Record<string, any>) {
     case "payments_public_link_status": {
       const l = link(a.p_id);
       const lastEv = [...w.events].reverse().find((e) =>
-        (e.link_id === a.p_id || e.origin_ref === a.p_id) &&
+        e.link_id === a.p_id &&
         ["APPROVED", "DECLINED", "VOIDED", "ERROR"].includes(e.tx_status) &&
-        ["processed", "duplicate_payment", "legacy_invoice", "legacy_order_payment"].includes(e.classification)
+        ["processed", "duplicate_payment"].includes(e.classification)
       );
-      return ok({ found: !!l, status: l?.status ?? null, last_attempt: lastEv?.tx_status ?? null, updated_at: l?.updated_at ?? null });
+      return ok({ found: !!l, status: l?.status ?? null, last_attempt: l ? (lastEv?.tx_status ?? null) : null, updated_at: l?.updated_at ?? null });
     }
     case "payments_find_link_by_wompi_id": {
       const l = w.links.find((x) => x.wompi_link_id === a.p_wompi_link_id);
-      return ok(l ? { id: l.id, client_id: l.client_id, environment: l.environment, status: l.status, amount_in_cents: l.amount_in_cents, currency: l.currency } : null);
+      return ok(l ? { id: l.id, client_id: l.client_id, environment: l.environment, status: l.status, amount_in_cents: l.amount_in_cents, currency: l.currency, merchant_tenant_id: l.merchant_tenant_id ?? null } : null);
     }
     case "payments_record_event": {
       const p = a.p_payload;
@@ -176,24 +173,6 @@ function rpcImpl(w: World, fn: string, a: Record<string, any>) {
       }
       return ok({ event_id: ev.id, classification: cls, link_id: l.id, client_id: l.client_id, link_status: l.status, deliveries });
     }
-    case "payments_record_legacy_event": {
-      const p = a.p_payload;
-      const tx = p?.data?.transaction;
-      const ev: Row = {
-        id: ++seq, received_at: now, environment: a.p_environment, raw: p, signature_valid: a.p_signature_valid,
-        transaction_id: tx?.id ?? null, tx_status: tx?.status ?? null, amount_in_cents: tx?.amount_in_cents ?? null,
-        wompi_link_id: tx?.payment_link_id ?? null, link_id: null, classification: a.p_classification,
-        origin: a.p_origin, origin_ref: a.p_origin_ref, expected_cents: a.p_expected_cents,
-      };
-      w.events.push(ev);
-      return ok({ event_id: ev.id, classification: ev.classification });
-    }
-    case "payments_transaction_usage": {
-      const used = ["processed", "duplicate_payment", "amount_mismatch", "forwarded_foreign", "legacy_invoice", "legacy_order_payment"];
-      return ok(w.events.filter((e) => e.transaction_id === a.p_transaction_id && used.includes(e.classification)).map((e) => ({
-        wompi_link_id: e.wompi_link_id, tx_status: e.tx_status, classification: e.classification, origin: e.origin ?? null, origin_ref: e.origin_ref ?? null,
-      })));
-    }
     case "payments_claim_deliveries": {
       const due = w.deliveries.filter((d) => d.status === "pending" && !d.leased && w.clients.find((c) => c.id === d.client_id)?.status === "active").slice(0, a.p_limit);
       due.forEach((d) => { d.leased = true; d.attempt += 1; });
@@ -219,6 +198,7 @@ function rpcImpl(w: World, fn: string, a: Record<string, any>) {
       const c: Row = {
         id: crypto.randomUUID(), name: a.p_name, status: "active", api_key_hash: a.p_key_hash, key_prefix: a.p_key_prefix,
         callback_url: a.p_callback_url, signing_secret_name: a.p_signing_secret_name, created_at: now, updated_at: now, revoked_at: null,
+        kind: a.p_kind ?? "external",
       };
       w.clients.push(c);
       return ok(c);
@@ -251,7 +231,7 @@ export function makeDeps(w: World, over: Partial<Deps> = {}): Deps {
       const id = decodeURIComponent(txm[2]);
       w.verify.calls.push(id);
       const auth = (init.headers as Record<string, string> | undefined)?.Authorization;
-      if (auth !== `Bearer ${SECRETS.privateKey}` && auth !== `Bearer ${TENANT_KEYS.privateKey}`) return new Response("{}", { status: 401 });
+      if (auth !== `Bearer ${SECRETS.privateKey}` && auth !== `Bearer ${TENANT_KEYS.privateKey}` && auth !== `Bearer ${MERCHANT_KEYS.privateKey}`) return new Response("{}", { status: 401 });
       switch (w.verify.mode) {
         case "network": throw new TypeError("connection reset");
         case "timeout":
@@ -291,6 +271,17 @@ export function makeDeps(w: World, over: Partial<Deps> = {}): Deps {
         getSecret: async (n: string) => (n === "private_key" ? c.privateKey : n === "events_key" ? c.eventsKey : null),
       };
     },
+    isMerchantActive: async (tenantId) => !w.inactiveMerchants.has(tenantId),
+    getMerchantCredential: async (tenantId) => {
+      if (tenantId === null) {
+        const c = w.credential;
+        if (!c) return null;
+        return { mode: c.mode, getSecret: async (n: string) => (n === "private_key" ? c.privateKey : n === "events_key" ? c.eventsKey : null) };
+      }
+      const c = w.merchants.get(tenantId);
+      if (!c) return null;
+      return { mode: c.mode, getSecret: async (n: string) => (n === "private_key" ? c.privateKey : n === "events_key" ? c.eventsKey : null) };
+    },
     verifyAdmin: async (h) => {
       if (!h) throw new ApiError(401, "unauthorized", "Falta la sesión.");
       if (h === `Bearer ${SECRETS.adminJwt}`) return { userId: "11111111-1111-4111-8111-111111111111" };
@@ -298,52 +289,12 @@ export function makeDeps(w: World, over: Partial<Deps> = {}): Deps {
       throw new ApiError(401, "unauthorized", "Sesión inválida.");
     },
     env: { supabaseUrl: SUPABASE_URL, cronSecret: "cron-secret-VALUE-1234" },
-    legacy: {
-      find: async (id) => {
-        if (w.legacy.ambiguous.has(id)) return "ambiguous";
-        const t = w.legacy.targets.get(id);
-        return t ? { ...t } : null;
-      },
-      publicStatus: async (id) => {
-        for (const t of w.legacy.targets.values()) {
-          if (t.id !== id) continue;
-          if (t.deleted) return null;
-          const inv: Record<string, string> = { PENDING: "pending", OVERDUE: "pending", PAID: "paid", CANCELLED: "cancelled", REFUNDED: "voided" };
-          const status = (t.origin === "invoice" ? inv[t.status] : t.status) as never;
-          return { status: status ?? "unknown", updatedAt: "2026-10-11T12:00:00.000Z" };
-        }
-        return null;
-      },
-      getCredential: async (tenantId) => {
-        const c = w.legacy.credentials.get(tenantId ?? "platform");
-        if (!c) return null;
-        return { mode: c.mode, getSecret: async (n: string) => (n === "private_key" ? c.privateKey : n === "events_key" ? c.eventsKey : null) };
-      },
-      transactionUsedElsewhere: async (txId, target) => {
-        const by = w.legacy.usedTx.get(txId);
-        return by !== undefined && by !== target.id;
-      },
-      apply: async (target, tx) => {
-        const t = w.legacy.targets.get(target.wompiLinkId)!;
-        const approved = tx.status === "APPROVED";
-        const pend = t.origin === "invoice" ? ["PENDING", "OVERDUE"].includes(t.status) : t.status === "pending";
-        if (!pend) return { handled: false };
-        if (t.origin === "order_link" && !approved) return { handled: false };
-        w.legacy.applied.push({ targetId: t.id, txId: String(tx.id), status: String(tx.status) });
-        if (approved) {
-          t.status = t.origin === "invoice" ? "PAID" : "paid";
-          t.appliedTransactionId = String(tx.id);
-          w.legacy.usedTx.set(String(tx.id), t.id);
-        }
-        return { handled: true };
-      },
-    },
     timeouts: { deliveryMs: 60, wompiMs: 60, verifyMs: 60 },
     ...over,
   };
 }
 
-export async function addClient(w: World, o: { name?: string; callback?: string | null; env?: PayEnvironment; secret?: string } = {}) {
+export async function addClient(w: World, o: { name?: string; callback?: string | null; env?: PayEnvironment; secret?: string; kind?: "external" | "internal" } = {}) {
   const key = await generateApiKey(o.env ?? "sandbox");
   const secretName = `payments/${crypto.randomUUID()}/signing`;
   const signing = o.secret ?? "lxy_whsec_TESTSIGNINGSECRET";
@@ -351,7 +302,7 @@ export async function addClient(w: World, o: { name?: string; callback?: string 
   const c: Row = {
     id: crypto.randomUUID(), name: o.name ?? `proj-${w.clients.length}`, status: "active", api_key_hash: key.keyHash,
     key_prefix: key.keyPrefix, callback_url: o.callback === undefined ? "https://hooks.example.com/pay" : o.callback,
-    signing_secret_name: secretName, created_at: new Date().toISOString(), revoked_at: null,
+    signing_secret_name: secretName, created_at: new Date().toISOString(), revoked_at: null, kind: o.kind ?? "external",
   };
   w.clients.push(c);
   return { client: c, apiKey: key.apiKey, signingSecret: signing };
@@ -397,32 +348,8 @@ export async function wompiEvent(o: {
   return { event: "transaction.updated", data, environment: o.env ?? "test", signature: { properties: props, checksum }, timestamp, sent_at: "2026-10-10T12:00:00.000Z" };
 }
 
-/** Registra un destino legacy y la credencial de su merchant. */
-export function addLegacyTarget(
-  w: World,
-  o: { origin: "invoice" | "order_link"; wompiLinkId: string; merchantTenantId?: string | null; expectedCents?: number | null; currency?: string; status?: string; deleted?: boolean },
-) {
-  const t: LegacyTarget = {
-    origin: o.origin,
-    id: crypto.randomUUID(),
-    wompiLinkId: o.wompiLinkId,
-    merchantTenantId: o.merchantTenantId === undefined ? (o.origin === "invoice" ? null : crypto.randomUUID()) : o.merchantTenantId,
-    status: o.status ?? (o.origin === "invoice" ? "PENDING" : "pending"),
-    expectedCents: o.expectedCents === undefined ? 1_500_000 : o.expectedCents,
-    currency: o.currency ?? "COP",
-    deleted: o.deleted ?? false,
-    appliedTransactionId: null,
-  };
-  w.legacy.targets.set(o.wompiLinkId, t);
-  const key = t.merchantTenantId ?? "platform";
-  if (!w.legacy.credentials.has(key)) {
-    // Credenciales distintas por merchant (el evento de un tenant NO se firma con la llave de plataforma)
-    w.legacy.credentials.set(key, t.merchantTenantId === null
-      ? { mode: "sandbox", privateKey: SECRETS.privateKey, eventsKey: SECRETS.eventsKey }
-      : { mode: "sandbox", privateKey: TENANT_KEYS.privateKey, eventsKey: TENANT_KEYS.eventsKey });
-  }
-  return t;
-}
+/** Credenciales de un comercio (distintas de las de la plataforma). */
+export const MERCHANT_KEYS = { privateKey: "prv_test_MERCHANTPRIVATE888", eventsKey: "test_events_MERCHANTEVENTS999" };
 export const TENANT_KEYS = { privateKey: "prv_test_TENANTPRIVATE777", eventsKey: "test_events_TENANTEVENTS555" };
 
 export async function createOwnLink(w: World, h: (r: Request) => Promise<Response>, apiKey: string, over: Record<string, unknown> = {}, idem = crypto.randomUUID()) {

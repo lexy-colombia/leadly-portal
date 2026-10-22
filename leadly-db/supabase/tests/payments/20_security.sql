@@ -47,8 +47,8 @@ select t.ok(not exists (
   select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
    where n.nspname='public' and p.proname like 'payments\_%' and not has_function_privilege('service_role', p.oid, 'execute')),
   'todas las funciones payments_* ejecutables por service_role');
-select t.ok((select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname like 'payments\_%') = 24,
-  'inventario: 24 funciones payments_* (contrato + find_link_by_wompi_id + health_summary + record_legacy_event + transaction_usage + public_link_status; claim_delivery eliminada)');
+select t.ok((select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname like 'payments\_%') = 23,
+  'inventario: 23 funciones payments_* (24 previas - record_legacy_event - transaction_usage + payments_internal_client_ok de ST3)');
 select t.ok(not exists (
   select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
    where n.nspname='public' and p.proname like 'payments\_%' and p.proconfig is null),
@@ -60,8 +60,8 @@ select t.ok(not exists (
 -- definer solo donde corresponde
 select t.ok((select array_agg(proname::text order by proname) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
    where n.nspname='public' and p.proname like 'payments\_%' and p.prosecdef)
-   = array['payments_read_secret','payments_store_secret','payments_trigger_dispatch'],
-  'security definer solo en read_secret, store_secret y trigger_dispatch');
+   = array['payments_internal_client_ok','payments_read_secret','payments_store_secret','payments_trigger_dispatch'],
+  'security definer solo en internal_client_ok (ST3), read_secret, store_secret y trigger_dispatch');
 
 -- tablas: sin acceso para anon/authenticated/public; RLS on sin policies
 select t.ok(not exists (select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace

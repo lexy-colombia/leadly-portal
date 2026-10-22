@@ -4,6 +4,27 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.31] - 2026-10-22
+
+### Added
+- **Cobro anticipado de suscripciones.** El comprobante de cada período se emite **7 días antes** (30 en planes anuales) de que empiece y **vence el día que empieza**; el de una suscripción nueva vence el mismo día de su creación. Cada comprobante guarda el período que cubre, así no se duplica ni se omite uno al cambiar la regla.
+- **Muro de pago para el comercio bloqueado por mora:** en lugar de "tu empresa está desactivada", ve sus comprobantes pendientes (número, plan, período, monto, vencimiento), puede pagar con "Pagar ahora" y verificar con "Ya pagué, verificar". Un bloqueo manual conserva su mensaje (ahora traducido es/en).
+- **Reactivación automática al pagar** (Wompi o pago manual), solo si el bloqueo fue por mora. Un bloqueo hecho a mano nunca se reactiva solo.
+- **Pantalla de facturación del comercio:** columna "Período cubierto" y "Próximo vencimiento" calculado desde el siguiente comprobante sin pagar.
+- **Links de pago de Wompi con una sola forma de crearlos:** el servicio `payments-api` ahora sirve a cada comercio con su propia cuenta de Wompi (y a la plataforma con la suya), con un único receptor de eventos. El drawer de Wompi del comercio muestra la URL de eventos que debe registrar en su cuenta, con botón para copiarla.
+
+### Changed
+- **La "factura" de la suscripción pasa a llamarse "comprobante de cobro"**, en pantallas y en Wompi: detalla el plan y el período contratados y aclara que **no es una factura electrónica**. El link de pago lleva "Comprobante de cobro <número> · <plan> (<período>)" y los impuestos reales del comprobante, no un IVA 19 % fijo.
+- Pedidos de la tienda, de la IA por WhatsApp, botón del pedido y cobros de plataforma crean su link por el servicio de pagos; el resultado vuelve por un aviso firmado que acredita el pago en una sola transacción.
+
+### Fixed
+- **El bloqueo automático por mora nunca había funcionado:** el trigger que protege el estado del comercio rechazaba el cambio hecho desde el cron (no hay usuario en el cron) y la función habría fallado cada hora en cuanto un comercio estuviera en mora. Corregido y probado con simulación de varios meses.
+- Un comprobante anulado (por ejemplo, al cancelar una suscripción) ya no se puede pagar ni reconciliar, y cancelar anula los comprobantes de períodos futuros ya emitidos para no bloquear a quien canceló.
+- Si falla la red al pulsar "Ya pagué, verificar", la app ya no te saca a "crear empresa" ni te deja entrar a una app vacía.
+
+### Removed
+- La rama de eventos heredada de Wompi, la tabla `sales_order_payment_links`, la columna `payment_invoices.provider_checkout_id` y el cliente y los datos de prueba de sandbox.
+
 ## [1.0.30] - 2026-10-15
 
 ### Added
@@ -14,6 +35,15 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 ### Changed
 - **`run-campaigns` omite a los contactos con la etiqueta "no contactar"** al momento de enviar, incluso en campañas ya programadas. El destinatario queda como fallido con el motivo.
 - La conversación de WhatsApp reinicia el contexto de la IA cuando el contacto vuelve después de 24 h, para que no imite respuestas viejas del historial.
+
+## [1.0.29] - 2026-10-15
+
+### Changed
+- **Las facturas electrónicas se imprimen solas apenas la DIAN las acepta**, con la opción de impresión automática activada o no. Aplica al cobrar en venta rápida, en cuentas abiertas (incluido el saldo pendiente de un cobro) y al enviar o cobrar desde el detalle de la orden.
+- La opción de impresión automática ahora solo controla el **ticket de las ventas sin factura**.
+
+### Fixed
+- En venta rápida, el ticket salía **antes** de que la DIAN respondiera, así que la factura se imprimía como remisión sin CUFE ni QR. Ahora, si se pidió factura, se espera la respuesta de la DIAN y se imprime el documento real.
 
 ## [1.0.28] - 2026-10-15
 

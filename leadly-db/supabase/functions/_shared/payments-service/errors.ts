@@ -70,6 +70,9 @@ export function mapRpcError(fn: string, error: { code?: string; message: string 
       return new ApiError(422, overrides.PY422 ?? "invalid_request", clean || "Dato inválido.");
     case "PY423":
       return new ApiError(409, overrides.PY423 ?? "invalid_state", clean || "Estado no permitido para esta operación.");
+    case "PY424":
+      // payments_begin_link: un proyecto que no es `internal` pidio un comercio.
+      return new ApiError(403, overrides.PY424 ?? "merchant_not_allowed", "Este proyecto no puede crear links a nombre de un comercio.");
     default:
       console.error(JSON.stringify({ level: "error", event: "rpc_failed", fn, code: error.code ?? null, message: redact(error.message ?? "", 200) }));
       return new ApiError(500, "internal_error", "Error interno.");

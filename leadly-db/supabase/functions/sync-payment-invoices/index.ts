@@ -1,13 +1,13 @@
-// Manual reconciliation, generic across providers (mirrors lexy's
-// sync-wompi-invoices) -- a poll-based safety net for missed webhooks, not a
-// scheduled retry. Superadmin only, triggered from the backoffice
+// Manual reconciliation against the unified payments service (it asks the
+// service for the invoice's link and, if the link is paid, applies it with the
+// same SQL function payments-internal uses) -- a poll-based safety net for missed
+// notifications, not a scheduled retry. Superadmin only, triggered from the backoffice
 // "Sincronizar con el proveedor" button. Optionally scoped to a single
 // invoice_id.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/cors.ts";
-import { applyWebhookEvent } from "../_shared/payments/applyWebhookEvent.ts";
-import { getAdapter, makeSecretGetter, resolveCredential } from "../_shared/payments/registry.ts";
+import { syncInvoiceFromService } from "../_shared/payments/syncInvoice.ts";
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -51,9 +51,10 @@ Deno.serve(async (req: Request) => {
 
   let query = adminClient
     .from("payment_invoices")
-    .select("id, merchant_tenant_id, provider_key, provider_checkout_id, status")
+    .select("id, payer_tenant_id, payments_link_id, status, deleted_at")
+    .is("deleted_at", null)
     .in("status", ["PENDING", "OVERDUE"])
-    .not("provider_checkout_id", "is", null);
+    .not("payments_link_id", "is", null);
   if (body.invoice_id) {
     query = query.eq("id", body.invoice_id);
   }
@@ -66,12 +67,13 @@ Deno.serve(async (req: Request) => {
   const results: { invoice_id: string; synced: boolean }[] = [];
   for (const invoice of invoices ?? []) {
     try {
-      const adapter = getAdapter(invoice.provider_key);
-      const credential = await resolveCredential(adminClient, invoice.merchant_tenant_id, invoice.provider_key);
-      const getSecret = makeSecretGetter(adminClient, credential.id);
-      const event = await adapter.queryTransaction(credential, getSecret, invoice.provider_checkout_id!);
-      const applied = event ? await applyWebhookEvent(adminClient, invoice.provider_key, event) : { handled: false };
-      results.push({ invoice_id: invoice.id, synced: applied.handled });
+      const out = await syncInvoiceFromService(adminClient, {
+        id: invoice.id,
+        payer_tenant_id: invoice.payer_tenant_id,
+        payments_link_id: invoice.payments_link_id as string,
+        deleted_at: invoice.deleted_at as string | null,
+      });
+      results.push({ invoice_id: invoice.id, synced: out.synced });
     } catch (err) {
       console.error(`sync-payment-invoices: failed for invoice ${invoice.id}:`, err);
       results.push({ invoice_id: invoice.id, synced: false });

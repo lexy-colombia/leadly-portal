@@ -1,5 +1,7 @@
 export type UserRole = 'superadmin' | 'tenant_admin' | 'tenant_agent'
 export type TenantStatus = 'active' | 'inactive'
+/** Por que un tenant esta 'inactive': 'nonpayment' = bloqueo automatico por mora; null = bloqueo manual del superadmin. */
+export type TenantSuspensionReason = 'nonpayment'
 export type TenantEntityType = 'persona' | 'empresa'
 export type TenantDocumentType = 'NIT' | 'CC' | 'CE' | 'RUC' | 'RFC' | 'PASAPORTE' | 'OTRO'
 export type TenantLanguage = 'es' | 'en'
@@ -16,6 +18,8 @@ export interface Tenant {
   id: string
   name: string
   status: TenantStatus
+  suspension_reason: TenantSuspensionReason | null
+  suspended_at: string | null
   contact_email: string | null
   contact_phone: string | null
   notes: string | null
@@ -1092,7 +1096,10 @@ export interface PaymentInvoice {
   invoice_number: string | null
   description: string | null
   due_date: string | null
-  provider_checkout_id: string | null
+  // Periodo que cubre el comprobante (date, yyyy-mm-dd). Null en historicos y en
+  // comprobantes manuales; ver 20261020130000_billing_invoice_periods.sql.
+  period_start: string | null
+  period_end: string | null
   provider_transaction_id: string | null
   provider_payment_method: string | null
   provider_payment_data: Record<string, unknown> | null

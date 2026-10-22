@@ -108,7 +108,6 @@
   "paymentLinks.health.transaction_conflict": "{count} transaction conflict(s): Wompi reported contradictory statuses for the same payment.",
   "paymentLinks.health.amount_mismatch": "{count} payment(s) with an amount different from the link: they were not marked as paid.",
   "paymentLinks.health.duplicate_payment": "{count} link(s) with more than one approved payment: a refund may be needed.",
-  "paymentLinks.health.legacy_not_applied": "{count} payment(s) charged by Wompi could not be credited to their order or invoice: review them by hand.",
   "paymentLinks.health.deliveries_failed": "{count} notification(s) to projects could not be delivered: check the project's notification URL.",
   "paymentLinks.health.stale_pending_links": "{count} link(s) pending for over 24 h with unverified events: they are probably already paid."
 }

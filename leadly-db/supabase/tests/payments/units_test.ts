@@ -3,7 +3,6 @@ import { sha256Hex, timingSafeEqual, verifyWompiChecksum, wompiExpectedChecksum,
 import { checkCallbackDestination, checkCallbackUrl } from "../../functions/_shared/payments-service/ssrf.ts";
 import { generateApiKey, authenticateClient } from "../../functions/_shared/payments-service/apiKeys.ts";
 import { redact } from "../../functions/_shared/payments-service/errors.ts";
-import { wompiAdapter } from "../../functions/_shared/payments/wompi.ts";
 import { SECRETS, wompiEvent } from "./harness.ts";
 
 Deno.test("timingSafeEqual: iguales, distintos, distinto largo, vacío", async () => {
@@ -14,13 +13,14 @@ Deno.test("timingSafeEqual: iguales, distintos, distinto largo, vacío", async (
   assert(await timingSafeEqual("", ""));
 });
 
-Deno.test("checksum Wompi propio == wompiAdapter.verifyWebhookSignature (prueba diferencial)", async () => {
+Deno.test("checksum Wompi propio == SHA-256(valores + timestamp + secreto) calculado aparte (oraculo independiente)", async () => {
   const ev = await wompiEvent({ linkId: "L" });
   assert(await verifyWompiChecksum(ev, SECRETS.eventsKey));
-  assert(await wompiAdapter.verifyWebhookSignature(ev, async () => SECRETS.eventsKey));
+  // oraculo independiente (formula documentada por Wompi), sin pasar por hmac.ts
+  const t = ev.data.transaction;
+  assertEquals(ev.signature.checksum, await sha256Hex(`${t.id}${t.status}${t.amount_in_cents}${ev.timestamp}${SECRETS.eventsKey}`));
   const bad = await wompiEvent({ linkId: "L", eventsKey: "otra" });
   assertFalse(await verifyWompiChecksum(bad, SECRETS.eventsKey));
-  assertFalse(await wompiAdapter.verifyWebhookSignature(bad, async () => SECRETS.eventsKey));
   // mayúsculas (la doc de Wompi muestra el checksum en MAYÚSCULAS)
   const up = { ...ev, signature: { ...ev.signature, checksum: ev.signature.checksum.toUpperCase() } };
   assert(await verifyWompiChecksum(up, SECRETS.eventsKey));

@@ -32,41 +32,6 @@ export interface AuthenticatedClient {
   environment: PayEnvironment;
 }
 
-/** Destino legacy de un evento de Wompi (tablas de `public` anteriores al
- * servicio nuevo): factura de plataforma o link de cobro de un tenant. */
-export interface LegacyTarget {
-  origin: "invoice" | "order_link";
-  /** payment_invoices.id | sales_order_payment_links.id */
-  id: string;
-  wompiLinkId: string;
-  /** Tenant cuyo Wompi cobra (null = credencial de plataforma). */
-  merchantTenantId: string | null;
-  /** Estado nativo de la fila (PENDING/PAID/... | pending/paid/...). */
-  status: string;
-  /** Monto esperado en centavos que se le pidio a Wompi al crear el cobro (null = no almacenado). */
-  expectedCents: number | null;
-  currency: string | null;
-  /** Fila marcada como borrada (soft-delete): no es pagable en silencio. */
-  deleted: boolean;
-  /** Transaccion que ya acredito este destino (si ya esta pagado). */
-  appliedTransactionId: string | null;
-}
-
-/** Acceso a las tablas legacy de `public`. Se inyecta (real: legacyStore.ts). */
-export interface LegacyStore {
-  /** null = ninguna fila; "ambiguous" = mas de una fila para el mismo checkout (no se paga nada). */
-  find(wompiLinkId: string): Promise<LegacyTarget | "ambiguous" | null>;
-  /** Credencial Wompi del merchant (null = plataforma). null si no hay una activa o no se pudo leer. */
-  getCredential(merchantTenantId: string | null): Promise<PlatformCredential | null>;
-  /** ¿Esta transaccion ya acredito OTRO destino legacy (otra factura / otro pago de pedido)? */
-  transactionUsedElsewhere(transactionId: string, target: LegacyTarget): Promise<boolean>;
-  /** Aplica el pago/intento reutilizando applyWebhookEvent / applySalesOrderPaymentWebhookEvent. */
-  apply(target: LegacyTarget, tx: Record<string, unknown>): Promise<{ handled: boolean }>;
-  /** Estado publico (solo lectura) de una fila legacy por SU id propio
-   * (payment_invoices.id | sales_order_payment_links.id). null = no existe o esta borrada. */
-  publicStatus(id: string): Promise<{ status: PublicLinkStatus; updatedAt: string | null } | null>;
-}
-
 /** Estados que expone la ruta publica de retorno (/v1/public/payment-links/{id}/status). */
 export type PublicLinkStatus = "paid" | "pending" | "expired" | "cancelled" | "voided" | "error" | "unknown";
 
@@ -77,8 +42,12 @@ export interface Deps {
   now: () => number;
   /** Credencial de plataforma de Wompi (resolveCredential(null,'wompi')); null si no hay una activa. */
   getPlatformCredential: () => Promise<PlatformCredential | null>;
-  /** Origenes legacy (public.payment_invoices / public.sales_order_payment_links). */
-  legacy: LegacyStore;
+  /** Credencial Wompi de un comercio (tenant) o, con null, de la plataforma.
+   * null si no hay una activa o no se pudo leer (el llamante falla CERRADO). */
+  getMerchantCredential: (tenantId: string | null) => Promise<PlatformCredential | null>;
+  /** ¿El tenant existe y esta activo (tenants.status = 'active')? SOLO se consulta al CREAR un link
+   * de comercio; el receptor nunca la usa (un pago ya hecho se procesa aunque el tenant se desactive). */
+  isMerchantActive: (tenantId: string) => Promise<boolean>;
   /** Valida el JWT del caller y que profiles.role = 'superadmin'. Lanza ApiError 401/403. */
   verifyAdmin: (authHeader: string | null) => Promise<{ userId: string }>;
   /** Resolución DNS opcional (Deno.resolveDns). Si no existe, el anti-SSRF solo mira literales. */

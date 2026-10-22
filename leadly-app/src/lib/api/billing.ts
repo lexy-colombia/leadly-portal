@@ -273,6 +273,8 @@ export async function listInvoicesForTenant(tenantId: string): Promise<PaymentIn
     .from('payment_invoices')
     .select('*')
     .eq('payer_tenant_id', tenantId)
+    // Un comprobante futuro anulado (cancelar la suscripcion) es soft-delete: no se muestra.
+    .is('deleted_at', null)
     .order('created_at', { ascending: false })
   if (error) throw error
   return data

@@ -980,6 +980,8 @@ export function OrderDetail() {
         setSendInvoiceError(
           result.rejectionDetail ?? t("einvoicing.detail.sendError"),
         );
+      // Factura aceptada por la DIAN: se imprime de una vez.
+      else if (result.status === "accepted" && id) receiptPrinter.print(id);
       reloadInvoices();
     } catch (err) {
       setSendInvoiceError(
@@ -3680,7 +3682,10 @@ export function OrderDetail() {
           }
           storeCreditBalance={storeCreditBalance}
           pendingAmount={balance}
-          onSaved={reloadPayments}
+          onSaved={(_saved, einvoicing) => {
+            reloadPayments();
+            if (einvoicing?.accepted) receiptPrinter.print(order.id);
+          }}
         />
       )}
 

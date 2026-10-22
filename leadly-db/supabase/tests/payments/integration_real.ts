@@ -6,26 +6,28 @@
 //        aplica 00_stubs.sql + la migración real y corre este script)
 // Manual: DATABASE_URL=postgres://postgres@127.0.0.1:54330/rt deno run -A tests/payments/integration_real.ts
 // NO toca ninguna base real. Imprime PASS/FAIL y sale con codigo != 0 si algo falla.
-// Seccion 17: origenes legacy (public.payment_invoices / sales_order_payment_links) con
-// legacyStore.ts REAL sobre un emulador de supabase-js en SQL real (pgSupabase.ts).
+// Seccion 17: camino "evento de un link que no es del servicio" (unknown_link) sin rama legacy,
+// sobre SQL real. Las secciones 20/21 usan pgSupabase.ts (emulador de supabase-js en SQL real).
+// Corre IGUAL contra el esquema ANTES y DESPUES de 20261017120000_payments_retire_legacy.sql
+// (run_integration.sh: PRE_RETIRE=1 no aplica esa migracion).
 import postgres from "npm:postgres@3";
 import { createHandler } from "../../functions/_shared/payments-service/router.ts";
 import { sha256Hex, hmacSha256Hex } from "../../functions/_shared/payments-service/hmac.ts";
 import { checkCallbackDestination } from "../../functions/_shared/payments-service/ssrf.ts";
 import type { Deps, PayEnvironment, RpcClient } from "../../functions/_shared/payments-service/types.ts";
-import { createLegacyStore } from "../../functions/_shared/payments-service/legacyStore.ts";
-import { applyWebhookEvent } from "../../functions/_shared/payments/applyWebhookEvent.ts";
+import { createPaymentLink, validateLinkRequest } from "../../functions/_shared/payments-service/wompiLinks.ts";
+import { ApiError } from "../../functions/_shared/payments-service/errors.ts";
 import { pgSupabase } from "./pgSupabase.ts";
 
 const URL_DB = Deno.env.get("DATABASE_URL") ?? "postgres://postgres@127.0.0.1:54330/rt";
 const root = postgres(URL_DB, { max: 4, onnotice: () => {} }); // superusuario (solo para inspeccionar / forzar tiempos)
 const svc = postgres(URL_DB, { max: 12, onnotice: () => {}, connection: { options: "-c role=service_role" } });
 // PostgREST devuelve numeric como numero JSON, no como string.
-const legacySql = postgres(URL_DB, {
+const pubSql = postgres(URL_DB, {
   max: 6, onnotice: () => {}, connection: { options: "-c role=service_role" },
   types: { numeric: { to: 1700, from: [1700], serialize: (x: unknown) => String(x), parse: (x: string) => Number(x) } },
 });
-const legacyAdmin = pgSupabase(legacySql);
+const pubAdmin = pgSupabase(pubSql);
 
 let failures = 0;
 let passes = 0;
@@ -138,16 +140,25 @@ const fakeFetch: typeof fetch = async (input, init = {}) => {
   throw new TypeError(`red no simulada: ${url}`);
 };
 
+let merchantWithCredential: string | null = null;
 const deps: Deps = {
   rpc: realRpc,
   fetch: fakeFetch,
   now: () => Date.now(),
   env: { supabaseUrl: "https://proj.supabase.co", cronSecret: "CRONSECRET_xyz" },
-  legacy: createLegacyStore(legacyAdmin as never),
   getPlatformCredential: async () => ({
     mode: world.mode,
     getSecret: async (n) => (n === "private_key" ? KEYS.privateKey : n === "events_key" ? KEYS.eventsKey : null),
   }),
+  // ST2: comercio. T1 (tenant con Wompi propio) usa las llaves de tenant; otros comercios no tienen credencial.
+  isMerchantActive: async (id) => (await root`select status from public.tenants where id=${id}`)[0]?.status === "active",
+  getMerchantCredential: async (tenantId) => {
+    if (tenantId === null) {
+      return { mode: world.mode, getSecret: async (n) => (n === "private_key" ? KEYS.privateKey : n === "events_key" ? KEYS.eventsKey : null) };
+    }
+    if (tenantId !== merchantWithCredential) return null;
+    return { mode: "sandbox", getSecret: async (n) => (n === "private_key" ? KEYS.tenantPrivate : n === "events_key" ? KEYS.tenantEvents : null) };
+  },
   verifyAdmin: async () => ({ userId: "11111111-1111-1111-1111-111111111111" }),
 };
 const handler = createHandler(deps);
@@ -463,21 +474,14 @@ check("readiness.health = payments_health_summary real", rd2.status === 200 && r
 const susp2 = await root`select c.status from payments.clients c where c.id=${CLIENT_ID}`;
 console.log(`INFO cliente de la prueba: ${susp2[0].status}`);
 
-console.log("== 17. FUSION: origenes legacy con SQL real y legacyStore.ts real");
-// --- datos: un tenant con Wompi propio (cobra a su cliente), una factura de plataforma, una factura de un tenant-merchant
+console.log("== 17. evento de un link que no es del servicio: unknown_link sin rama legacy (SQL real)");
+// --- datos de apoyo: dos tenants y facturas de plataforma (que ya NO se resuelven por el receptor)
 const T1 = (await root`insert into public.tenants(name) values ('Tenant Uno') returning id`)[0].id as string;
 const T2 = (await root`insert into public.tenants(name) values ('Tenant Dos') returning id`)[0].id as string;
-const CRED = (await root`insert into public.tenant_payment_credentials(tenant_id, provider_key, mode) values (${T1}, 'wompi', 'sandbox') returning id`)[0].id as string;
-await root`insert into public.test_credential_secrets values (${CRED}, 'private_key', ${KEYS.tenantPrivate}), (${CRED}, 'events_key', ${KEYS.tenantEvents})`;
-let orderSeq = 0;
-const mkOrder = async (tenant: string) => (await root`insert into public.sales_orders(tenant_id, number, status, total) values (${tenant}, ${++orderSeq}, 'confirmada', 1000) returning id`)[0].id as string;
 const mkSub = async () => (await root`insert into public.billing_subscriptions default values returning id`)[0].id as string;
-const mkInvoice = async (o: { checkout: string; cents?: number; merchant?: string | null; status?: string }) =>
-  (await root`insert into public.payment_invoices(merchant_tenant_id, payer_tenant_id, subscription_id, provider_key, amount_cents, status, provider_checkout_id)
-    values (${o.merchant ?? null}, ${T2}, ${await mkSub()}, 'wompi', ${o.cents ?? 250_000}, ${o.status ?? "PENDING"}, ${o.checkout}) returning id`)[0].id as string;
-const mkOrderLink = async (o: { checkout: string; amount?: number; status?: string }) =>
-  (await root`insert into public.sales_order_payment_links(tenant_id, order_id, provider_key, provider_checkout_id, checkout_url, amount, status)
-    values (${T1}, ${await mkOrder(T1)}, 'wompi', ${o.checkout}, ${"https://checkout.wompi.co/l/" + o.checkout}, ${o.amount ?? 1500.5}, ${o.status ?? "pending"}) returning id`)[0].id as string;
+const mkInvoice = async (o: { cents?: number; merchant?: string | null; status?: string } = {}) =>
+  (await root`insert into public.payment_invoices(merchant_tenant_id, payer_tenant_id, subscription_id, provider_key, amount_cents, status)
+    values (${o.merchant ?? null}, ${T2}, ${await mkSub()}, 'wompi', ${o.cents ?? 250_000}, ${o.status ?? "PENDING"}) returning id`)[0].id as string;
 
 // evento firmado con la llave del merchant indicado; registra la transaccion "real" en su merchant
 async function lev(o: { link: string; tx: string; status?: string; amount: number; merchant: "platform" | "tenant"; currency?: string; badKey?: boolean; realLink?: string }) {
@@ -489,235 +493,56 @@ async function lev(o: { link: string; tx: string; status?: string; amount: numbe
 }
 const sendEv = async (e: Any) => { const x = await signed(e); return call("POST", "/v1/events/wompi", { raw: JSON.stringify(x) }); };
 const invRow = async (id: string) => (await root`select * from public.payment_invoices where id=${id}`)[0];
-const subStatus = async (id: string) => (await root`select status from public.billing_subscriptions where id=${id}`)[0].status as string;
 const evRows = async (tx: string) => await root`select classification, origin, origin_ref, signature_valid, amount_matches, wompi_link_id, link_id from payments.events where transaction_id=${tx} order by id`;
-const payRows = async (linkId: string) => await root`select * from public.sales_order_payments where payment_link_id=${linkId}`;
-
-console.log("-- 17.1 origen (2) factura de plataforma");
-const INV1 = await mkInvoice({ checkout: "winv1" });
-const inv1Sub = (await invRow(INV1)).subscription_id as string;
-const vc0 = world.verifyCalls.length;
-const i1 = await sendEv(await lev({ link: "winv1", tx: "ti-1", amount: 250_000, merchant: "platform" }));
-check("(2) APPROVED valido -> 200 legacy_invoice", i1.status === 200 && i1.body?.classification === "legacy_invoice", i1);
-check("(2) factura PAID con provider_transaction_id y suscripcion ACTIVE (trigger real una vez)", (await invRow(INV1)).status === "PAID" && (await invRow(INV1)).provider_transaction_id === "ti-1" && (await subStatus(inv1Sub)) === "ACTIVE");
-check("(2) confirmo con Wompi (GET /transactions) con la llave de plataforma", world.verifyCalls.length === vc0 + 1 && world.verifyCalls.at(-1)!.id === "ti-1" && world.verifyCalls.at(-1)!.auth === `Bearer ${KEYS.privateKey}`);
-const e1r = (await evRows("ti-1"))[0];
-check("(2) bandeja unica: payments.events con origin=legacy_invoice, origin_ref=id de factura, firma valida, monto coincide", e1r.classification === "legacy_invoice" && e1r.origin === "legacy_invoice" && e1r.origin_ref === INV1 && e1r.signature_valid === true && e1r.amount_matches === true && e1r.link_id === null, e1r);
-check("(2) un payment_attempt registrado", (await root`select count(*)::int c from public.payment_attempts where invoice_id=${INV1}`)[0].c === 1);
-const i1d = await sendEv(await lev({ link: "winv1", tx: "ti-1", amount: 250_000, merchant: "platform" }));
-check("(2) evento duplicado -> duplicate, un solo attempt", i1d.body?.classification === "duplicate" && (await root`select count(*)::int c from public.payment_attempts where invoice_id=${INV1}`)[0].c === 1, i1d.body);
-const i1x = await sendEv(await lev({ link: "winv1", tx: "ti-1b", status: "DECLINED", amount: 250_000, merchant: "platform" }));
-check("(2) DECLINED tras el pago no regresa la factura", i1x.status === 200 && (await invRow(INV1)).status === "PAID" && (await root`select count(*)::int c from public.payment_attempts where invoice_id=${INV1}`)[0].c === 1);
-const i1y = await sendEv(await lev({ link: "winv1", tx: "ti-1c", amount: 250_000, merchant: "platform" }));
-check("(2) segunda APPROVED (otra tx) sobre factura pagada -> duplicate_payment, no acredita", i1y.body?.classification === "duplicate_payment" && (await invRow(INV1)).provider_transaction_id === "ti-1");
-
-const INV2 = await mkInvoice({ checkout: "winv2" });
-const iM = await sendEv(await lev({ link: "winv2", tx: "ti-2", amount: 249_999, merchant: "platform" }));
-check("(2) monto distinto -> amount_mismatch, factura sigue PENDING, sin attempts", iM.body?.classification === "amount_mismatch" && (await invRow(INV2)).status === "PENDING" && (await root`select count(*)::int c from public.payment_attempts where invoice_id=${INV2}`)[0].c === 0, iM.body);
-check("(2) amount_matches=false en la bandeja", (await evRows("ti-2"))[0].amount_matches === false);
-const iC = await sendEv(await lev({ link: "winv2", tx: "ti-2c", amount: 250_000, currency: "USD", merchant: "platform" }));
-check("(2) moneda distinta -> amount_mismatch", iC.body?.classification === "amount_mismatch" && (await invRow(INV2)).status === "PENDING");
-const iS = await sendEv(await lev({ link: "winv2", tx: "ti-3", amount: 250_000, merchant: "platform", badKey: true }));
-check("(2) firma invalida -> 401, factura intacta, invalid_signature guardado (resumen minimo)", iS.status === 401 && (await invRow(INV2)).status === "PENDING" && (await evRows("ti-3"))[0].classification === "invalid_signature", iS.status);
-const iT = await sendEv(await lev({ link: "winv2", tx: "ti-3t", amount: 250_000, merchant: "tenant" })); // firmado con la llave de OTRO merchant
-check("(2) evento firmado con la llave de otro merchant -> 401", iT.status === 401 && (await invRow(INV2)).status === "PENDING");
-const weakI = await signed(await lev({ link: "winv2", tx: "ti-4", amount: 250_000, merchant: "platform" }));
-weakI.signature.properties = ["transaction.id", "transaction.status"];
-weakI.signature.checksum = await sha256Hex("ti-4APPROVED" + String(weakI.timestamp) + KEYS.eventsKey);
-const iW = await call("POST", "/v1/events/wompi", { raw: JSON.stringify(weakI) });
-check("(2) signature.properties sin monto -> 401 aunque el hash cuadre", iW.status === 401 && (await invRow(INV2)).status === "PENDING", iW.status);
-world.verifyMode = "down";
-const iD = await sendEv(await lev({ link: "winv2", tx: "ti-5", amount: 250_000, merchant: "platform" }));
-check("(2) Wompi caido -> 503, unverified, factura PENDING", iD.status === 503 && (await invRow(INV2)).status === "PENDING" && (await evRows("ti-5"))[0].classification === "unverified", iD.status);
-world.verifyMode = "echo";
-const iD2 = await sendEv(await lev({ link: "winv2", tx: "ti-5", amount: 250_000, merchant: "platform" }));
-check("(2) reintento tras la caida SI procesa", iD2.status === 200 && iD2.body?.classification === "legacy_invoice" && (await invRow(INV2)).status === "PAID", iD2.body);
-
-const INV3 = await mkInvoice({ checkout: "winv3", merchant: T1 }); // factura cuyo merchant es un tenant
-const i3 = await sendEv(await lev({ link: "winv3", tx: "ti-6", amount: 250_000, merchant: "tenant" }));
-check("(2) factura con merchant_tenant_id usa la credencial de ESE tenant", i3.body?.classification === "legacy_invoice" && (await invRow(INV3)).status === "PAID" && world.verifyCalls.at(-1)!.auth === `Bearer ${KEYS.tenantPrivate}`, i3.body);
-const INV4 = await mkInvoice({ checkout: "winv4", status: "CANCELLED" });
-const iN = await sendEv(await lev({ link: "winv4", tx: "ti-7", amount: 250_000, merchant: "platform" }));
-check("(2) APPROVED sobre factura CANCELLED -> legacy_not_applied (dinero sin acreditar, visible), nada cambia", iN.body?.classification === "legacy_not_applied" && (await invRow(INV4)).status === "CANCELLED", iN.body);
-
-console.log("-- 17.2 origen (3) link de pedido de un tenant");
-const OL1 = await mkOrderLink({ checkout: "word1", amount: 1500.5 });
-const vc1 = world.verifyCalls.length;
-const o1 = await sendEv(await lev({ link: "word1", tx: "to-1", amount: 150_050, merchant: "tenant" }));
-check("(3) APPROVED valido -> 200 legacy_order_payment", o1.status === 200 && o1.body?.classification === "legacy_order_payment", o1);
-const op1 = await payRows(OL1);
-check("(3) pago registrado: method wompi, monto = cents/100, provider_transaction_id, link paid", op1.length === 1 && op1[0].method === "wompi" && Number(op1[0].amount) === 1500.5 && op1[0].provider_transaction_id === "to-1" && (await root`select status from public.sales_order_payment_links where id=${OL1}`)[0].status === "paid", op1);
-check("(3) confirmo con la llave PRIVADA DEL TENANT", world.verifyCalls.length === vc1 + 1 && world.verifyCalls.at(-1)!.auth === `Bearer ${KEYS.tenantPrivate}`);
-const e3r = (await evRows("to-1"))[0];
-check("(3) bandeja unica con origin=legacy_order y origin_ref=id del link", e3r.classification === "legacy_order_payment" && e3r.origin === "legacy_order" && e3r.origin_ref === OL1 && e3r.amount_matches === true, e3r);
-const o1d = await sendEv(await lev({ link: "word1", tx: "to-1", amount: 150_050, merchant: "tenant" }));
-check("(3) duplicado -> duplicate, un solo pago", o1d.body?.classification === "duplicate" && (await payRows(OL1)).length === 1, o1d.body);
-const o1x = await sendEv(await lev({ link: "word1", tx: "to-1x", status: "DECLINED", amount: 150_050, merchant: "tenant" }));
-check("(3) DECLINED tras el pago no cambia nada", o1x.status === 200 && (await payRows(OL1)).length === 1);
-const o1y = await sendEv(await lev({ link: "word1", tx: "to-1y", amount: 150_050, merchant: "tenant" }));
-check("(3) segunda APPROVED (otra tx) sobre link pagado -> duplicate_payment, no acredita", o1y.body?.classification === "duplicate_payment" && (await payRows(OL1)).length === 1);
-
-const OL2 = await mkOrderLink({ checkout: "word2", amount: 1500.5 });
-const oM = await sendEv(await lev({ link: "word2", tx: "to-2", amount: 100, merchant: "tenant" }));
-check("(3) monto distinto -> amount_mismatch, NO se paga, link pending", oM.body?.classification === "amount_mismatch" && (await payRows(OL2)).length === 0 && (await root`select status from public.sales_order_payment_links where id=${OL2}`)[0].status === "pending", oM.body);
-const oS = await sendEv(await lev({ link: "word2", tx: "to-3", amount: 150_050, merchant: "tenant", badKey: true }));
-check("(3) firma invalida -> 401, sin pago", oS.status === 401 && (await payRows(OL2)).length === 0);
-const oP = await sendEv(await lev({ link: "word2", tx: "to-3p", amount: 150_050, merchant: "platform" })); // llave de plataforma sobre un link de tenant
-check("(3) evento firmado con la llave de PLATAFORMA sobre un link de tenant -> 401", oP.status === 401 && (await payRows(OL2)).length === 0);
-const weakO = await signed(await lev({ link: "word2", tx: "to-4", amount: 150_050, merchant: "tenant" }));
-weakO.signature.properties = ["transaction.id", "transaction.status"];
-weakO.signature.checksum = await sha256Hex("to-4APPROVED" + String(weakO.timestamp) + KEYS.tenantEvents);
-const oW = await call("POST", "/v1/events/wompi", { raw: JSON.stringify(weakO) });
-check("(3) signature.properties sin monto -> 401", oW.status === 401 && (await payRows(OL2)).length === 0);
-world.verifyMode = "down";
-const oD = await sendEv(await lev({ link: "word2", tx: "to-5", amount: 150_050, merchant: "tenant" }));
-check("(3) Wompi caido -> 503, unverified, sin pago", oD.status === 503 && (await payRows(OL2)).length === 0 && (await evRows("to-5"))[0].classification === "unverified", oD.status);
-world.verifyMode = "echo";
-const oD2 = await sendEv(await lev({ link: "word2", tx: "to-5", amount: 150_050, merchant: "tenant" }));
-check("(3) reintento tras la caida SI procesa y paga", oD2.status === 200 && oD2.body?.classification === "legacy_order_payment" && (await payRows(OL2)).length === 1, oD2.body);
-
-const OL3 = await mkOrderLink({ checkout: "word3", amount: 1500.5 });
-// la transaccion real pertenece a OTRO link; el cuerpo se reenvia con el payment_link_id de OL3 y la firma recalculada
-const oV = await sendEv(await lev({ link: "word3", tx: "to-6", amount: 150_050, merchant: "tenant", realLink: "otro_link_real" }));
-check("(3) Wompi dice que la tx es de otro link -> verification_mismatch, sin pago", oV.body?.classification === "verification_mismatch" && (await payRows(OL3)).length === 0, oV.body);
-world.verifyMode = "notfound";
-const oN = await sendEv(await lev({ link: "word3", tx: "to-7", amount: 150_050, merchant: "tenant" }));
-check("(3) Wompi 404 -> verification_mismatch, sin pago", oN.body?.classification === "verification_mismatch" && (await payRows(OL3)).length === 0, oN.body);
-world.verifyMode = "echo";
-const OL4 = await mkOrderLink({ checkout: "word4", amount: 1500.5, status: "expired" });
-const oX = await sendEv(await lev({ link: "word4", tx: "to-8", amount: 150_050, merchant: "tenant" }));
-check("(3) link expired + APPROVED -> legacy_not_applied (visible), sin pago", oX.body?.classification === "legacy_not_applied" && (await payRows(OL4)).length === 0, oX.body);
-const oDA = await sendEv(await lev({ link: "word3", tx: "to-9a", status: "DECLINED", amount: 150_050, merchant: "tenant" }));
-const oDB = await sendEv(await lev({ link: "word3", tx: "to-9b", amount: 150_050, merchant: "tenant" }));
-check("(3) DECLINED y luego APPROVED -> termina pagado", oDA.status === 200 && oDB.body?.classification === "legacy_order_payment" && (await payRows(OL3)).length === 1);
-
-console.log("-- 17.3 replay entre origenes y anti-replay en tablas legacy");
-const INV5 = await mkInvoice({ checkout: "winv5" });
-const OL5 = await mkOrderLink({ checkout: "word5", amount: 2500 });
-const own5 = await call("POST", "/v1/payment-links", { headers: { authorization: `Bearer ${NEWKEY}`, "idempotency-key": "x-leg-5" }, json: mkBody({ external_reference: "LEG-5", amount_in_cents: 250_000 }) });
-const W5 = String(own5.body.checkout_url).split("/").pop()!;
-const pay5 = await sendEv(await lev({ link: "winv5", tx: "tx-CROSS", amount: 250_000, merchant: "platform" }));
-check("(2) pago legitimo de la factura 5", pay5.body?.classification === "legacy_invoice");
-// mismo cuerpo, otro payment_link_id: hacia el link de pedido (tenant) y hacia el link del servicio nuevo (plataforma)
-const toOrder = await sendEv(await lev({ link: "word5", tx: "tx-CROSS", amount: 250_000, merchant: "tenant", realLink: "winv5" }));
-check("[DINERO] la tx aplicada a la factura NO acredita el link de pedido", toOrder.body?.classification === "transaction_conflict" && (await payRows(OL5)).length === 0, toOrder.body);
-const toOwn = await sendEv(await lev({ link: W5, tx: "tx-CROSS", amount: 250_000, merchant: "platform", realLink: "winv5" }));
-check("[DINERO] ...ni el link del servicio nuevo (replay cruzado B1 extendido)", toOwn.body?.classification === "transaction_conflict" && (await dbLink(own5.body.id)).status === "pending", toOwn.body);
-// al reves: tx aplicada a un link de pedido -> hacia una factura
-const OL6 = await mkOrderLink({ checkout: "word6", amount: 1500.5 });
-const INV6 = await mkInvoice({ checkout: "winv6", cents: 150_050 });
-await sendEv(await lev({ link: "word6", tx: "tx-CROSS2", amount: 150_050, merchant: "tenant" }));
-const toInv = await sendEv(await lev({ link: "winv6", tx: "tx-CROSS2", amount: 150_050, merchant: "platform", realLink: "word6" }));
-check("[DINERO] la tx aplicada a un pago de pedido NO acredita una factura", toInv.body?.classification === "transaction_conflict" && (await invRow(INV6)).status === "PENDING", toInv.body);
-// sin ningun evento previo: la transaccion solo vive en la tabla legacy (pago registrado a mano / por el webhook viejo)
-const OL7 = await mkOrderLink({ checkout: "word7", amount: 1500.5 });
-const OL8 = await mkOrderLink({ checkout: "word8", amount: 1500.5 });
-await root`insert into public.sales_order_payments(tenant_id, order_id, method, amount, provider_key, provider_transaction_id, payment_link_id)
-  select tenant_id, order_id, 'wompi', 1500.5, 'wompi', 'tx-OLDWEBHOOK', id from public.sales_order_payment_links where id=${OL7}`;
-await root`update public.sales_order_payment_links set status='paid' where id=${OL7}`;
-const toLegacyOnly = await sendEv(await lev({ link: "word8", tx: "tx-OLDWEBHOOK", amount: 150_050, merchant: "tenant", realLink: "word7" }));
-check("[DINERO] tx ya acreditada por el webhook VIEJO (solo en sales_order_payments) tampoco acredita otro link", toLegacyOnly.body?.classification === "transaction_conflict" && (await payRows(OL8)).length === 0, toLegacyOnly.body);
-const reOld = await sendEv(await lev({ link: "word7", tx: "tx-OLDWEBHOOK", amount: 150_050, merchant: "tenant" }));
-check("reentrega de Wompi de esa misma tx al MISMO link (ya aplicada por el webhook viejo) -> duplicate, sin segundo pago", reOld.body?.classification === "duplicate" && (await payRows(OL7)).length === 1, reOld.body);
-
-console.log("-- 17.4 compatibilidad de los otros callers y concurrencia");
-const INV7 = await mkInvoice({ checkout: "winv7" });
-const compat = await applyWebhookEvent(legacyAdmin as never, "wompi", {
-  providerCheckoutId: "winv7", providerTransactionId: "ts-sync", status: "APPROVED", approved: true, amountCents: 250_000, currency: "COP",
-  paymentMethod: "CARD", paymentBrand: null, paymentLastFour: null, paymentBank: null, paymentReference: "r", rawData: {},
-});
-check("applyWebhookEvent (sync-payment-invoices) conserva su contrato: PAID y handled", compat.handled === true && (await invRow(INV7)).status === "PAID");
-const compat2 = await applyWebhookEvent(legacyAdmin as never, "wompi", {
-  providerCheckoutId: "winv7", providerTransactionId: "ts-sync2", status: "APPROVED", approved: true, amountCents: 250_000, currency: "COP",
-  paymentMethod: "CARD", paymentBrand: null, paymentLastFour: null, paymentBank: null, paymentReference: "r", rawData: {},
-});
-check("applyWebhookEvent idempotente: sobre factura PAID no hace nada", compat2.handled === false);
-
-const OLC = await mkOrderLink({ checkout: "wordc", amount: 1500.5 });
-const evC = await lev({ link: "wordc", tx: "to-conc", amount: 150_050, merchant: "tenant" });
-const burst = await Promise.all(Array.from({ length: 6 }, () => sendEv(JSON.parse(JSON.stringify(evC)))));
-check("(3) 6 entregas simultaneas del mismo evento: ninguna 5xx", burst.every((r) => r.status === 200), burst.map((r) => r.status));
-check("(3) ...y exactamente UN pago registrado", (await payRows(OLC)).length === 1, (await payRows(OLC)).length);
-const INVC = await mkInvoice({ checkout: "winvc" });
-const evI = await lev({ link: "winvc", tx: "ti-conc", amount: 250_000, merchant: "platform" });
-const burstI = await Promise.all(Array.from({ length: 6 }, () => sendEv(JSON.parse(JSON.stringify(evI)))));
-check("(2) 6 entregas simultaneas: ninguna 5xx y factura PAID con una sola tx", burstI.every((r) => r.status === 200) && (await invRow(INVC)).status === "PAID");
-check("(2) ...un solo payment_attempt y el resto clasificado duplicate", (await root`select count(*)::int c from public.payment_attempts where invoice_id=${INVC}`)[0].c === 1 && burstI.filter((r) => r.body?.classification === "legacy_invoice").length === 1 && burstI.filter((r) => r.body?.classification === "duplicate").length === 5, burstI.map((r) => r.body?.classification));
-console.log(`INFO (2) concurrencia: payment_attempts de la factura = ${(await root`select count(*)::int c from public.payment_attempts where invoice_id=${INVC}`)[0].c} (esperado 1: la transicion a PAID es atomica)`);
 
 
-console.log("-- 17.6 ronda 2: anti-llenado, credencial de tenant, ambiguo, borrado, indice por nombre de constraint");
-{
-  const lF = await call("POST", "/v1/payment-links", { headers: { authorization: `Bearer ${NEWKEY}`, "idempotency-key": "r3-F" }, json: mkBody({ external_reference: "R3-F" }) });
-  const wF = String(lF.body.checkout_url).split("/").pop()!;
-  const flood = async (i: number) => {
-    const e = wompiEvent({ linkId: wF, txId: `tfl-${i}`, status: "APPROVED", amount: 5_000_000, key: "clave_falsa" });
-    e.data.transaction.customer_email = "victima@example.com";
-    e.data.transaction.blob = "z".repeat(200_000);
-    return call("POST", "/v1/events/wompi", { raw: JSON.stringify(await signed(e)) });
-  };
-  const batch: Any[] = [];
-  for (let i = 0; i < 200; i += 20) batch.push(...(await Promise.all(Array.from({ length: 20 }, (_, k) => flood(i + k)))));
-  check("200 firmas invalidas: todas 401 (misma respuesta, sin 5xx)", batch.every((r) => r.status === 401 && r.body?.error?.code === "invalid_signature"), [...new Set(batch.map((r) => r.status))]);
-  const fr = await root`select count(*)::int c, coalesce(max(octet_length(raw::text)),0)::int sz from payments.events where classification='invalid_signature' and wompi_link_id=${wF}`;
-  console.log(`INFO ráfaga de 200 invalidas -> filas insertadas=${fr[0].c}, fila mayor=${fr[0].sz} bytes`);
-  check("filas insertadas acotadas (<= 10 por minuto por link)", fr[0].c >= 1 && fr[0].c <= 10, fr[0]);
-  check("tamaño de cada fila <= 3 KB (resumen mínimo, sin el payload de 200 KB ni el correo)", fr[0].sz <= 3000, fr[0]);
-  check("ninguna fila guarda el customer_email", (await root`select count(*)::int c from payments.events where wompi_link_id=${wF} and raw::text like '%victima@example.com%'`)[0].c === 0);
-  const okF = await sendEv(await lev({ link: wF, tx: "tfl-ok", amount: 5_000_000, merchant: "platform" }));
-  check("el evento VÁLIDO posterior del link spameado SIGUE procesándose (paid)", okF.status === 200 && okF.body?.classification === "processed" && (await dbLink(lF.body.id)).status === "paid", okF.body);
-  const ill = await call("POST", "/v1/events/wompi", { raw: JSON.stringify({ data: { transaction: { id: "q", status: "APPROVED", payment_link_id: "wompi_xx" } }, signature: { checksum: "zz", properties: [] } }) });
-  check("checksum no-hex -> 401 uniforme", ill.status === 401 && ill.body?.error?.code === "invalid_signature");
+const post17 = async (link: string, tx: string, o: { amount?: number; badKey?: boolean } = {}) =>
+  sendEv(await lev({ link, tx, amount: o.amount ?? 250_000, merchant: "platform", badKey: o.badKey }));
+const INV17 = await mkInvoice();
+const vc17 = world.verifyCalls.length;
+const evBefore = (await root`select count(*)::int c from payments.events`)[0].c as number;
 
-  // credencial de TENANT no resoluble -> 401 (mismo cuerpo que firma inválida); plataforma ausente -> 503 (unit)
-  const T3 = (await root`insert into public.tenants(name) values ('Tenant sin credencial') returning id`)[0].id as string;
-  const ord3 = (await root`insert into public.sales_orders(tenant_id, number, status, total) values (${T3}, 999, 'confirmada', 1) returning id`)[0].id as string;
-  await root`insert into public.sales_order_payment_links(tenant_id, order_id, provider_key, provider_checkout_id, checkout_url, amount) values (${T3}, ${ord3}, 'wompi', 'wnocred', 'https://x', 10)`;
-  const nc = await sendEv(await lev({ link: "wnocred", tx: "tnc-1", amount: 1000, merchant: "tenant" }));
-  const bs = await sendEv(await lev({ link: "no_existe_en_nada", tx: "tnc-2", amount: 1000, merchant: "tenant", badKey: true }));
-  check("(3) tenant SIN credencial activa -> 401 invalid_signature, idéntico a una firma inválida", nc.status === 401 && bs.status === 401 && nc.body?.error?.code === bs.body?.error?.code && nc.body?.error?.message === bs.body?.error?.message, { nc: nc.status, bs: bs.status });
-  check("...y nada se acreditó", (await root`select count(*)::int c from public.sales_order_payments where provider_transaction_id='tnc-1'`)[0].c === 0);
+// 17a. evento firmado y valido de un checkout que no es de ningun link del servicio (incluye el id que
+// tuvo una factura / link de pedido cuando existia la rama legacy)
+const u1_17 = await post17("wlegacy_ex_factura", "tu-1");
+const u2_17 = await post17("wnever_existed", "tu-2");
+check("17a firma valida + checkout sin link del servicio -> 200 unknown_link", u1_17.status === 200 && u1_17.body?.classification === "unknown_link" && u2_17.status === 200 && u2_17.body?.classification === "unknown_link", [u1_17.body, u2_17.body]);
+check("17a las dos respuestas tienen la MISMA forma (sin oraculo)", JSON.stringify(Object.keys(u1_17.body).sort()) === JSON.stringify(Object.keys(u2_17.body).sort()));
+const r1_17 = (await evRows("tu-1"))[0];
+check("17a bandeja: classification unknown_link, firma valida, sin link ni origen legacy", r1_17.classification === "unknown_link" && r1_17.signature_valid === true && r1_17.link_id === null && r1_17.origin === null && r1_17.origin_ref === null, r1_17);
+check("17a un evento desconocido NO se confirma contra Wompi ni toca public", world.verifyCalls.length === vc17 && (await invRow(INV17)).status === "PENDING");
+check("17a sin pagos acreditados por esas transacciones", (await root`select count(*)::int c from public.sales_order_payments where provider_transaction_id in ('tu-1','tu-2')`)[0].c === 0);
 
-  // checkout ambiguo: dos facturas con el mismo provider_checkout_id
-  await mkInvoice({ checkout: "wamb" }); await mkInvoice({ checkout: "wamb" });
-  const am = await sendEv(await lev({ link: "wamb", tx: "tam-1", amount: 250_000, merchant: "platform" }));
-  check("ambiguo + firma de plataforma válida -> legacy_not_applied (visible), nada pagado", am.status === 200 && am.body?.classification === "legacy_not_applied" && (await root`select count(*)::int c from public.payment_invoices where provider_checkout_id='wamb' and status='PAID'`)[0].c === 0, am.body);
-  check("ambiguo: origin_ref explícito en la bandeja", (await root`select origin_ref from payments.events where transaction_id='tam-1'`)[0].origin_ref === "ambiguous:wamb");
+// 17b. firma invalida: 401 uniforme, exista o no el checkout
+const b1_17 = await post17("wlegacy_ex_factura", "tu-3", { badKey: true });
+const b2_17 = await post17("wnever_existed", "tu-4", { badKey: true });
+check("17b firma invalida -> 401 invalid_signature con el MISMO cuerpo exista o no el link", b1_17.status === 401 && b2_17.status === 401 && b1_17.body?.error?.code === "invalid_signature" && b1_17.body?.error?.message === b2_17.body?.error?.message, [b1_17.body, b2_17.body]);
+const rb_17 = (await evRows("tu-3"))[0];
+check("17b bandeja: invalid_signature, firma invalida, sin origen legacy", rb_17.classification === "invalid_signature" && rb_17.signature_valid === false && rb_17.origin === null, rb_17);
 
-  // factura soft-deleted
-  const invDel = await mkInvoice({ checkout: "wdel" });
-  await root`update public.payment_invoices set deleted_at = now() where id=${invDel}`;
-  const dl = await sendEv(await lev({ link: "wdel", tx: "tdl-1", amount: 250_000, merchant: "platform" }));
-  check("factura soft-deleted + APPROVED -> legacy_not_applied, sigue PENDING", dl.body?.classification === "legacy_not_applied" && (await invRow(invDel)).status === "PENDING", dl.body);
+// 17c. checksum mal formado: 401 sin consultas, una sola fila minima
+const ill_17 = await signed(await lev({ link: "wlegacy_ex_factura", tx: "tu-5", amount: 1, merchant: "platform" }));
+ill_17.signature.checksum = "no-es-hex";
+ill_17.data.transaction.customer_email = "x".repeat(200_000);
+const il_17 = await call("POST", "/v1/events/wompi", { raw: JSON.stringify(ill_17) });
+check("17c checksum mal formado -> 401", il_17.status === 401, il_17.status);
+const ilRow_17 = (await root`select raw::text t, classification from payments.events where transaction_id='tu-5'`)[0];
+check("17c fila minima (sin PII ni payload grande)", ilRow_17.classification === "invalid_signature" && ilRow_17.t.length < 1500 && !ilRow_17.t.includes("pagador@x.co"), ilRow_17.t?.length);
 
-  // health: ahora cuenta legacy_not_applied
-  const rdH = await call("GET", "/admin/readiness", { headers: { authorization: "Bearer x" } });
-  check("health.legacy_not_applied visible en /admin/readiness", rdH.body?.health && rdH.body.health.legacy_not_applied >= 2, rdH.body?.health);
+// 17d. tope anti-llenado sobre un checkout inexistente (record_event real)
+for (let i = 0; i < 25; i++) await post17("wspam_flood", `tfl17-${i}`, { badKey: true });
+check("17d 25 firmas invalidas del mismo checkout inexistente -> maximo 10 filas por minuto", (await root`select count(*)::int c from payments.events where wompi_link_id='wspam_flood' and classification='invalid_signature'`)[0].c <= 10);
 
-  // índice único propuesto: el 23505 por NOMBRE de constraint
-  const idxSql = await Deno.readTextFile(new URL("../../../../progress/pendiente_no_aplicar/20261011210100_payment_transaction_unique_indexes.sql", import.meta.url));
-  await root.unsafe(idxSql);
-  const { applySalesOrderPaymentWebhookEvent } = await import("../../functions/_shared/payments/salesOrderPayments.ts");
-  const L1 = await mkOrderLink({ checkout: "widx1", amount: 10 });
-  const L2 = await mkOrderLink({ checkout: "widx2", amount: 10 });
-  const ev = (tx: string) => ({ approved: true, providerTransactionId: tx, amountCents: 1000, paymentReference: "r" });
-  const a1 = await applySalesOrderPaymentWebhookEvent(legacyAdmin as never, "wompi", "widx1", ev("tx-IDX"));
-  let thrown = "";
-  try { await applySalesOrderPaymentWebhookEvent(legacyAdmin as never, "wompi", "widx2", ev("tx-IDX")); } catch (e) { thrown = (e as Error).message; }
-  check("índice nuevo: misma tx en OTRO link -> lanza (conflicto real), NO 'ya manejado'", a1.handled && thrown === "transaction_already_applied_to_another_payment" && (await payRows(L2)).length === 0, thrown);
-  await root`update public.sales_order_payment_links set status='pending' where id=${L1}`;
-  const again = await applySalesOrderPaymentWebhookEvent(legacyAdmin as never, "wompi", "widx1", ev("tx-IDX"));
-  check("índice payment_link_idx: reentrega al MISMO link sigue siendo 'ya manejado'", again.handled === true && (await payRows(L1)).length === 1);
-  await root`drop index if exists public.sales_order_payments_wompi_transaction_uidx`;
-  await root`drop index if exists public.payment_invoices_provider_transaction_uidx`;
-}
+// 17e. replay cruzado contra un evento historico de la rama retirada (las clasificaciones legacy_* siguen en el CHECK)
+await root`insert into payments.events(classification, raw, transaction_id, tx_status, wompi_link_id, origin, origin_ref, signature_valid)
+  values ('legacy_invoice', '{}', 'th-1', 'APPROVED', 'wlegacy_hist', 'legacy_invoice', ${INV17}, true)`;
+const hLink_17 = await call("POST", "/v1/payment-links", { headers: { authorization: `Bearer ${NEWKEY}`, "idempotency-key": "k-17e" }, json: mkBody({ external_reference: "R17E" }) });
+const hWl_17 = (await dbLink(hLink_17.body.id)).wompi_link_id as string;
+const hv_17 = await sendEv(await lev({ link: hWl_17, tx: "th-1", amount: 5_000_000, merchant: "platform" }));
+check("17e [DINERO] una tx que la rama retirada ya acredito (historia) NO paga un link del servicio", hv_17.body?.classification === "transaction_conflict" && (await dbLink(hLink_17.body.id)).status === "pending", hv_17.body);
 
-console.log("-- 17.5 trazabilidad y no-regresion");
-const byClass = await root`select classification, count(*)::int c from payments.events where origin is not null or classification='unknown_link' group by 1 order by 1`;
-console.log(`INFO bandeja unica, eventos legacy por clasificacion: ${JSON.stringify(byClass)}`);
-check("todo evento legacy quedo en payments.events con origin y origin_ref", (await root`select count(*)::int c from payments.events where origin is not null and origin_ref is null`)[0].c === 0);
-check("ningun payment_link del servicio nuevo fue tocado por eventos legacy", (await root`select count(*)::int c from payments.payment_links where status='paid' and paid_transaction_id like 'ti-%'`)[0].c === 0);
-check("las filas de invalid_signature legacy guardan solo el resumen minimo (sin customer_email)", (await root`select count(*)::int c from payments.events where origin is not null and classification='invalid_signature' and raw::text like '%pagador@x.co%'`)[0].c === 0);
+check("17f nada de lo anterior toco las facturas ni los pagos de public", (await invRow(INV17)).status === "PENDING" && (await root`select count(*)::int c from public.sales_order_payments where provider_transaction_id like 'tu-%' or provider_transaction_id like 'tfl17-%'`)[0].c === 0);
+console.log(`INFO eventos nuevos en esta seccion: ${(await root`select count(*)::int c from payments.events`)[0].c - evBefore}`);
 
 console.log("== 18. RETORNO DE PAGO: estado publico + redirect por defecto (SQL real)");
 const pubStatus = async (id: string) => {
@@ -749,27 +574,16 @@ await post(wompiEvent({ linkId: WL18, txId: "tr-ok", status: "VOIDED", amount: 5
 const p1v = await pubStatus(d1.body.id);
 check("18b VOIDED de la tx pagada -> voided / VOIDED", p1v.body.status === "voided" && p1v.body.last_attempt === "VOIDED", p1v.body);
 
-const INV18 = await mkInvoice({ checkout: "wret-inv" });
-const pi = await pubStatus(INV18);
-check("18b factura de plataforma PENDING -> pending", pi.status === 200 && pi.body.status === "pending" && Object.keys(pi.body).sort().join() === KEYS18.join(), pi.body);
-await sendEv(await lev({ link: "wret-inv", tx: "tr-i1", status: "DECLINED", amount: 250_000, merchant: "platform" }));
-check("18b factura: DECLINED -> last_attempt DECLINED (desde payments.events por origin_ref)", (await pubStatus(INV18)).body.last_attempt === "DECLINED");
-await sendEv(await lev({ link: "wret-inv", tx: "tr-i2", amount: 250_000, merchant: "platform" }));
-const pi2 = await pubStatus(INV18);
-check("18b factura pagada -> paid / APPROVED", pi2.body.status === "paid" && pi2.body.last_attempt === "APPROVED", pi2.body);
-await root`update public.payment_invoices set status='REFUNDED' where id=${INV18}`;
-check("18b factura REFUNDED -> voided", (await pubStatus(INV18)).body.status === "voided");
-const INV18d = await mkInvoice({ checkout: "wret-del" });
-await root`update public.payment_invoices set deleted_at = now() where id=${INV18d}`;
-check("18b factura soft-deleted -> unknown (igual que inexistente)", JSON.stringify((await pubStatus(INV18d)).body) === JSON.stringify({ status: "unknown", last_attempt: null, updated_at: null }));
-
-const OL18 = await mkOrderLink({ checkout: "wret-ol", amount: 1500.5 });
-check("18b link de pedido pending", (await pubStatus(OL18)).body.status === "pending");
-await sendEv(await lev({ link: "wret-ol", tx: "tr-o1", amount: 150_050, merchant: "tenant" }));
-const po = await pubStatus(OL18);
-check("18b link de pedido pagado -> paid / APPROVED", po.body.status === "paid" && po.body.last_attempt === "APPROVED", po.body);
-await root`update public.sales_order_payment_links set status='expired' where id=${OL18}`;
-check("18b link de pedido expired", (await pubStatus(OL18)).body.status === "expired");
+// sin fallback: el id de una factura / link de pedido (ex-legacy) responde unknown, igual que uno inexistente,
+// aunque exista la fila en public y aunque haya un evento historico con ese origin_ref
+const INV18 = await mkInvoice();
+const unE0 = JSON.stringify({ status: "unknown", last_attempt: null, updated_at: null });
+check("18b id de una factura de plataforma (ya no se resuelve) -> unknown", JSON.stringify((await pubStatus(INV18)).body) === unE0);
+await root`insert into payments.events(classification, raw, transaction_id, tx_status, wompi_link_id, origin, origin_ref, signature_valid)
+  values ('legacy_invoice', '{}', 'tr-hist', 'APPROVED', 'wret-hist', 'legacy_invoice', ${INV18}, true)`;
+check("18b ...aunque haya un evento historico legacy con ese origin_ref (last_attempt NO se filtra)", JSON.stringify((await pubStatus(INV18)).body) === unE0);
+await root`update public.payment_invoices set status='PAID' where id=${INV18}`;
+check("18b ...y cambie el estado de la factura", JSON.stringify((await pubStatus(INV18)).body) === unE0);
 
 const un1 = await pubStatus(crypto.randomUUID());
 const un2 = await pubStatus("no-es-uuid");
@@ -787,31 +601,229 @@ const priv = await root`select has_function_privilege('anon', 'public.payments_p
   has_function_privilege('service_role', 'public.payments_public_link_status(uuid)', 'execute') as svc`;
 check("18c payments_public_link_status: solo service_role puede ejecutarla", priv[0].anon === false && priv[0].auth === false && priv[0].svc === true, priv[0]);
 
-// (d) createSalesOrderPaymentLink real (legacy): default y explicito
+// (d) createSalesOrderPaymentLink: desde ST4 crea por el servicio (cubierto de punta a punta en la seccion 21).
+
+console.log("== 19. ST2: comercio (SQL real de begin_link + receptor con la credencial del comercio)");
 {
-  const { createSalesOrderPaymentLink } = await import("../../functions/_shared/payments/salesOrderPayments.ts");
-  const realFetch = globalThis.fetch;
-  const seen: Array<Record<string, unknown>> = [];
-  let n = 0;
-  globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
-    if (String(input).endsWith("/payment_links")) {
-      seen.push(JSON.parse(String(init?.body)));
-      return new Response(JSON.stringify({ data: { id: `wlret${++n}` } }), { status: 201 });
-    }
-    return realFetch(input as never, init);
-  }) as typeof fetch;
-  try {
-    const o1 = await mkOrder(T1);
-    const o2 = await mkOrder(T1);
-    const a = await createSalesOrderPaymentLink(legacyAdmin as never, T1, o1, null);
-    const rowA = (await root`select id, status from public.sales_order_payment_links where order_id=${o1}`)[0];
-    check("18d link de pedido sin redirect: default con el id de la fila insertada", seen[0]?.redirect_url === `https://leadly.lexycolombia.com/pago/resultado?link=${rowA.id}` && a.checkoutUrl.endsWith("wlret1"), seen[0]);
-    const b = await createSalesOrderPaymentLink(legacyAdmin as never, T1, o2, null, "https://tienda.example.com/tienda/x/carrito?payment=return");
-    check("18d redirect explicito (tienda publica) intacto", seen[1]?.redirect_url === "https://tienda.example.com/tienda/x/carrito?payment=return" && b.checkoutUrl.endsWith("wlret2"), seen[1]);
-    check("18d el endpoint publico resuelve ese id nuevo (pending)", (await pubStatus(rowA.id)).body.status === "pending");
-  } finally {
-    globalThis.fetch = realFetch;
+  merchantWithCredential = T1;
+  const mkClientKind = async (name: string, kind: string, hash: string) => {
+    const r = await realRpc.rpc("payments_admin_create_client", { p_name: name, p_callback_url: null, p_key_hash: hash, p_key_prefix: "lxy_pay_test_x", p_signing_secret_name: null, p_created_by: null, p_kind: kind });
+    if (r.error) throw new Error(r.error.message);
+    return (r.data as Any).id as string;
+  };
+  const internalId = await mkClientKind("Leadly interno ST2", "internal", "a".repeat(64));
+  const externalId = await mkClientKind("Externo ST2", "external", "b".repeat(64));
+  const body = (ref: string) => validateLinkRequest({ amount_in_cents: 150000, currency: "COP", name: "Pedido", description: "Pedido de prueba", external_reference: ref }, Date.now());
+  const mk = (clientId: string, merchant: string | null, ref: string, idem: string) =>
+    createPaymentLink(deps, { clientId, createdBy: null, environment: null, idempotencyKey: idem, request: body(ref), merchantTenantId: merchant });
+  const before = world.wompiCalls.length;
+  const L = await mk(internalId, T1, "order:st2-a", "st2-idem-a");
+  const row = (await root`select merchant_tenant_id, environment, status from payments.payment_links where id=${String(L.link.id)}`)[0];
+  check("19a interno + comercio: fila con merchant_tenant_id y link pendiente", row.merchant_tenant_id === T1 && row.status === "pending", row);
+  check("19a Wompi recibio la llave privada del COMERCIO", world.wompiCalls.at(-1)!.auth === `Bearer ${KEYS.tenantPrivate}` && world.wompiCalls.length === before + 1);
+  let code = "";
+  try { await mk(externalId, T1, "order:st2-b", "st2-idem-b"); } catch (e) { code = e instanceof ApiError ? `${e.status}:${e.code}` : String(e); }
+  check("19b externo con comercio (PY424 real de la base) -> 403 merchant_not_allowed, sin llamar a Wompi", code === "403:merchant_not_allowed" && world.wompiCalls.length === before + 1, code);
+  let code2 = "";
+  try { await mk(internalId, T2, "order:st2-c", "st2-idem-c"); } catch (e) { code2 = e instanceof ApiError ? `${e.status}:${e.code}` : String(e); }
+  const failed = (await root`select status, status_detail from payments.payment_links where external_reference='order:st2-c'`)[0];
+  check("19c comercio sin credencial -> 409 y fila en error, sin llamada a Wompi", code2 === "409:merchant_credential_unavailable" && failed?.status === "error" && world.wompiCalls.length === before + 1, { code2, failed });
+  let code3 = "";
+  try { await mk(internalId, null, "order:st2-a", "st2-idem-a"); } catch (e) { code3 = e instanceof ApiError ? `${e.status}:${e.code}` : String(e); }
+  check("19d misma Idempotency-Key con otro comercio -> 409 idempotency_key_reused (hash con comercio)", code3 === "409:idempotency_key_reused", code3);
+  const re = await mk(internalId, T1, "order:st2-a", "st2-idem-a");
+  check("19d mismo comercio -> replay del mismo link", re.replayed === true && re.link.id === L.link.id);
+  const wl = (await root`select wompi_link_id from payments.payment_links where id=${String(L.link.id)}`)[0].wompi_link_id as string;
+  txMerchant.set("tx-st2-bad", "tenant");
+  const vcBad = world.verifyCalls.length;
+  const bad = await call("POST", "/v1/events/wompi", { raw: JSON.stringify(await signed(wompiEvent({ linkId: wl, txId: "tx-st2-bad", status: "APPROVED", amount: 150000, key: KEYS.eventsKey }))) });
+  check("19e evento del link del comercio firmado con la events_key de PLATAFORMA -> 401, sin confirmar contra Wompi", bad.status === 401 && bad.body?.error?.code === "invalid_signature" && world.verifyCalls.length === vcBad, bad.body);
+  txMerchant.set("tx-st2-ok", "tenant");
+  const ok = await call("POST", "/v1/events/wompi", { raw: JSON.stringify(await signed(wompiEvent({ linkId: wl, txId: "tx-st2-ok", status: "APPROVED", amount: 150000, key: KEYS.tenantEvents }))) });
+  const paid = (await root`select status, paid_transaction_id from payments.payment_links where id=${String(L.link.id)}`)[0];
+  check("19f firmado con la events_key del comercio y confirmado con SU private_key -> processed y link paid",
+    ok.body?.classification === "processed" && paid.status === "paid" && paid.paid_transaction_id === "tx-st2-ok" && world.verifyCalls.at(-1)!.auth === `Bearer ${KEYS.tenantPrivate}`, { b: ok.body, paid });
+  const TI = (await root`insert into public.tenants(name, status) values ('Tenant Inactivo ST2', 'inactive') returning id`)[0].id as string;
+  merchantWithCredential = TI;
+  let code4 = "";
+  try { await mk(internalId, TI, "order:st2-d", "st2-idem-d"); } catch (e) { code4 = e instanceof ApiError ? `${e.status}:${e.code}` : String(e); }
+  const failed4 = (await root`select status, status_detail from payments.payment_links where external_reference='order:st2-d'`)[0];
+  check("19g tenant inactivo (tenants.status real) -> 409 merchant_not_active, fila en error, sin Wompi", code4 === "409:merchant_not_active" && failed4?.status === "error" && world.wompiCalls.length === before + 1, { code4, failed4 });
+  merchantWithCredential = null;
+}
+
+console.log("== 20. ST3: consumidor interno (handler real + apply_wompi_* reales + secreto de firma de Vault)");
+{
+  const { createInternalHandler } = await import("../../functions/_shared/payments-service/internalConsumer.ts");
+  const { signEnvelope } = await import("../../functions/_shared/payments-service/hmac.ts");
+  const intC = await call("POST", "/admin/clients", { json: { name: "Leadly interno ST3", kind: "internal", callback_url: "https://kkdtrkfcnyvuefazndnj.supabase.co/functions/v1/payments-internal" }, headers: { authorization: "Bearer x" } });
+  check("20-setup cliente interno creado por la ruta admin", intC.status === 201 && intC.body.client.kind === "internal", intC);
+  const INT_ID: string = intC.body.client.id;
+  const SIGNING_INT: string = intC.body.signing_secret;
+  const h = createInternalHandler({ rpc: realRpc, now: () => Date.now(), clientId: INT_ID });
+  const hFor = (id: string) => createInternalHandler({ rpc: realRpc, now: () => Date.now(), clientId: id });
+  const U1 = (await root`insert into public.tenants(name) values ('Tenant ST3 Uno') returning id`)[0].id as string;
+  const U2 = (await root`insert into public.tenants(name) values ('Tenant ST3 Dos') returning id`)[0].id as string;
+  const ord = async (tenant: string) => (await root`insert into public.sales_orders(tenant_id, number, status, total) values (${tenant}, ${9000 + Math.floor(Math.random() * 90000)}, 'confirmada', 1000) returning id`)[0].id as string;
+  const env = (o: { orderId: string; tenant: string; linkId?: string; tx?: string; cents?: number; kind?: string; ref?: string }) => ({
+    id: `evt-${crypto.randomUUID()}`, type: "payment_link.transaction", created_at: new Date().toISOString(),
+    payment_link: { id: o.linkId ?? crypto.randomUUID(), external_reference: o.ref ?? `order:${o.orderId}`, status: "paid", amount_in_cents: o.cents ?? 100000, currency: "COP",
+      metadata: { kind: o.kind ?? "order", tenant_id: o.tenant, order_id: o.orderId } },
+    classification: "processed",
+    transaction: { id: o.tx ?? `tx-${crypto.randomUUID()}`, status: "APPROVED", amount_in_cents: o.cents ?? 100000, currency: "COP" },
+    wompi: { data: { transaction: { payment_method_type: "NEQUI", payment_method: { phone_number: "3001112233" } } } },
+  });
+  const sendEnv = async (e: unknown, secret = SIGNING_INT, handle = h) => {
+    const raw = JSON.stringify(e);
+    const r = await handle(new Request("https://x.supabase.co/functions/v1/payments-internal", { method: "POST", body: raw, headers: { "Payments-Signature": await signEnvelope(secret, raw, Math.floor(Date.now() / 1000)) } }));
+    return { status: r.status, body: await r.json() };
+  };
+  const cnt = async (orderId: string) => Number((await root`select count(*)::int as n from public.sales_order_payments where order_id=${orderId}`)[0].n);
+
+  const o1 = await ord(U1);
+  const e1 = env({ orderId: o1, tenant: U1 });
+  const a = await sendEnv(e1);
+  check("20a firma de Vault valida + pedido: 200 applied y 1 pago wompi", a.status === 200 && a.body.result === "applied" && await cnt(o1) === 1, a);
+  const pay = (await root`select amount, method, provider_key, provider_reference, payment_link_id from public.sales_order_payments where order_id=${o1}`)[0];
+  check("20a pago: monto 1000.00, referencia Nequi, payment_link_id = id del link del servicio", Number(pay.amount) === 1000 && pay.method === "wompi" && pay.provider_reference === "Nequi 3001112233" && pay.payment_link_id === e1.payment_link.id, pay);
+  const again = await sendEnv(e1);
+  check("20b reentrega del mismo evento: 200 duplicate, sigue 1 pago", again.status === 200 && again.body.result === "duplicate" && await cnt(o1) === 1, again);
+  const o2 = await ord(U1);
+  const e2 = env({ orderId: o2, tenant: U1 });
+  const burst = await Promise.all(Array.from({ length: 8 }, () => sendEnv(e2)));
+  const results = burst.map((b) => b.body.result).sort();
+  check("20c 8 entregas CONCURRENTES del mismo evento: exactamente 1 applied, 7 duplicate, 1 pago", results.filter((x) => x === "applied").length === 1 && results.filter((x) => x === "duplicate").length === 7 && await cnt(o2) === 1, results);
+  const o3 = await ord(U2);
+  const foreign = await sendEnv(env({ orderId: o3, tenant: U1 }));
+  check("20d tenant ajeno en metadata: 200 not_applicable tenant_mismatch y NO acredita", foreign.status === 200 && foreign.body.reason === "tenant_mismatch" && await cnt(o3) === 0, foreign);
+  const o4 = await ord(U1);
+  const sameTx = await sendEnv(env({ orderId: o4, tenant: U1, tx: e1.transaction.id }));
+  check("20e misma transaccion en OTRO pedido: conflict y NO acredita", sameTx.body.result === "conflict" && await cnt(o4) === 0, sameTx);
+  const second = await sendEnv(env({ orderId: o1, tenant: U1 }));
+  check("20f segundo cobro aprobado (otro link) sobre pedido ya pagado: conflict order_already_paid, sin doble acreditacion", second.body.result === "conflict" && second.body.reason === "order_already_paid" && await cnt(o1) === 1, second);
+  const bad = await sendEnv(e1, "otro-secreto");
+  check("20g firma con otro secreto: 401", bad.status === 401, bad);
+  const o5 = await ord(U1);
+  const wrongAmount = env({ orderId: o5, tenant: U1 });
+  wrongAmount.transaction.amount_in_cents = 99999;
+  const wa = await sendEnv(wrongAmount);
+  check("20h monto de la transaccion distinto del link: no acredita", wa.body.reason === "amount_mismatch" && await cnt(o5) === 0, wa);
+  const incoh = await sendEnv(env({ orderId: o5, tenant: U1, ref: `order:${o1}` }));
+  check("20i referencia distinta de la metadata: no acredita", incoh.body.reason === "inconsistent_envelope" && await cnt(o5) === 0, incoh);
+  // B1: el cliente configurado debe ser interno/activo/no revocado
+  const o6 = await ord(U2);
+  const forged = env({ orderId: o6, tenant: U2 });
+  const susp = (await root`insert into payments.clients(name, status, api_key_hash, key_prefix, signing_secret_name, kind) select 'susp ST3','suspended',${"9".repeat(64)},'ps', signing_secret_name,'internal' from payments.clients where id=${INT_ID} returning id`)[0].id as string;
+  const rev = (await root`insert into payments.clients(name, status, api_key_hash, key_prefix, signing_secret_name, kind, revoked_at) select 'rev ST3','active',${"8".repeat(64)},'pr', signing_secret_name,'internal', now() from payments.clients where id=${INT_ID} returning id`)[0].id as string;
+  const cases: Array<[string, string, string]> = [["externo", CLIENT_ID, SIGNING], ["suspendido", susp, SIGNING_INT], ["revocado", rev, SIGNING_INT], ["inexistente", crypto.randomUUID(), SIGNING_INT]];
+  for (const [name, id, sec] of cases) {
+    const r = await sendEnv(forged, sec, hFor(id));
+    check(`20k variable apuntando a cliente ${name}: 503 y NO acredita`, r.status === 503 && await cnt(o6) === 0, r);
   }
+  // extremo a extremo: un externo firma con SU secreto un sobre con metadata mentirosa (pedido de otro tenant)
+  const lie = await sendEnv(env({ orderId: o6, tenant: U2 }), SIGNING, hFor(CLIENT_ID));
+  check("20k externo que firma con su propio secreto un sobre mentiroso: 503, nada acreditado", lie.status === 503 && await cnt(o6) === 0, lie);
+  const ext = await sendEnv(env({ orderId: o6, tenant: U2 }), SIGNING, h);
+  check("20k y contra el handler interno su firma no vale: 401", ext.status === 401 && await cnt(o6) === 0, ext);
+
+  // factura de plataforma
+  const sub = (await root`insert into public.billing_subscriptions(status) values ('PENDING') returning id`)[0].id as string;
+  const inv = (await root`insert into public.payment_invoices(payer_tenant_id, subscription_id, provider_key, amount_cents, status) values (${U1}, ${sub}, 'wompi', 5000000, 'PENDING') returning id`)[0].id as string;
+  const ei = env({ orderId: "", tenant: U1, cents: 5000000, ref: `invoice:${inv}`, kind: "invoice" });
+  (ei.payment_link.metadata as Any).invoice_id = inv;
+  const ia = await sendEnv(ei);
+  const invRow = (await root`select status, provider_transaction_id from public.payment_invoices where id=${inv}`)[0];
+  const subRow = (await root`select status from public.billing_subscriptions where id=${sub}`)[0];
+  check("20j factura de plataforma: PAID, transaccion registrada y suscripcion ACTIVE", ia.body.result === "applied" && invRow.status === "PAID" && invRow.provider_transaction_id === ei.transaction.id && subRow.status === "ACTIVE", { ia, invRow, subRow });
+  const ib = await sendEnv(ei);
+  check("20j reentrega de la factura: duplicate y un solo intento", ib.body.result === "duplicate" && Number((await root`select count(*)::int n from public.payment_attempts where invoice_id=${inv}`)[0].n) === 1, ib);
+
+  // ===== 21. ST4: creadores internos por el servicio, de punta a punta (SQL real) =====
+  console.log("== 21. ST4: creadores internos -> servicio -> aviso firmado -> consumidor");
+  const { createSalesOrderPaymentLink } = await import("../../functions/_shared/payments/salesOrderPayments.ts");
+  const { ensureInvoiceCheckout } = await import("../../functions/_shared/payments/invoiceCheckout.ts");
+  const { syncInvoiceFromService } = await import("../../functions/_shared/payments/syncInvoice.ts");
+  const opts4 = { deps, clientId: INT_ID };
+  merchantWithCredential = U1;
+  const col = (await root`select data_type, is_nullable from information_schema.columns where table_schema='public' and table_name='payment_invoices' and column_name='payments_link_id'`)[0];
+  const fkCnt = Number((await root`select count(*)::int n from pg_constraint c join pg_attribute a on a.attrelid=c.conrelid and a.attnum=any(c.conkey) where c.conrelid='public.payment_invoices'::regclass and c.contype='f' and a.attname='payments_link_id'`)[0].n);
+  check("21-sql payments_link_id: uuid, nullable, SIN FK, con indice parcial",
+    col?.data_type === "uuid" && col.is_nullable === "YES" && fkCnt === 0 && (await root`select 1 from pg_indexes where indexname='payment_invoices_payments_link_id_idx'`).length === 1, { col, fkCnt });
+  const deliveryBody = async (linkId: string) => (await root`select body from payments.deliveries where link_id=${linkId} order by id desc limit 1`)[0]?.body as Any;
+
+  // pedido: creador -> link del servicio a nombre del tenant -> evento Wompi -> aviso -> pago
+  const oid = await ord(U1);
+  const cr = await createSalesOrderPaymentLink(pubAdmin as never, U1, oid, null, undefined, opts4);
+  const ol = (await root`select * from payments.payment_links where external_reference=${"order:" + oid}`)[0];
+  check("21a pedido: link del servicio con comercio, metadata de la fila, amount del saldo y sin sombra en public",
+    ol && ol.merchant_tenant_id === U1 && ol.metadata.kind === "order" && ol.metadata.tenant_id === U1 && ol.metadata.order_id === oid && Number(ol.amount_in_cents) === 100000 && cr.amount === 1000 &&
+      world.wompiCalls.at(-1)!.auth === `Bearer ${KEYS.tenantPrivate}` && !("taxes" in world.wompiCalls.at(-1)!.body), { ol, cr });
+  check("21a el redirect por defecto resuelve en el servicio (id del link del servicio)", world.wompiCalls.at(-1)!.body.redirect_url === `https://leadly.lexycolombia.com/pago/resultado?link=${ol.id}`, world.wompiCalls.at(-1)!.body);
+  const otx = `tx-st4-${crypto.randomUUID()}`;
+  txMerchant.set(otx, "tenant");
+  const oev = await post(wompiEvent({ linkId: ol.wompi_link_id, txId: otx, status: "APPROVED", amount: 100000, key: KEYS.tenantEvents }));
+  check("21b evento Wompi del comercio -> processed", oev.status === 200 && oev.body?.classification === "processed", oev.body);
+  const obody = await deliveryBody(ol.id);
+  const og = await sendEnv(obody);
+  check("21b aviso firmado al consumidor interno: pedido acreditado una vez", og.status === 200 && og.body.result === "applied" && await cnt(oid) === 1, og);
+  const og2 = await sendEnv(obody);
+  check("21b reentrega: duplicate, sigue un solo pago", og2.body.result === "duplicate" && await cnt(oid) === 1, og2);
+  const oc = await createSalesOrderPaymentLink(pubAdmin as never, U1, oid, null, undefined, opts4).catch((e: Error) => e);
+  check("21b pedido ya pagado: el creador rechaza (no hay saldo)", oc instanceof Error && /pagado/.test(oc.message));
+
+  // factura de plataforma: creador -> payments_link_id -> evento -> aviso -> PAID + suscripcion
+  const mkInv = async () => {
+    const sb = (await root`insert into public.billing_subscriptions(status) values ('PENDING') returning id`)[0].id as string;
+    const id = (await root`insert into public.payment_invoices(payer_tenant_id, subscription_id, provider_key, amount_cents, status, description, tax_cents, period_start, period_end) values (${U1}, ${sb}, 'wompi', 11900000, 'PENDING', 'Plan Pro', 1900000, '2026-10-10', '2026-11-10') returning id`)[0].id as string;
+    return { id, sb };
+  };
+  const invFor = async (id: string) => (await root`select id, merchant_tenant_id, payer_tenant_id, provider_key, amount_cents, currency, description, invoice_number, payments_link_id, tax_rate, tax_cents, period_start::text as period_start, period_end::text as period_end from public.payment_invoices where id=${id}`)[0] as Any;
+  const I1 = await mkInv();
+  const ck = await ensureInvoiceCheckout(pubAdmin as never, await invFor(I1.id), null, undefined, opts4);
+  const i1 = await invFor(I1.id);
+  const il = (await root`select * from payments.payment_links where id=${i1.payments_link_id}`)[0] as Any;
+  check("21c factura: link del servicio de PLATAFORMA (comercio null), metadata con el pagador, VAT = tax_cents de la fila, nombre con periodo, payments_link_id guardado",
+    !!ck.ok && !!il && il.merchant_tenant_id === null && il.external_reference === `invoice:${I1.id}` && il.metadata.tenant_id === U1 && il.metadata.invoice_id === I1.id &&
+      world.wompiCalls.at(-1)!.auth === `Bearer ${KEYS.privateKey}` && JSON.stringify(world.wompiCalls.at(-1)!.body.taxes) === JSON.stringify([{ type: "VAT", amount_in_cents: 1900000 }]) &&
+      il.name.startsWith("Comprobante de cobro ") && il.name.endsWith("· Plan Pro (10 oct 2026 – 10 nov 2026)"), { ck, il });
+  const ck2 = await ensureInvoiceCheckout(pubAdmin as never, await invFor(I1.id), null, undefined, opts4);
+  check("21c segunda llamada reutiliza el link pendiente (misma URL, sin otra llamada a Wompi)", ck.ok && ck2.ok && ck2.checkoutUrl === ck.checkoutUrl, { ck, ck2 });
+  const itx = `tx-st4-${crypto.randomUUID()}`;
+  txMerchant.set(itx, "platform");
+  const iev = await post(wompiEvent({ linkId: il.wompi_link_id, txId: itx, status: "APPROVED", amount: 11900000, key: KEYS.eventsKey }));
+  check("21d evento Wompi de plataforma -> processed", iev.body?.classification === "processed", iev.body);
+  const ia2 = await sendEnv(await deliveryBody(il.id));
+  const subA = (await root`select status from public.billing_subscriptions where id=${I1.sb}`)[0];
+  check("21d aviso firmado: factura PAID y suscripcion ACTIVE", ia2.body.result === "applied" && (await invFor(I1.id)) && (await root`select status from public.payment_invoices where id=${I1.id}`)[0].status === "PAID" && subA.status === "ACTIVE", { ia2, subA });
+
+  // reconciliacion: el aviso nunca llego; sync consulta el servicio y aplica con la MISMA funcion SQL
+  const I2 = await mkInv();
+  await ensureInvoiceCheckout(pubAdmin as never, await invFor(I2.id), null, undefined, opts4);
+  const i2 = await invFor(I2.id);
+  const il2 = (await root`select * from payments.payment_links where id=${i2.payments_link_id}`)[0];
+  const s0 = await syncInvoiceFromService(pubAdmin as never, { id: I2.id, payer_tenant_id: U1, payments_link_id: i2.payments_link_id }, opts4);
+  check("21e sync con el link pendiente: no aplica", s0.synced === false && s0.result === "link_pending", s0);
+  const stx = `tx-st4-${crypto.randomUUID()}`;
+  txMerchant.set(stx, "platform");
+  await post(wompiEvent({ linkId: il2.wompi_link_id, txId: stx, status: "APPROVED", amount: 11900000, key: KEYS.eventsKey }));
+  const s1 = await syncInvoiceFromService(pubAdmin as never, { id: I2.id, payer_tenant_id: U1, payments_link_id: i2.payments_link_id }, opts4);
+  const subB = (await root`select status from public.billing_subscriptions where id=${I2.sb}`)[0];
+  const row2 = (await root`select status, provider_transaction_id from public.payment_invoices where id=${I2.id}`)[0];
+  check("21e sync con el link pagado: aplica (PAID, tx del servicio, suscripcion ACTIVE)", s1.synced && row2.status === "PAID" && row2.provider_transaction_id === stx && subB.status === "ACTIVE", { s1, row2, subB });
+  const s2 = await syncInvoiceFromService(pubAdmin as never, { id: I2.id, payer_tenant_id: U1, payments_link_id: i2.payments_link_id }, opts4);
+  check("21e sync repetido y luego el aviso tardio: duplicate, un solo intento", s2.result === "duplicate" && (await sendEnv(await deliveryBody(il2.id))).body.result === "duplicate" &&
+    Number((await root`select count(*)::int n from public.payment_attempts where invoice_id=${I2.id}`)[0].n) === 1, s2);
+  // aislamiento: factura de otro tenant, sync con el pagador equivocado
+  const I3 = await mkInv();
+  await ensureInvoiceCheckout(pubAdmin as never, await invFor(I3.id), null, undefined, opts4);
+  const i3 = await invFor(I3.id);
+  const il3 = (await root`select * from payments.payment_links where id=${i3.payments_link_id}`)[0];
+  const ttx = `tx-st4-${crypto.randomUUID()}`;
+  txMerchant.set(ttx, "platform");
+  await post(wompiEvent({ linkId: il3.wompi_link_id, txId: ttx, status: "APPROVED", amount: 11900000, key: KEYS.eventsKey }));
+  const s3 = await syncInvoiceFromService(pubAdmin as never, { id: I3.id, payer_tenant_id: U2, payments_link_id: i3.payments_link_id }, opts4);
+  check("21f sync con pagador ajeno: no aplica (tenant_mismatch) y la factura sigue PENDING", !s3.synced && s3.result === "not_applicable" && (await root`select status from public.payment_invoices where id=${I3.id}`)[0].status === "PENDING", s3);
+  merchantWithCredential = null;
 }
 
 console.log("== 14. secretos en respuestas / logs / DB");
@@ -829,5 +841,5 @@ for (const [k, v] of Object.entries(secrets)) check(`tablas de eventos/entregas/
 console.log(`\nRESUMEN: ${passes} PASS, ${failures} FAIL`);
 await root.end();
 await svc.end();
-await legacySql.end();
+await pubSql.end();
 Deno.exit(failures ? 1 : 0);

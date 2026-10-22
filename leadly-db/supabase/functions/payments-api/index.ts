@@ -10,11 +10,11 @@
 //   curl -i https://kkdtrkfcnyvuefazndnj.supabase.co/functions/v1/payments-api/v1/health        -> 200 {"status":"ok"}
 //   curl -i https://kkdtrkfcnyvuefazndnj.supabase.co/functions/v1/payments-api/v1/payment-links -> 401 con cuerpo
 //        {"error":{"code":"unauthorized",...}} (el cuerpo propio, no el del gateway)
-// payments-api es el UNICO receptor de eventos de Wompi: payment-webhook-wompi
-// se retiro (sus dos origenes -- factura de plataforma y link de pedido de un
-// tenant -- los resuelve _shared/payments-service/legacyOrigins.ts). La URL de
-// eventos de CADA cuenta de Wompi en uso (plataforma y cada tenant con Wompi
-// propio) debe apuntar a .../functions/v1/payments-api/v1/events/wompi.
+// payments-api es el UNICO receptor de eventos de Wompi (payment-webhook-wompi
+// se retiro). Todo link se crea por este servicio, asi que todo evento se
+// resuelve contra payments.payment_links, con la credencial del comercio del
+// link. La URL de eventos de CADA cuenta de Wompi en uso (plataforma y cada
+// tenant con Wompi propio) debe apuntar a .../functions/v1/payments-api/v1/events/wompi.
 // Contrato del receptor para proyectos (firma Payments-Signature, deduplicación
 // por Payments-Event-Id, significado de classification / payment_link.status):
 // ver README.md en esta carpeta. Un proyecto debe entregar el servicio SOLO con
@@ -22,51 +22,16 @@
 // Secreto requerido en la función: CRON_REMINDER_SECRET (ya usado por
 // notify-sales-lead / send-task-reminders).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "jsr:@supabase/supabase-js@2";
-import { makeSecretGetter, resolveCredential } from "../_shared/payments/registry.ts";
 import { createHandler } from "../_shared/payments-service/router.ts";
-import { createLegacyStore } from "../_shared/payments-service/legacyStore.ts";
-import { ApiError } from "../_shared/payments-service/errors.ts";
-import { publicAppUrl } from "../_shared/publicAppUrl.ts";
-import type { Deps, RpcClient } from "../_shared/payments-service/types.ts";
+import { buildPaymentsDeps } from "../_shared/payments-service/buildPaymentsDeps.ts";
 
-const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-const adminClient = createClient(supabaseUrl, serviceRoleKey);
-
-const deps: Deps = {
-  rpc: adminClient as unknown as RpcClient,
-  fetch: (input, init) => fetch(input, init),
-  now: () => Date.now(),
-  env: { supabaseUrl, cronSecret: Deno.env.get("CRON_REMINDER_SECRET") ?? null, appBaseUrl: publicAppUrl() },
-  getPlatformCredential: async () => {
-    try {
-      const credential = await resolveCredential(adminClient, null, "wompi");
-      return { mode: credential.mode, getSecret: makeSecretGetter(adminClient, credential.id) };
-    } catch {
-      return null;
-    }
-  },
-  // Origenes legacy: public.payment_invoices (Lexy cobra a un tenant) y
-  // public.sales_order_payment_links (un tenant cobra a su cliente).
-  legacy: createLegacyStore(adminClient),
-  verifyAdmin: async (authHeader) => {
-    if (!authHeader) throw new ApiError(401, "unauthorized", "Falta la sesión.");
-    const caller = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } });
-    const { data: { user }, error } = await caller.auth.getUser();
-    if (error || !user) throw new ApiError(401, "unauthorized", "Sesión inválida.");
-    const { data: profile } = await caller.from("profiles").select("role").eq("id", user.id).maybeSingle();
-    if (!profile || profile.role !== "superadmin") throw new ApiError(403, "forbidden", "Solo un superadministrador puede usar esta ruta.");
-    return { userId: user.id };
-  },
-  // Best-effort: si el runtime no expone Deno.resolveDns, el anti-SSRF solo mira literales.
-  resolveDns: typeof Deno.resolveDns === "function"
-    ? async (host: string) => {
-      const [a, aaaa] = await Promise.allSettled([Deno.resolveDns(host, "A"), Deno.resolveDns(host, "AAAA")]);
-      return [...(a.status === "fulfilled" ? a.value : []), ...(aaaa.status === "fulfilled" ? aaaa.value : [])];
-    }
-    : undefined,
-};
+// La construccion de Deps (admin client, credenciales de plataforma/comercio,
+// verifyAdmin) vive en _shared/payments-service/buildPaymentsDeps.ts.
+const deps = buildPaymentsDeps({
+  supabaseUrl: Deno.env.get("SUPABASE_URL")!,
+  serviceRoleKey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  anonKey: Deno.env.get("SUPABASE_ANON_KEY")!,
+  cronSecret: Deno.env.get("CRON_REMINDER_SECRET") ?? null,
+});
 
 Deno.serve(createHandler(deps));

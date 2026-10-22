@@ -1669,11 +1669,10 @@ async function executeTool(
       // server-side (see createSalesOrderPaymentLink). Found live 2026-08-25
       // designing this: letting the model pass its own `amount` had the
       // same failure mode as the address-placeholder bug -- nothing stopped
-      // it from inventing or misreading a number. This also persists a
-      // sales_order_payment_links row so payment-webhook-wompi can record
-      // the payment on this exact order once the customer actually pays --
-      // the old version of this tool generated a real Wompi link that led
-      // nowhere once paid.
+      // it from inventing or misreading a number. The link is created
+      // through the payments service (external_reference "order:<id>"), whose
+      // signed notice to payments-internal records the payment on this exact
+      // order once the customer actually pays.
       if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
       const order = await resolveLatestOrder(adminClient, tenantId, contactId, "confirmada");
       if (!order) throw new Error("Este cliente no tiene ningún pedido confirmado para cobrar. Un pedido tiene que estar confirmado (confirm_quote) antes de poder generarle un link de pago.");

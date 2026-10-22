@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
-import { getAdapter, makeSecretGetter, resolveCredential } from "./registry.ts";
-import { paymentReturnUrl } from "../publicAppUrl.ts";
+import { createInternalPaymentLink } from "../payments-service/internalLinks.ts";
+import type { InternalLinkOptions } from "../payments-service/internalLinks.ts";
 
 function formatOrderCode(number: number): string {
   return String(number).padStart(3, "0");
@@ -16,10 +16,10 @@ async function resolveConfirmedOrderBalance(
   adminClient: SupabaseClient,
   tenantId: string,
   orderId: string,
-): Promise<{ id: string; number: number; total: number; currency: string; balanceDue: number }> {
+): Promise<{ id: string; tenantId: string; number: number; total: number; currency: string; balanceDue: number }> {
   const { data: order, error: orderError } = await adminClient
     .from("sales_orders")
-    .select("id, number, status, total, currency")
+    .select("id, tenant_id, number, status, total, currency")
     .eq("id", orderId)
     .eq("tenant_id", tenantId)
     .is("deleted_at", null)
@@ -38,64 +38,56 @@ async function resolveConfirmedOrderBalance(
   const balanceDue = Math.round((order.total - totalPaid) * 100) / 100;
   if (balanceDue <= 0) throw new Error("Este pedido ya está pagado por completo.");
 
-  return { id: order.id, number: order.number, total: order.total, currency: order.currency, balanceDue };
+  return { id: order.id, tenantId: order.tenant_id, number: order.number, total: order.total, currency: order.currency, balanceDue };
 }
 
 /** Creates a real Wompi payment link for a confirmed sales order, for its
- * exact remaining balance. Persists a sales_order_payment_links row so
- * payments-api (/v1/events/wompi) can find its way back to this specific order once
- * the customer actually pays -- without this bridge (which didn't exist
- * before 2026-08-25), a completed Wompi payment had nowhere to land: the
- * checkout worked but the order never found out. Called from both
- * whatsapp-ai-tools (generate_payment_link) and
- * create-sales-order-payment-link (the human-agent action from the order's
- * own screen) -- same rules either way. */
+ * exact remaining balance, THROUGH the unified payments service (in-process, as
+ * Leadly's internal client, on behalf of the order's own tenant -- see
+ * payments-service/internalLinks.ts). The link <-> order bridge is the service's
+ * external_reference ("order:<id>") plus metadata {kind, tenant_id, order_id},
+ * ALWAYS built here from the order row read on the server (never from a caller
+ * parameter): payments-internal credits the payment against exactly that order
+ * when Wompi confirms it. No taxes are sent (D7: the tenant's own prices carry
+ * their own INC/IVA; the old fixed 19% was a Lexy convention). Called from
+ * whatsapp-ai-tools, storefront and create-sales-order-payment-link -- same
+ * rules for every caller. Fails closed if the internal client is not configured. */
 export async function createSalesOrderPaymentLink(
   adminClient: SupabaseClient,
   tenantId: string,
   orderId: string,
   createdBy: string | null,
   // Opcional. Un redirectUrl explícito SIEMPRE gana (la tienda pública manda el
-  // suyo, `?payment=return`, y su contrato no cambia). Sin él, el comprador
-  // vuelve a la página pública de resultado del SPA (/pago/resultado?link=<id de
-  // esta fila>), que solo muestra el estado que el backend ya conoce por el
-  // webhook: nunca decide si el pago fue aprobado.
+  // suyo, `?payment=return`, y su contrato no cambia). Sin él, el servicio manda al
+  // comprador a /pago/resultado?link=<id del link del servicio>, que solo muestra el
+  // estado que el backend ya conoce: nunca decide si el pago fue aprobado.
   redirectUrl?: string,
+  // Solo pruebas: Deps/clientId inyectados.
+  opts?: InternalLinkOptions,
 ): Promise<{ checkoutUrl: string; amount: number; orderCode: string }> {
   const order = await resolveConfirmedOrderBalance(adminClient, tenantId, orderId);
   const balanceDue = order.balanceDue;
-
-  const credential = await resolveCredential(adminClient, tenantId, "wompi");
-  const getSecret = makeSecretGetter(adminClient, credential.id);
-  const adapter = getAdapter("wompi");
   const orderCode = formatOrderCode(order.number);
   const currency = order.currency ?? "COP";
+  if (currency !== "COP") throw new Error("Solo se pueden generar cobros en COP.");
 
-  // El id de la fila se genera ANTES de crear el checkout para poder armar el
-  // redirect por defecto con él; se inserta la fila con ese mismo id.
-  const linkRowId = crypto.randomUUID();
-  const result = await adapter.createCheckout(credential, getSecret, {
-    invoiceId: `order-${order.number}-${Date.now()}`,
-    amountCents: Math.round(balanceDue * 100),
-    currency,
-    description: `Pago pedido ${orderCode}`,
-    redirectUrl: redirectUrl ?? paymentReturnUrl(linkRowId),
-  });
+  const link = await createInternalPaymentLink({
+    // Comercio y metadata salen de la FILA del pedido (aislamiento de tenant).
+    merchantTenantId: order.tenantId,
+    createdBy,
+    idempotencyKey: `order:${order.id}:${crypto.randomUUID()}`,
+    request: {
+      amount_in_cents: Math.round(balanceDue * 100),
+      currency,
+      name: `Pago pedido ${orderCode}`,
+      description: `Pago pedido ${orderCode}`,
+      external_reference: `order:${order.id}`,
+      metadata: { kind: "order", tenant_id: order.tenantId, order_id: order.id },
+      ...(redirectUrl ? { redirect_url: redirectUrl } : {}),
+    },
+  }, opts);
 
-  const { error: linkError } = await adminClient.from("sales_order_payment_links").insert({
-    id: linkRowId,
-    tenant_id: tenantId,
-    order_id: orderId,
-    provider_key: "wompi",
-    provider_checkout_id: result.providerCheckoutId,
-    checkout_url: result.checkoutUrl,
-    amount: balanceDue,
-    currency,
-    created_by: createdBy,
-  });
-  if (linkError) throw new Error(linkError.message);
-
-  return { checkoutUrl: result.checkoutUrl, amount: balanceDue, orderCode };
+  return { checkoutUrl: link.checkoutUrl, amount: balanceDue, orderCode };
 }
 
 /** Charges a confirmed sales order's exact remaining balance to the
@@ -131,65 +123,4 @@ export async function chargeSalesOrderToCredit(
   if (paymentError) throw new Error(paymentError.message);
 
   return { amount: order.balanceDue, orderCode: formatOrderCode(order.number) };
-}
-
-/** The receiving half of the bridge above -- called from payments-api (/v1/events/wompi)
- * after a `payment_invoices` lookup misses (that table is Leadly's own SaaS
- * billing to its tenants, a completely different concern, see that
- * function's header). Idempotent the same way applyWebhookEvent.ts is: a
- * link only gets acted on while still "pending", and
- * sales_order_payments_payment_link_idx (a partial unique index) makes a
- * second insert for the same link impossible even if this ran twice
- * concurrently -- caught and treated as already-handled, not an error. */
-export async function applySalesOrderPaymentWebhookEvent(
-  adminClient: SupabaseClient,
-  providerKey: string,
-  providerCheckoutId: string,
-  event: {
-    approved: boolean;
-    providerTransactionId: string;
-    amountCents: number;
-    paymentReference: string | null;
-  },
-): Promise<{ handled: boolean; orderId?: string }> {
-  const { data: link } = await adminClient
-    .from("sales_order_payment_links")
-    .select("id, tenant_id, order_id, status")
-    .eq("provider_key", providerKey)
-    .eq("provider_checkout_id", providerCheckoutId)
-    .maybeSingle();
-  if (!link) return { handled: false };
-  if (link.status !== "pending") return { handled: false };
-  if (!event.approved) return { handled: false };
-
-  const { error: insertError } = await adminClient.from("sales_order_payments").insert({
-    tenant_id: link.tenant_id,
-    order_id: link.order_id,
-    method: "wompi",
-    amount: Math.round(event.amountCents) / 100,
-    provider_key: providerKey,
-    provider_transaction_id: event.providerTransactionId,
-    provider_reference: event.paymentReference,
-    payment_link_id: link.id,
-  });
-  if (insertError) {
-    // 23505 = violacion de un indice unico. Se distingue POR NOMBRE de constraint:
-    //  - sales_order_payments_payment_link_idx: ya hay un pago para este link (una
-    //    reentrega concurrente que gano la carrera) -> ya manejado, no es un fallo.
-    //  - sales_order_payments_wompi_transaction_uidx (propuesta 20261011210100): la
-    //    MISMA transaccion ya acredito otro pago -> conflicto real, NUNCA "ya manejado".
-    //  - cualquier otro 23505: se conserva el comportamiento historico (ya manejado).
-    if (insertError.code === "23505") {
-      const msg = `${insertError.message ?? ""} ${(insertError as { details?: string }).details ?? ""}`;
-      if (msg.includes("sales_order_payments_wompi_transaction_uidx")) {
-        throw new Error("transaction_already_applied_to_another_payment");
-      }
-      return { handled: true, orderId: link.order_id };
-    }
-    throw new Error(insertError.message);
-  }
-
-  await adminClient.from("sales_order_payment_links").update({ status: "paid" }).eq("id", link.id);
-
-  return { handled: true, orderId: link.order_id };
 }

@@ -1,5 +1,4 @@
-// Piezas compartidas por el receptor de eventos de Wompi (links del servicio
-// nuevo y origenes legacy): mapeo de ambiente, resumen minimo sin datos
+// Piezas compartidas por el receptor de eventos de Wompi (links del servicio): mapeo de ambiente, resumen minimo sin datos
 // personales y confirmacion de una transaccion contra la API de Wompi.
 import { logEvent } from "./errors.ts";
 import { VERIFY_TIMEOUT_MS } from "./types.ts";

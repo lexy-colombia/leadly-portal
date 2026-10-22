@@ -6,7 +6,7 @@ import { Drawer } from '@/components/organisms'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { formatDateTime } from '../../../lib/dates'
+import { formatDate, formatDateTime } from '../../../lib/dates'
 
 function formatMoney(amountCents: number, currency: string): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amountCents / 100)
@@ -21,10 +21,9 @@ function Row({ label, value }: { label: string; value: ReactNode }) {
   )
 }
 
-/** Read-only view of everything a Colombian electronic invoice needs to be
- * issued by a certified provider later (buyer snapshot, IVA breakdown) plus
- * the real payment history -- makes the DIAN-ready data visible/useful
- * instead of sitting silently in columns nobody looks at. */
+/** Read-only view of a billing receipt ("comprobante de cobro", NOT an
+ * electronic invoice): period covered, buyer snapshot, items, IVA breakdown and
+ * the real payment history. */
 export function InvoiceDetailDrawer({ open, onClose, invoice }: { open: boolean; onClose: () => void; invoice: PaymentInvoice | null }) {
   const { t, language } = useLanguage()
   const [attempts, setAttempts] = useState<PaymentAttempt[] | null>(null)
@@ -48,6 +47,15 @@ export function InvoiceDetailDrawer({ open, onClose, invoice }: { open: boolean;
       description={invoice.description ?? ''}
     >
       <div className="space-y-5">
+        <p className="rounded-lg bg-brand-50 px-3 py-2 text-xs text-brand-600" role="note">{t('backoffice.invoiceDetail.notElectronic')}</p>
+        <section>
+          <dl className="divide-y divide-brand-50">
+            <Row
+              label={t('backoffice.invoiceDetail.period')}
+              value={invoice.period_start && invoice.period_end ? `${formatDate(invoice.period_start)} → ${formatDate(invoice.period_end)}` : '—'}
+            />
+          </dl>
+        </section>
         <section>
           <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-brand-400">{t('backoffice.invoiceDetail.buyer')}</h3>
           <dl className="divide-y divide-brand-50">

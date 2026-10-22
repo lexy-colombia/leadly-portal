@@ -383,7 +383,10 @@ export function PosFastCheckout() {
         checkout_token: checkoutTokenRef.current,
       })
       setResult(response)
-      if (receiptPrinter.autoPrintEnabled) receiptPrinter.print(response.order.id)
+      // Sin factura pedida, el ticket sale de una vez (si el flag está activo).
+      // Con factura, se imprime cuando la DIAN responde (más abajo): si la acepta
+      // sale la factura con CUFE y QR, sin pasar antes por una remisión.
+      if (!wantsInvoice && receiptPrinter.autoPrintEnabled) receiptPrinter.print(response.order.id)
 
       // Envío a la DIAN, SIEMPRE después del cobro -- un rechazo acá nunca
       // revierte la venta, ya está cobrada. pos-checkout solo RESERVA la
@@ -392,8 +395,10 @@ export function PosFastCheckout() {
       // detalle del pedido -- mismo criterio que PaymentDrawer.tsx.
       if (wantsInvoice) {
         setSendingInvoice(true)
+        let invoiceAccepted = false
         try {
           const invoiceResult = await sendPosInvoiceForOrder(response.order.id)
+          invoiceAccepted = invoiceResult.status === 'accepted'
           const failureDetail = invoiceResult.status === 'error' ? invoiceResult.faultReason : invoiceResult.status === 'rejected' ? invoiceResult.rejectionDetail : null
           if (failureDetail !== null) setEinvoicingError(failureDetail || t('orders.paymentDrawer.einvoicing.errors.send'))
         } catch (err) {
@@ -401,6 +406,9 @@ export function PosFastCheckout() {
         } finally {
           setSendingInvoice(false)
         }
+        // Factura aceptada: se imprime siempre. Si no, solo el ticket y solo
+        // con el flag activo (comportamiento de antes).
+        if (invoiceAccepted || receiptPrinter.autoPrintEnabled) receiptPrinter.print(response.order.id)
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('pos.errors.checkout'))

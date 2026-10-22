@@ -3,7 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import type { UserRole } from '../types/domain'
 import { PageSpinner } from '@/components/atoms'
-import { AccessDenied, TenantDeactivated } from '@/components/organisms'
+import { AccessDenied, TenantDeactivated, TenantSuspendedNonpayment } from '@/components/organisms'
 export function roleHome(role: UserRole | undefined): string {
   return role === 'superadmin' ? '/backoffice' : '/app'
 }
@@ -14,7 +14,7 @@ export function roleHome(role: UserRole | undefined): string {
  * the RLS layer already blocks their data via auth_active_tenant_id(), this is just
  * the friendly explanation instead of an app that looks broken. */
 export function RequireAuth({ children }: { children: ReactNode }) {
-  const { session, loading, unprovisioned, profile, tenant, signOut } = useAuth()
+  const { session, loading, unprovisioned, profile, tenant, signOut, refreshProfile } = useAuth()
 
   if (loading) {
     return <PageSpinner />
@@ -29,6 +29,10 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   }
 
   if (profile?.role !== 'superadmin' && tenant?.status === 'inactive') {
+    // Bloqueo por mora: muro de pago (unica pantalla accesible). Bloqueo manual (motivo null): mensaje fijo.
+    if (tenant.suspension_reason === 'nonpayment') {
+      return <TenantSuspendedNonpayment tenantId={tenant.id} tenantName={tenant.name} onSignOut={signOut} onRefresh={refreshProfile} />
+    }
     return <TenantDeactivated tenantName={tenant.name} onSignOut={signOut} />
   }
 
