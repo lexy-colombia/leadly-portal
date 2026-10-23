@@ -4,6 +4,11 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.34] - 2026-10-23
+
+### Fixed
+- **Impresión térmica directa (USB): el QR de la factura no salía.** Se imprimía con el comando QR nativo de la impresora, que depende del modelo/firmware y no imprime nada si no lo soporta. Ahora el QR se manda como imagen de 1 bit (igual que el logo), que sale en cualquier térmica.
+
 ## [1.0.33] - 2026-10-23
 
 ### Fixed

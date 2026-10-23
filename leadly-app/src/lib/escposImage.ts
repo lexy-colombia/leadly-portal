@@ -1,3 +1,4 @@
+import QRCode from 'qrcode'
 /** Convierte una imagen remota (el logo del tenant) a un raster ESC/POS de
  * 1 bit -- necesario para poder imprimirlo por WebUSB (lib/webUsbPrinter.ts),
  * donde no hay ningún `<img>` ni CSS que la impresora pueda interpretar
@@ -90,4 +91,29 @@ export async function rasterizeLogoForEscPos(url: string, maxWidthPx: number, ta
   } catch {
     return null
   }
+}
+
+/** QR como imagen de 1 bit (GS v 0), generado con la librería `qrcode`. Se usa
+ * en vez del comando nativo de la impresora (GS ( k): el logo, que viaja como
+ * imagen, sale en cualquier térmica; el comando nativo depende del modelo y
+ * del firmware, y cuando no lo soporta no imprime nada, sin error. */
+export function rasterizeQrForEscPos(text: string, maxWidthPx: number): { widthPx: number; heightPx: number; data: Uint8Array } {
+  const qr = QRCode.create(text, { errorCorrectionLevel: 'M' })
+  const size = qr.modules.size
+  const quiet = 2
+  const total = size + quiet * 2
+  const scale = Math.max(1, Math.floor(maxWidthPx / total))
+  const px = total * scale
+  const rowBytes = Math.ceil(px / 8)
+  const data = new Uint8Array(rowBytes * px)
+  for (let y = 0; y < px; y++) {
+    const my = Math.floor(y / scale) - quiet
+    if (my < 0 || my >= size) continue
+    for (let x = 0; x < px; x++) {
+      const mx = Math.floor(x / scale) - quiet
+      if (mx < 0 || mx >= size) continue
+      if (qr.modules.get(mx, my)) data[y * rowBytes + (x >> 3)] |= 0x80 >> (x & 7)
+    }
+  }
+  return { widthPx: rowBytes * 8, heightPx: px, data }
 }

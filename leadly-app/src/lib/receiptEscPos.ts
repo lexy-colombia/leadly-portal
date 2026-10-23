@@ -1,5 +1,5 @@
 import { EscPosBuilder } from './escpos'
-import { rasterizeLogoForEscPos } from './escposImage'
+import { rasterizeLogoForEscPos, rasterizeQrForEscPos } from './escposImage'
 import { formatMoney } from '../components/pos/PosReceiptTicket'
 import type { PosReceiptData } from './api/posReceipt'
 import type { PosPendingReceiptData } from '../components/pos/PosPendingReceiptTicket'
@@ -228,7 +228,7 @@ export async function buildChargedReceiptEscPos(data: PosReceiptData, t: T, lang
     b.rule()
     b.align('center')
     if (fiscal.isValidated && fiscal.cufe && fiscal.qrVerificationUrl) {
-      b.qr(fiscal.qrVerificationUrl)
+      b.raster(rasterizeQrForEscPos(fiscal.qrVerificationUrl, paperWidthMm === 58 ? 300 : 340))
       b.feed(1)
       b.line(`CUFE: ${fiscal.cufe}`)
       b.line(t('pos.receipt.verifyHint'))
