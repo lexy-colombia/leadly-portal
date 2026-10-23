@@ -110,6 +110,7 @@
   "pos.receipt.address": "Address",
   "pos.receipt.tax": "Tax",
   "pos.receipt.defaultFooter": "Thank you for your purchase!",
+  "pos.receipt.softwareCredit": "Own software - Printed with Lexy Colombia SAS",
   "pos.receipt.disclaimer": "This document is a draft and is not valid as a sales invoice.",
   "pos.receipt.errors.load": "Couldn't load the receipt to print.",
   "pos.receipt.print": "Print receipt",

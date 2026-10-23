@@ -649,7 +649,7 @@ export async function buildInvoicePdf(input: BuildInvoicePdfInput): Promise<Uint
     }
     fy -= Math.max(1, cufeLines.length) * 9 + Math.max(1, urlLines.length) * 9 + 3;
 
-    text("Programa de facturación propio", margin, fy, { size: 6.5, color: gray });
+    text(input.isRemision ? "Impreso con Lexy Colombia SAS" : "Software propio - Impreso con Lexy Colombia SAS", margin, fy, { size: 6.5, color: gray });
 
     // El QR (o su recuadro vacío) arranca en la regla y baja hasta el pie.
     const qrY = footerTop - headLines * 9 - 3 - qrSize;

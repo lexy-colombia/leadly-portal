@@ -4,6 +4,11 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.32] - 2026-10-22
+
+### Added
+- **Leyenda "Software propio - Impreso con Lexy Colombia SAS"** al pie del PDF de las facturas electrónicas y notas crédito (reemplaza "Programa de facturación propio") y al final del ticket del POS cuando es factura. Las remisiones dicen solo "Impreso con Lexy Colombia SAS" en el PDF y no la llevan en el ticket.
+
 ## [1.0.31] - 2026-10-22
 
 ### Added

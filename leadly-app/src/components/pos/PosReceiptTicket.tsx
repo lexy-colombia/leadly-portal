@@ -215,6 +215,7 @@ export function PosReceiptTicket({ data }: { data: PosReceiptData }) {
 
       <p className="pos-receipt-footer">{tenant.pos_receipt_footer_message || t('pos.receipt.defaultFooter')}</p>
       {fiscal.isRemision && <p className="pos-receipt-disclaimer">{t('pos.receipt.disclaimer')}</p>}
+      {!fiscal.isRemision && <p className="pos-receipt-disclaimer">{t('pos.receipt.softwareCredit')}</p>}
     </div>
   )
 }

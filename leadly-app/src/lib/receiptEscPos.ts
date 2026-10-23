@@ -242,6 +242,7 @@ export async function buildChargedReceiptEscPos(data: PosReceiptData, t: T, lang
   b.align('center')
   b.line(tenant.pos_receipt_footer_message || t('pos.receipt.defaultFooter'))
   if (fiscal.isRemision) b.line(t('pos.receipt.disclaimer'))
+  else b.line(t('pos.receipt.softwareCredit'))
   b.align('left')
 
   b.cut()
