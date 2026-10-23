@@ -93,8 +93,17 @@ export class EscPosBuilder {
    * de llamarla, igual que con el texto. */
   raster(image: { widthPx: number; heightPx: number; data: Uint8Array }): this {
     const rowBytes = Math.ceil(image.widthPx / 8)
-    this.push([0x1d, 0x76, 0x30, 0x00, rowBytes & 0xff, (rowBytes >> 8) & 0xff, image.heightPx & 0xff, (image.heightPx >> 8) & 0xff])
-    return this.push(Array.from(image.data))
+    // En bandas de 128 filas, una orden GS v 0 por banda: muchas térmicas
+    // genéricas descartan o desfiguran una imagen de más de 255 filas en una
+    // sola orden (un QR de ~285 px de alto no salía), y las bandas
+    // consecutivas se imprimen pegadas, sin hueco.
+    const BAND_ROWS = 128
+    for (let y = 0; y < image.heightPx; y += BAND_ROWS) {
+      const rows = Math.min(BAND_ROWS, image.heightPx - y)
+      this.push([0x1d, 0x76, 0x30, 0x00, rowBytes & 0xff, (rowBytes >> 8) & 0xff, rows & 0xff, (rows >> 8) & 0xff])
+      this.push(Array.from(image.data.subarray(y * rowBytes, (y + rows) * rowBytes)))
+    }
+    return this
   }
 
   /** Una línea de texto simple, con salto al final. */

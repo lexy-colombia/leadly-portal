@@ -9,6 +9,7 @@
 
 const EPSON_VENDOR_ID = 0x04b8 // Seiko Epson Corp.
 const PRINTER_CLASS_CODE = 7 // USB Printer class
+const TRANSFER_CHUNK_BYTES = 4096
 
 export function isWebUsbSupported(): boolean {
   return typeof navigator !== 'undefined' && 'usb' in navigator
@@ -63,7 +64,12 @@ export async function printRaw(bytes: Uint8Array): Promise<void> {
 
     await device.claimInterface(iface.interfaceNumber)
     try {
-      await device.transferOut(endpoint.endpointNumber, bytes)
+      // En bloques: las térmicas genéricas (no Epson) tienen buffers chicos y
+      // pierden datos -- típicamente el QR o el logo, que son los bloques más
+      // grandes -- si reciben todo el ticket de un solo envío.
+      for (let offset = 0; offset < bytes.length; offset += TRANSFER_CHUNK_BYTES) {
+        await device.transferOut(endpoint.endpointNumber, bytes.slice(offset, offset + TRANSFER_CHUNK_BYTES))
+      }
     } finally {
       await device.releaseInterface(iface.interfaceNumber)
     }
