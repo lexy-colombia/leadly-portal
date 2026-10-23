@@ -159,9 +159,10 @@ export function ReceiptPrintPortal({ children, paperWidth, onDone }: { children:
            QR ocupando la mayor parte del alto. 30mm sigue siendo
            perfectamente escaneable (un QR de recibo típico va entre 2 y
            3cm) y libera ~48mm de alto en papel de 80mm. */
-        .pos-receipt-qr { display: block; width: 30mm; height: 30mm; margin: 5px auto; }
+        .pos-receipt-qr { display: block; width: 26mm; height: 26mm; margin: 3px auto; }
         .pos-receipt-footer { text-align: center; margin-top: 6px; font-weight: 600; }
         .pos-receipt-disclaimer { text-align: center; margin-top: 4px; font-size: 0.85em; }
+        .pos-receipt-credit { text-align: center; margin-top: 1px; font-size: 0.75em; line-height: 1.2; }
         @media print {
           body > #root { display: none !important; }
           .pos-receipt-print-portal { position: static; left: auto; pointer-events: auto; }
