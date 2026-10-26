@@ -171,7 +171,8 @@ function VariantRow({
   outOfStockLabel: string
   onCommit: (quantity: number) => Promise<unknown>
 }) {
-  const variantOut = (variant.available ?? 0) <= 0
+  // null = sin control de inventario (siempre disponible); solo el backend dice 0.
+  const variantOut = variant.available != null && variant.available <= 0
   const { value, saving, nudge } = useDebouncedQuantity(cartQuantity, onCommit)
 
   return (

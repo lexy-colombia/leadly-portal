@@ -27,7 +27,6 @@ import {
 import {
   calculateOrder,
   deleteOrder,
-  findStockShortfalls,
   getOrder,
   getOrderTotalsBreakdown,
   hasIncompleteVariantSelection,
@@ -59,11 +58,8 @@ import type { OpportunityWithRelations } from "../../lib/api/opportunities";
 import { listAddressesForContact } from "../../lib/api/addresses";
 import { listProducts } from "../../lib/api/products";
 import type { ProductWithImages } from "../../lib/api/products";
-import {
-  listStockByWarehouse,
-  listStockByWarehouseForProducts,
-} from "../../lib/api/stockMovements";
-import type { ProductWarehouseStockRow } from "../../lib/api/stockMovements";
+import { listAvailabilityByWarehouse } from "../../lib/api/stockMovements";
+import type { ProductWarehouseAvailabilityRow } from "../../lib/api/stockMovements";
 import { listProductCategories } from "../../lib/api/productCategories";
 import { listBrands } from "../../lib/api/brands";
 import { listWarehouses } from "../../lib/api/warehouses";
@@ -541,7 +537,7 @@ export function OrderDetail() {
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [stockRows, setStockRows] = useState<ProductWarehouseStockRow[]>([]);
+  const [stockRows, setStockRows] = useState<ProductWarehouseAvailabilityRow[]>([]);
   const [addresses, setAddresses] = useState<ContactAddress[]>([]);
   const [relatedTasks, setRelatedTasks] = useState<TaskWithRelations[] | null>(
     null,
@@ -1330,7 +1326,7 @@ export function OrderDetail() {
             listProducts(tenantId, { page: 1, pageSize: 1000 }),
             listProductCategories(tenantId),
             listBrands(tenantId),
-            listStockByWarehouse(tenantId),
+            listAvailabilityByWarehouse({ excludeCartId: cartIdRef.current }),
           ]).then(([prods, cats, brs, stock]) => {
             setProducts(prods.data);
             setCategories(cats);
@@ -1339,7 +1335,7 @@ export function OrderDetail() {
           })
         : Promise.all([
             listProducts(tenantId, { page: 1, pageSize: 1000, productIds }),
-            listStockByWarehouseForProducts(tenantId, productIds),
+            listAvailabilityByWarehouse({ productIds, excludeCartId: cartIdRef.current }),
           ]).then(([prods, stock]) => {
             if (stale()) return;
             setProducts(prods.data);
@@ -1834,9 +1830,7 @@ export function OrderDetail() {
         items: d.items,
         origin: "portal",
       });
-      // Mismo estado que ya usaba el chequeo pre-confirmar (findStockShortfalls
-      // más abajo) -- ahora se actualiza en vivo con cada autoguardado, en vez
-      // de solo calcularse recién al intentar confirmar. OrderItemsEditor ya
+      // Faltantes que devuelve el backend en cada autoguardado. OrderItemsEditor ya
       // sabía pintar estas líneas en rojo (prop `shortfalls`).
       setStockShortfalls(shortfalls);
       if (cart.id !== cartIdRef.current) {
@@ -1999,9 +1993,9 @@ export function OrderDetail() {
 
   /** Cotización -> venta. Todo dentro de la cola: espera a cualquier
    * autoguardado en vuelo, guarda la última versión (si hace falta), revisa
-   * faltantes con lo guardado y recién ahí confirma. Nunca dos guardados o
+   * y confirma (el backend decide por stock). Nunca dos guardados o
    * confirmaciones simultáneos. */
-  async function confirmQuote(orderId: string, tenantId: string) {
+  async function confirmQuote(orderId: string) {
     if (opInFlightRef.current) return;
     opInFlightRef.current = true;
     setAdvancingStatus(true);
@@ -2009,19 +2003,11 @@ export function OrderDetail() {
       await enqueueSave(async () => {
         // Si falla, NO se confirma (el error ya quedó en pantalla).
         if (!(await saveDraftNow(orderId))) return;
-        // Stock is only checked at the exact moment a cotización turns into a
-        // venta -- quoting is allowed to exceed what's on hand, confirming
-        // isn't (explicit product decision).
-        const shortfalls = await findStockShortfalls(
-          tenantId,
-          draftRef.current.items,
-          warehouses,
-        );
-        if (shortfalls.length > 0) {
-          setStockShortfalls(shortfalls);
-          setShortfallDialogOpen(true);
-          return;
-        }
+        // Quoting is allowed to exceed what's on hand, confirming isn't
+        // (explicit product decision) -- el que lo decide es el backend.
+        // El chequeo de stock lo hace el backend (guard de confirmación,
+        // que ya descuenta lo reservado por otras cuentas): si rechaza, su
+        // mensaje sale por el catch de abajo. Nada se compara acá.
         await updateOrderStatus(orderId, "confirmada");
         await reloadOrder();
       });
@@ -2046,7 +2032,7 @@ export function OrderDetail() {
     if (!guardBaseData(order.status === "cotizacion")) return;
     setActionError(null);
     if (order.status === "cotizacion" && newStatus === "confirmada") {
-      await confirmQuote(order.id, profile.tenant_id);
+      await confirmQuote(order.id);
       return;
     }
     setAdvancingStatus(true);
@@ -2144,7 +2130,6 @@ export function OrderDetail() {
     if (!guardBaseData(true)) return;
     if (opInFlightRef.current) return;
     opInFlightRef.current = true;
-    const tenantId = profile.tenant_id;
 
     setCreating(true);
     try {
@@ -2158,21 +2143,6 @@ export function OrderDetail() {
         if (hasIncompleteVariantSelection(validItems, d.products)) {
           setActionError(t("orders.itemsEditor.variantRequired"));
           return;
-        }
-
-        // Same rule as confirmQuote: creating directly as a venta (not a
-        // cotización) skips the separate "convert" step but not this check.
-        if (status !== "cotizacion") {
-          const shortfalls = await findStockShortfalls(
-            tenantId,
-            validItems,
-            warehouses,
-          );
-          if (shortfalls.length > 0) {
-            setStockShortfalls(shortfalls);
-            setShortfallDialogOpen(true);
-            return;
-          }
         }
 
         // Guarda el estado final en el carrito (por si el agente apretó
@@ -2196,10 +2166,14 @@ export function OrderDetail() {
         });
         setStockShortfalls(shortfalls);
         applyCartId(cart.id);
-        // create-order valida stock real antes de crear nada (rechaza sin
-        // dejar ninguna fila huérfana si algo no alcanza) -- el pre-chequeo
-        // de arriba (findStockShortfalls) es solo para avisar antes, esto es
-        // lo que de verdad bloquea si igual llegó a pasar algo.
+        // Mismo criterio que confirmQuote: creando directamente como venta,
+        // el aviso sale de lo que devolvió el guardado (backend); create-order
+        // valida stock real antes de crear nada (rechaza sin dejar ninguna
+        // fila huérfana si algo no alcanza) y es lo que de verdad bloquea.
+        if (status !== "cotizacion" && shortfalls.length > 0) {
+          setShortfallDialogOpen(true);
+          return;
+        }
         const created = await createOrderFromCart(cart.id);
         cartConsumedRef.current = true;
         if (status === "confirmada")

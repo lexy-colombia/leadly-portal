@@ -253,6 +253,9 @@ Deno.serve(async (req) => {
       adminClient,
       tenantId,
       resolvedItems.map((item) => ({ product_id: item.product_id, variant_id: item.variant_id, warehouse_id: item.warehouse_id, product_name: item.product_name, quantity: item.quantity })),
+      // Disponible = físico - reservas de OTRAS cuentas: la reserva de esta
+      // misma cuenta es la que se está por consumir y no puede bloquearla.
+      { excludeCartId: cart.id as string },
     );
     if (shortfalls.length > 0) {
       const detail = shortfalls.map((s) => `"${s.product_name}" (disponible ${s.available}, pedido ${s.requested})`).join(", ");
@@ -319,16 +322,18 @@ Deno.serve(async (req) => {
   // cobrada.
   const fullyBilledIds = selections.filter((s) => s.quantity === s.cartItem.quantity).map((s) => s.cartItem.id);
   const partiallyBilled = selections.filter((s) => s.quantity < s.cartItem.quantity);
-  if (fullyBilledIds.length > 0) {
-    const { error: deleteItemsError } = await adminClient.from("cart_items").delete().in("id", fullyBilledIds);
-    if (deleteItemsError) return json({ error: deleteItemsError.message }, 500);
-  }
-  for (const { cartItem, quantity } of partiallyBilled) {
-    const { error: updateItemError } = await adminClient
-      .from("cart_items")
-      .update({ quantity: cartItem.quantity - quantity })
-      .eq("id", cartItem.id);
-    if (updateItemError) return json({ error: updateItemError.message }, 500);
+  // Una sola función atómica (migración 20261026130000): toma el lock del
+  // carrito ANTES de tocar cart_items (mismo orden que save_cart_lines, así
+  // un autosave de otra caja no se cruza en deadlock) y descuenta lo cobrado
+  // de forma relativa.
+  if (fullyBilledIds.length > 0 || partiallyBilled.length > 0) {
+    const { error: settleError } = await adminClient.rpc("cart_settle_billed_items", {
+      p_cart_id: cart.id,
+      p_tenant_id: tenantId,
+      p_full_ids: fullyBilledIds,
+      p_partial: partiallyBilled.map(({ cartItem, quantity }) => ({ id: cartItem.id, qty: quantity })),
+    });
+    if (settleError) return json({ error: settleError.message }, 500);
   }
 
   const { count: remaining, error: remainingError } = await adminClient

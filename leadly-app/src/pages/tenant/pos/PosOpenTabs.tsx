@@ -194,6 +194,8 @@ export function PosOpenTabs({ tenantId }: { tenantId: string }) {
           unit_price: i.unit_price,
           discount_amount: i.discount_amount,
         })),
+        0,
+        account.id,
       )
       const client = cart.contact_id ? await getClient(cart.contact_id) : null
       // Mismos dos datos que mira la pantalla de la cuenta para decidir qué

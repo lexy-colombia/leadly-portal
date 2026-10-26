@@ -11,9 +11,9 @@ import { ADMINISTRATOR_ONLY, AI_TOOLS, isAdministratorContact, isToolAllowed } f
 import { updateClientProfile } from "../_shared/clientTags.ts";
 import { sendWhatsappImage } from "../_shared/whatsapp.ts";
 import { chargeSalesOrderToCredit, createSalesOrderPaymentLink } from "../_shared/payments/salesOrderPayments.ts";
-import { confirmSalesOrder, getStockTotals, getVariantStock, isPlaceholderAddressText } from "../_shared/orders/confirmSalesOrder.ts";
+import { confirmSalesOrder, getStockTotals, isPlaceholderAddressText } from "../_shared/orders/confirmSalesOrder.ts";
 import { persistOrderItems, type ResolvedOrderItem } from "../_shared/orders/persistOrderItems.ts";
-import { findStockShortfalls, type StockCheckItem } from "../_shared/orders/stockAvailability.ts";
+import { findStockShortfalls, loadAvailabilitySummary, type StockCheckItem } from "../_shared/orders/stockAvailability.ts";
 import { makeIntegrationSecretGetter, resolveTenantIntegrationCredential } from "../_shared/integrations/credentials.ts";
 import { createDeal, createOrUpdateContact, getDealPipelines } from "../_shared/integrations/hubspot.ts";
 import { resolveShopifyDomain, searchCustomerByPhone, searchOrders, searchProducts } from "../_shared/integrations/shopify.ts";
@@ -2373,21 +2373,12 @@ async function assertStockForQuote(adminClient: any, tenantId: string, items: St
   );
 }
 
-/** Stock sumado por variante (todas las bodegas) de un producto. */
+/** DISPONIBLE por variante (todas las bodegas; físico - reservas vigentes de
+ * carritos) de un producto. Fuente única: RPC stock_availability_rows. */
 // deno-lint-ignore no-explicit-any
 async function getStockByVariant(adminClient: any, tenantId: string, productId: string): Promise<Map<string, number>> {
-  const { data, error } = await adminClient
-    .from("product_stock")
-    .select("variant_id, quantity")
-    .eq("tenant_id", tenantId)
-    .eq("product_id", productId)
-    .not("variant_id", "is", null);
-  if (error) throw new Error(error.message);
-  const totals = new Map<string, number>();
-  for (const row of (data ?? []) as { variant_id: string; quantity: number }[]) {
-    totals.set(row.variant_id, (totals.get(row.variant_id) ?? 0) + row.quantity);
-  }
-  return totals;
+  const { byVariant } = await loadAvailabilitySummary(adminClient, tenantId, [productId]);
+  return byVariant;
 }
 
 /** Enlace de la tienda pública del tenant, o null si no la tiene activa (sin

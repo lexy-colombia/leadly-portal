@@ -19,8 +19,7 @@ import type { ProductWithImages } from '../../../lib/api/products'
 import { listProductCategories } from '../../../lib/api/productCategories'
 import { listBrands } from '../../../lib/api/brands'
 import { listWarehouses } from '../../../lib/api/warehouses'
-import { listStockByWarehouse } from '../../../lib/api/stockMovements'
-import type { ProductWarehouseStockRow } from '../../../lib/api/stockMovements'
+import { listAvailabilityByWarehouse, type ProductWarehouseAvailabilityRow } from '../../../lib/api/stockMovements'
 import type { Brand, CartItem, Client, PosPoint, ProductCategory, SalesOrder, Warehouse } from '../../../types/domain'
 import { OrderItemsEditor } from '../orders/OrderItemsEditor'
 import { PaymentDrawer } from '../orders/PaymentDrawer'
@@ -87,7 +86,7 @@ export function PosTabAccount({
   const [categories, setCategories] = useState<ProductCategory[]>([])
   const [brands, setBrands] = useState<Brand[]>([])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
-  const [stockRows, setStockRows] = useState<ProductWarehouseStockRow[]>([])
+  const [stockRows, setStockRows] = useState<ProductWarehouseAvailabilityRow[]>([])
   // Estado del stock del listado: 'loading' -> 'ready' (o 'failed' si la
   // carga inicial falló). Mientras no esté 'ready' el editor no pinta "Agotado"
   // ni aplica tope (`stockLoading` de OrderItemsEditor: sin datos no se
@@ -207,7 +206,7 @@ export function PosTabAccount({
     listWarehouses(tenantId)
       .then(setWarehouses)
       .catch(() => toast.error(t('pos.tabs.errors.loadCatalog', { what: t('pos.tabs.errors.loadCatalogWarehouses') })))
-    listStockByWarehouse(tenantId)
+    listAvailabilityByWarehouse({ excludeCartId: cartId })
       .then((rows) => {
         stockRefreshRef.current.at = Date.now()
         setStockRows(rows)
@@ -221,7 +220,7 @@ export function PosTabAccount({
     isDianDirectoConnected(tenantId)
       .then(setDianConnected)
       .catch(() => setDianConnected(false))
-  }, [tenantId])
+  }, [tenantId, cartId])
 
   useEffect(() => {
     function applyCart(cart: CartWithItems) {
@@ -350,7 +349,7 @@ export function PosTabAccount({
     const state = stockRefreshRef.current
     if (!mountedRef.current || state.inFlight || (!force && Date.now() - state.at < 30_000)) return
     state.inFlight = true
-    listStockByWarehouse(tenantId)
+    listAvailabilityByWarehouse({ excludeCartId: cartId })
       .then((rows) => {
         state.at = Date.now()
         if (mountedRef.current) {
@@ -430,7 +429,12 @@ export function PosTabAccount({
       if (!windingRef.current) {
         toast.error(
           err instanceof CartStockRejectedError
-            ? t(mountedRef.current ? 'pos.tabs.errors.stockRejected' : 'pos.tabs.errors.stockRejectedOnLeave', { detail: err.message })
+            ? // Rechazo sin detalle de líneas (p. ej. carrera de reserva en el
+              // servidor): solo el mensaje del backend, sin la sugerencia de
+              // "quita esa línea", que no aplica si no sabemos cuál es.
+              err.stockShortfalls.length === 0 && err.message
+              ? err.message
+              : t(mountedRef.current ? 'pos.tabs.errors.stockRejected' : 'pos.tabs.errors.stockRejectedOnLeave', { detail: err.message })
             : err instanceof Error
               ? err.message
               : t('pos.tabs.errors.save'),
@@ -515,6 +519,7 @@ export function PosTabAccount({
   const { totals, totalsSignature, stockShortfalls: previewShortfalls, loading: totalsLoading, error: totalsError } = useOrderTotalsPreview(items, 0, {
     prefetched,
     hold: inflightItemsSig !== null && inflightItemsSig === JSON.stringify(items),
+    cartId,
   })
   // Lo último que muestra el resumen, con la firma de las líneas a las que
   // corresponde. Un clic de "Cobrar" que espera un guardado lo lee de acá, pero
@@ -647,12 +652,14 @@ export function PosTabAccount({
                   discount_amount: selected.quantity === item.quantity ? (item.discount_amount ?? 0) : 0,
                 }
               }),
+            0,
+            cartId,
           )
         : // `saved`: lo que devolvió el guardado que acaba de esperar
           // handleChargeAll (sus ítems y su desglose), no lo que había en
           // pantalla al hacer clic -- si el servidor quitó una línea por stock,
           // el pago abre con el estado real de la cuenta.
-          (saved?.totals ?? (await previewOrderTotals(saved?.items ?? latestRef.current?.input.items ?? items)))
+          (saved?.totals ?? (await previewOrderTotals(saved?.items ?? latestRef.current?.input.items ?? items, 0, cartId)))
       setSplitItems(null)
       drawerDoneRef.current = false
       chargeTokenRef.current = crypto.randomUUID()

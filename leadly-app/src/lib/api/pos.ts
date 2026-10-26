@@ -1,5 +1,6 @@
 import { supabase } from '../supabaseClient'
 import { formatVariantLabel, getProductImageUrl } from './products'
+import { listStockTotals } from './stockMovements'
 import type { Client, OrderPaymentMethod, ProductImage, ProductOption, ProductVariant, SalesOrder } from '../../types/domain'
 
 /** Punto de venta de mostrador. A diferencia de Órdenes (donde se arma una
@@ -63,20 +64,20 @@ function escapePostgrestPattern(term: string): string {
   return term.replace(/[,()%_]/g, '\\$&')
 }
 
-/** Suma de product_stock por producto y por variante, en UNA consulta,
- * acotada a los productos que se van a mostrar -- no la grilla completa del
- * tenant (esto corre en cada búsqueda del cajero, no una vez al cargar). */
+/** Disponible por producto y por variante que entrega el backend (RPC de
+ * disponibilidad: físico menos reservas de otras cuentas), en tandas de ids y
+ * acotado a los productos que se van a mostrar -- no la grilla completa del
+ * tenant (esto corre en cada búsqueda del cajero). Un producto sin control de
+ * inventario no aparece (toPosProduct lo trata como sin límite). Si el backend
+ * falla, lanza: nunca se asume "0" ni "sin límite". */
 async function loadStock(productIds: string[]): Promise<{ byProduct: Map<string, number>; byVariant: Map<string, number> }> {
   const byProduct = new Map<string, number>()
   const byVariant = new Map<string, number>()
   if (productIds.length === 0) return { byProduct, byVariant }
 
-  const { data, error } = await supabase.from('product_stock').select('product_id, variant_id, quantity').in('product_id', productIds)
-  if (error) throw error
-  for (const row of data as { product_id: string; variant_id: string | null; quantity: number }[]) {
-    byProduct.set(row.product_id, (byProduct.get(row.product_id) ?? 0) + row.quantity)
-    if (row.variant_id) byVariant.set(row.variant_id, (byVariant.get(row.variant_id) ?? 0) + row.quantity)
-  }
+  const totals = await listStockTotals(productIds)
+  for (const [id, total] of totals.byProduct) byProduct.set(id, total.available)
+  for (const [id, total] of totals.byVariant) byVariant.set(id, total.available)
   return { byProduct, byVariant }
 }
 

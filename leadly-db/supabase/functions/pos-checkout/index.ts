@@ -215,6 +215,10 @@ Deno.serve(async (req) => {
 
   if (!orderId) {
     // Rechazo duro -- ver comentario de cabecera. Antes de insertar nada.
+    // findStockShortfalls compara contra el DISPONIBLE (físico - reservas de las
+    // cuentas abiertas y de la tienda pública), no solo contra el físico: una venta
+    // rápida sin carrito no puede consumir lo que una mesa ya reservó (H3 de la
+    // feature de reservas). Sin excludeCartId: esta venta no tiene cuenta propia.
     const shortfalls = await findStockShortfalls(
       adminClient,
       tenantId,

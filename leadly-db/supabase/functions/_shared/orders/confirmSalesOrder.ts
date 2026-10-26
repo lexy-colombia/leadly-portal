@@ -1,34 +1,27 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
+import { loadAvailabilitySummary } from "./stockAvailability.ts";
 
-/** Sums product_stock (per-warehouse quantity) per product id, tenant-scoped
- * -- usado hoy solo por el pre-chequeo de UX en OrderDetail.tsx
- * (findStockShortfalls) para mostrarle al agente el detalle de faltantes
- * ANTES de confirmar, con tiempo de reaccionar (ajustar cantidades, etc.).
- * El chequeo real que bloquea la confirmación vive en el trigger de DB
- * (guard_sales_order_confirmation, 20260903180000) -- ver nota grande en
+/** DISPONIBLE (físico - reservas vigentes de carritos) por producto, sumando
+ * variantes y bodegas, acotado al tenant. Antes sumaba solo el físico de
+ * product_stock; ahora sale de la fuente única de disponibilidad (RPC
+ * `stock_availability_rows`, ver stockAvailability.ts), igual que
+ * findStockShortfalls. Lo usa la IA para `in_stock` y el pie de foto, y el
+ * pre-chequeo de UX. El chequeo real que bloquea la confirmación vive en el
+ * trigger de DB (guard_sales_order_confirmation) -- ver nota grande en
  * confirmSalesOrder más abajo. */
 export async function getStockTotals(adminClient: SupabaseClient, tenantId: string, productIds: string[]): Promise<Map<string, { available: number }>> {
   const totals = new Map<string, { available: number }>();
   if (productIds.length === 0) return totals;
-
-  const { data } = await adminClient.from("product_stock").select("product_id, quantity").eq("tenant_id", tenantId).in("product_id", productIds);
-
-  for (const row of (data ?? []) as { product_id: string; quantity: number }[]) {
-    const existing = totals.get(row.product_id) ?? { available: 0 };
-    existing.available += row.quantity;
-    totals.set(row.product_id, existing);
-  }
+  const { byProduct } = await loadAvailabilitySummary(adminClient, tenantId, productIds);
+  for (const [id, available] of byProduct) totals.set(id, { available });
   return totals;
 }
 
-/** Same idea as getStockTotals but scoped to one specific variant. */
-export async function getVariantStock(adminClient: SupabaseClient, tenantId: string, variantId: string): Promise<{ available: number }> {
-  const { data } = await adminClient.from("product_stock").select("quantity").eq("tenant_id", tenantId).eq("variant_id", variantId);
-  const totals = { available: 0 };
-  for (const row of (data ?? []) as { quantity: number }[]) {
-    totals.available += row.quantity;
-  }
-  return totals;
+/** Same idea as getStockTotals but scoped to one specific variant (disponible,
+ * no físico). Necesita el producto para acotar la lectura al tenant. */
+export async function getVariantStock(adminClient: SupabaseClient, tenantId: string, productId: string, variantId: string): Promise<{ available: number }> {
+  const { byVariant } = await loadAvailabilitySummary(adminClient, tenantId, [productId]);
+  return { available: byVariant.get(variantId) ?? 0 };
 }
 
 /** Sigue en uso fuera del flujo de confirmación: whatsapp-ai-tools la usa

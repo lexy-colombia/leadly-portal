@@ -72,7 +72,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { persistOrderItems, type ResolvedOrderItem } from "../_shared/orders/persistOrderItems.ts";
 import { computeOrderTotals } from "../_shared/orders/computeOrderTotals.ts";
 import { isTenantTaxEnabled } from "../_shared/invoicing/queueInvoiceGeneration.ts";
-import { findStockShortfalls } from "../_shared/orders/stockAvailability.ts";
+import { findStockShortfalls, parseStockRejection } from "../_shared/orders/stockAvailability.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 
 interface RawItemInput {
@@ -172,12 +172,18 @@ Deno.serve(async (req) => {
   const tProfile = Date.now();
   const [{ data: profile }, existingCartRes] = await Promise.all([
     callerClient.from("profiles").select("tenant_id").eq("id", caller.id).maybeSingle(),
-    isCartPath && requestedCartId ? callerClient.from("carts").select("id, status, origin").eq("id", requestedCartId).maybeSingle() : Promise.resolve(null),
+    // También en preview: el carrito (leído con RLS del caller, así que solo
+    // uno del propio tenant) se usa para excluir SUS reservas del disponible.
+    (isCartPath || body.preview) && requestedCartId ? callerClient.from("carts").select("id, status, origin").eq("id", requestedCartId).maybeSingle() : Promise.resolve(null),
   ]);
   ms.profile = Date.now() - tProfile;
   if (!profile?.tenant_id) return json({ error: "No se pudo resolver el tenant del usuario." }, 403);
   const tenantId = profile.tenant_id as string;
   const existingCart = existingCartRes?.data ?? null;
+  // Reserva de stock: el disponible se calcula SIN las reservas de la propia
+  // cuenta abierta (su reserva no puede bloquear su propia edición). Solo un
+  // carrito que el RLS del caller dejó ver; nunca un id ajeno del body.
+  const excludeCartId = existingCart ? (existingCart.id as string) : null;
 
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
@@ -222,7 +228,7 @@ Deno.serve(async (req) => {
   const wantsStock = body.preview || (isCartPath && !cartRejectedEarly);
   const tStock = Date.now();
   const stockPromise: Promise<{ ok: true; value: Awaited<ReturnType<typeof findStockShortfalls>> } | { ok: false; error: unknown }> | null = wantsStock
-    ? findStockShortfalls(adminClient, tenantId, stockItems).then(
+    ? findStockShortfalls(adminClient, tenantId, stockItems, { excludeCartId }).then(
         (value) => {
           ms.stock = Date.now() - tStock;
           return { ok: true as const, value };
@@ -533,6 +539,19 @@ Deno.serve(async (req) => {
     return json({ error: `Sin stock suficiente para: ${detail}.`, stock_shortfalls: rejectable, cart: currentCart }, 409);
   }
 
+  // Respuesta 409 con la misma forma que el rechazo previo por stock: error,
+  // stock_shortfalls y el carrito tal como quedó en el servidor (null si era
+  // un carrito nuevo que no llegó a existir).
+  const stockRejectedResponse = async (rejection: { message: string; shortfalls: unknown[] }, existingId: string | null) => {
+    let currentCart: unknown = null;
+    if (existingId) {
+      const { data } = await adminClient.from("carts").select("*, items:cart_items(*)").eq("id", existingId).eq("tenant_id", tenantId).maybeSingle();
+      currentCart = data ?? null;
+    }
+    logTiming("save");
+    return json({ error: rejection.message, stock_shortfalls: rejection.shortfalls, cart: currentCart }, 409);
+  };
+
   const tWrite = Date.now();
   const itemRows = (id?: string) =>
     items.map((item) => ({
@@ -577,6 +596,12 @@ Deno.serve(async (req) => {
       // validaciones previas (por si el carrito cambió entre la lectura y el guardado).
       if (saveError.code === "LX404") return json({ error: "Carrito no encontrado." }, 404);
       if (saveError.code === "LX409") return json({ error: "Este carrito ya no está abierto." }, 409);
+      // LX422: otra cuenta reservó el stock entre el chequeo de arriba y el
+      // guardado (carrera). La transacción de save_cart_lines se revirtió: la
+      // línea no se cargó y el carrito quedó como estaba. Misma forma de
+      // respuesta que el rechazo previo (CartStockRejectedError del frontend).
+      const rejection = parseStockRejection(saveError);
+      if (rejection) return await stockRejectedResponse(rejection, cartId);
       return json({ error: saveError.message }, 500);
     }
     const { items: rpcItems, ...rpcCart } = saved as Record<string, unknown> & { items?: unknown[] };
@@ -606,7 +631,16 @@ Deno.serve(async (req) => {
     // Carrito recién creado: no tiene ítems que borrar, solo insertar.
     if (items.length > 0) {
       const { data: inserted, error: insertItemsError } = await adminClient.from("cart_items").insert(itemRows(cartId)).select();
-      if (insertItemsError) return json({ error: insertItemsError.message }, 500);
+      if (insertItemsError) {
+        // La cabecera ya se insertó (sin transacción con las líneas): si las
+        // líneas fallan -- LX422 por carrera de stock, o cualquier otro error --
+        // no se deja un carrito vacío huérfano. El delete se acota por tenant;
+        // las reservas y líneas caen por cascada.
+        await adminClient.from("carts").delete().eq("id", cartId).eq("tenant_id", tenantId);
+        const rejection = parseStockRejection(insertItemsError);
+        if (rejection) return await stockRejectedResponse(rejection, null);
+        return json({ error: insertItemsError.message }, 500);
+      }
       savedItems = (inserted ?? []) as unknown[];
     }
   }

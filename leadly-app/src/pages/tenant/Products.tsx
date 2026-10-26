@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
@@ -6,7 +6,7 @@ import { useLanguage } from '../../contexts/LanguageContext'
 import { useHeaderSearchSlot } from '@/contexts/HeaderSearchSlotContext'
 import { bulkSetVisibleInCatalog, deleteProduct, getProductImageUrl, listProducts, updateProduct } from '../../lib/api/products'
 import type { ProductWithImages } from '../../lib/api/products'
-import { listStockByWarehouse, listStockTotalsByTenant, recordStockMovement } from '../../lib/api/stockMovements'
+import { listStockByWarehouse, listStockTotals, recordStockMovement } from '../../lib/api/stockMovements'
 import type { ProductStockTotal, ProductWarehouseStockRow } from '../../lib/api/stockMovements'
 import { descendantIds, listProductCategories } from '../../lib/api/productCategories'
 import { useResetOnFilterChange, useUrlFilterSync } from '../../lib/urlFilters'
@@ -43,16 +43,24 @@ function formatCurrency(value: number | null, currency: string): string {
 }
 
 /** `products` carries no stock counter of its own (see types/domain.ts) --
- * "available" is always the sum across warehouses (product_stock), looked
- * up from the `stockTotals` map loaded alongside the list. What's actually
- * sellable right now excludes anything held by open cotizaciones
- * (reserved), even though it's still physically on the shelf. */
-function availableStock(product: ProductWithImages, stockTotals: Map<string, ProductStockTotal>): number {
-  return stockTotals.get(product.id)?.available ?? 0
+ * "available" es el número que entrega el backend (físico menos lo reservado
+ * por cuentas abiertas/tienda), cargado junto a la lista en `stockTotals`.
+ * `null` = todavía no llegó (o falló): se muestra "—", nunca 0. */
+function availableStock(product: ProductWithImages, stockTotals: Map<string, ProductStockTotal> | null): number | null {
+  if (!stockTotals) return null
+  return stockTotals.get(product.id)?.available ?? null
 }
 
-function isLowStock(product: ProductWithImages, stockTotals: Map<string, ProductStockTotal>): boolean {
-  return product.track_inventory && availableStock(product, stockTotals) <= product.low_stock_threshold
+/** Físico real (no el disponible): solo para el ajuste rápido de inventario,
+ * que registra la diferencia contra lo que de verdad hay en bodega. */
+function physicalStock(product: ProductWithImages, stockTotals: Map<string, ProductStockTotal> | null): number | null {
+  if (!stockTotals) return null
+  return stockTotals.get(product.id)?.physical ?? null
+}
+
+function isLowStock(product: ProductWithImages, stockTotals: Map<string, ProductStockTotal> | null): boolean {
+  const available = availableStock(product, stockTotals)
+  return product.track_inventory && available !== null && available <= product.low_stock_threshold
 }
 
 function warehouseStock(rows: ProductWarehouseStockRow[], productId: string, warehouseId: string): number {
@@ -75,13 +83,17 @@ function QuickStockPopover({
   warehouses,
   stockRows,
   currentTotal,
+  availableTotal,
   lowStock,
   onSaved,
 }: {
   product: ProductWithImages
   warehouses: Warehouse[]
   stockRows: ProductWarehouseStockRow[]
+  /** Físico: base del ajuste (se registra la diferencia contra esto). */
   currentTotal: number
+  /** Disponible del backend: lo que muestra el badge. */
+  availableTotal: number
   lowStock: boolean
   onSaved: () => void
 }) {
@@ -142,7 +154,7 @@ function QuickStockPopover({
   if (warehouses.length === 0) {
     return (
       <Badge variant={lowStock ? 'destructive' : 'secondary'}>
-        {t('products.table.available', { count: currentTotal })} {lowStock && t('products.table.low')}
+        {t('products.table.available', { count: availableTotal })} {lowStock && t('products.table.low')}
       </Badge>
     )
   }
@@ -152,7 +164,7 @@ function QuickStockPopover({
       <PopoverTrigger asChild>
         <button type="button" className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent-300">
           <Badge variant={lowStock ? 'destructive' : 'secondary'} className="cursor-pointer transition hover:brightness-95">
-            {t('products.table.available', { count: currentTotal })} {lowStock && t('products.table.low')}
+            {t('products.table.available', { count: availableTotal })} {lowStock && t('products.table.low')}
           </Badge>
         </button>
       </PopoverTrigger>
@@ -237,7 +249,7 @@ export function Products() {
 
   const [products, setProducts] = useState<ProductWithImages[] | null>(null)
   const [totalCount, setTotalCount] = useState(0)
-  const [stockTotals, setStockTotals] = useState<Map<string, ProductStockTotal>>(new Map())
+  const [stockTotals, setStockTotals] = useState<Map<string, ProductStockTotal> | null>(null)
   const [stockRows, setStockRows] = useState<ProductWarehouseStockRow[]>([])
   const [categories, setCategories] = useState<ProductCategory[]>([])
   const [brands, setBrands] = useState<Brand[]>([])
@@ -302,6 +314,24 @@ export function Products() {
     page: page > 1 ? String(page) : null,
   })
 
+  // Carga de disponible de la página visible. Una respuesta de una página u
+  // orden de carga anterior se descarta (stockReqRef). Error = desconocido:
+  // "—" + botón de reintento, nunca 0.
+  const stockReqRef = useRef(0)
+  const [stockError, setStockError] = useState(false)
+  function loadStockTotals(list: ProductWithImages[]) {
+    const reqId = ++stockReqRef.current
+    setStockTotals(null)
+    setStockError(false)
+    listStockTotals(list.filter((p) => p.track_inventory).map((p) => p.id))
+      .then((totals) => {
+        if (stockReqRef.current === reqId) setStockTotals(totals.byProduct)
+      })
+      .catch(() => {
+        if (stockReqRef.current === reqId) setStockError(true)
+      })
+  }
+
   function reload() {
     if (!tenantId) return
     setLoading(true)
@@ -310,6 +340,8 @@ export function Products() {
       .then(({ data, count }) => {
         setProducts(data)
         setTotalCount(count)
+        // Disponible del backend, solo de los productos de esta página.
+        loadStockTotals(data)
         // Keeps an open edit drawer in sync (e.g. right after an image
         // upload/removal) instead of holding on to the stale snapshot it was
         // opened with -- the drawer's `product` prop is separate state from
@@ -318,7 +350,6 @@ export function Products() {
       })
       .catch((err) => setError(err.message ?? t('products.errors.load')))
       .finally(() => setLoading(false))
-    listStockTotalsByTenant(tenantId).then(setStockTotals).catch(() => {})
     // Desglose por bodega para QuickStockPopover cuando hay más de una --
     // se pide siempre (no solo si `warehouses.length > 1`) porque ese
     // estado se carga en un efecto aparte y todavía puede estar vacío la
@@ -556,14 +587,29 @@ export function Products() {
                           <span className="text-xs text-brand-400">{t('products.table.noControl')}</span>
                         ) : product.has_variants ? (
                           <Badge variant={lowStock ? 'destructive' : 'secondary'}>
-                            {t('products.table.available', { count: availableStock(product, stockTotals) })} {lowStock && t('products.table.low')}
+                            {availableStock(product, stockTotals) !== null ? t('products.table.available', { count: availableStock(product, stockTotals) as number }) : stockError ? (
+                              <button type="button" className="underline" onClick={() => products && loadStockTotals(products)}>
+                                — {t('common.actions.retry')}
+                              </button>
+                            ) : (
+                              '—'
+                            )} {lowStock && t('products.table.low')}
                           </Badge>
+                        ) : availableStock(product, stockTotals) === null || physicalStock(product, stockTotals) === null ? (
+                          stockError ? (
+                            <button type="button" className="text-xs text-brand-500 underline" onClick={() => products && loadStockTotals(products)}>
+                              — {t('common.actions.retry')}
+                            </button>
+                          ) : (
+                            <span className="text-xs text-brand-400">—</span>
+                          )
                         ) : (
                           <QuickStockPopover
                             product={product}
                             warehouses={warehouses}
                             stockRows={stockRows}
-                            currentTotal={availableStock(product, stockTotals)}
+                            currentTotal={physicalStock(product, stockTotals) as number}
+                            availableTotal={availableStock(product, stockTotals) as number}
                             lowStock={lowStock}
                             onSaved={reload}
                           />

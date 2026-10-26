@@ -4,6 +4,14 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.37] - 2026-10-26
+
+### Added
+- **Reserva de stock al cargar productos.** Lo que cargas en una cuenta abierta del POS o en el carrito de la tienda queda reservado y baja el disponible al instante (disponible = físico − reservado), así que ya no aparece "no hay stock suficiente" al cobrar por una venta que se hizo mientras la mesa estaba abierta. Las mesas reservan hasta cerrarse; el carrito de la tienda pública reserva 15 minutos y luego libera el stock (el carrito queda marcado como abandonado). Si no hay disponible, el producto no se puede cargar.
+
+### Changed
+- **El disponible lo calcula el servidor.** POS, Órdenes, Productos, variantes y tienda muestran el disponible que devuelve el backend, y "Confirmar" en Órdenes lo decide el servidor. El ajuste rápido de stock en Productos sigue operando sobre el stock físico.
+
 ## [1.0.36] - 2026-10-26
 
 ### Changed

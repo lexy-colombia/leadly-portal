@@ -222,7 +222,7 @@ function VariantRow({
         placeholder={formatCurrency(product.retail_price, product.currency)}
         className={`w-24 shrink-0 ${ROW_FIELD_CLASS}`}
       />
-      <span className="w-16 shrink-0 text-xs text-brand-400">{stock ? stock.available : 0} disp.</span>
+      <span className="w-16 shrink-0 text-xs text-brand-400">{stock ? stock.available : '—'} disp.</span>
 
       <VariantImages tenantId={tenantId} product={product} variant={variant} images={variantImages} onChanged={onChanged} />
 

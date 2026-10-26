@@ -104,10 +104,9 @@ export interface StockShortfall {
    * no tiene selector) -- el chequeo del servidor sumó todas las bodegas. */
   warehouseId: string | null
   productName: string
-  /** sku/warehouseName solo los completa el chequeo cliente de abajo (para
-   * el diálogo de OrderDetail.tsx) -- el que devuelve calculate-order
-   * (ver ApiStockShortfall/mapApiStockShortfalls) no los necesita: nada los
-   * renderiza hoy fuera de ese diálogo, que solo muestra un conteo. */
+  /** sku/warehouseName ya no los completa nadie (el chequeo cliente se
+   * retiró; calculate-order no los devuelve). Se conservan opcionales por
+   * compatibilidad de tipo. */
   sku?: string | null
   warehouseName?: string
   requested: number
@@ -138,44 +137,6 @@ export function mapApiStockShortfalls(shortfalls: ApiStockShortfall[]): StockSho
     available: s.available,
     requested: s.requested,
   }))
-}
-
-/** Fresh product_stock read (not whatever snapshot the page happened to
- * load on mount) for every line that points at a real product+warehouse --
- * called at the exact moment a cotización turns into a venta (see
- * OrderDetail.tsx's handleStatusSelect/handleCreate and Orders.tsx's
- * handleConfirm), never while it's still a cotización, which is allowed to
- * quote more than what's physically on hand. Lines without a product_id
- * (custom lines) or without a warehouse chosen are skipped -- there's
- * nothing to check them against. */
-export async function findStockShortfalls(tenantId: string, items: OrderItemInput[], warehouses: { id: string; name: string }[]): Promise<StockShortfall[]> {
-  const relevant = items.filter((i) => i.product_id && i.warehouse_id && i.quantity > 0)
-  if (relevant.length === 0) return []
-
-  const productIds = Array.from(new Set(relevant.map((i) => i.product_id as string)))
-  const { data, error } = await supabase.from('product_stock').select('product_id, variant_id, warehouse_id, quantity').eq('tenant_id', tenantId).in('product_id', productIds)
-  if (error) throw error
-  const rows = data as { product_id: string; variant_id: string | null; warehouse_id: string; quantity: number }[]
-
-  const shortfalls: StockShortfall[] = []
-  for (const item of relevant) {
-    const available = rows
-      .filter((r) => r.product_id === item.product_id && r.warehouse_id === item.warehouse_id && r.variant_id === (item.variant_id ?? null))
-      .reduce((sum, r) => sum + r.quantity, 0)
-    if (available < item.quantity) {
-      shortfalls.push({
-        productId: item.product_id as string,
-        variantId: item.variant_id ?? null,
-        warehouseId: item.warehouse_id as string,
-        productName: item.product_name,
-        sku: item.sku ?? null,
-        warehouseName: warehouses.find((w) => w.id === item.warehouse_id)?.name ?? '—',
-        requested: item.quantity,
-        available,
-      })
-    }
-  }
-  return shortfalls
 }
 
 export interface OrderInput {
@@ -515,9 +476,9 @@ export interface OrderTotalsBreakdown {
  * real con el mismo computeOrderTotals que después persiste el pedido.
  * Nunca se calcula acá -- ver la regla del proyecto de cero lógica de
  * negocio en el frontend. */
-async function invokePreview(items: OrderItemInput[], shipping: number): Promise<{ totals: OrderTotalsBreakdown; stock_shortfalls?: ApiStockShortfall[] }> {
+async function invokePreview(items: OrderItemInput[], shipping: number, cartId?: string | null): Promise<{ totals: OrderTotalsBreakdown; stock_shortfalls?: ApiStockShortfall[] }> {
   const { data, error } = await supabase.functions.invoke<{ totals: OrderTotalsBreakdown; stock_shortfalls?: ApiStockShortfall[]; error?: string }>('calculate-order', {
-    body: { preview: true, items, shipping },
+    body: { preview: true, items, shipping, ...(cartId ? { cart_id: cartId } : {}) },
   })
   if (error) {
     const context = (error as { context?: Response }).context
@@ -537,16 +498,19 @@ async function invokePreview(items: OrderItemInput[], shipping: number): Promise
   return data as { totals: OrderTotalsBreakdown; stock_shortfalls?: ApiStockShortfall[] }
 }
 
-export async function previewOrderTotals(items: OrderItemInput[], shipping = 0): Promise<OrderTotalsBreakdown> {
-  const result = await invokePreview(items, shipping)
+export async function previewOrderTotals(items: OrderItemInput[], shipping = 0, cartId?: string | null): Promise<OrderTotalsBreakdown> {
+  const result = await invokePreview(items, shipping, cartId)
   return result.totals
 }
 
-/** Mismo preview de arriba, pero además trae `stockShortfalls` -- usado por
+/** `cartId` = la cuenta abierta que se está previsualizando: el backend
+ * excluye la reserva de ESA cuenta al comparar contra el disponible (sin él,
+ * las líneas propias se marcarían en rojo contra su propia reserva). Mismo
+ * preview de arriba, pero además trae `stockShortfalls` -- usado por
  * useOrderTotalsPreview para que el POS pueda resaltar/deshabilitar sin
  * calcular nada por su cuenta (ver mapApiStockShortfalls). */
-export async function previewOrderTotalsWithStock(items: OrderItemInput[], shipping = 0): Promise<{ totals: OrderTotalsBreakdown; stockShortfalls: StockShortfall[] }> {
-  const result = await invokePreview(items, shipping)
+export async function previewOrderTotalsWithStock(items: OrderItemInput[], shipping = 0, cartId?: string | null): Promise<{ totals: OrderTotalsBreakdown; stockShortfalls: StockShortfall[] }> {
+  const result = await invokePreview(items, shipping, cartId)
   return { totals: result.totals, stockShortfalls: mapApiStockShortfalls(result.stock_shortfalls ?? []) }
 }
 

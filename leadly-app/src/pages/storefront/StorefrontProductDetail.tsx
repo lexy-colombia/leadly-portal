@@ -100,7 +100,7 @@ export function StorefrontProductDetail() {
   const selectedVariant = product.variants.find((v) => v.id === variantId)
   const price = product.has_variants ? (selectedVariant?.price ?? product.price) : product.price
   const images = product.images.length > 0 ? product.images : [{ url: '', variant_id: null }]
-  const available = product.has_variants ? (selectedVariant ? (selectedVariant.available ?? 0) : null) : product.available
+  const available = product.has_variants ? (selectedVariant ? (selectedVariant.available ?? null) : null) : product.available
   const outOfStock = available !== null && available <= 0
   const lowStock = available !== null && available > 0 && available <= 5
 

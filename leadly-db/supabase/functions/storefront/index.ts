@@ -19,6 +19,7 @@ import { chargeSalesOrderToCredit, createSalesOrderPaymentLink } from "../_share
 import { isTenantTaxEnabled } from "../_shared/invoicing/queueInvoiceGeneration.ts";
 import { sendWhatsappTemplate } from "../_shared/whatsapp.ts";
 import { splitPhone } from "../_shared/phone.ts";
+import { loadAvailabilitySummary, parseStockRejection } from "../_shared/orders/stockAvailability.ts";
 
 const CATALOG_PAGE_SIZE = 20;
 const OTP_TTL_MINUTES = 10;
@@ -93,6 +94,20 @@ async function resolveCart(adminClient: SupabaseClient, sessionToken: string): P
 
 function assertCartOpen(cart: { status: string }) {
   if (cart.status !== "open") throw new StorefrontError("Este carrito ya fue completado.", 409);
+}
+
+/** Traduce el rechazo de reserva (LX422, ver migración 20261026120000) a un
+ * mensaje claro para el visitante. La tienda reserva el stock al cargar el
+ * carrito (15 min): si otra persona lo reservó primero, o la reserva propia
+ * venció y ya no hay, se rechaza con la cantidad que queda. Devuelve null si
+ * el error es de otra cosa. */
+function stockRejectionToError(error: { code?: string; message?: string; details?: string | null } | null): StorefrontError | null {
+  const rejection = parseStockRejection(error);
+  if (!rejection) return null;
+  const detail = rejection.shortfalls.length
+    ? rejection.shortfalls.map((s) => (s.available > 0 ? `"${s.product_name}" (quedan ${s.available})` : `"${s.product_name}" (agotado)`)).join(", ")
+    : null;
+  return new StorefrontError(detail ? `No hay stock suficiente para: ${detail}. Ajusta tu carrito e inténtalo de nuevo.` : rejection.message, 409);
 }
 
 async function handleAction(adminClient: SupabaseClient, action: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -397,6 +412,7 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       // el producto, así que se le arma un carrito nuevo en silencio en vez
       // de mostrarle "este carrito no existe".
       let cart: { id: string; tenant_id: string; session_token: string };
+      let createdCartId: string | null = null;
       if (existingCartRow && existingCartRow.status === "open") {
         cart = existingCartRow;
       } else {
@@ -408,6 +424,7 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
           .single();
         if (error) throw new Error(error.message);
         cart = created;
+        createdCartId = created.id;
       }
 
       // Validación de producto/variante + búsqueda del ítem que ya podría
@@ -471,12 +488,18 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
           .from("cart_items")
           .update({ quantity: existingItem.quantity + quantity, product_name: product.name, sku, unit_price: unitPrice })
           .eq("id", existingItem.id);
-        if (error) throw new Error(error.message);
+        if (error) throw stockRejectionToError(error) ?? new Error(error.message);
       } else {
         const { error } = await adminClient
           .from("cart_items")
           .insert({ cart_id: cart.id, product_id: product.id, variant_id: variantId, product_name: product.name, sku, quantity, unit_price: unitPrice });
-        if (error) throw new Error(error.message);
+        if (error) {
+          // Carrito creado en esta misma petición y sin stock para su primera
+          // línea: no se deja un carrito vacío huérfano (el visitante nunca
+          // llega a recibir su session_token).
+          if (createdCartId) await adminClient.from("carts").delete().eq("id", createdCartId).eq("tenant_id", cart.tenant_id);
+          throw stockRejectionToError(error) ?? new Error(error.message);
+        }
       }
 
       const [items, totals] = await Promise.all([loadCartItems(adminClient, cart.id), loadCartTotals(adminClient, cart.tenant_id, cart.id)]);
@@ -499,7 +522,7 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       // existe y es de este carrito -- el `select("id")` de la respuesta ya
       // dice si algo matcheó.
       const { data: updated, error } = await adminClient.from("cart_items").update({ quantity }).eq("id", itemId).eq("cart_id", cart.id).select("id");
-      if (error) throw new Error(error.message);
+      if (error) throw stockRejectionToError(error) ?? new Error(error.message);
       if (!updated || updated.length === 0) throw new StorefrontError("Ítem no encontrado.", 404);
       const [items, totals] = await Promise.all([loadCartItems(adminClient, cart.id), loadCartTotals(adminClient, cart.tenant_id, cart.id)]);
       return { items, totals };
@@ -701,6 +724,15 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
 
       const cartItems = await loadCartItemsForCheckout(adminClient, cart.id);
       if (cartItems.length === 0) throw new StorefrontError("El carrito está vacío.", 400);
+
+      // La reserva de la tienda dura 15 min: si venció, el carrito conserva sus
+      // líneas pero ya no tiene stock apartado, y el guard de confirmación solo
+      // vería el físico. Se RE-RESERVA aquí, antes de crear nada (ni cliente,
+      // ni direcciones, ni pedido): si otro ya tomó el stock, se rechaza con
+      // un mensaje claro y el carrito sigue abierto para ajustarlo. Si la
+      // reserva sigue vigente, esto la renueva y no puede fallar.
+      const { error: reserveError } = await adminClient.rpc("sync_cart_reservations", { p_cart_id: cart.id });
+      if (reserveError) throw stockRejectionToError(reserveError) ?? new Error(reserveError.message);
 
       const clientId = await resolveOrCreateClient(adminClient, cart.tenant_id, phone, fullName, documentType, documentNumber);
 
@@ -952,7 +984,7 @@ async function loadFirstImages(adminClient: SupabaseClient, productIds: string[]
   return images;
 }
 
-/** Una sola consulta a product_stock para toda la página de resultados --
+/** Disponible de toda la página de resultados en una sola RPC --
  * separa las filas "propias" de un producto simple (variant_id null) de las
  * de cada variante, en vez de sumar todo junto por product_id (eso mezclaría
  * el stock de todos los colores/tallas de un producto con variantes, mismo
@@ -962,19 +994,13 @@ async function loadStock(
   tenantId: string,
   productIds: string[],
 ): Promise<{ stockByProduct: Map<string, number>; stockByVariant: Map<string, number> }> {
-  const stockByProduct = new Map<string, number>();
-  const stockByVariant = new Map<string, number>();
-  if (productIds.length === 0) return { stockByProduct, stockByVariant };
-
-  const { data } = await adminClient.from("product_stock").select("product_id, variant_id, quantity").eq("tenant_id", tenantId).in("product_id", productIds);
-  for (const row of (data ?? []) as { product_id: string; variant_id: string | null; quantity: number }[]) {
-    if (row.variant_id) {
-      stockByVariant.set(row.variant_id, (stockByVariant.get(row.variant_id) ?? 0) + row.quantity);
-    } else {
-      stockByProduct.set(row.product_id, (stockByProduct.get(row.product_id) ?? 0) + row.quantity);
-    }
-  }
-  return { stockByProduct, stockByVariant };
+  // DISPONIBLE (físico - reservas vigentes de carritos, incluidas las de
+  // otros visitantes y las mesas abiertas del POS), no stock físico: misma
+  // fuente única que el POS y la IA (RPC stock_availability_rows). Es lo que
+  // alimenta `available` y los estados "Agotado" / "Quedan N" de la tienda.
+  if (productIds.length === 0) return { stockByProduct: new Map(), stockByVariant: new Map() };
+  const summary = await loadAvailabilitySummary(adminClient, tenantId, productIds);
+  return { stockByProduct: summary.byProductNoVariant, stockByVariant: summary.byVariant };
 }
 
 /** Variantes de todos los productos-con-variantes de la página, en un solo

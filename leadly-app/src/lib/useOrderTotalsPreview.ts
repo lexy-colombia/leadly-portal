@@ -43,6 +43,7 @@ export function useOrderTotalsPreview(
     debounceMs = 400,
     prefetched = null,
     hold = false,
+    cartId = null,
   }: {
     debounceMs?: number
     /** Totales ya calculados por el servidor al guardar (contrato de
@@ -53,6 +54,9 @@ export function useOrderTotalsPreview(
      * guardado no los trae (o falla), `hold` vuelve a false y el preview corre
      * como siempre. No cancela ni atenúa un preview ya pedido o resuelto. */
     hold?: boolean
+    /** Cuenta abierta (carrito) que se previsualiza: viaja como `cart_id` para
+     * que el backend no cuente la reserva de esta misma cuenta en contra. */
+    cartId?: string | null
   } = {},
 ): {
   totals: OrderTotalsBreakdown | null
@@ -132,7 +136,7 @@ export function useOrderTotalsPreview(
     if (hold) return
     const timer = setTimeout(() => {
       inflightSigRef.current = signature
-      previewOrderTotalsWithStock(items, shipping)
+      previewOrderTotalsWithStock(items, shipping, cartId)
         .then((result) => {
           if (requestRef.current !== requestId) return
           inflightSigRef.current = null
@@ -153,7 +157,7 @@ export function useOrderTotalsPreview(
     }, debounceMs)
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature, debounceMs, prefetchedMatches, hold])
+  }, [signature, debounceMs, prefetchedMatches, hold, cartId])
 
   if (prefetchedMatches && prefetched) return { totals: prefetched.totals, totalsSignature: signature, stockShortfalls: prefetched.stockShortfalls, loading: false, error: null }
   return { totals, totalsSignature, stockShortfalls, loading, error }

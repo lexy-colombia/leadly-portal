@@ -1,7 +1,7 @@
 import { supabase } from '../supabaseClient'
 import type { Product, ProductImage, ProductOption, ProductVariant } from '../../types/domain'
 import type { TranslationKey } from '../../i18n/translations'
-import { listProductIdsWithWarehouseStock, listStockTotalsByTenant } from './stockMovements'
+import { listProductIdsWithWarehouseStock, listStockTotals } from './stockMovements'
 
 export interface ProductInput {
   tenant_id: string
@@ -190,17 +190,20 @@ export async function listProducts(tenantId: string, params: ListProductsParams)
   if (productIds) intersect(productIds)
 
   if (warehouseId) {
-    intersect(await listProductIdsWithWarehouseStock(tenantId, warehouseId))
+    intersect(await listProductIdsWithWarehouseStock(warehouseId))
   }
 
   if (lowStockOnly) {
-    const [{ data: slim, error: slimError }, stockTotals] = await Promise.all([
-      supabase.from('products').select('id, low_stock_threshold').eq('tenant_id', tenantId).eq('track_inventory', true).is('deleted_at', null),
-      listStockTotalsByTenant(tenantId),
-    ])
+    const { data: slim, error: slimError } = await supabase.from('products').select('id, low_stock_threshold').eq('tenant_id', tenantId).eq('track_inventory', true).is('deleted_at', null)
     if (slimError) throw slimError
+    // Disponible que entrega el backend (reservas incluidas), por tandas de ids.
+    const { byProduct: stockTotals } = await listStockTotals((slim as { id: string }[]).map((p) => p.id))
     const lowStockIds = (slim as { id: string; low_stock_threshold: number }[])
-      .filter((p) => (stockTotals.get(p.id)?.available ?? 0) <= p.low_stock_threshold)
+      // Sin dato del backend = desconocido: no entra al filtro (nunca como 0).
+      .filter((p) => {
+        const total = stockTotals.get(p.id)
+        return total !== undefined && total.available <= p.low_stock_threshold
+      })
       .map((p) => p.id)
     intersect(lowStockIds)
   }

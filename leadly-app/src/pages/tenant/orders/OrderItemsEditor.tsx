@@ -12,21 +12,22 @@ import { ProductImage } from '@/components/atoms'
 import { TrashIcon } from '@/components/atoms/icons'
 import type { OrderItemInput, StockShortfall } from '../../../lib/api/orders'
 import { formatVariantLabel, getProductImageUrl, type ProductWithImages } from '../../../lib/api/products'
-import type { ProductWarehouseStockRow } from '../../../lib/api/stockMovements'
+import type { ProductWarehouseAvailabilityRow } from '../../../lib/api/stockMovements'
 import type { Brand, ProductCategory, ProductVariant, Warehouse } from '../../../types/domain'
 
 function formatCurrency(value: number, currency = 'COP'): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 }
 
-/** Sum of matching product_stock rows for one (product, variant, warehouse)
- * combination -- null when there isn't enough context yet (no product or no
+/** Disponible que ENTREGÓ el backend (`available` del DTO de disponibilidad:
+ * físico menos reservas de otras cuentas) para una combinación (producto,
+ * variante, bodega). Solo se lee y se suma lo que ya viene calculado; null when there isn't enough context yet (no product or no
  * warehouse picked on the line) to show a number at all. Variant-less
  * products only ever have variant_id null rows, so passing `variantId`
  * undefined/null there is correct, not a fallback. */
-function availableStock(rows: ProductWarehouseStockRow[], productId: string | null | undefined, variantId: string | null | undefined, warehouseId: string | null | undefined): number | null {
+function availableStock(rows: ProductWarehouseAvailabilityRow[], productId: string | null | undefined, variantId: string | null | undefined, warehouseId: string | null | undefined): number | null {
   if (!productId || !warehouseId) return null
-  return rows.filter((r) => r.product_id === productId && r.warehouse_id === warehouseId && r.variant_id === (variantId ?? null)).reduce((sum, r) => sum + r.quantity, 0)
+  return rows.filter((r) => r.product_id === productId && r.warehouse_id === warehouseId && r.variant_id === (variantId ?? null)).reduce((sum, r) => sum + r.available, 0)
 }
 
 /** Picks the line's photo: the variant's own image if one was uploaded for
@@ -84,7 +85,7 @@ export function OrderItemsEditor({
   categories: ProductCategory[]
   brands: Brand[]
   warehouses: Warehouse[]
-  stockRows: ProductWarehouseStockRow[]
+  stockRows: ProductWarehouseAvailabilityRow[]
   /** Lines a stock check just blocked on -- see StockShortfallDialog. Marks
    * that line's Cantidad input red so the agent doesn't have to cross-
    * reference the dialog's text against every row by eye. Cleared by the
@@ -176,7 +177,7 @@ export function OrderItemsEditor({
         if (activeOnly && !p.is_active) return false
         if (brandFilter && p.brand?.id !== brandFilter) return false
         if (categoryIds && !p.categories.some((c) => categoryIds.has(c.id))) return false
-        if (stockOnly && !stockLoading && !stockRows.some((r) => r.product_id === p.id && r.quantity > 0)) return false
+        if (stockOnly && !stockLoading && !stockRows.some((r) => r.product_id === p.id && r.available > 0)) return false
         if (q && !p.name.toLowerCase().includes(q) && !(p.sku ?? '').toLowerCase().includes(q) && !(p.barcode ?? '').toLowerCase().includes(q)) return false
         return true
       })

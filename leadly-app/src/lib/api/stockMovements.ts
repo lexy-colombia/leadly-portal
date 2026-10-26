@@ -47,64 +47,101 @@ export async function listStockByProduct(productId: string): Promise<ProductStoc
   return data
 }
 
+/** Totales de disponibilidad de UN producto o variante tal como los devuelve
+ * el backend (RPC `get_stock_availability_totals`): `available` es EL número
+ * a mostrar (físico menos lo reservado por OTROS carritos, nunca negativo);
+ * `physical` solo sirve para pantallas de AJUSTE de inventario (QuickStock),
+ * nunca para decidir si se puede vender. Nada se calcula acá. */
 export interface ProductStockTotal {
+  available: number
+  physical: number
+  reserved: number
+}
+
+export interface StockTotalsResult {
+  byProduct: Map<string, ProductStockTotal>
+  byVariant: Map<string, ProductStockTotal>
+}
+
+/** Fila del DTO `get_stock_availability` (por producto/variante/bodega). */
+export interface ProductWarehouseAvailabilityRow {
+  product_id: string
+  variant_id: string | null
+  warehouse_id: string
+  physical: number
+  reserved: number
   available: number
 }
 
-/** One query, summed client-side per product -- used by the products LIST
- * (Products.tsx) to show "available"/"low stock" at a glance without a
- * per-product round trip. `products` itself carries no stock counter
- * anymore (see types/domain.ts), so this is the only way the list can know
- * how much of a product exists across every warehouse. Deliberately NOT
- * variant-aware: it sums every product_stock row for the product regardless
- * of variant_id, so a variant product's total here still reads correctly
- * (see listStockTotalsByVariant below for the per-variant breakdown). */
-export async function listStockTotalsByTenant(tenantId: string): Promise<Map<string, ProductStockTotal>> {
-  const { data, error } = await supabase.from('product_stock').select('product_id, quantity').eq('tenant_id', tenantId)
-  if (error) throw error
+// La RPC trae una fila por producto + una por variante y PostgREST corta cada
+// respuesta en 1000 filas: se pide por tandas de ids Y cada tanda se pagina
+// con .range() (la RPC tiene orden estable: product_id, variant_id nulls
+// first, scope), así nunca se trunca en silencio aunque haya muchas variantes.
+const TOTALS_CHUNK = 50
+const TOTALS_PAGE = 1000
 
-  const totals = new Map<string, ProductStockTotal>()
-  for (const row of data as { product_id: string; quantity: number }[]) {
-    const existing = totals.get(row.product_id) ?? { available: 0 }
-    existing.available += row.quantity
-    totals.set(row.product_id, existing)
+/** Disponibilidad total (todas las bodegas) de estos productos, desde el
+ * backend. Un producto sin control de inventario NO aparece (= sin límite);
+ * un producto CON control que falte en el resultado es "desconocido" para el
+ * llamador (nunca 0).
+ * `excludeCartId`: la cuenta abierta propia, para que su reserva no cuente en
+ * contra de sí misma. Lanza si el backend falla (el llamador trata eso como
+ * "desconocido", no como cero). */
+export async function listStockTotals(productIds: string[], excludeCartId?: string | null): Promise<StockTotalsResult> {
+  const result: StockTotalsResult = { byProduct: new Map(), byVariant: new Map() }
+  const ids = Array.from(new Set(productIds))
+  for (let i = 0; i < ids.length; i += TOTALS_CHUNK) {
+    const chunk = ids.slice(i, i + TOTALS_CHUNK)
+    for (let from = 0; ; from += TOTALS_PAGE) {
+      const { data, error } = await supabase
+        .rpc('get_stock_availability_totals', { p_product_ids: chunk, p_exclude_cart_id: excludeCartId ?? null })
+        .range(from, from + TOTALS_PAGE - 1)
+      if (error) throw error
+      const page = (data ?? []) as { product_id: string; variant_id: string | null; scope: 'product' | 'variant'; physical: number; reserved: number; available: number }[]
+      for (const row of page) {
+        const total = { available: Number(row.available), physical: Number(row.physical), reserved: Number(row.reserved) }
+        if (row.scope === 'variant' && row.variant_id) result.byVariant.set(row.variant_id, total)
+        else if (row.scope === 'product') result.byProduct.set(row.product_id, total)
+      }
+      if (page.length < TOTALS_PAGE) break
+    }
   }
-  return totals
+  return result
 }
 
-/** Same shape as listStockTotalsByTenant but keyed by variant_id and scoped
- * to one product -- used by ProductVariantsCard's variant cards and by the
- * variant pickers (OrderItemsEditor/StockMovementDrawer) to show
- * available stock per combination. Rows with a null variant_id (the
- * product's own non-variant stock, which shouldn't exist once has_variants
- * is true, but could linger from before it was toggled on) are skipped --
- * they don't belong to any variant. */
-export async function listStockTotalsByVariant(productId: string): Promise<Map<string, ProductStockTotal>> {
-  const { data, error } = await supabase.from('product_stock').select('variant_id, quantity').eq('product_id', productId).not('variant_id', 'is', null)
-  if (error) throw error
-
-  const totals = new Map<string, ProductStockTotal>()
-  for (const row of data as { variant_id: string; quantity: number }[]) {
-    const existing = totals.get(row.variant_id) ?? { available: 0 }
-    existing.available += row.quantity
-    totals.set(row.variant_id, existing)
-  }
-  return totals
+/** Disponibilidad por variante de UN producto (tarjetas de variantes y
+ * selectores de variante) -- mismo origen que `listStockTotals`. */
+export async function listStockTotalsByVariant(productId: string, excludeCartId?: string | null): Promise<Map<string, ProductStockTotal>> {
+  return (await listStockTotals([productId], excludeCartId)).byVariant
 }
 
-/** Product ids that have stock (quantity > 0) in one specific warehouse --
- * used to prefilter the products list when the "bodega" filter is set (see
- * Products.tsx). A product with stock in other warehouses but not this one
- * is correctly excluded, unlike listStockTotalsByTenant's tenant-wide sum. */
-export async function listProductIdsWithWarehouseStock(tenantId: string, warehouseId: string): Promise<string[]> {
-  const { data, error } = await supabase
-    .from('product_stock')
-    .select('product_id')
-    .eq('tenant_id', tenantId)
-    .eq('warehouse_id', warehouseId)
-    .gt('quantity', 0)
-  if (error) throw error
-  return Array.from(new Set((data as { product_id: string }[]).map((r) => r.product_id)))
+/** Grilla completa de disponibilidad por (producto, variante, bodega), desde
+ * el backend, ya con orden estable en la RPC: se pagina con `.range()` hasta
+ * traer todo (tope de 1000 de PostgREST). `productIds` = null trae todo el
+ * tenant (el tenant sale de la sesión, no de un parámetro). Un producto sin
+ * control de inventario no aparece. */
+export async function listAvailabilityByWarehouse(options: { productIds?: string[] | null; excludeCartId?: string | null } = {}): Promise<ProductWarehouseAvailabilityRow[]> {
+  const { productIds = null, excludeCartId = null } = options
+  if (productIds && productIds.length === 0) return []
+  const pageSize = 1000
+  const rows: ProductWarehouseAvailabilityRow[] = []
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .rpc('get_stock_availability', { p_product_ids: productIds, p_exclude_cart_id: excludeCartId })
+      .range(from, from + pageSize - 1)
+    if (error) throw error
+    const page = (data ?? []) as ProductWarehouseAvailabilityRow[]
+    rows.push(...page.map((r) => ({ ...r, physical: Number(r.physical), reserved: Number(r.reserved), available: Number(r.available) })))
+    if (page.length < pageSize) break
+  }
+  return rows
+}
+
+/** Product ids con disponible > 0 en una bodega concreta (filtro "bodega" del
+ * listado de productos) -- sale de la disponibilidad del backend. */
+export async function listProductIdsWithWarehouseStock(warehouseId: string): Promise<string[]> {
+  const rows = await listAvailabilityByWarehouse()
+  return Array.from(new Set(rows.filter((r) => r.warehouse_id === warehouseId && r.available > 0).map((r) => r.product_id)))
 }
 
 export interface ProductWarehouseStockRow {
@@ -114,10 +151,10 @@ export interface ProductWarehouseStockRow {
   quantity: number
 }
 
-/** Full per-(product, variant, warehouse) grid for the tenant in one query --
- * used by OrderItemsEditor to show "X disp." for the specific warehouse
- * picked on each line. listStockTotalsByTenant/ByVariant only give the sum
- * across every warehouse, not "how much in warehouse Y specifically". */
+/** Grilla FÍSICA (product_stock) por producto/variante/bodega. Solo para
+ * pantallas de AJUSTE de inventario (QuickStockPopover de Products.tsx, que
+ * registra la diferencia contra el físico). NUNCA para decidir disponibilidad
+ * de venta: eso sale de `listAvailabilityByWarehouse` (reservas incluidas). */
 export async function listStockByWarehouse(tenantId: string): Promise<ProductWarehouseStockRow[]> {
   // PostgREST corta cada respuesta en `max_rows` (1000): un tenant con más
   // filas de product_stock (variantes x bodegas) recibiría la lista truncada y
@@ -140,19 +177,6 @@ export async function listStockByWarehouse(tenantId: string): Promise<ProductWar
     if (data.length < pageSize) break
   }
   return rows
-}
-
-/** Igual que `listStockByWarehouse` pero solo de estos productos -- para un
- * pedido bloqueado (OrderDetail) que solo muestra el disponible de sus líneas. */
-export async function listStockByWarehouseForProducts(tenantId: string, productIds: string[]): Promise<ProductWarehouseStockRow[]> {
-  if (productIds.length === 0) return []
-  const { data, error } = await supabase
-    .from('product_stock')
-    .select('product_id, variant_id, warehouse_id, quantity')
-    .eq('tenant_id', tenantId)
-    .in('product_id', productIds)
-  if (error) throw error
-  return data
 }
 
 export async function listMovementsForProduct(productId: string, limit = 20): Promise<StockMovementWithWarehouse[]> {
