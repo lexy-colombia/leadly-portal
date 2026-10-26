@@ -4,6 +4,11 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.36] - 2026-10-26
+
+### Changed
+- **Pantalla de bloqueo por mora rediseñada.** Ahora muestra "Reactiva tu acceso a Lexy" con una alerta de acceso suspendido, los comprobantes pendientes (período, vencimiento con marca de "Vencido" y monto) a la izquierda y un resumen con el total y un botón grande "Pagar ahora" a la derecha. Incluye una tarjeta "¿Ya realizaste el pago?" para verificar y se adapta a celular. Si hay varios comprobantes, el botón grande paga el más antiguo y cada fila trae su propio botón de pago.
+
 ## [1.0.35] - 2026-10-23
 
 ### Fixed
