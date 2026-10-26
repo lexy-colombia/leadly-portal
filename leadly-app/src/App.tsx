@@ -41,6 +41,8 @@ import { Pos } from "./pages/tenant/Pos";
 import { OrderDetail } from "./pages/tenant/OrderDetail";
 import { Credit } from "./pages/tenant/Credit";
 import { Reports } from "./pages/tenant/Reports";
+import { Materials } from "./pages/tenant/Materials";
+import { MaterialDetail } from "./pages/tenant/MaterialDetail";
 import { Returns } from "./pages/tenant/Returns";
 import { Calendar } from "./pages/tenant/Calendar";
 import { Billing as TenantBilling } from "./pages/tenant/Billing";
@@ -280,6 +282,22 @@ export default function App() {
                     element={
                       <RequireModule moduleKey="credit" action="credit.view">
                         <Credit />
+                      </RequireModule>
+                    }
+                  />
+                  <Route
+                    path="materials"
+                    element={
+                      <RequireModule moduleKey="materials" action="materials.view">
+                        <Materials />
+                      </RequireModule>
+                    }
+                  />
+                  <Route
+                    path="materials/:id"
+                    element={
+                      <RequireModule moduleKey="materials" action="materials.view">
+                        <MaterialDetail />
                       </RequireModule>
                     }
                   />

@@ -9,6 +9,7 @@ import {
   type TenantEntitlements,
 } from '../../../lib/api/billing'
 import type { BillingPlan, BillingSubscription } from '../../../types/domain'
+import { Card } from '@/components/molecules'
 import { PageSpinner } from '@/components/atoms'
 import { ConfirmDialog } from '@/components/organisms'
 import { Badge } from '@/components/ui/badge'
@@ -41,12 +42,8 @@ function formatMoney(amountCents: number, currency: string): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amountCents / 100)
 }
 
-/** The tenant's plan, shown in the client detail sidebar (identity/info
- * card) rather than buried inside the "Facturación" tab -- the plan isn't a
- * billing operation, it's a fact about the tenant (and drives limits like
- * max_users/max_whatsapp_lines that other tabs read), so it belongs next to
- * legal_name/document/etc, not next to the invoice list. Facturación stays
- * scoped to invoices/payments; this owns assign/change/cancel. */
+/** Subscription management and effective limits in the client detail's
+ * dedicated plan section. Invoice/payment operations remain separate. */
 export function TenantPlanSection({ tenantId, onPlanChange }: { tenantId: string; onPlanChange?: (plan: BillingPlan | null) => void }) {
   const { t } = useLanguage()
   const [subscription, setSubscription] = useState<BillingSubscription | null | undefined>(undefined)
@@ -143,7 +140,6 @@ export function TenantPlanSection({ tenantId, onPlanChange }: { tenantId: string
 
   return (
     <div>
-      <p className="mb-1.5 text-xs font-medium text-brand-400">{t('backoffice.tenantPlan.label')}</p>
 
       {subscription === undefined && <PageSpinner />}
 
@@ -178,84 +174,55 @@ export function TenantPlanSection({ tenantId, onPlanChange }: { tenantId: string
       )}
 
       {subscription && !showAssignForm && (
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-brand-800">{plan?.name ?? t('backoffice.tenantBilling.plan')}</span>
-            <Badge
-              variant="outline"
-              className={
-                subscription.status === 'ACTIVE'
-                  ? 'border-transparent bg-emerald-100 text-emerald-700'
-                  : subscription.status === 'PENDING_PAYMENT'
-                    ? 'border-transparent bg-amber-100 text-amber-700'
-                    : 'border-transparent bg-red-100 text-red-700'
-              }
-            >
-              {t(SUBSCRIPTION_STATUS_LABEL_KEY[subscription.status])}
-            </Badge>
-          </div>
-          {plan && (
-            <p className="text-xs text-brand-500">
-              {formatMoney(plan.amount_cents, plan.currency)}/{plan.billing_interval === 'monthly' ? t('backoffice.tenantBilling.perMonth') : t('backoffice.tenantBilling.perYear')}
-            </p>
-          )}
-          {subscription.cancel_at_period_end ? (
-            <p className="text-xs font-medium text-amber-600">
-              {t('backoffice.tenantPlan.cancelsOn', { date: formatDate(subscription.current_period_end) })}
-            </p>
-          ) : (
-            <p className="text-xs text-brand-400">{t('backoffice.tenantBilling.expires', { date: formatDate(subscription.current_period_end) })}</p>
-          )}
-          {plan?.is_custom && (
-            <p className="text-xs text-brand-500">
-              {subscription.custom_base_amount_cents != null
-                ? t('backoffice.tenantPlan.customBase', { amount: formatMoney(subscription.custom_base_amount_cents, plan.currency) })
-                : t('backoffice.tenantPlan.customPending')}
-            </p>
-          )}
-          {entitlementsError && <p className="text-xs text-red-600">{t('backoffice.tenantPlan.entitlementsError')}</p>}
-          {entitlements?.limits && (
-            <div className="mt-2 rounded-lg border border-brand-100 px-2.5 py-2">
-              <p className="mb-1 text-[11px] font-semibold tracking-wide text-brand-400 uppercase">{t('backoffice.tenantPlan.limits')}</p>
-              <dl className="space-y-0.5">
+        <div className="flex flex-col gap-4">
+          <div className="grid items-stretch gap-4 lg:grid-cols-2">
+            <Card className="flex flex-col gap-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-base font-bold text-foreground">{plan?.name ?? t('backoffice.tenantBilling.plan')}</h3>
+                <Badge variant="outline" className={subscription.status === 'ACTIVE' ? 'border-transparent bg-emerald-100 text-emerald-700' : subscription.status === 'PENDING_PAYMENT' ? 'border-transparent bg-amber-100 text-amber-700' : 'border-transparent bg-red-100 text-red-700'}>
+                  {t(SUBSCRIPTION_STATUS_LABEL_KEY[subscription.status])}
+                </Badge>
+              </div>
+              <div>
+                <p className="mb-1 text-xs text-muted-foreground">{t(plan?.is_custom ? 'backoffice.tenantPlan.negotiatedPrice' : 'backoffice.tenantPlan.planPrice')}</p>
+                {plan && (!plan.is_custom || subscription.custom_base_amount_cents != null) ? (
+                  <p className="text-2xl font-bold tracking-tight text-foreground">
+                    {formatMoney(plan.is_custom ? subscription.custom_base_amount_cents! : plan.amount_cents, plan.currency)}
+                    <span className="ml-1 text-xs font-normal tracking-normal text-muted-foreground">/ {plan.is_custom || plan.billing_interval === 'monthly' ? t('backoffice.tenantBilling.perMonth') : t('backoffice.tenantBilling.perYear')}</span>
+                  </p>
+                ) : <p className="text-xs text-muted-foreground">{t('backoffice.tenantPlan.customPending')}</p>}
+              </div>
+              <dl className="grid grid-cols-2 gap-3 border-t border-border pt-3 text-xs">
+                <div><dt className="text-muted-foreground">{t('backoffice.tenantPlan.periodStart')}</dt><dd className="mt-1 font-medium">{formatDate(subscription.current_period_start)}</dd></div>
+                <div><dt className="text-muted-foreground">{t('backoffice.tenantPlan.periodEnd')}</dt><dd className="mt-1 font-medium">{formatDate(subscription.current_period_end)}</dd></div>
+              </dl>
+              {subscription.cancel_at_period_end && <p className="text-xs text-amber-700">{t('backoffice.tenantPlan.cancelsOn', { date: formatDate(subscription.current_period_end) })}</p>}
+              <div className="mt-auto flex flex-wrap gap-2">
+                {plan?.is_custom && <Button size="sm" onClick={() => setNegotiationOpen(true)}>{t('backoffice.tenantPlan.editNegotiation')}</Button>}
+                <Button variant="outline" size="sm" onClick={() => setChangingPlan(true)}>{t('backoffice.tenantPlan.change')}</Button>
+              </div>
+            </Card>
+            <Card className="flex flex-col gap-3">
+              <h3 className="text-xs font-semibold text-foreground">{t('backoffice.tenantPlan.limits')}</h3>
+              {entitlementsError && <p role="alert" className="text-xs text-red-600">{t('backoffice.tenantPlan.entitlementsError')}</p>}
+              {!entitlements && !entitlementsError && <PageSpinner />}
+              {entitlements?.limits && <dl className="divide-y divide-border">
                 {LIMIT_ROWS.map((row) => {
                   const value = entitlements.limits?.[row.key]
-                  return (
-                    <div key={row.key} className="flex items-center justify-between gap-2 text-xs">
-                      <dt className="text-brand-500">{t(row.labelKey)}</dt>
-                      <dd className="font-medium text-brand-800">{value == null ? t('backoffice.facturacion.table.maxUsers.unlimited') : value}</dd>
-                    </div>
-                  )
+                  return <div key={row.key} className="flex items-center justify-between gap-3 py-2 text-xs"><dt className="text-muted-foreground">{t(row.labelKey)}</dt><dd className="font-medium text-foreground">{value == null ? t('backoffice.facturacion.table.maxUsers.unlimited') : value}</dd></div>
                 })}
-              </dl>
-              <p className="mt-1.5 text-xs text-brand-500">{t('backoffice.tenantPlan.modulesCount', { count: String(entitlements.modules.length) })}</p>
-            </div>
-          )}
-          <div className="flex flex-wrap gap-1.5 pt-1">
-            {plan?.is_custom && (
-              <Button size="xs" onClick={() => setNegotiationOpen(true)}>
-                {t('backoffice.tenantPlan.negotiate')}
-              </Button>
-            )}
-            <Button size="xs" variant="outline" onClick={() => setApplyOpen(true)}>
-              {t('backoffice.tenantPlan.applyToModules')}
-            </Button>
+              </dl>}
+            </Card>
           </div>
-          <div className="flex gap-1.5 pt-0.5">
-            <button type="button" onClick={() => setChangingPlan(true)} className="text-xs font-medium text-accent-600 hover:text-accent-700">
-              {t('backoffice.tenantPlan.change')}
-            </button>
+          <Card className="flex flex-wrap items-center justify-between gap-3">
+            <div><h3 className="text-xs font-semibold">{t('backoffice.tenantPlan.moduleAccess')}</h3><p className="mt-1 text-xs text-muted-foreground">{entitlements ? t('backoffice.tenantPlan.modulesCount', { count: String(entitlements.modules.length) }) : '—'}</p></div>
+            <Button size="sm" variant="outline" onClick={() => setApplyOpen(true)}>{t('backoffice.tenantPlan.applyToModules')}</Button>
+          </Card>
+          <div className="flex justify-end border-t border-border pt-3">
             {subscription.cancel_at_period_end ? (
-              <button type="button" onClick={handleReactivate} disabled={reactivating} className="text-xs font-medium text-accent-600 hover:text-accent-700">
-                {reactivating ? t('backoffice.tenantPlan.reactivating') : t('backoffice.tenantPlan.reactivate')}
-              </button>
-            ) : (
-              subscription.status !== 'CANCELLED' &&
-              subscription.status !== 'EXPIRED' && (
-                <button type="button" onClick={() => setCancelConfirmOpen(true)} className="text-xs font-medium text-red-600 hover:text-red-700">
-                  {t('backoffice.tenantBilling.cancelSubscription')}
-                </button>
-              )
+              <Button variant="outline" size="sm" onClick={handleReactivate} disabled={reactivating}>{reactivating ? t('backoffice.tenantPlan.reactivating') : t('backoffice.tenantPlan.reactivate')}</Button>
+            ) : subscription.status !== 'CANCELLED' && subscription.status !== 'EXPIRED' && (
+              <button type="button" onClick={() => setCancelConfirmOpen(true)} className="rounded-sm text-xs text-destructive outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring">{t('backoffice.tenantBilling.cancelSubscription')}</button>
             )}
           </div>
         </div>

@@ -82,7 +82,7 @@ function NavLeaf({ item, onNavigate }: { item: NavItem; onNavigate: () => void }
 
 function NavGroup({ item, onNavigate }: { item: NavItem; onNavigate: () => void }) {
   const { pathname } = useLocation()
-  const { state } = useSidebar()
+  const { state, setOpen: setSidebarOpen } = useSidebar()
   const children = item.children!
   // Prefix-matching (pathname.startsWith(`${c.to}/`)) is only meaningful for
   // a child that is its own real section with sub-pages (e.g. /app/opportunities
@@ -99,18 +99,13 @@ function NavGroup({ item, onNavigate }: { item: NavItem; onNavigate: () => void 
   )
   const [open, setOpen] = useState(isChildActive)
 
-  // Collapsed (icon-only) rail has no room for an expandable submenu -- the
-  // group icon becomes a plain shortcut to its first child instead, same as
-  // the original SidebarNavItem. No shadcn primitive covers this by itself,
-  // it is entirely this app's own behavior layered on top of `useSidebar()`.
+  // Groups only expand navigation, including from the collapsed rail.
   if (state === 'collapsed') {
     return (
       <SidebarMenuItem>
-        <SidebarMenuButton asChild isActive={isChildActive} tooltip={item.label} size="sm" className={ITEM_CLASSES}>
-          <NavLink to={children[0].to} onClick={onNavigate}>
-            <ItemIcon icon={item.icon} />
-            <span>{item.label}</span>
-          </NavLink>
+        <SidebarMenuButton isActive={isChildActive} tooltip={item.label} size="sm" className={ITEM_CLASSES} onClick={() => { setSidebarOpen(true); setOpen(true) }} aria-label={item.label} aria-expanded={false}>
+          <ItemIcon icon={item.icon} />
+          <span>{item.label}</span>
         </SidebarMenuButton>
       </SidebarMenuItem>
     )

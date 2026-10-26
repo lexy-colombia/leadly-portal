@@ -28,6 +28,13 @@ export interface StockShortfall {
   product_name: string;
   available: number;
   requested: number;
+  /** Solo en faltantes de productos `recipe` (ficha técnica, migración
+   * 20261027130000): `product_id` es el producto vendido, `available` son las
+   * unidades de ESE producto que alcanzan con el insumo, y estos campos dicen
+   * qué insumo no alcanza. `material_name` null = producto recipe sin ficha. */
+  material_id?: string | null;
+  material_name?: string | null;
+  unit?: string | null;
 }
 
 /** Una fila de la disponibilidad unificada (RPC `stock_availability_rows`,
@@ -126,15 +133,19 @@ export async function findStockShortfalls(
   // y el filtro por track_inventory se aplica en memoria. Precedencia de
   // errores igual que antes: primero el de products, luego el de stock.
   const [{ data: products, error: productsError }, availability] = await Promise.all([
-    adminClient.from("products").select("id, track_inventory").eq("tenant_id", tenantId).in("id", productIds),
+    adminClient.from("products").select("id, track_inventory, inventory_mode").eq("tenant_id", tenantId).in("id", productIds),
     loadAvailabilityRows(adminClient, tenantId, productIds, options.excludeCartId ?? null).then(
       (rows) => ({ ok: true as const, rows }),
       (error) => ({ ok: false as const, error }),
     ),
   ]);
   if (productsError) throw new Error(productsError.message);
-  const trackedIds = new Set((products ?? []).filter((p) => p.track_inventory).map((p) => p.id as string));
-  if (trackedIds.size === 0) return [];
+  // Productos `recipe` (sin stock propio): su disponible sale de los insumos de
+  // su ficha y se resuelve aparte (RPC recipe_shortfalls). Los `stock` siguen
+  // exactamente el camino de siempre.
+  const recipeIds = new Set((products ?? []).filter((p) => p.inventory_mode === "recipe").map((p) => p.id as string));
+  const trackedIds = new Set((products ?? []).filter((p) => p.track_inventory && p.inventory_mode !== "recipe").map((p) => p.id as string));
+  if (trackedIds.size === 0 && recipeIds.size === 0) return [];
   if (!availability.ok) throw availability.error instanceof Error ? availability.error : new Error(String(availability.error));
 
   // Disponible = físico - reservado de otros, por total (línea sin bodega:
@@ -179,7 +190,51 @@ export async function findStockShortfalls(
       });
     }
   }
+  if (recipeIds.size > 0) {
+    shortfalls.push(...(await findRecipeShortfalls(adminClient, tenantId, items.filter((i) => i.product_id && recipeIds.has(i.product_id)), options.excludeCartId ?? null)));
+  }
   return shortfalls;
+}
+
+interface RecipeShortfallRow {
+  product_id: string;
+  product_name: string;
+  material_id: string | null;
+  material_name: string | null;
+  unit: string | null;
+  available_units: number | string;
+  requested: number | string;
+}
+
+/** Faltantes de insumos de los productos `recipe` (RPC `recipe_shortfalls`).
+ * El consumo se suma ENTRE líneas (insumos compartidos) y se compara contra
+ * existencias - reservas de otros carritos. Una fila por (producto, insumo
+ * corto); un producto recipe sin ficha sale con material_name null. */
+async function findRecipeShortfalls(
+  adminClient: SupabaseClient,
+  tenantId: string,
+  items: StockCheckItem[],
+  excludeCartId: string | null,
+): Promise<StockShortfall[]> {
+  const lines = items.filter((i) => i.product_id && i.quantity > 0).map((i) => ({ product_id: i.product_id, quantity: i.quantity }));
+  if (lines.length === 0) return [];
+  const { data, error } = await adminClient.rpc("recipe_shortfalls", {
+    p_tenant_id: tenantId,
+    p_items: lines,
+    p_exclude_cart_id: excludeCartId,
+  });
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as RecipeShortfallRow[]).map((r) => ({
+    product_id: r.product_id,
+    variant_id: null,
+    warehouse_id: null,
+    product_name: r.product_name,
+    available: Number(r.available_units),
+    requested: Number(r.requested),
+    material_id: r.material_id,
+    material_name: r.material_name,
+    unit: r.unit,
+  }));
 }
 
 /** SQLSTATE que lanza `sync_cart_reservations` / `save_cart_lines` cuando una
@@ -202,6 +257,9 @@ export function parseStockRejection(error: { code?: string; message?: string; de
         product_name: String(s.product_name ?? ""),
         available: Number(s.available),
         requested: Number(s.requested),
+        material_id: s.material_id ?? null,
+        material_name: s.material_name ?? null,
+        unit: s.unit ?? null,
       }));
     }
   } catch {

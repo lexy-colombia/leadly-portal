@@ -437,8 +437,73 @@ export interface Product {
    * CLAUDE.md: ningún producto aparece en /tienda/:slug hasta que el tenant
    * lo marque a propósito, distinto de is_active ("vendible en general"). */
   is_visible_in_catalog: boolean
+  /** 'stock' = stock propio (como siempre); 'recipe' = se arma con insumos
+   * (ficha técnica, product_bom): no tiene stock propio y su disponible lo
+   * deriva el backend de los insumos. */
+  inventory_mode: InventoryMode
   deleted_at: string | null
   deleted_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type InventoryMode = 'stock' | 'recipe'
+
+// --- Insumos y ficha técnica (contrato A, progress/contract_A_insumos.md).
+// Una unidad por insumo, cantidades decimales, sin conversión de unidades.
+export type MaterialUnit = 'un' | 'kg' | 'g' | 'l' | 'ml' | 'm' | 'cm' | 'm2'
+
+export interface Material {
+  id: string
+  tenant_id: string
+  name: string
+  sku: string | null
+  unit: MaterialUnit
+  /** Costo unitario, informativo. */
+  cost: number
+  min_stock: number | null
+  is_active: boolean
+  notes: string | null
+  deleted_at: string | null
+  deleted_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type MaterialMovementType = 'entrada' | 'salida' | 'ajuste_positivo' | 'ajuste_negativo' | 'carga_inicial'
+export type MaterialReferenceType = 'carga_inicial' | 'compra' | 'venta' | 'ajuste_manual' | 'devolucion' | 'produccion'
+
+export interface MaterialStock {
+  tenant_id: string
+  material_id: string
+  warehouse_id: string
+  quantity: number
+}
+
+export interface MaterialMovement {
+  id: string
+  tenant_id: string
+  material_id: string
+  warehouse_id: string
+  movement_type: MaterialMovementType
+  quantity: number
+  unit_cost: number | null
+  reference_type: MaterialReferenceType
+  reference_id: string | null
+  notes: string | null
+  created_by: string | null
+  created_at: string
+}
+
+/** Línea de la ficha técnica: cuánto insumo (en la unidad del insumo) se
+ * consume por 1 unidad vendida del producto. */
+export interface ProductBomLine {
+  id: string
+  tenant_id: string
+  product_id: string
+  material_id: string
+  quantity: number
+  notes: string | null
   created_at: string
   updated_at: string
 }

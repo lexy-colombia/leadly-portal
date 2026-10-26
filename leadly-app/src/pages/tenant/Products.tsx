@@ -60,7 +60,8 @@ function physicalStock(product: ProductWithImages, stockTotals: Map<string, Prod
 
 function isLowStock(product: ProductWithImages, stockTotals: Map<string, ProductStockTotal> | null): boolean {
   const available = availableStock(product, stockTotals)
-  return product.track_inventory && available !== null && available <= product.low_stock_threshold
+  // Un producto que se arma con insumos no usa low_stock_threshold (campo oculto en su ficha).
+  return product.inventory_mode !== 'recipe' && product.track_inventory && available !== null && available <= product.low_stock_threshold
 }
 
 function warehouseStock(rows: ProductWarehouseStockRow[], productId: string, warehouseId: string): number {
@@ -154,7 +155,7 @@ function QuickStockPopover({
   if (warehouses.length === 0) {
     return (
       <Badge variant={lowStock ? 'destructive' : 'secondary'}>
-        {t('products.table.available', { count: availableTotal })} {lowStock && t('products.table.low')}
+        {t('products.table.available', { count: availableTotal })} {lowStock && <span className="sr-only">{t('products.table.low')}</span>}
       </Badge>
     )
   }
@@ -164,7 +165,7 @@ function QuickStockPopover({
       <PopoverTrigger asChild>
         <button type="button" className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent-300">
           <Badge variant={lowStock ? 'destructive' : 'secondary'} className="cursor-pointer transition hover:brightness-95">
-            {t('products.table.available', { count: availableTotal })} {lowStock && t('products.table.low')}
+            {t('products.table.available', { count: availableTotal })} {lowStock && <span className="sr-only">{t('products.table.low')}</span>}
           </Badge>
         </button>
       </PopoverTrigger>
@@ -585,6 +586,22 @@ export function Products() {
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         {!product.track_inventory ? (
                           <span className="text-xs text-brand-400">{t('products.table.noControl')}</span>
+                        ) : product.inventory_mode === 'recipe' ? (
+                          // Se arma con insumos: sin stock propio, así que NO hay
+                          // QuickStockPopover (no hay qué ajustar acá); el disponible
+                          // lo deriva el backend de los insumos.
+                          <span className="inline-flex items-center gap-1.5">
+                            <Badge variant={lowStock ? 'destructive' : 'secondary'}>
+                              {availableStock(product, stockTotals) !== null ? t('products.table.available', { count: availableStock(product, stockTotals) as number }) : stockError ? (
+                                <button type="button" className="underline" onClick={() => products && loadStockTotals(products)}>
+                                  — {t('common.actions.retry')}
+                                </button>
+                              ) : (
+                                '—'
+                              )} {lowStock && <span className="sr-only">{t('products.table.low')}</span>}
+                            </Badge>
+                            <span className="text-[11px] text-brand-400">{t('products.table.recipe')}</span>
+                          </span>
                         ) : product.has_variants ? (
                           <Badge variant={lowStock ? 'destructive' : 'secondary'}>
                             {availableStock(product, stockTotals) !== null ? t('products.table.available', { count: availableStock(product, stockTotals) as number }) : stockError ? (
@@ -593,7 +610,7 @@ export function Products() {
                               </button>
                             ) : (
                               '—'
-                            )} {lowStock && t('products.table.low')}
+                            )} {lowStock && <span className="sr-only">{t('products.table.low')}</span>}
                           </Badge>
                         ) : availableStock(product, stockTotals) === null || physicalStock(product, stockTotals) === null ? (
                           stockError ? (

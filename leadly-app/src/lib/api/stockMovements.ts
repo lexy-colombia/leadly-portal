@@ -179,15 +179,23 @@ export async function listStockByWarehouse(tenantId: string): Promise<ProductWar
   return rows
 }
 
-export async function listMovementsForProduct(productId: string, limit = 20): Promise<StockMovementWithWarehouse[]> {
-  const { data, error } = await supabase
-    .from('stock_movements')
-    .select('*, warehouse:warehouses(id, name)')
-    .eq('product_id', productId)
-    .order('created_at', { ascending: false })
-    .limit(limit)
-  if (error) throw error
-  return data
+/** Read complete history in bounded requests; pair transfers before UI pagination. */
+export async function listMovementsForProduct(productId: string): Promise<StockMovementWithWarehouse[]> {
+  const pageSize = 500
+  const rows: StockMovementWithWarehouse[] = []
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from('stock_movements')
+      .select('*, warehouse:warehouses(id, name)')
+      .eq('product_id', productId)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, from + pageSize - 1)
+    if (error) throw error
+    rows.push(...data)
+    if (data.length < pageSize) break
+  }
+  return rows
 }
 
 export interface StockMovementInput {

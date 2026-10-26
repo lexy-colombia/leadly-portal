@@ -418,5 +418,22 @@
   "backoffice.negotiation.invoice.created": "Comprobante {number} emitido",
   "backoffice.negotiation.invoice.createdNoNumber": "Comprobante emitido",
   "backoffice.negotiation.invoice.nothing": "No hay nada que cobrar para este período o ya existe un comprobante.",
-  "backoffice.negotiation.errors.invoice": "No se pudo emitir el comprobante."
+  "backoffice.negotiation.errors.invoice": "No se pudo emitir el comprobante.",
+  "backoffice.clienteDetalle.modules.includedIn": "Incluido en {module}",
+  "backoffice.clienteDetalle.sections": "Secciones del cliente",
+  "backoffice.clienteDetalle.tabs.resumen": "Resumen",
+  "backoffice.clienteDetalle.tabs.plan": "Plan y límites",
+  "backoffice.clienteDetalle.overviewHint": "Información de la empresa y datos de contacto.",
+  "backoffice.clienteDetalle.companyInfo": "Datos de la empresa",
+  "backoffice.clienteDetalle.contactInfo": "Contacto",
+  "backoffice.clienteDetalle.managePlan": "Gestionar plan",
+  "backoffice.tenantPlan.negotiatedPrice": "Precio base negociado",
+  "backoffice.tenantPlan.planPrice": "Precio del plan",
+  "backoffice.tenantPlan.periodStart": "Inicio del período",
+  "backoffice.tenantPlan.periodEnd": "Fin del período",
+  "backoffice.tenantPlan.editNegotiation": "Editar negociación",
+  "backoffice.tenantPlan.moduleAccess": "Acceso a módulos",
+  "backoffice.clienteDetalle.modules.general": "Módulos generales",
+  "backoffice.clienteDetalle.modules.parents": "Módulos",
+  "backoffice.clienteDetalle.modules.noChildren": "Este módulo no tiene submódulos. Su acceso se gestiona desde la columna izquierda."
 }

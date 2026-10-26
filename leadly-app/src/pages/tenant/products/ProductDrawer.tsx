@@ -1,22 +1,24 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 import { CheckIcon, PlusIcon as PlusIconLucide, XIcon } from 'lucide-react'
+import { FormSection as Section, FormToggle } from '@/components/molecules/FormSection'
+import { ImageGalleryField } from '@/components/molecules/ImageGalleryField'
 import { cn } from '@/lib/utils'
 import { createProduct, deleteProductImage, getProductImageUrl, updateProduct, uploadProductImage, validateProductImageFile } from '../../../lib/api/products'
 import type { ProductWithImages } from '../../../lib/api/products'
 import { listProductCategories, flattenCategoryTree } from '../../../lib/api/productCategories'
 import { listSuppliers } from '../../../lib/api/suppliers'
 import { listBrands } from '../../../lib/api/brands'
-import type { Brand, ProductCategory, Supplier } from '../../../types/domain'
+import type { Brand, InventoryMode, ProductCategory, Supplier } from '../../../types/domain'
+import { usePermission } from '../../../contexts/AuthContext'
+import { ProductBomSection } from './ProductBomSection'
 import { useLanguage } from '../../../contexts/LanguageContext'
-import { FieldError, ProductImage } from '@/components/atoms'
+import { FieldError } from '@/components/atoms'
 import { ComboboxFilter, CurrencyInput } from '@/components/molecules'
 import { Drawer } from '@/components/organisms'
-import { PlusIcon, TrashIcon } from '@/components/atoms/icons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -40,88 +42,58 @@ const TEXTAREA_CLASS = '!rounded-lg !py-1.5 !text-xs'
 // to fill what's left instead.
 const COMBOBOX_TRIGGER_CLASS = 'flex-1 !rounded-lg'
 
-/** Small uppercase label above a group of related fields -- breaks the form
- * into scannable sections (Información básica / Categorización / Precios /
- * Inventario) instead of one undifferentiated stack, the main thing that
- * made the old version feel like a wall of fields. */
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="space-y-2.5">
-      <p className="text-[11px] font-semibold tracking-wide text-brand-400 uppercase">{title}</p>
-      {children}
-    </div>
-  )
-}
-
 /** Images only make sense once the product exists in the DB
  * (product_images.product_id needs a real row to point at) -- same
  * rule as TaskAttachments, so this section only renders while editing. */
 function ProductImages({ tenantId, product, onChanged }: { tenantId: string; product: ProductWithImages; onChanged: () => void }) {
   const { t } = useLanguage()
-  const inputRef = useRef<HTMLInputElement>(null)
+  const [images, setImages] = useState(product.images)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  useEffect(() => setImages(product.images), [product.id, product.images])
 
-  async function handleSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0] ?? null
-    e.target.value = ''
-    if (!file) return
-    const validationError = validateProductImageFile(file)
-    if (validationError) {
-      setError(t(validationError))
-      return
-    }
+  async function handleSelect(files: File[]) {
+    const invalid = files.map(validateProductImageFile).find(Boolean)
+    if (invalid) { setError(t(invalid)); return }
     setError(null)
     setUploading(true)
+    let changed = false
     try {
-      await uploadProductImage(tenantId, product.id, file, product.images.length)
-      onChanged()
+      let order = Math.max(-1, ...images.map((image) => image.display_order)) + 1
+      for (const file of files) {
+        const image = await uploadProductImage(tenantId, product.id, file, order++)
+        setImages((prev) => [...prev, image])
+        changed = true
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('products.drawer.images.uploadError'))
+    } finally {
+      setUploading(false)
+      if (changed) onChanged()
+    }
+  }
+
+  async function handleRemove(imageId: string) {
+    const image = images.find((item) => item.id === imageId)
+    if (!image) return
+    setUploading(true)
+    setError(null)
+    try {
+      await deleteProductImage(image.id, image.storage_path)
+      setImages((prev) => prev.filter((item) => item.id !== imageId))
+      onChanged()
+    } catch {
+      setError(t('products.drawer.images.removeError'))
     } finally {
       setUploading(false)
     }
   }
 
-  async function handleRemove(imageId: string, storagePath: string) {
-    try {
-      await deleteProductImage(imageId, storagePath)
-      onChanged()
-    } catch {
-      setError(t('products.drawer.images.removeError'))
-    }
-  }
-
-  return (
-    <Section title={t('products.drawer.images.label')}>
-      <div className="flex flex-wrap gap-2">
-        {product.images.map((img) => (
-          <div key={img.id} className="group relative h-16 w-16 overflow-hidden rounded-lg border border-brand-100">
-            <img src={getProductImageUrl(img.storage_path)} alt="" className="h-full w-full object-cover" />
-            <button
-              type="button"
-              onClick={() => handleRemove(img.id, img.storage_path)}
-              className="absolute inset-0 flex items-center justify-center bg-black/50 text-white opacity-0 transition-opacity group-hover:opacity-100"
-              aria-label={t('products.drawer.images.removeAria')}
-            >
-              <TrashIcon width={16} height={16} />
-            </button>
-          </div>
-        ))}
-        <button
-          type="button"
-          onClick={() => inputRef.current?.click()}
-          disabled={uploading}
-          className="flex h-16 w-16 items-center justify-center rounded-lg border border-dashed border-brand-300 text-brand-400 hover:border-accent-400 hover:text-accent-500"
-        >
-          <PlusIcon width={16} height={16} />
-        </button>
-      </div>
-      <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={handleSelect} />
-      {uploading && <p className="text-xs text-brand-400">{t('products.drawer.images.uploading')}</p>}
-      {error && <p className="text-xs text-red-600">{error}</p>}
-    </Section>
-  )
+  return <div className="flex flex-col gap-1">
+    <ImageGalleryField images={images.map((image) => ({ id: image.id, src: getProductImageUrl(image.storage_path) }))} label={t('products.drawer.images.label')} addLabel={t('products.drawer.images.add')} removeLabel={t('products.drawer.images.removeAria')} busy={uploading} onAdd={handleSelect} onRemove={handleRemove} />
+    {uploading && <p role="status" className="text-xs text-muted-foreground">{t('products.drawer.images.uploading')}</p>}
+    {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+  </div>
 }
 
 /** Multi-select combobox -- chips for whatever's picked plus an "Agregar"
@@ -226,6 +198,8 @@ export function ProductDrawer({
   onSaved: () => void
 }) {
   const { t } = useLanguage()
+  const formId = useId()
+  const nameRef = useRef<HTMLInputElement>(null)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [sku, setSku] = useState('')
@@ -241,6 +215,8 @@ export function ProductDrawer({
   const [wholesalePrice, setWholesalePrice] = useState('')
   const [retailPrice, setRetailPrice] = useState('')
   const [trackInventory, setTrackInventory] = useState(true)
+  const [inventoryMode, setInventoryMode] = useState<InventoryMode>('stock')
+  const canManageBom = usePermission('products.manage_bom')
   const [lowStockThreshold, setLowStockThreshold] = useState('5')
   const [isActive, setIsActive] = useState(true)
   const [visibleInCatalog, setVisibleInCatalog] = useState(false)
@@ -270,6 +246,7 @@ export function ProductDrawer({
     setWholesalePrice(product?.wholesale_price != null ? String(product.wholesale_price) : '')
     setRetailPrice(product?.retail_price != null ? String(product.retail_price) : '')
     setTrackInventory(product?.track_inventory ?? true)
+    setInventoryMode(product?.inventory_mode ?? 'stock')
     setLowStockThreshold(product ? String(product.low_stock_threshold) : '5')
     setIsActive(product?.is_active ?? true)
     setVisibleInCatalog(product?.is_visible_in_catalog ?? false)
@@ -310,7 +287,7 @@ export function ProductDrawer({
     e.preventDefault()
     setTouched(true)
     setFormError(null)
-    if (!isNotBlank(name)) return
+    if (!isNotBlank(name)) { nameRef.current?.focus(); return }
 
     setSubmitting(true)
     try {
@@ -326,7 +303,11 @@ export function ProductDrawer({
         purchase_price: toNumberOrNull(purchasePrice),
         wholesale_price: toNumberOrNull(wholesalePrice),
         retail_price: toNumberOrNull(retailPrice),
-        track_inventory: trackInventory,
+        // Un producto "se arma con insumos" se queda con track_inventory=true:
+        // el backend deriva su disponible de los insumos y los flujos de venta
+        // (listados, POS) piden disponibilidad solo de los que controlan inventario.
+        track_inventory: inventoryMode === 'recipe' ? true : trackInventory,
+        inventory_mode: inventoryMode,
         low_stock_threshold: Math.max(0, Math.trunc(Number(lowStockThreshold) || 0)),
         is_active: isActive,
         is_visible_in_catalog: visibleInCatalog,
@@ -349,61 +330,28 @@ export function ProductDrawer({
   }
 
   return (
-    <Drawer open={open} onClose={onClose} title={product ? t('products.drawer.editTitle') : t('products.drawer.newTitle')} description={t('products.drawer.description')} size="lg">
-      <form onSubmit={handleSubmit} noValidate className="space-y-5">
-        {/* Cover thumbnail + name -- puts a face on the product right away
-            (reuses the same colored-initials placeholder the list/detail
-            pages fall back to when there's no photo yet), instead of the
-            name field floating alone at the top like every other text field. */}
-        <div className="flex items-center gap-3">
-          <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-brand-100">
-            <ProductImage src={product?.images[0] ? getProductImageUrl(product.images[0].storage_path) : null} name={name || '?'} className="h-full w-full" iconSize={20} />
-          </div>
-          <div className="min-w-0 flex-1">
-            <Label htmlFor="product-name">{t('products.drawer.fields.name')}</Label>
-            <Input
-              id="product-name"
-              value={name}
-              aria-invalid={!!nameError}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t('products.drawer.fields.namePlaceholder')}
-              className={`mt-1 ${FIELD_CLASS}`}
-            />
-            <FieldError message={nameError} />
+    <Drawer open={open} onClose={onClose} title={product ? t('products.drawer.editTitle') : t('products.drawer.newTitle')} size="xl" footer={
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="outline" onClick={onClose}>{t('common.actions.cancel')}</Button>
+        <Button type="submit" form={formId} disabled={submitting}>{submitting ? t('common.actions.saving') : t('common.actions.saveChanges')}</Button>
+      </div>
+    }>
+      <form id={formId} onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
+        <div className="flex items-start gap-4">
+          <div className="flex min-w-0 flex-1 flex-col gap-3">
+            <div><Label htmlFor="product-name">{t('products.drawer.fields.name')}</Label><Input ref={nameRef} id="product-name" value={name} aria-invalid={!!nameError} onChange={(e) => setName(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} /><FieldError message={nameError} /></div>
+            <div>
+              <Label htmlFor="product-description">{t('products.drawer.compact.description')}</Label>
+              <Textarea id="product-description" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} className={`mt-1 ${TEXTAREA_CLASS}`} />
+            </div>
           </div>
         </div>
-
-        <Section title={t('products.drawer.sections.basics')}>
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <Label htmlFor="product-sku">{t('products.drawer.fields.sku')}</Label>
-              <Input id="product-sku" value={sku} onChange={(e) => setSku(e.target.value)} placeholder={t('products.drawer.fields.skuPlaceholder')} className={`mt-1 ${FIELD_CLASS}`} />
-            </div>
-            <div>
-              <Label htmlFor="product-barcode">{t('products.drawer.fields.barcode')}</Label>
-              <Input
-                id="product-barcode"
-                value={barcode}
-                onChange={(e) => setBarcode(e.target.value)}
-                placeholder={t('products.drawer.fields.barcodePlaceholder')}
-                className={`mt-1 ${FIELD_CLASS}`}
-              />
-            </div>
-            <div>
-              <Label htmlFor="product-slug">{t('products.drawer.fields.slug')}</Label>
-              <Input id="product-slug" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder={t('products.drawer.fields.slugPlaceholder')} className={`mt-1 ${FIELD_CLASS}`} />
-            </div>
-          </div>
-          <div>
-            <Label htmlFor="product-description">{t('products.drawer.fields.description')}</Label>
-            <Textarea id="product-description" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} className={`mt-1 ${TEXTAREA_CLASS}`} />
-          </div>
-        </Section>
-
+        {product && <ProductImages key={product.id} tenantId={tenantId} product={product} onChanged={onSaved} />}
         <Section title={t('products.drawer.sections.classification')}>
+          <CategoryMultiSelect categories={categories} selectedIds={categoryIds} onChange={setCategoryIds} />
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label>{t('products.drawer.fields.brand')}</Label>
+              <Label>{t('products.drawer.compact.brand')}</Label>
               <div className="mt-1">
                 <ComboboxFilter
                   // Marcas inactivas no son elegibles para un producto nuevo
@@ -423,7 +371,7 @@ export function ProductDrawer({
               </div>
             </div>
             <div>
-              <Label>{t('products.drawer.fields.supplier')}</Label>
+              <Label>{t('products.drawer.compact.supplier')}</Label>
               <div className="mt-1">
                 <ComboboxFilter
                   // Mismo criterio que Marca -- ver comentario arriba.
@@ -439,11 +387,31 @@ export function ProductDrawer({
               </div>
             </div>
           </div>
-          <CategoryMultiSelect categories={categories} selectedIds={categoryIds} onChange={setCategoryIds} />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <Label htmlFor="product-sku">{t('products.drawer.compact.sku')}</Label>
+              <Input id="product-sku" value={sku} onChange={(e) => setSku(e.target.value)} placeholder={t('products.drawer.fields.skuPlaceholder')} className={`mt-1 ${FIELD_CLASS}`} />
+            </div>
+            <div>
+              <Label htmlFor="product-barcode">{t('products.drawer.compact.barcode')}</Label>
+              <Input
+                id="product-barcode"
+                value={barcode}
+                onChange={(e) => setBarcode(e.target.value)}
+                placeholder={t('products.drawer.fields.barcodePlaceholder')}
+                className={`mt-1 ${FIELD_CLASS}`}
+              />
+            </div>
+            <div>
+              <Label htmlFor="product-slug">{t('products.drawer.compact.slug')}</Label>
+              <Input id="product-slug" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder={t('products.drawer.fields.slugPlaceholder')} className={`mt-1 ${FIELD_CLASS}`} />
+            </div>
+          </div>
         </Section>
 
-        <Section title={t('products.drawer.sections.pricing')}>
-          <div className="grid grid-cols-3 gap-3">
+
+        <Section title={t('products.drawer.sections.pricingAndTax')}>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <Label htmlFor="product-purchase-price">{t('products.drawer.fields.purchasePrice')}</Label>
               <CurrencyInput id="product-purchase-price" value={purchasePrice} onChange={(e) => setPurchasePrice(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
@@ -457,9 +425,6 @@ export function ProductDrawer({
               <CurrencyInput id="product-retail-price" value={retailPrice} onChange={(e) => setRetailPrice(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
             </div>
           </div>
-        </Section>
-
-        <Section title={t('products.drawer.sections.tax')}>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="product-tax-type">{t('products.drawer.fields.taxType')}</Label>
@@ -512,53 +477,46 @@ export function ProductDrawer({
               <Input id="product-tax-rate" type="number" min={0} max={100} step={0.5} value={taxRate} onChange={(e) => setTaxRate(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
             </div>
           </div>
-          <p className="text-[11px] text-brand-400">{t('products.drawer.fields.taxHint')}</p>
         </Section>
+
 
         <Section title={t('products.drawer.sections.inventory')}>
-          <div className="divide-y divide-brand-100 rounded-lg border border-brand-100">
-            <div className="flex items-center justify-between px-3 py-2.5">
-              <Label htmlFor="product-track-inventory" className="font-normal text-brand-700">
-                {t('products.drawer.fields.trackInventory')}
-              </Label>
-              <Switch id="product-track-inventory" checked={trackInventory} onCheckedChange={setTrackInventory} />
-            </div>
-            {trackInventory && (
-              <div className="px-3 py-2.5">
-                <Label htmlFor="product-low-stock">{t('products.drawer.fields.lowStockAlert')}</Label>
-                <Input id="product-low-stock" type="number" min="0" step="1" value={lowStockThreshold} onChange={(e) => setLowStockThreshold(e.target.value)} className={`mt-1 w-28 ${FIELD_CLASS}`} />
-              </div>
-            )}
-            <div className="flex items-center justify-between px-3 py-2.5">
-              <Label htmlFor="product-active" className="font-normal text-brand-700">
-                {t('products.drawer.fields.active')}
-              </Label>
-              <Switch id="product-active" checked={isActive} onCheckedChange={setIsActive} />
-            </div>
-            <div className="flex items-center justify-between px-3 py-2.5">
-              <div>
-                <Label htmlFor="product-visible-in-catalog" className="font-normal text-brand-700">
-                  {t('products.drawer.fields.visibleInCatalog')}
-                </Label>
-                <p className="text-[11px] text-brand-400">{t('products.drawer.fields.visibleInCatalogHint')}</p>
-              </div>
-              <Switch id="product-visible-in-catalog" checked={visibleInCatalog} onCheckedChange={setVisibleInCatalog} />
-            </div>
+          <div className="grid grid-cols-2 items-start gap-3">
+            <div>              <Label htmlFor="product-inventory-mode">{t('products.drawer.fields.inventoryMode')}</Label>
+              <Select value={inventoryMode} onValueChange={(v) => setInventoryMode(v as InventoryMode)} disabled={!canManageBom || !!product?.has_variants}>
+                <SelectTrigger id="product-inventory-mode" title={product?.has_variants ? t('products.drawer.inventoryMode.variantsHint') : !canManageBom ? t('products.drawer.inventoryMode.noPermission') : undefined} className={`mt-1 w-full ${FIELD_CLASS}`}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="stock" className="text-xs">
+                    {t('products.drawer.inventoryMode.stock')}
+                  </SelectItem>
+                  <SelectItem value="recipe" className="text-xs">
+                    {t('products.drawer.inventoryMode.recipe')}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+</div>
+            {inventoryMode === 'stock' && trackInventory && <div><Label htmlFor="product-low-stock">{t('products.drawer.fields.lowStockAlert')}</Label><Input id="product-low-stock" type="number" min="0" step="1" value={lowStockThreshold} onChange={(e) => setLowStockThreshold(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} /></div>}
           </div>
+          {inventoryMode === 'stock' && <FormToggle id="product-track-inventory" label={t('products.drawer.fields.trackInventory')} checked={trackInventory} onCheckedChange={setTrackInventory} />}
+          {inventoryMode === 'recipe' && product && product.inventory_mode !== 'recipe' && <p role="status" className="text-xs text-amber-700">{t('products.drawer.inventoryMode.switchWarning')}</p>}
         </Section>
 
-        {product && <ProductImages tenantId={tenantId} product={product} onChanged={onSaved} />}
+        {inventoryMode === 'recipe' && (
+          <Section title={t('products.drawer.sections.bom')}>
+            {product ? <ProductBomSection tenantId={tenantId} productId={product.id} onChanged={onSaved} /> : <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">{t('products.bom.saveFirst')}</p>}
+          </Section>
+        )}
 
-        {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
 
-        <div className="flex gap-2 border-t border-brand-100 pt-4">
-          <Button type="submit" disabled={submitting}>
-            {submitting ? t('common.actions.saving') : t('common.actions.save')}
-          </Button>
-          <Button type="button" variant="ghost" onClick={onClose}>
-            {t('common.actions.cancel')}
-          </Button>
-        </div>
+        <Section title={t('products.drawer.sections.visibility')}>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <FormToggle id="product-active" label={t('products.drawer.fields.active')} checked={isActive} onCheckedChange={setIsActive} />
+            <FormToggle id="product-visible-in-catalog" label={t('products.drawer.fields.visibleInCatalog')} checked={visibleInCatalog} onCheckedChange={setVisibleInCatalog} />
+          </div>
+        </Section>
+        {formError && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
       </form>
     </Drawer>
   )

@@ -1,22 +1,23 @@
 import { getListReturnUrl } from '../../lib/urlFilters'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { ArrowRightIcon, Maximize2Icon, MoreHorizontalIcon } from 'lucide-react'
+import { Maximize2Icon } from 'lucide-react'
 import { deleteProduct, formatCategoryHierarchy, getProduct, getProductImageUrl, updateProduct } from '../../lib/api/products'
 import type { ProductDetail } from '../../lib/api/products'
-import { combineTransferHistory, isStockEntry, listMovementsForProduct, listStockByProduct, MOVEMENT_TYPE_KEY } from '../../lib/api/stockMovements'
+import { combineTransferHistory, isStockEntry, listMovementsForProduct, listStockByProduct, listStockTotals, MOVEMENT_TYPE_KEY } from '../../lib/api/stockMovements'
 import type { MovementHistoryEntry, ProductStockWithWarehouse, StockMovementWithWarehouse } from '../../lib/api/stockMovements'
 import { useLanguage } from '../../contexts/LanguageContext'
 import { formatDate } from '../../lib/dates'
-import { InitialsAvatar, PageSpinner, ProductImage } from '@/components/atoms'
-import { MailIcon, PencilIcon, PhoneIcon, PlusIcon, UserIcon } from '@/components/atoms/icons'
+import { PageSpinner, ProductImage } from '@/components/atoms'
+import { PencilIcon } from '@/components/atoms/icons'
+import { Pagination } from '@/components/molecules/Pagination'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { ConfirmDialog } from '@/components/organisms'
 import { ProductDrawer } from './products/ProductDrawer'
 import { ProductVariantsCard } from './products/ProductVariantsCard'
+import { ProductBomSection } from './products/ProductBomSection'
 import { StockMovementDrawer } from './inventory/StockMovementDrawer'
 import { useAuth } from '../../contexts/AuthContext'
 
@@ -31,22 +32,15 @@ function Field({ label, value, tone = 'neutral', className = '' }: { label: stri
   return (
     <div className={`min-w-0 ${className}`}>
       <dt className="text-[11px] text-brand-400">{label}</dt>
-      <dd className={`truncate text-xs font-semibold ${tone === 'danger' ? 'text-red-600' : 'text-brand-800'}`}>{value}</dd>
+      <dd className={`break-words text-xs font-semibold ${tone === 'danger' ? 'text-red-600' : 'text-brand-800'}`}>{value}</dd>
     </div>
   )
 }
 
-/** A real bordered/padded card -- used for every distinct block on this
- * page (Precios, Detalles, Inventario por bodega, Movimientos, Acciones
- * rápidas, Proveedor). No tabs anywhere on this page anymore: Inventario/
- * Movimientos used to be separate tabs, but a traslado is still just a
- * kind of movement (combineTransferHistory already unifies them into one
- * table), so splitting the page into tabs over that one table was pure
- * overhead, not a real distinction (explicit user call). */
 function StatCard({ title, action, children, className = '' }: { title: string; action?: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <div className={`rounded-xl border border-brand-100 p-4 ${className}`}>
-      <div className="mb-2.5 flex items-center justify-between gap-2">
+    <div className={`rounded-lg border border-border bg-card p-3 ${className}`}>
+      <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-xs font-semibold text-brand-800">{title}</h3>
         {action}
       </div>
@@ -66,14 +60,15 @@ function ProductImageBlock({ product }: { product: ProductDetail }) {
   const { t } = useLanguage()
   const [selected, setSelected] = useState(0)
   const images = product.images
+  if (images.length === 0) return null
   const activeIndex = Math.min(selected, Math.max(images.length - 1, 0))
   const activeUrl = images[activeIndex] ? getProductImageUrl(images[activeIndex].storage_path) : null
 
   return (
-    <div className="w-full shrink-0 sm:w-72">
-      <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border border-brand-100 bg-brand-50">
+    <div className="w-full max-w-48 shrink-0">
+      <div className="relative aspect-[4/3] w-full overflow-hidden rounded-lg border border-brand-100 bg-brand-50">
         {activeUrl ? (
-          <img src={activeUrl} alt={product.name} className="h-full w-full object-cover" />
+          <img src={activeUrl} alt={product.name} className="h-full w-full object-contain" />
         ) : (
           <ProductImage src={null} name={product.name} className="h-full w-full" iconSize={40} />
         )}
@@ -89,15 +84,17 @@ function ProductImageBlock({ product }: { product: ProductDetail }) {
         )}
       </div>
       {images.length > 1 && (
-        <div className="mt-2 flex flex-wrap gap-1.5">
+        <div className="mt-1.5 flex gap-1 overflow-x-auto">
           {images.map((img, index) => (
             <button
               key={img.id}
               type="button"
               onClick={() => setSelected(index)}
-              className={`h-10 w-10 shrink-0 overflow-hidden rounded-lg border-2 transition-colors ${index === activeIndex ? 'border-accent-500' : 'border-transparent hover:border-brand-200'}`}
+              aria-label={`${t('products.drawer.images.label')} ${index + 1}`}
+              aria-pressed={index === activeIndex}
+              className={`h-7 w-7 shrink-0 overflow-hidden rounded-md border-2 transition-colors ${index === activeIndex ? 'border-accent-500' : 'border-transparent hover:border-brand-200'}`}
             >
-              <img src={getProductImageUrl(img.storage_path)} alt="" className="h-full w-full object-cover" />
+              <img src={getProductImageUrl(img.storage_path)} alt="" className="h-full w-full object-contain" />
             </button>
           ))}
         </div>
@@ -112,33 +109,18 @@ function ProductImageBlock({ product }: { product: ProductDetail }) {
  * entrada rows it's made of (see combineTransferHistory). */
 function HistoryRow({ entry }: { entry: MovementHistoryEntry }) {
   const { t } = useLanguage()
-  if (entry.kind === 'transfer') {
-    return (
-      <TableRow>
-        <TableCell className="text-xs text-brand-500">{formatDate(entry.created_at)}</TableCell>
-        <TableCell className="text-xs text-brand-700">
-          <span className="inline-flex items-center gap-1.5">
-            {entry.from.warehouse.name}
-            <ArrowRightIcon className="size-3 shrink-0 text-brand-300" />
-            {entry.to.warehouse.name}
-          </span>
-        </TableCell>
-        <TableCell className="text-xs text-brand-700">{t('inventory.product.history.transfer')}</TableCell>
-        <TableCell className="text-right text-xs font-medium text-brand-700">{entry.from.quantity}</TableCell>
-      </TableRow>
-    )
-  }
-  const { movement } = entry
-  return (
-    <TableRow>
-      <TableCell className="text-xs text-brand-500">{formatDate(movement.created_at)}</TableCell>
-      <TableCell className="text-xs text-brand-500">{movement.warehouse.name}</TableCell>
-      <TableCell className="text-xs text-brand-700">{t(MOVEMENT_TYPE_KEY[movement.movement_type])}</TableCell>
-      <TableCell className={`text-right text-xs font-medium ${isStockEntry(movement.movement_type) ? 'text-emerald-600' : 'text-red-600'}`}>
-        {t('inventory.product.movement.quantitySign', { sign: isStockEntry(movement.movement_type) ? '+' : '-', quantity: movement.quantity })}
-      </TableCell>
-    </TableRow>
-  )
+  const transfer = entry.kind === 'transfer'
+  const movement = entry.kind === 'movement' ? entry.movement : null
+  return <TableRow className="[&_td]:py-1">
+    <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{formatDate(transfer ? entry.created_at : movement!.created_at)}</TableCell>
+    <TableCell className="text-xs">
+      <p className="inline">{transfer ? t('inventory.product.history.transfer') : t(MOVEMENT_TYPE_KEY[movement!.movement_type])}</p>
+      <p className="ml-2 inline text-[10px] text-muted-foreground">{transfer ? `${entry.from.warehouse.name} → ${entry.to.warehouse.name}` : movement!.warehouse.name}</p>
+    </TableCell>
+    <TableCell className={`text-right text-xs font-medium ${movement ? isStockEntry(movement.movement_type) ? 'text-emerald-600' : 'text-red-600' : 'text-foreground'}`}>
+      {transfer ? entry.from.quantity : t('inventory.product.movement.quantitySign', { sign: isStockEntry(movement!.movement_type) ? '+' : '-', quantity: movement!.quantity })}
+    </TableCell>
+  </TableRow>
 }
 
 function HistoryTable({ entries }: { entries: MovementHistoryEntry[] }) {
@@ -149,7 +131,6 @@ function HistoryTable({ entries }: { entries: MovementHistoryEntry[] }) {
         <TableHeader>
           <TableRow>
             <TableHead>{t('inventory.product.table.date')}</TableHead>
-            <TableHead>{t('inventory.product.table.warehouse')}</TableHead>
             <TableHead>{t('inventory.product.table.type')}</TableHead>
             <TableHead className="text-right">{t('inventory.product.table.quantity')}</TableHead>
           </TableRow>
@@ -178,21 +159,27 @@ export function ProductDetail() {
   const [stockError, setStockError] = useState<string | null>(null)
   const [movements, setMovements] = useState<StockMovementWithWarehouse[] | null>(null)
   const [movementsError, setMovementsError] = useState<string | null>(null)
+  const [historyPage, setHistoryPage] = useState(1)
+  const historyEntries = useMemo(() => movements ? combineTransferHistory(movements) : null, [movements])
+  const historyPages = Math.max(1, Math.ceil((historyEntries?.length ?? 0) / 3))
+  const activeHistoryPage = Math.min(historyPage, historyPages)
   const [movementDrawer, setMovementDrawer] = useState<{ open: boolean; mode: 'adjustment' | 'transfer' }>({ open: false, mode: 'adjustment' })
+  const [recipeAvailable, setRecipeAvailable] = useState<number | null>(null)
+  const [recipeAvailableError, setRecipeAvailableError] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
-  function reload() {
+  const reload = useCallback(() => {
     if (!id) return
     getProduct(id)
       .then(setProduct)
       .catch((err) => setError(err.message ?? t('products.detail.loadError')))
-  }
+  }, [id, t])
 
-  useEffect(reload, [id])
+  useEffect(reload, [reload])
 
-  function reloadStock() {
+  const reloadStock = useCallback(() => {
     if (!id) return
     listStockByProduct(id)
       .then(setStockByWarehouse)
@@ -200,9 +187,21 @@ export function ProductDetail() {
     listMovementsForProduct(id)
       .then(setMovements)
       .catch((err) => setMovementsError(err.message ?? t('inventory.product.errors.loadMovements')))
+  }, [id, t])
+
+  useEffect(() => { setHistoryPage(1); setMovements(null); setMovementsError(null); setStockByWarehouse(null); setStockError(null); reloadStock() }, [reloadStock])
+
+  // Producto "se arma con insumos": su disponible lo calcula el backend a
+  // partir de los insumos (RPC de disponibilidad); acá solo se muestra.
+  function loadRecipeAvailable() {
+    if (!id || product?.inventory_mode !== 'recipe') return
+    setRecipeAvailableError(false)
+    listStockTotals([id])
+      .then((totals) => setRecipeAvailable(totals.byProduct.get(id)?.available ?? null))
+      .catch(() => setRecipeAvailableError(true))
   }
 
-  useEffect(reloadStock, [id])
+  useEffect(loadRecipeAvailable, [id, product?.inventory_mode])
 
   async function handleToggleActive() {
     if (!product) return
@@ -247,140 +246,71 @@ export function ProductDetail() {
   const totalAvailable = stockByWarehouse?.reduce((sum, row) => sum + row.quantity, 0) ?? null
   const totalDamaged = stockByWarehouse?.reduce((sum, row) => sum + row.damaged_quantity, 0) ?? 0
   const totalOverall = (totalAvailable ?? 0) + totalDamaged
-  const lowStock = product.track_inventory && totalAvailable != null && totalAvailable <= product.low_stock_threshold
-  const margin = product.retail_price != null && product.purchase_price != null ? product.retail_price - product.purchase_price : null
-  const marginPct = margin != null && product.retail_price ? (margin / product.retail_price) * 100 : null
-
-  const historyEntries = movements ? combineTransferHistory(movements) : null
-
+  const isRecipe = product.inventory_mode === 'recipe'
+  const lowStock = !isRecipe && product.track_inventory && totalAvailable != null && totalAvailable <= product.low_stock_threshold
   return (
-    // No hay un "← Productos" propio acá -- el header de AppShell ya lo
-    // resuelve solo para toda ruta de detalle un nivel bajo su lista
-    // (resolvePageTitle/backTo), mismo patrón que ClientDetail.
-    <div className="space-y-5">
-      <div className="flex flex-col gap-5 sm:flex-row">
-        <ProductImageBlock product={product} />
-
-        <div className="min-w-0 flex-1 space-y-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-xs font-bold text-brand-800">{product.name}</h1>
-                <Badge variant={product.is_active ? 'secondary' : 'outline'}>{t(product.is_active ? 'common.status.active' : 'common.status.inactive')}</Badge>
-                {lowStock && <Badge variant="destructive">{t('products.detail.badges.lowStock')}</Badge>}
-              </div>
-
-              {/* Marca justo debajo del nombre (con su logo si tiene, mismo
-                  fallback InitialsAvatar que la tabla de Marcas), categorías
-                  en su propia fila abajo -- pedido explícito del usuario de
-                  no mezclar todo en una sola línea de metadatos. */}
-              {product.brand && (
-                <div className="mt-1.5 flex items-center gap-1.5">
-                  {product.brand.logo_url ? (
-                    // object-contain + fondo blanco, no object-cover -- un
-                    // logo tipo wordmark (lo más común) no es cuadrado, y
-                    // recortarlo a un círculo lo deja irreconocible (mismo
-                    // fix ya aplicado al logo del tenant en Configuracion.tsx).
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-brand-100 bg-white p-0.5">
-                      <img src={product.brand.logo_url} alt="" className="h-full w-full object-contain" />
-                    </span>
-                  ) : (
-                    <InitialsAvatar name={product.brand.name} size="xs" />
-                  )}
-                  <span className="text-xs font-medium text-brand-700">{product.brand.name}</span>
-                </div>
-              )}
-
-              {/* SKU y categorías se movieron a la card "Información general"
-                  de abajo (junto al resto de los datos del producto) --
-                  antes se repetían acá arriba Y en la sección de Detalles. */}
-              {product.description && <p className="mt-2 text-xs text-brand-600">{product.description}</p>}
-            </div>
-
-            <div className="flex shrink-0 items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
-                <PencilIcon width={13} height={13} /> {t('common.actions.edit')}
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="icon-sm" aria-label={t('products.detail.actions.moreActions')}>
-                    <MoreHorizontalIcon className="size-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-48">
-                  <DropdownMenuItem onSelect={handleToggleActive}>{t(product.is_active ? 'products.detail.actions.deactivate' : 'products.detail.actions.activate')}</DropdownMenuItem>
-                  <DropdownMenuItem variant="destructive" onSelect={() => setDeleteOpen(true)}>
-                    {t('products.detail.actions.delete')}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </div>
-
-          {/* Precios + Detalles en UNA sola card con dos secciones internas
-              separadas por una línea vertical, no dos cards con borde propio
-              cada una (pedido explícito, referencia visual del usuario) --
-              ya no "Inventario general" acá: era una simple repetición de lo
-              que el cuadro de Inventario por bodega ya muestra (con su fila
-              de Total general), sin agregar nada. Sin botón "Editar" propio
-              -- ya existe uno en el header de la página (regla del proyecto:
-              no duplicarlo, ver EmpresaDetalle.tsx). */}
-          <StatCard title={t('products.detail.sections.general')}>
-            {/* Grilla real (alineada), no flex-wrap -- el ancho "natural" por
-                campo se veía descuadrado (pedido explícito). 4 columnas con
-                los 8 campos cortos primero (2 filas completas), y los 2
-                campos que de verdad pueden ser largos (Categoría/Slug) al
-                final ocupando 2 columnas cada uno -- así cierran su propia
-                fila completa en vez de romper la alineación de los demás. */}
-            <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
-              <Field label={t('products.detail.fields.purchase')} value={formatCurrency(product.purchase_price, product.currency)} />
-              <Field label={t('products.detail.fields.wholesale')} value={formatCurrency(product.wholesale_price, product.currency)} />
-              <Field label={t('products.detail.fields.retail')} value={<span className="text-accent-600">{formatCurrency(product.retail_price, product.currency)}</span>} />
-              <Field
-                label={t('products.detail.fields.margin')}
-                value={
-                  margin != null ? (
-                    <span className={margin > 0 ? 'text-emerald-600' : margin < 0 ? 'text-red-600' : undefined}>
-                      {formatCurrency(margin, product.currency)} <span className="font-normal text-brand-400">({marginPct?.toFixed(0)}%)</span>
-                    </span>
-                  ) : (
-                    '-'
-                  )
-                }
-              />
-              <Field label={t('products.detail.fields.sku')} value={product.sku ?? '-'} />
-              <Field label={t('products.detail.fields.currency')} value={product.currency} />
-              <Field label={t('products.detail.fields.createdAt')} value={formatDate(product.created_at)} />
-              <Field label={t('products.detail.fields.updatedAt')} value={formatDate(product.updated_at)} />
-              <Field
-                className="col-span-2"
-                label={t('products.detail.fields.category')}
-                value={product.categories.length > 0 ? formatCategoryHierarchy(product.categories) : '-'}
-              />
-              <Field className="col-span-2" label={t('products.detail.fields.slug')} value={product.slug ?? '-'} />
-              <Field className="col-span-2" label={t('products.detail.fields.barcode')} value={product.barcode ?? '-'} />
-            </div>
-          </StatCard>
+    <div className="flex min-w-0 flex-col gap-3">
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <h1 className="text-lg font-bold tracking-tight text-brand-800">{product.name}</h1>
+          <Badge variant={product.is_active ? 'secondary' : 'outline'}>{t(product.is_active ? 'common.status.active' : 'common.status.inactive')}</Badge>
+          {lowStock && <Badge variant="destructive">{t('products.detail.badges.lowStock')}</Badge>}
         </div>
-      </div>
-
-      {profile?.tenant_id && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}><PencilIcon width={13} height={13} />{t('common.actions.edit')}</Button>
+          <Button variant="outline" size="sm" onClick={handleToggleActive}>{t(product.is_active ? 'products.detail.actions.deactivate' : 'products.detail.actions.activate')}</Button>
+          <Button variant="ghost" size="sm" className="text-destructive" onClick={() => setDeleteOpen(true)}>{t('products.detail.actions.delete')}</Button>
+        </div>
+      </header>
+      <section className="flex flex-col gap-4 rounded-lg border border-border bg-card p-4 sm:flex-row" aria-label={t('products.detail.sections.general')}>
+        <ProductImageBlock product={product} />
+        <div className="min-w-0 flex-1">
+          <dl className="grid grid-cols-2 gap-x-5 gap-y-3 sm:grid-cols-3">
+            <Field label={t('products.table.brand')} value={product.brand?.name ?? '—'} />
+            <Field label={t('products.detail.fields.sku')} value={product.sku ?? '—'} />
+            <Field label={t('products.detail.fields.barcode')} value={product.barcode ?? '—'} />
+            <Field className="col-span-2" label={t('products.detail.fields.category')} value={product.categories.length ? formatCategoryHierarchy(product.categories) : '—'} />
+            <Field label={t('products.detail.sections.supplier')} value={product.supplier?.name ?? '—'} />
+          </dl>
+          {product.description && <p className="mt-3 text-xs text-muted-foreground">{product.description}</p>}
+          <dl className="mt-4 grid grid-cols-3 gap-3 border-t border-border pt-3 [&_dd]:mt-1 [&_dd]:text-base">
+            <Field label={t('products.detail.fields.purchase')} value={formatCurrency(product.purchase_price, product.currency)} />
+            <Field label={t('products.detail.fields.wholesale')} value={formatCurrency(product.wholesale_price, product.currency)} />
+            <Field label={t('products.detail.fields.retail')} value={<span className="text-accent-600">{formatCurrency(product.retail_price, product.currency)}</span>} />
+          </dl>
+        </div>
+      </section>
+      {profile?.tenant_id && !isRecipe && (
         <StatCard title={t('products.detail.sections.variants')}>
           <ProductVariantsCard tenantId={profile.tenant_id} product={product} hasExistingStock={!product.has_variants && totalOverall > 0} onChanged={reload} />
         </StatCard>
       )}
 
-      {product.track_inventory ? (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <div className="space-y-4 lg:col-span-2">
-            {/* Escondida para productos con variantes -- product_stock ya
-                no tiene una fila por producto+bodega ahí, sino una por
-                variante+bodega (ver 20260819061000_product_stock_variant_id.sql),
-                así que esta tabla mostraría varias filas por bodega sin
-                forma de saber a qué variante pertenece cada una. El stock
-                por variante se ve en la card "Variantes" de arriba. */}
-            {!product.has_variants && (
-            <StatCard title={t('inventory.product.section.stockByWarehouse')}>
+      {isRecipe && profile?.tenant_id && (
+        <StatCard
+          title={t('products.detail.sections.bom')}
+          action={
+            <span className="text-xs text-brand-500">
+              {t('products.detail.bom.available')}:{' '}
+              <span className="font-semibold text-brand-800">
+                {recipeAvailable !== null ? recipeAvailable : recipeAvailableError ? (
+                  <button type="button" className="underline" onClick={loadRecipeAvailable}>
+                    — {t('common.actions.retry')}
+                  </button>
+                ) : (
+                  '—'
+                )}
+              </span>
+            </span>
+          }
+        >
+          <ProductBomSection tenantId={profile.tenant_id} productId={product.id} onChanged={loadRecipeAvailable} />
+        </StatCard>
+      )}
+
+      <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)]">
+          {product.track_inventory && !isRecipe && <>
+            {!product.has_variants && (            <StatCard title={t('inventory.product.section.stockByWarehouse')}>
               {stockError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{stockError}</p>}
               {!stockByWarehouse && !stockError && <PageSpinner />}
               {stockByWarehouse && stockByWarehouse.length === 0 && <p className="text-xs text-brand-400">{t('inventory.product.empty.noStock')}</p>}
@@ -414,113 +344,14 @@ export function ProductDetail() {
                   </Table>
                 </div>
               )}
-            </StatCard>
-            )}
-
-            <StatCard title={t('inventory.product.section.movements')}>
+            </StatCard>)}
+            <StatCard title={t('inventory.product.section.movements')} action={<div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => setMovementDrawer({ open: true, mode: 'transfer' })}>{t('products.detail.transferCard.action')}</Button><Button size="sm" onClick={() => setMovementDrawer({ open: true, mode: 'adjustment' })}>{t('inventory.product.actions.registerMovement')}</Button></div>}>
               {movementsError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{movementsError}</p>}
               {!historyEntries && !movementsError && <PageSpinner />}
               {historyEntries && historyEntries.length === 0 && <p className="text-xs text-brand-400">{t('inventory.product.empty.noMovements')}</p>}
-              {historyEntries && historyEntries.length > 0 && <HistoryTable entries={historyEntries} />}
+              {historyEntries && historyEntries.length > 0 && <><HistoryTable entries={historyEntries.slice((activeHistoryPage - 1) * 3, activeHistoryPage * 3)} /><Pagination page={activeHistoryPage} totalPages={historyPages} onChange={setHistoryPage} alwaysVisible /></>}
             </StatCard>
-          </div>
-
-          <div className="space-y-4">
-            <StatCard title={t('products.detail.quickActions.title')}>
-              <div className="space-y-2">
-                <Button size="sm" className="w-full" onClick={() => setMovementDrawer({ open: true, mode: 'transfer' })}>
-                  <PlusIcon width={14} height={14} /> {t('products.detail.transferCard.action')}
-                </Button>
-                <Button variant="outline" size="sm" className="w-full" onClick={() => setMovementDrawer({ open: true, mode: 'adjustment' })}>
-                  <PlusIcon width={14} height={14} /> {t('inventory.product.actions.registerMovement')}
-                </Button>
-              </div>
-            </StatCard>
-
-            {product.supplier && (
-              <StatCard title={t('products.detail.sections.supplier')}>
-                <dl className="grid grid-cols-2 gap-3">
-                  <Field label={t('products.detail.fields.supplierName')} value={product.supplier.name} />
-                  {product.supplier.contact_name && (
-                    <Field
-                      label={t('products.detail.fields.contactPerson')}
-                      value={
-                        <span className="inline-flex items-center gap-1">
-                          <UserIcon width={12} height={12} />
-                          {product.supplier.contact_name}
-                        </span>
-                      }
-                    />
-                  )}
-                  {product.supplier.phone && (
-                    <Field
-                      label={t('products.detail.fields.phone')}
-                      value={
-                        <span className="inline-flex items-center gap-1">
-                          <PhoneIcon width={12} height={12} />
-                          {product.supplier.phone}
-                        </span>
-                      }
-                    />
-                  )}
-                  {product.supplier.email && (
-                    <Field
-                      label={t('products.detail.fields.email')}
-                      value={
-                        <span className="inline-flex items-center gap-1">
-                          <MailIcon width={12} height={12} />
-                          {product.supplier.email}
-                        </span>
-                      }
-                    />
-                  )}
-                </dl>
-              </StatCard>
-            )}
-          </div>
-        </div>
-      ) : (
-        product.supplier && (
-          <StatCard title={t('products.detail.sections.supplier')} className="max-w-md">
-            <dl className="grid grid-cols-2 gap-3">
-              <Field label={t('products.detail.fields.supplierName')} value={product.supplier.name} />
-              {product.supplier.contact_name && (
-                <Field
-                  label={t('products.detail.fields.contactPerson')}
-                  value={
-                    <span className="inline-flex items-center gap-1">
-                      <UserIcon width={12} height={12} />
-                      {product.supplier.contact_name}
-                    </span>
-                  }
-                />
-              )}
-              {product.supplier.phone && (
-                <Field
-                  label={t('products.detail.fields.phone')}
-                  value={
-                    <span className="inline-flex items-center gap-1">
-                      <PhoneIcon width={12} height={12} />
-                      {product.supplier.phone}
-                    </span>
-                  }
-                />
-              )}
-              {product.supplier.email && (
-                <Field
-                  label={t('products.detail.fields.email')}
-                  value={
-                    <span className="inline-flex items-center gap-1">
-                      <MailIcon width={12} height={12} />
-                      {product.supplier.email}
-                    </span>
-                  }
-                />
-              )}
-            </dl>
-          </StatCard>
-        )
-      )}
+          </>}      </div>
 
       {profile?.tenant_id && (
         <>

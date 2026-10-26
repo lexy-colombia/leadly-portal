@@ -2,6 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(git push *)",
+      "Bash(supabase db push *)",
+      "Bash(supabase db push)",
       "Bash(find /Users/sebastianavendano/Desktop -maxdepth 3 -iname \"*lexy*\" 2>/dev/null)",
       "Read(//Users/sebastianavendano/Desktop/**)",
       "WebFetch(domain:lafactura.co)",

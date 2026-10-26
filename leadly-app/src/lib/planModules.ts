@@ -11,7 +11,7 @@ export const PLAN_MODULE_GROUPS: { key: string; labelKey: TranslationKey; module
   {
     key: 'operation',
     labelKey: 'backoffice.planModules.group.operation',
-    modules: ['dashboard', 'products', 'inventory', 'sales', 'pos', 'contacts', 'credit', 'expenses', 'returns', 'reports', 'settings', 'billing'],
+    modules: ['dashboard', 'products', 'materials', 'inventory', 'sales', 'pos', 'contacts', 'credit', 'expenses', 'returns', 'reports', 'settings', 'billing'],
   },
   {
     key: 'formalization',

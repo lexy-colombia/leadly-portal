@@ -418,5 +418,22 @@
   "backoffice.negotiation.invoice.created": "Receipt {number} issued",
   "backoffice.negotiation.invoice.createdNoNumber": "Receipt issued",
   "backoffice.negotiation.invoice.nothing": "There is nothing to charge for this period, or a receipt already exists.",
-  "backoffice.negotiation.errors.invoice": "Could not issue the receipt."
+  "backoffice.negotiation.errors.invoice": "Could not issue the receipt.",
+  "backoffice.clienteDetalle.modules.includedIn": "Included in {module}",
+  "backoffice.clienteDetalle.sections": "Client sections",
+  "backoffice.clienteDetalle.tabs.resumen": "Overview",
+  "backoffice.clienteDetalle.tabs.plan": "Plan and limits",
+  "backoffice.clienteDetalle.overviewHint": "Company information and contact details.",
+  "backoffice.clienteDetalle.companyInfo": "Company details",
+  "backoffice.clienteDetalle.contactInfo": "Contact",
+  "backoffice.clienteDetalle.managePlan": "Manage plan",
+  "backoffice.tenantPlan.negotiatedPrice": "Negotiated base price",
+  "backoffice.tenantPlan.planPrice": "Plan price",
+  "backoffice.tenantPlan.periodStart": "Period start",
+  "backoffice.tenantPlan.periodEnd": "Period end",
+  "backoffice.tenantPlan.editNegotiation": "Edit negotiated terms",
+  "backoffice.tenantPlan.moduleAccess": "Module access",
+  "backoffice.clienteDetalle.modules.general": "General modules",
+  "backoffice.clienteDetalle.modules.parents": "Modules",
+  "backoffice.clienteDetalle.modules.noChildren": "This module has no submodules. Manage its access from the left column."
 }

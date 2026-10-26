@@ -10,6 +10,7 @@ import { useLanguage } from '@/contexts/LanguageContext'
 const SIZE_CLASSES = {
   md: 'max-w-md',
   lg: 'max-w-xl',
+  xl: 'max-w-2xl',
 }
 
 export function Drawer({
@@ -56,7 +57,7 @@ export function Drawer({
       <div className={`animate-slide-in-right absolute inset-y-0 right-0 flex w-full ${SIZE_CLASSES[size]} flex-col bg-white shadow-2xl`}>
         <div className="flex items-start justify-between gap-4 border-b border-brand-100 px-6 py-5">
           <div>
-            <h2 className="text-xs font-bold text-brand-800">{title}</h2>
+            <h2 className={`${size === 'xl' ? 'text-lg' : 'text-xs'} font-bold text-brand-800`}>{title}</h2>
             {description && <p className="mt-0.5 text-xs text-brand-400">{description}</p>}
           </div>
           <button

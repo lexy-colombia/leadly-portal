@@ -65,6 +65,7 @@ export interface GrossMarginRow {
    * NUNCA tratar como 0, ver reports-summary/RPC. */
   estimated_cost: number | null
   estimated_margin: number | null
+  cost_source?: 'recipe' | 'purchase_price' | null
 }
 
 export interface ProductReport {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   createProductVariant,
   deleteProductImage,
@@ -21,14 +21,13 @@ import { PlusIcon, TrashIcon } from '@/components/atoms/icons'
 import { CurrencyInput, TagInput } from '@/components/molecules'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { ImageGalleryField } from '@/components/molecules/ImageGalleryField'
+import { Pagination } from '@/components/molecules/Pagination'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Switch } from '@/components/ui/switch'
 
 const MAX_OPTIONS = 3
-// Same compact convention as ProductDrawer/StockMovementDrawer -- one thin
-// row per variant instead of a full-height card, so a product with a dozen
-// variants doesn't turn this section into an endless scroll.
-const ROW_FIELD_CLASS = '!h-7 !rounded-lg !text-xs'
+const ROW_FIELD_CLASS = '!h-6 !min-w-0 !w-full rounded-md px-2 text-xs'
 
 function formatCurrency(value: number | null, currency: string): string {
   if (value == null) return '—'
@@ -56,25 +55,15 @@ function skuSuffix(combo: Combo): string {
   return parts.map((v) => v.trim().toUpperCase().replace(/\s+/g, '')).join('-')
 }
 
-/** Mini photo strip scoped to one variant -- same upload/remove mechanics
- * as ProductDrawer's ProductImages, just filtered to this variant's own
- * images (product_images.variant_id) instead of the product's general
- * gallery, and always available (never gated on the product needing to be
- * saved first -- a variant only exists here once it already has a real id).
- * Sized small (h-8) and non-wrapping -- lives inline inside VariantRow's
- * single scrolling line, not a standalone block, so the thumbnails need to
- * stay actually visible there instead of tucked behind a click (explicit
- * user request) without blowing up the row's height. */
+/** Variant photos reuse the same gallery field as the product editor. */
 function VariantImages({ tenantId, product, variant, images, onChanged }: { tenantId: string; product: ProductDetail; variant: ProductVariant; images: ProductDetail['images']; onChanged: () => void }) {
   const { t } = useLanguage()
-  const inputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  async function handleSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0] ?? null
-    e.target.value = ''
-    if (!file) return
+  async function handleSelect(files: File[]) {
+    if (!files.length) return
+    const file = files[0]
     const validationError = validateProductImageFile(file)
     if (validationError) {
       setError(t(validationError))
@@ -83,7 +72,11 @@ function VariantImages({ tenantId, product, variant, images, onChanged }: { tena
     setError(null)
     setUploading(true)
     try {
-      await uploadProductImage(tenantId, product.id, file, images.length, variant.id)
+      for (const [index, image] of files.entries()) {
+        const validation = validateProductImageFile(image)
+        if (validation) throw new Error(t(validation))
+        await uploadProductImage(tenantId, product.id, image, images.length + index, variant.id)
+      }
       onChanged()
     } catch (err) {
       setError(err instanceof Error ? err.message : t('products.drawer.images.uploadError'))
@@ -101,45 +94,15 @@ function VariantImages({ tenantId, product, variant, images, onChanged }: { tena
     }
   }
 
-  return (
-    <div className="relative flex shrink-0 items-center gap-1">
-      {error && <span className="absolute -top-5 left-0 z-10 rounded bg-red-50 px-1.5 py-0.5 text-[10px] whitespace-nowrap text-red-600">{error}</span>}
-      <div className="flex shrink-0 items-center gap-1">
-        {images.map((img) => (
-          <div key={img.id} className="group relative h-8 w-8 shrink-0 overflow-hidden rounded-md border border-brand-100">
-            <img src={getProductImageUrl(img.storage_path)} alt="" className="h-full w-full object-cover" />
-            <button
-              type="button"
-              onClick={() => handleRemove(img.id, img.storage_path)}
-              className="absolute inset-0 flex items-center justify-center bg-black/50 text-white opacity-0 transition-opacity group-hover:opacity-100"
-              aria-label={t('products.drawer.images.removeAria')}
-            >
-              <TrashIcon width={11} height={11} />
-            </button>
-          </div>
-        ))}
-        <button
-          type="button"
-          onClick={() => inputRef.current?.click()}
-          disabled={uploading}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-dashed border-brand-300 text-brand-400 hover:border-accent-400 hover:text-accent-500"
-        >
-          <PlusIcon width={13} height={13} />
-        </button>
-      </div>
-      <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={handleSelect} />
-    </div>
-  )
+  return <div className="mt-2">
+    <ImageGalleryField compact label={t('products.drawer.images.label')} addLabel={t('products.drawer.images.add')} removeLabel={t('products.drawer.images.removeAria')} busy={uploading}
+      images={images.map((image) => ({ id: image.id, src: getProductImageUrl(image.storage_path) }))}
+      onAdd={handleSelect} onRemove={(id) => { const image = images.find((item) => item.id === id); if (image) void handleRemove(id, image.storage_path) }} />
+    {error && <p role="alert" className="mt-1 text-xs text-destructive">{error}</p>}
+  </div>
 }
 
-/** One variant, one thin row -- combination, SKU, the 3 prices, stock,
- * photo thumbnails (small but actually visible, not hidden behind a click)
- * and active/delete all on a single line (explicit user request: the
- * previous stacked-card version "se ve feo", took too much vertical space
- * for what is essentially a table). Every field still autosaves on
- * blur/toggle, no per-row "Guardar" button. `overflow-x-auto` on the
- * container lets the row scroll horizontally on narrow screens instead of
- * wrapping, since wrapping would defeat "single line" on mobile too. */
+/** Inline edits preserve inherited prices and save only changed fields. */
 function VariantRow({
   tenantId,
   product,
@@ -156,6 +119,7 @@ function VariantRow({
   onChanged: () => void
 }) {
   const { t } = useLanguage()
+  const [rowError, setRowError] = useState<string | null>(null)
   const [sku, setSku] = useState(variant.sku ?? '')
   const [barcode, setBarcode] = useState(variant.barcode ?? '')
   const [purchasePrice, setPurchasePrice] = useState(variant.purchase_price != null ? String(variant.purchase_price) : '')
@@ -171,76 +135,37 @@ function VariantRow({
   }, [variant.id, variant.sku, variant.barcode, variant.purchase_price, variant.wholesale_price, variant.retail_price])
 
   async function save(patch: Partial<ProductVariantInput>) {
-    await updateProductVariant(variant.id, patch)
-    onChanged()
+    if (Object.entries(patch).every(([key, value]) => variant[key as keyof ProductVariant] === value)) return
+    setRowError(null)
+    try { await updateProductVariant(variant.id, patch); onChanged() }
+    catch (err) { setRowError(err instanceof Error ? err.message : t('products.drawer.errors.save')) }
   }
 
   async function handleDelete() {
-    await deleteProductVariant(variant.id)
-    onChanged()
+    try { await deleteProductVariant(variant.id); onChanged() }
+    catch (err) { setRowError(err instanceof Error ? err.message : t('products.drawer.errors.save')) }
   }
 
   const variantImages = product.images.filter((img) => img.variant_id === variant.id)
 
-  return (
-    <div className="flex items-center justify-between gap-3 overflow-x-auto px-3 py-2">
-      <span className="w-28 shrink-0 truncate text-xs font-medium text-brand-800" title={formatVariantLabel(variant, options)}>
-        {formatVariantLabel(variant, options)}
-      </span>
-      <Input
-        value={sku}
-        onChange={(e) => setSku(e.target.value)}
-        onBlur={() => save({ sku: sku.trim() || null })}
-        placeholder={t('products.drawer.variants.skuPlaceholder', { sku: product.sku || '—' })}
-        className={`w-28 shrink-0 ${ROW_FIELD_CLASS}`}
-      />
-      <Input
-        value={barcode}
-        onChange={(e) => setBarcode(e.target.value)}
-        onBlur={() => save({ barcode: barcode.trim() || null })}
-        placeholder={t('products.drawer.variants.barcodePlaceholder')}
-        className={`w-28 shrink-0 ${ROW_FIELD_CLASS}`}
-      />
-      <CurrencyInput
-        value={purchasePrice}
-        onChange={(e) => setPurchasePrice(e.target.value)}
-        onBlur={() => save({ purchase_price: purchasePrice ? Number(purchasePrice) : null })}
-        placeholder={formatCurrency(product.purchase_price, product.currency)}
-        className={`w-24 shrink-0 ${ROW_FIELD_CLASS}`}
-      />
-      <CurrencyInput
-        value={wholesalePrice}
-        onChange={(e) => setWholesalePrice(e.target.value)}
-        onBlur={() => save({ wholesale_price: wholesalePrice ? Number(wholesalePrice) : null })}
-        placeholder={formatCurrency(product.wholesale_price, product.currency)}
-        className={`w-24 shrink-0 ${ROW_FIELD_CLASS}`}
-      />
-      <CurrencyInput
-        value={retailPrice}
-        onChange={(e) => setRetailPrice(e.target.value)}
-        onBlur={() => save({ retail_price: retailPrice ? Number(retailPrice) : null })}
-        placeholder={formatCurrency(product.retail_price, product.currency)}
-        className={`w-24 shrink-0 ${ROW_FIELD_CLASS}`}
-      />
-      <span className="w-16 shrink-0 text-xs text-brand-400">{stock ? stock.available : '—'} disp.</span>
-
+  const label = formatVariantLabel(variant, options)
+  return <TableRow className="align-top [&_td]:py-1.5">
+    <TableCell className="p-2 text-xs font-medium">
+      {label}
       <VariantImages tenantId={tenantId} product={product} variant={variant} images={variantImages} onChanged={onChanged} />
-
-      {/* Switch+delete grouped in their own flex item -- justify-between on
-          the row spreads every item evenly across the full width (the
-          actual ask: on a wide screen the fields were all bunched at the
-          left with a big dead gap before these two), but without this
-          wrapper the group itself would also get spread apart from each
-          other by the same even-gap logic, undoing "activo pegado al
-          eliminar" from the previous round. */}
-      <div className="flex shrink-0 items-center gap-2">
-        <Switch checked={variant.is_active} onCheckedChange={(checked) => save({ is_active: checked })} />
-        <Button type="button" variant="ghost" onClick={handleDelete} aria-label={t('products.drawer.variants.removeVariantAria')} className="!h-7 !shrink-0 !px-2 !text-red-600 hover:!bg-red-50">
-          <TrashIcon width={13} height={13} />
-        </Button>
-      </div>
-    </div>
-  )
+      {rowError && <p role="alert" className="mt-1 text-xs text-destructive">{rowError}</p>}
+    </TableCell>
+    <TableCell className="p-2"><div className="flex min-w-0 flex-col gap-1">
+      <Input aria-label={`SKU · ${label}`} value={sku} onChange={(e) => setSku(e.target.value)} onBlur={() => save({ sku: sku.trim() || null })} placeholder={product.sku ?? 'SKU'} className={ROW_FIELD_CLASS} />
+      <Input aria-label={`${t('products.detail.fields.barcode')} · ${label}`} value={barcode} onChange={(e) => setBarcode(e.target.value)} onBlur={() => save({ barcode: barcode.trim() || null })} placeholder={t('products.drawer.variants.barcodePlaceholder')} className={ROW_FIELD_CLASS} />
+    </div></TableCell>
+    <TableCell className="p-2"><CurrencyInput aria-label={`${t('products.detail.fields.purchase')} · ${label}`} value={purchasePrice} onChange={(e) => setPurchasePrice(e.target.value)} onBlur={() => save({ purchase_price: purchasePrice ? Number(purchasePrice) : null })} placeholder={formatCurrency(product.purchase_price, product.currency)} className={`${ROW_FIELD_CLASS} pl-6 pr-1`} /></TableCell>
+    <TableCell className="p-2"><CurrencyInput aria-label={`${t('products.detail.fields.wholesale')} · ${label}`} value={wholesalePrice} onChange={(e) => setWholesalePrice(e.target.value)} onBlur={() => save({ wholesale_price: wholesalePrice ? Number(wholesalePrice) : null })} placeholder={formatCurrency(product.wholesale_price, product.currency)} className={`${ROW_FIELD_CLASS} pl-6 pr-1`} /></TableCell>
+    <TableCell className="p-2"><CurrencyInput aria-label={`${t('products.detail.fields.retail')} · ${label}`} value={retailPrice} onChange={(e) => setRetailPrice(e.target.value)} onBlur={() => save({ retail_price: retailPrice ? Number(retailPrice) : null })} placeholder={formatCurrency(product.retail_price, product.currency)} className={`${ROW_FIELD_CLASS} pl-6 pr-1`} /></TableCell>
+    <TableCell className="p-2 pt-4 text-center text-xs tabular-nums">{stock?.available ?? '—'}</TableCell>
+    <TableCell className="p-2 pt-3"><Switch aria-label={`${t('common.status.active')} · ${label}`} checked={variant.is_active} onCheckedChange={(checked) => save({ is_active: checked })} /></TableCell>
+    <TableCell className="p-2"><Button type="button" variant="ghost" size="sm" onClick={handleDelete} className="h-8 px-1 text-xs text-destructive">{t('common.actions.delete')}</Button></TableCell>
+  </TableRow>
 }
 
 /** Lives on ProductDetail (not ProductDrawer) on purpose -- explicit user
@@ -268,6 +193,9 @@ export function ProductVariantsCard({
   onChanged: () => void
 }) {
   const { t } = useLanguage()
+  const [page, setPage] = useState(1)
+  const totalPages = Math.max(1, Math.ceil(product.variants.length / 3))
+  const activePage = Math.min(page, totalPages)
   const [optionsDraft, setOptionsDraft] = useState<ProductOptionInput[]>([])
   const [stockTotals, setStockTotals] = useState<Map<string, ProductStockTotal>>(new Map())
   const [savingOptions, setSavingOptions] = useState(false)
@@ -389,29 +317,23 @@ export function ProductVariantsCard({
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between rounded-lg border border-brand-100 px-4 py-3">
-        <div>
-          <p className="text-xs font-medium text-brand-700">{t('products.drawer.variants.enable')}</p>
-          <p className="mt-0.5 text-xs text-brand-400">{t('products.drawer.variants.enableHint')}</p>
-        </div>
-        <Switch checked={product.has_variants} onCheckedChange={handleToggle} disabled={!product.has_variants && hasExistingStock} />
-      </div>
-      {product.has_variants && product.variants.length > 0 && <p className="text-xs text-brand-400">{t('products.drawer.variants.disableBlocked')}</p>}
+    <div className="space-y-3">
+      {!product.has_variants && <div className="flex items-center justify-between gap-3">
+        <span className="text-xs font-medium">{t('products.drawer.variants.enable')}</span>
+        <Switch aria-label={t('products.drawer.variants.enable')} checked={product.has_variants} onCheckedChange={handleToggle} disabled={hasExistingStock} />
+      </div>}
       {!product.has_variants && hasExistingStock && <p className="text-xs text-amber-600">{t('products.detail.variants.errors.existingStockBlocksEnable')}</p>}
 
       {product.has_variants && (
-        <>
+        <div className="flex flex-col gap-4">
           <div className="space-y-3">
             {optionsDraft.map((option, index) => (
-              <div key={index} className="flex flex-col gap-3 rounded-lg border border-brand-100 p-3 sm:flex-row sm:items-start">
-                <div className="w-full sm:w-40">
-                  <Label className="text-xs">{t('products.detail.variants.optionName')}</Label>
-                  <Input value={option.name} onChange={(e) => updateOption(index, { name: e.target.value })} placeholder={t('products.drawer.variants.optionNamePlaceholder')} className="mt-1" />
+              <div key={index} className="flex items-center gap-2">
+                <div className="w-28 shrink-0">
+                  <Input value={option.name} onChange={(e) => updateOption(index, { name: e.target.value })} placeholder={t('products.drawer.variants.optionNamePlaceholder')} className="h-8 text-xs" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <Label className="text-xs">{t('products.detail.variants.optionValues')}</Label>
-                  <div className="mt-1">
+                  <div className="text-xs">
                     <TagInput value={option.values} onChange={(values) => updateOption(index, { values })} placeholder={t('products.drawer.variants.optionValuesPlaceholder')} />
                   </div>
                 </div>
@@ -444,20 +366,32 @@ export function ProductVariantsCard({
             )}
             {optionsDraft.length >= MAX_OPTIONS && <span className="text-xs text-brand-400">{t('products.drawer.variants.maxOptionsReached')}</span>}
           </div>
-          {optionsDraft.length > 0 && <p className="text-xs text-brand-400">{t('products.drawer.variants.generateHint')}</p>}
 
           {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
 
           {product.variants.length > 0 ? (
-            <div className="divide-y divide-brand-100 rounded-lg border border-brand-100">
-              {product.variants.map((variant) => (
-                <VariantRow key={variant.id} tenantId={tenantId} product={product} variant={variant} options={optionsDraft} stock={stockTotals.get(variant.id)} onChanged={onChanged} />
-              ))}
+            <div className="overflow-hidden rounded-md border border-border">
+              <Table className="w-full table-fixed min-w-[740px]">
+                <TableHeader><TableRow>
+                  <TableHead className="w-[17%] px-2">{t('products.detail.sections.variants')}</TableHead>
+                  <TableHead className="w-[22%] px-2">SKU / {t('products.detail.fields.barcode')}</TableHead>
+                  <TableHead className="w-[12%] px-2">{t('products.detail.fields.purchase')}</TableHead>
+                  <TableHead className="w-[12%] px-2">{t('products.detail.fields.wholesale')}</TableHead>
+                  <TableHead className="w-[12%] px-2">{t('products.detail.fields.retail')}</TableHead>
+                  <TableHead className="w-[9%] px-2 text-center">{t('inventory.product.table.available')}</TableHead>
+                  <TableHead className="w-[7%] px-2">{t('common.status.active')}</TableHead>
+                  <TableHead className="w-[9%] px-2">{t('products.table.actions')}</TableHead>
+                </TableRow></TableHeader>
+                <TableBody>{product.variants.slice((activePage - 1) * 3, activePage * 3).map((variant) => (
+                  <VariantRow key={variant.id} tenantId={tenantId} product={product} variant={variant} options={optionsDraft} stock={stockTotals.get(variant.id)} onChanged={onChanged} />
+                ))}</TableBody>
+              </Table>
+              {totalPages > 1 && <Pagination page={activePage} totalPages={totalPages} onChange={setPage} />}
             </div>
           ) : (
             optionsDraft.length > 0 && <p className="text-xs text-brand-400">{t('products.drawer.variants.empty')}</p>
           )}
-        </>
+        </div>
       )}
     </div>
   )

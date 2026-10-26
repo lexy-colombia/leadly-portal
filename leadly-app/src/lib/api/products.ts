@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient'
-import type { Product, ProductImage, ProductOption, ProductVariant } from '../../types/domain'
+import type { InventoryMode, Product, ProductImage, ProductOption, ProductVariant } from '../../types/domain'
 import type { TranslationKey } from '../../i18n/translations'
 import { listProductIdsWithWarehouseStock, listStockTotals } from './stockMovements'
 
@@ -23,6 +23,7 @@ export interface ProductInput {
   tax_type_code?: string | null
   tax_rate?: number
   is_visible_in_catalog?: boolean
+  inventory_mode?: InventoryMode
 }
 
 export interface ProductCategoryRef {
@@ -194,7 +195,7 @@ export async function listProducts(tenantId: string, params: ListProductsParams)
   }
 
   if (lowStockOnly) {
-    const { data: slim, error: slimError } = await supabase.from('products').select('id, low_stock_threshold').eq('tenant_id', tenantId).eq('track_inventory', true).is('deleted_at', null)
+    const { data: slim, error: slimError } = await supabase.from('products').select('id, low_stock_threshold').eq('tenant_id', tenantId).eq('track_inventory', true).eq('inventory_mode', 'stock').is('deleted_at', null)
     if (slimError) throw slimError
     // Disponible que entrega el backend (reservas incluidas), por tandas de ids.
     const { byProduct: stockTotals } = await listStockTotals((slim as { id: string }[]).map((p) => p.id))

@@ -25,8 +25,20 @@ function formatCurrency(value: number, currency = 'COP'): string {
  * warehouse picked on the line) to show a number at all. Variant-less
  * products only ever have variant_id null rows, so passing `variantId`
  * undefined/null there is correct, not a fallback. */
-function availableStock(rows: ProductWarehouseAvailabilityRow[], productId: string | null | undefined, variantId: string | null | undefined, warehouseId: string | null | undefined): number | null {
-  if (!productId || !warehouseId) return null
+function availableStock(
+  rows: ProductWarehouseAvailabilityRow[],
+  productId: string | null | undefined,
+  variantId: string | null | undefined,
+  warehouseId: string | null | undefined,
+  recipe = false,
+): number | null {
+  if (!productId) return null
+  // Producto "se arma con insumos": el backend emite UNA fila de disponibilidad
+  // del producto con warehouse_id y variant_id null (derivada de los insumos),
+  // no una por bodega -- se lee esa e se ignora la bodega de la línea. Los
+  // productos con stock propio siguen igual que siempre.
+  if (recipe) return rows.filter((r) => r.product_id === productId && r.warehouse_id === null).reduce((sum, r) => sum + r.available, 0)
+  if (!warehouseId) return null
   return rows.filter((r) => r.product_id === productId && r.warehouse_id === warehouseId && r.variant_id === (variantId ?? null)).reduce((sum, r) => sum + r.available, 0)
 }
 
@@ -144,7 +156,7 @@ export function OrderItemsEditor({
       const active = p.variants.filter((v) => v.is_active)
       return active.length > 0 && active.every((v) => (availableStock(stockRows, p.id, v.id, defaultWarehouseId) ?? 0) <= 0)
     }
-    return (availableStock(stockRows, p.id, null, defaultWarehouseId) ?? 0) <= 0
+    return (availableStock(stockRows, p.id, null, defaultWarehouseId, p.inventory_mode === 'recipe') ?? 0) <= 0
   }
 
   /** Tope de cantidad de una línea (solo POS, `searchAlwaysOpen`): el stock
@@ -161,7 +173,7 @@ export function OrderItemsEditor({
   function stockLimit(product: ProductWithImages | undefined, variantId: string | null | undefined, warehouseId: string | null | undefined, excludeIndex: number): { available: number; cap: number } | null {
     if (!searchAlwaysOpen || stockLoading || !product || !product.track_inventory || stockRows.length === 0) return null
     if (product.has_variants && !variantId) return null
-    const available = availableStock(stockRows, product.id, variantId, warehouseId)
+    const available = availableStock(stockRows, product.id, variantId, warehouseId, product.inventory_mode === 'recipe')
     if (available === null) return null
     const others = items.reduce(
       (sum, other, i) => (i !== excludeIndex && other.product_id === product.id && (other.variant_id ?? null) === (variantId ?? null) && other.warehouse_id === warehouseId ? sum + other.quantity : sum),
@@ -381,7 +393,7 @@ export function OrderItemsEditor({
           const selectedProduct = item.product_id ? products.find((p) => p.id === item.product_id) : undefined
           const discountAmount = item.discount_amount ?? 0
           const lineTotal = item.quantity * item.unit_price - discountAmount
-          const available = stockLoading ? null : availableStock(stockRows, item.product_id, item.variant_id, item.warehouse_id)
+          const available = stockLoading ? null : availableStock(stockRows, item.product_id, item.variant_id, item.warehouse_id, selectedProduct?.inventory_mode === 'recipe')
           // Los faltantes vienen del SERVIDOR (no dependen de `stockRows`), así
           // que se pintan siempre, aunque el stock local todavía esté cargando.
           const isShort = shortfalls.some((s) => s.productId === item.product_id && s.variantId === (item.variant_id ?? null) && s.warehouseId === item.warehouse_id)
@@ -439,7 +451,20 @@ export function OrderItemsEditor({
                   </div>
                 )}
 
-                {!singleWarehouse && (
+                {!singleWarehouse && selectedProduct?.inventory_mode === 'recipe' && (
+                  // Se arma con insumos: la disponibilidad es del producto, no por
+                  // bodega; no hay selector de bodega que elegir.
+                  <div className="w-36 shrink-0">
+                    <span className="mb-0.5 block text-[11px] font-medium text-brand-400">{t('orders.itemsEditor.warehouse')}</span>
+                    {available !== null ? (
+                      <p className={`mt-1.5 text-[11px] font-medium ${available <= 0 || isShort ? 'text-red-500' : 'text-brand-400'}`}>{t('products.table.available', { count: available })}</p>
+                    ) : (
+                      <p className="mt-1.5 text-xs text-brand-300">—</p>
+                    )}
+                  </div>
+                )}
+
+                {!singleWarehouse && selectedProduct?.inventory_mode !== 'recipe' && (
                   <div className="w-36 shrink-0">
                     <span className="mb-0.5 block text-[11px] font-medium text-brand-400">{t('orders.itemsEditor.warehouse')}</span>
                     {item.product_id ? (

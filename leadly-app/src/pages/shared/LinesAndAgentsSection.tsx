@@ -60,7 +60,7 @@ function MetricCard({ icon, iconClass, value, label, sublabel }: { icon: ReactNo
       <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${iconClass}`}>{icon}</span>
       <div className="min-w-0">
         <p className="truncate text-xs font-bold text-brand-800">{value}</p>
-        <p className="truncate text-xs text-brand-500">{label}</p>
+        <p className="text-xs leading-snug text-brand-500">{label}</p>
         {sublabel && <p className="truncate text-[11px] text-brand-300">{sublabel}</p>}
       </div>
     </div>

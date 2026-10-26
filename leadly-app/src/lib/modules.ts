@@ -1,4 +1,6 @@
 import { AiSparkleIcon, ArchiveIcon, BarChartIcon, BoxIcon, BuildingIcon, CalendarIcon, ChatBubbleIcon, CheckIcon, CreditCardIcon, DashboardIcon, DollarIcon, GlobeIcon, KeyIcon, MegaphoneIcon, PhoneIcon, ReceiptIcon, RefreshIcon, ScanIcon, SettingsIcon, TargetIcon, UsersIcon, WalletIcon } from '@/components/atoms/icons'
+import { CRM_MODULE_KEYS } from './moduleHierarchy'
+import { FlaskConicalIcon } from 'lucide-react'
 import type { TranslationKey } from '../i18n/translations'
 import type { ComponentType } from 'react'
 
@@ -64,6 +66,11 @@ export const TENANT_MODULES: TenantModuleDefinition[] = [
       { labelKey: 'common.nav.suppliers', to: '/app/products/suppliers' },
     ],
   },
+  // Insumos -- materias primas con unidad/stock/costo propios, que alimentan
+  // la ficha técnica de los productos "se arma con insumos". Nace
+  // deshabilitado por defecto (mismo criterio que reports/expenses): el
+  // superadmin lo habilita por tenant (contrato A, progress/contract_A_insumos.md).
+  { key: 'materials', labelKey: 'common.nav.materials', to: '/app/materials', icon: FlaskConicalIcon, viewAction: 'materials.view' },
   { key: 'inventory', labelKey: 'common.nav.inventory', to: '/app/settings', icon: ArchiveIcon, hideFromNav: true },
   { key: 'sales', labelKey: 'common.nav.sales', to: '/app/sales', icon: ReceiptIcon, viewAction: 'sales.view' },
   // POS -- venta rápida de mostrador (escanear código de barras, cliente
@@ -145,4 +152,4 @@ export type TenantModuleKey = (typeof TENANT_MODULES)[number]['key']
  * TenantLayout groups them visually. */
 export const CRM_GROUP_KEY = 'crm'
 export const CRM_GROUP_ICON = UsersIcon
-export const CRM_GROUP_MODULE_KEYS: TenantModuleKey[] = ['conversations', 'channels', 'pipeline', 'tasks', 'calendar', 'campaigns', 'aiAgents']
+export const CRM_GROUP_MODULE_KEYS: TenantModuleKey[] = CRM_MODULE_KEYS

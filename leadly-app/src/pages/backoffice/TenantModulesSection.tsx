@@ -4,8 +4,8 @@ import { TENANT_MODULES } from '../../lib/modules'
 import { PLAN_MODULE_KEYS, moduleLabelKey } from '../../lib/planModules'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
-import { PageSpinner, Switch } from '@/components/atoms'
-import { Badge } from '@/components/ui/badge'
+import { PageSpinner } from '@/components/atoms'
+import { ModuleSelector } from '@/components/organisms/ModuleSelector'
 import type { TranslationKey } from '../../i18n/translations'
 
 const SOURCE_LABEL_KEY: Record<TenantModuleSource, TranslationKey> = {
@@ -30,74 +30,55 @@ export function TenantModulesSection({ tenantId }: { tenantId: string }) {
   const [togglingKey, setTogglingKey] = useState<string | null>(null)
 
   useEffect(() => {
+    let active = true
     setSources(null)
     setError(null)
     listEnabledModuleSources(tenantId)
-      .then(setSources)
-      .catch((err) => setError(err.message ?? t('backoffice.clienteDetalle.modules.errors.load')))
+      .then((next) => { if (active) setSources(next) })
+      .catch((err) => { if (active) setError(err.message ?? t('backoffice.clienteDetalle.modules.errors.load')) })
+    return () => { active = false }
   }, [tenantId, t])
 
-  async function handleToggle(moduleKey: string, enable: boolean) {
-    setTogglingKey(moduleKey)
+  async function handleToggle(keys: string[], enable: boolean) {
+    setTogglingKey(keys[0] ?? '')
     setError(null)
     try {
-      await setModuleEnabled(tenantId, moduleKey, enable, profile?.id ?? '')
+      const results = await Promise.allSettled(keys.map((key) => setModuleEnabled(tenantId, key, enable, profile?.id ?? '')))
       setSources((prev) => {
         const next = new Map(prev)
-        if (enable) next.set(moduleKey, 'manual')
-        else next.delete(moduleKey)
+        results.forEach((result, index) => {
+          if (result.status !== 'fulfilled') return
+          if (enable) next.set(keys[index], 'manual')
+          else next.delete(keys[index])
+        })
         return next
       })
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('backoffice.clienteDetalle.modules.errors.toggle'))
+      const failure = results.find((result) => result.status === 'rejected')
+      if (failure?.status === 'rejected') setError(failure.reason instanceof Error ? failure.reason.message : t('backoffice.clienteDetalle.modules.errors.toggle'))
     } finally {
       setTogglingKey(null)
     }
   }
 
-  // Catalog keys that have a DB key but no tenant-panel entry (automations)
-  // still need a row so a plan-granted one is visible here.
   const rows = [
-    ...TENANT_MODULES.filter((module) => !module.alwaysEnabled).map((module) => ({ key: module.key, Icon: module.icon as typeof module.icon | null })),
-    ...PLAN_MODULE_KEYS.filter((key) => !TENANT_MODULES.some((m) => m.key === key)).map((key) => ({ key, Icon: null })),
+    ...TENANT_MODULES.filter((module) => !module.alwaysEnabled).map((module) => ({ key: module.key, icon: module.icon })),
+    ...PLAN_MODULE_KEYS.filter((key) => !TENANT_MODULES.some((module) => module.key === key)).map((key) => ({ key, icon: null })),
   ]
 
   return (
-    <div className="space-y-3">
-      <p className="-mt-1 text-xs text-brand-400">{t('backoffice.clienteDetalle.modules.subtitle')}</p>
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
+    <div className="flex flex-col gap-4">
+      <p className="text-xs leading-relaxed text-muted-foreground">{t('backoffice.clienteDetalle.modules.subtitle')}</p>
+      {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
       {!sources && !error && <PageSpinner />}
-      {sources && (
-        <div className="grid gap-1.5 sm:grid-cols-2">
-          {rows.map(({ key, Icon }) => {
-            const source = sources.get(key)
-            const enabled = source !== undefined
-            const managed = source === 'plan' || source === 'subscription'
-            const labelKey = moduleLabelKey(key)
-            return (
-              <div key={key} className="flex items-center justify-between gap-2 rounded-lg border border-brand-100 px-2.5 py-1.5">
-                <div className="flex min-w-0 items-center gap-2">
-                  {Icon && (
-                    <span className="shrink-0 text-brand-400">
-                      <Icon width={13} height={13} />
-                    </span>
-                  )}
-                  <div className="min-w-0">
-                    <p className="truncate text-xs font-medium text-brand-800">{labelKey ? t(labelKey) : key}</p>
-                    {enabled && (
-                      <Badge variant="outline" className={managed ? 'border-transparent bg-accent-100 px-1.5 py-0 text-[10px] text-accent-700' : 'px-1.5 py-0 text-[10px]'}>
-                        {t(SOURCE_LABEL_KEY[source])}
-                      </Badge>
-                    )}
-                    {managed && <p className="text-[10px] text-brand-400">{t('backoffice.clienteDetalle.modules.managedHint')}</p>}
-                  </div>
-                </div>
-                <Switch checked={enabled} disabled={togglingKey === key || managed} onChange={(v) => handleToggle(key, v)} />
-              </div>
-            )
-          })}
-        </div>
-      )}
+      {sources && <ModuleSelector
+        moduleKeys={rows.map((row) => row.key)}
+        selected={new Set(sources.keys())}
+        onChange={handleToggle}
+        labelFor={(key) => { const labelKey = moduleLabelKey(key); return labelKey ? t(labelKey) : key }}
+        disabled={togglingKey !== null}
+        locked={(key) => sources.get(key) === 'plan' || sources.get(key) === 'subscription'}
+        sourceLabel={(key) => { const source = sources.get(key); return source && source !== 'manual' ? t(SOURCE_LABEL_KEY[source]) : undefined }}
+      />}
     </div>
   )
 }

@@ -1,0 +1,11 @@
+set client_min_messages = warning;
+create table tenants(id uuid primary key);
+create table products(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, name text, brand_id uuid, purchase_price numeric, is_active boolean default true, deleted_at timestamptz, inventory_mode text not null default 'stock');
+create table brands(id uuid primary key, tenant_id uuid, name text);
+create table product_categories(id uuid primary key, tenant_id uuid, name text);
+create table product_category_links(product_id uuid, category_id uuid, tenant_id uuid);
+create table materials(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, name text, cost numeric(14,4) not null default 0, deleted_at timestamptz);
+create table product_bom(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, product_id uuid not null, material_id uuid not null, quantity numeric(14,4) not null);
+create table sales_orders(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, status text, created_at timestamptz not null default now(), deleted_at timestamptz);
+create table sales_order_items(id uuid primary key default gen_random_uuid(), order_id uuid not null, product_id uuid, product_name text, quantity numeric, subtotal numeric);
+do $$ begin if not exists (select 1 from pg_roles where rolname='service_role') then create role service_role; end if; end $$;

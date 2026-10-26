@@ -22,6 +22,7 @@ import esPos from './locales/es/pos.json'
 import esProducts from './locales/es/products.json'
 import esExpenses from './locales/es/expenses.json'
 import esReports from './locales/es/reports.json'
+import esMaterials from './locales/es/materials.json'
 import esSettings from './locales/es/settings.json'
 import esTasks from './locales/es/tasks.json'
 import esTemplates from './locales/es/templates.json'
@@ -51,6 +52,7 @@ import enPos from './locales/en/pos.json'
 import enProducts from './locales/en/products.json'
 import enExpenses from './locales/en/expenses.json'
 import enReports from './locales/en/reports.json'
+import enMaterials from './locales/en/materials.json'
 import enSettings from './locales/en/settings.json'
 import enTasks from './locales/en/tasks.json'
 import enTemplates from './locales/en/templates.json'
@@ -83,6 +85,7 @@ export const translations = {
     ...esProducts,
     ...esExpenses,
     ...esReports,
+    ...esMaterials,
     ...esInventory,
     ...esDispatches,
     ...esReturns,
@@ -113,6 +116,7 @@ export const translations = {
     ...enProducts,
     ...enExpenses,
     ...enReports,
+    ...enMaterials,
     ...enInventory,
     ...enDispatches,
     ...enReturns,

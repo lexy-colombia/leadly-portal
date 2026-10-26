@@ -4,6 +4,15 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.38] - 2026-10-27
+
+### Added
+- **Módulo Insumos y ficha técnica de productos.** Nueva pantalla **Insumos** (materiales/ingredientes) con su propio inventario por bodega, unidad y costo, ajuste y carga inicial, y un detalle por insumo con resumen de stock (total, reservado, disponible), historial completo de movimientos (filtros por tipo y fechas) y los productos cuya ficha lo usa. En el producto, el selector **Inventario** permite elegir "Stock propio" o "Ficha técnica": con ficha técnica el producto no lleva stock propio y, al venderlo, se descuentan sus insumos (y se devuelven al anular la venta). Los insumos también se reservan al cargar el producto en la cuenta, igual que el stock.
+- **Margen con costo de ficha técnica.** En Reportes → Productos, el costo de un producto con ficha sale de la suma de sus insumos a su costo vigente (etiqueta "Según ficha técnica"). Si algún insumo no tiene costo, el costo y el margen se muestran como desconocidos en lugar de un margen falso.
+
+### Changed
+- Textos más cortos en el selector de inventario del producto.
+
 ## [1.0.37] - 2026-10-26
 
 ### Added

@@ -1,7 +1,9 @@
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import { AppShell, type NavItem } from '@/components/organisms'
-import { CRM_GROUP_ICON, CRM_GROUP_MODULE_KEYS, TENANT_MODULES } from '../lib/modules'
+import { CRM_GROUP_ICON, TENANT_MODULES } from '../lib/modules'
+
+import { groupTenantModules } from '../lib/moduleHierarchy'
 
 export function TenantLayout() {
   const { t } = useLanguage()
@@ -13,37 +15,29 @@ export function TenantLayout() {
     const moduleEnabled = module.alwaysEnabled || enabledModules?.has(module.key)
     return moduleEnabled && !module.hideFromNav
   })
-  const crmChildren: NavItem[] = enabled
-    .filter((module) => CRM_GROUP_MODULE_KEYS.includes(module.key))
-    .map((module) => ({ to: module.to, label: t(module.labelKey), icon: module.icon, badge: module.badge ? t(module.badge) : undefined }))
-  const rest = enabled.filter((module) => !CRM_GROUP_MODULE_KEYS.includes(module.key))
-
-  const navItems: NavItem[] = []
-  for (const module of rest) {
-    if (module.subRoutes && module.subRoutes.length > 0) {
-      // A module with intrinsic sub-pages (e.g. Products -> Categorías/
-      // Brands, 2026-08-16): the module itself is the first child so it's
-      // still one click away, not just a toggle -- same convention as the
-      // CRM group's first child substituting for the parent link.
-      const children: NavItem[] = [
-        { to: module.to, label: t(module.labelKey), icon: module.icon },
-        ...module.subRoutes.map((sub) => ({ to: sub.to, label: t(sub.labelKey), icon: module.icon })),
-      ]
-      navItems.push({ to: module.to, label: t(module.labelKey), icon: module.icon, badge: module.badge ? t(module.badge) : undefined, children })
-    } else {
-      navItems.push({ to: module.to, label: t(module.labelKey), icon: module.icon, badge: module.badge ? t(module.badge) : undefined })
+  const navItems: NavItem[] = groupTenantModules(enabled).map((node) => {
+    const definition = TENANT_MODULES.find((module) => module.key === node.key)
+    const children: NavItem[] = []
+    if (node.module?.subRoutes?.length) {
+      children.push(
+        { to: node.module.to, label: t(node.module.labelKey), icon: node.module.icon },
+        ...node.module.subRoutes.map((sub) => ({ to: sub.to, label: t(sub.labelKey), icon: node.module!.icon })),
+      )
     }
-    // CRM group sits right after Dashboard -- fixed position, not wherever
-    // its first member happened to fall in TENANT_MODULES' original order.
-    if (module.key === 'dashboard' && crmChildren.length > 0) {
-      navItems.push({ to: crmChildren[0].to, label: t('common.nav.crm'), icon: CRM_GROUP_ICON, children: crmChildren })
+    children.push(...node.children.flatMap((child) => child.module ? [{
+      to: child.module.to,
+      label: t(child.module.labelKey),
+      icon: child.module.icon,
+      badge: child.module.badge ? t(child.module.badge) : undefined,
+    }] : []))
+    return {
+      to: node.module?.to ?? children[0].to,
+      label: node.key === 'crm' ? t('common.nav.crm') : t(definition!.labelKey),
+      icon: definition?.icon ?? CRM_GROUP_ICON,
+      badge: node.module?.badge ? t(node.module.badge) : undefined,
+      children: children.length ? children : undefined,
     }
-  }
-  // Dashboard itself can be disabled per tenant -- if it is, the group still
-  // needs to render, just first instead of second.
-  if (crmChildren.length > 0 && !navItems.some((item) => item.children)) {
-    navItems.unshift({ to: crmChildren[0].to, label: t('common.nav.crm'), icon: CRM_GROUP_ICON, children: crmChildren })
-  }
+  })
 
   return <AppShell subtitle={t('common.shell.tenantSubtitle')} navItems={navItems} theme="dark" />
 }
