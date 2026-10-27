@@ -126,10 +126,13 @@ export async function listStoreCreditGrants(clientId: string): Promise<StoreCred
   return data
 }
 
+/** Saldo a favor disponible = grants - redemptions, calculado por el servidor
+ * (RPC get_client_store_credit_balance; misma regla que el trigger
+ * apply_store_credit_redemption que valida el pago). */
 export async function getStoreCreditBalance(clientId: string): Promise<number> {
-  const { data, error } = await supabase.from('store_credit_grants').select('amount').eq('client_id', clientId)
+  const { data, error } = await supabase.rpc('get_client_store_credit_balance', { p_client_id: clientId })
   if (error) throw error
-  return (data ?? []).reduce((sum, g) => sum + g.amount, 0)
+  return Number(data ?? 0)
 }
 
 /** Solo ítems que ya se entregaron (con producto/bodega asignados, igual

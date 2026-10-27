@@ -16,7 +16,7 @@ import { listOrdersForContact, type OrderWithRelations } from '../../lib/api/ord
 import { listAddressesForContact, deleteAddress } from '../../lib/api/addresses'
 import { listTasksForAccount, type TaskWithRelations } from '../../lib/api/tasks'
 import { listPipelinesByTenant } from '../../lib/api/pipelines'
-import { listCreditCharges, listCreditPayments, deleteCreditPayment, CREDIT_PAYMENT_METHOD_LABEL_KEY } from '../../lib/api/credit'
+import { getClientCreditSummary, listCreditCharges, listCreditPayments, deleteCreditPayment, CREDIT_PAYMENT_METHOD_LABEL_KEY } from '../../lib/api/credit'
 import { COUNTRIES } from '../../lib/referenceData'
 import { useOpportunityStageGate } from '../../lib/useOpportunityStageGate'
 import type {
@@ -240,6 +240,8 @@ function ClientDetailContent({
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [creditCharges, setCreditCharges] = useState<CreditCharge[] | null>(null)
   const [creditPayments, setCreditPayments] = useState<CreditPayment[] | null>(null)
+  // Saldo calculado por el servidor (RPC get_client_credit_summary); null = aún no cargado o fallido.
+  const [creditSummary, setCreditSummary] = useState<{ totalCharged: number; totalPaid: number; balance: number } | null>(null)
   const [creditPaymentDrawerOpen, setCreditPaymentDrawerOpen] = useState(false)
   const [receiptPayment, setReceiptPayment] = useState<CreditPayment | null>(null)
   const [deleteCreditPaymentId, setDeleteCreditPaymentId] = useState<string | null>(null)
@@ -261,7 +263,12 @@ function ClientDetailContent({
     listOpportunitiesForContact(contact.id).then(setOpportunities).catch(() => setOpportunities([]))
   }
 
+  function reloadCreditSummary() {
+    getClientCreditSummary(contact).then(setCreditSummary).catch(() => setCreditSummary(null))
+  }
+
   function reloadCredit() {
+    reloadCreditSummary()
     listCreditCharges(contact.id).then(setCreditCharges).catch(() => setCreditCharges([]))
     listCreditPayments(contact.id).then(setCreditPayments).catch(() => setCreditPayments([]))
   }
@@ -283,6 +290,7 @@ function ClientDetailContent({
     try {
       await deleteCreditPayment(deleteCreditPaymentId)
       setCreditPayments((prev) => (prev ? prev.filter((p) => p.id !== deleteCreditPaymentId) : prev))
+      reloadCreditSummary()
       setDeleteCreditPaymentId(null)
     } finally {
       setDeletingCreditPayment(false)
@@ -405,9 +413,9 @@ function ClientDetailContent({
   const ordersPage = useMemo(() => paginate(orders ?? [], page), [orders, page])
   const addressesPage = useMemo(() => paginate(addresses ?? [], page), [addresses, page])
 
-  const totalCharged = useMemo(() => (creditCharges ?? []).reduce((sum, c) => sum + c.amount, 0), [creditCharges])
-  const totalPaid = useMemo(() => (creditPayments ?? []).reduce((sum, p) => sum + p.amount, 0), [creditPayments])
-  const creditBalance = totalCharged - totalPaid
+  const totalCharged = creditSummary?.totalCharged ?? null
+  const totalPaid = creditSummary?.totalPaid ?? null
+  const creditBalance = creditSummary?.balance ?? null
   // Impresión del soporte de pago de un abono -- solo tirilla térmica, mismo
   // mecanismo que el ticket del POS (pedido explícito del usuario: nada de
   // PDF acá).
@@ -776,14 +784,14 @@ function ClientDetailContent({
             <Panel>
               <div className="mb-4 grid grid-cols-3 gap-3">
                 <StatCard title={t('credit.tab.charged')}>
-                  <p className="text-xs font-semibold text-brand-800">{formatCurrency(totalCharged)}</p>
+                  <p className="text-xs font-semibold text-brand-800">{totalCharged === null ? '—' : formatCurrency(totalCharged)}</p>
                 </StatCard>
                 <StatCard title={t('credit.tab.paid')}>
-                  <p className="text-xs font-semibold text-emerald-700">{formatCurrency(totalPaid)}</p>
+                  <p className="text-xs font-semibold text-emerald-700">{totalPaid === null ? '—' : formatCurrency(totalPaid)}</p>
                 </StatCard>
                 <StatCard title={t('credit.tab.balance')}>
-                  <p className={`text-xs font-semibold ${creditBalance > 0 ? 'text-red-700' : 'text-emerald-700'}`}>
-                    {creditBalance > 0 ? formatCurrency(creditBalance) : t('credit.tab.noBalance')}
+                  <p className={`text-xs font-semibold ${creditBalance !== null && creditBalance > 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                    {creditBalance === null ? '—' : creditBalance > 0 ? formatCurrency(creditBalance) : t('credit.tab.noBalance')}
                   </p>
                 </StatCard>
               </div>
@@ -847,8 +855,8 @@ function ClientDetailContent({
                           <span className="font-semibold text-emerald-700">+{formatCurrency(m.payment.amount)}</span>
                           <button
                             type="button"
-                            onClick={() => creditReceiptPrinter.print(m.payment, contact, creditBalance)}
-                            disabled={creditReceiptPrinter.printing}
+                            onClick={() => creditReceiptPrinter.print(m.payment, contact, creditBalance ?? 0)}
+                            disabled={creditReceiptPrinter.printing || creditBalance === null}
                             className="text-brand-300 hover:text-accent-600 disabled:opacity-50"
                             aria-label={t('credit.ticket.print')}
                             title={t('credit.ticket.print')}
@@ -933,6 +941,7 @@ function ClientDetailContent({
                 clientId={contact.id}
                 onSaved={(payment) => {
                   setCreditPayments((prev) => (prev ? [payment, ...prev] : [payment]))
+                  reloadCreditSummary()
                   setReceiptPayment(payment)
                 }}
               />

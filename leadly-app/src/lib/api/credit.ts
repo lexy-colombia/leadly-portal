@@ -11,48 +11,65 @@ export const CREDIT_PAYMENT_METHOD_LABEL_KEY: Record<CreditPaymentMethod, Transl
 }
 
 export interface ClientCreditSummary {
-  client: Client
+  client: Pick<Client, 'id' | 'full_name'>
   totalCharged: number
   totalPaid: number
   balance: number
 }
 
-/** Cartera list: every client with credit_enabled, plus their balance --
- * aggregated client-side from the two ledgers (same criterion as
- * computePipelineMetrics in lib/api/opportunities.ts) instead of a SQL
- * view, to avoid any ambiguity around RLS-on-views. */
-export async function listCreditClients(tenantId: string): Promise<ClientCreditSummary[]> {
-  const [{ data: clients, error: clientsError }, { data: charges, error: chargesError }, { data: payments, error: paymentsError }] = await Promise.all([
-    supabase.from('clients').select('*').eq('tenant_id', tenantId).eq('credit_enabled', true).is('deleted_at', null).order('full_name'),
-    supabase.from('credit_charges').select('client_id, amount').eq('tenant_id', tenantId),
-    supabase.from('credit_payments').select('client_id, amount').eq('tenant_id', tenantId).is('deleted_at', null),
-  ])
-  if (clientsError) throw clientsError
-  if (chargesError) throw chargesError
-  if (paymentsError) throw paymentsError
-
-  const chargedByClient = new Map<string, number>()
-  for (const c of charges ?? []) chargedByClient.set(c.client_id, (chargedByClient.get(c.client_id) ?? 0) + c.amount)
-  const paidByClient = new Map<string, number>()
-  for (const p of payments ?? []) paidByClient.set(p.client_id, (paidByClient.get(p.client_id) ?? 0) + p.amount)
-
-  return (clients ?? []).map((client) => {
-    const totalCharged = chargedByClient.get(client.id) ?? 0
-    const totalPaid = paidByClient.get(client.id) ?? 0
-    return { client, totalCharged, totalPaid, balance: totalCharged - totalPaid }
-  })
+export interface CreditPortfolioTotals {
+  clients: number
+  withBalance: number
+  totalCharged: number
+  totalPaid: number
+  totalBalance: number
 }
 
-export async function getClientCreditSummary(client: Client): Promise<{ totalCharged: number; totalPaid: number; balance: number }> {
-  const [{ data: charges, error: chargesError }, { data: payments, error: paymentsError }] = await Promise.all([
-    supabase.from('credit_charges').select('amount').eq('client_id', client.id),
-    supabase.from('credit_payments').select('amount').eq('client_id', client.id).is('deleted_at', null),
-  ])
-  if (chargesError) throw chargesError
-  if (paymentsError) throw paymentsError
-  const totalCharged = (charges ?? []).reduce((sum, c) => sum + c.amount, 0)
-  const totalPaid = (payments ?? []).reduce((sum, p) => sum + p.amount, 0)
-  return { totalCharged, totalPaid, balance: totalCharged - totalPaid }
+interface CreditClientsRpcRow {
+  client: { id: string; full_name: string }
+  total_charged: number
+  total_paid: number
+  balance: number
+}
+
+/** Cartera: clientes con credit_enabled y su saldo, UNA página por llamada.
+ * El saldo (cargos - pagos no borrados) y los totales de toda la cartera los
+ * calcula el servidor (RPC list_credit_clients, migración 20261029150000):
+ * antes se sumaban aquí las filas de los dos libros y PostgREST las cortaba
+ * en 1000 sin error. */
+export async function listCreditClientsPage(
+  page: number,
+  pageSize: number,
+): Promise<{ rows: ClientCreditSummary[]; total: number; totals: CreditPortfolioTotals }> {
+  const { data, error } = await supabase.rpc('list_credit_clients', { p_page: page, p_page_size: pageSize })
+  if (error) throw error
+  const res = data as {
+    rows: CreditClientsRpcRow[]
+    total: number
+    summary: { clients: number; with_balance: number; total_charged: number; total_paid: number; total_balance: number }
+  }
+  return {
+    rows: res.rows.map((r) => ({ client: r.client, totalCharged: r.total_charged, totalPaid: r.total_paid, balance: r.balance })),
+    total: res.total,
+    totals: {
+      clients: res.summary.clients,
+      withBalance: res.summary.with_balance,
+      totalCharged: res.summary.total_charged,
+      totalPaid: res.summary.total_paid,
+      totalBalance: res.summary.total_balance,
+    },
+  }
+}
+
+/** Saldo de crédito de un cliente, calculado por el servidor
+ * (RPC get_client_credit_summary). Cliente no visible -> lanza (nunca ceros
+ * inventados). */
+export async function getClientCreditSummary(client: Pick<Client, 'id'>): Promise<{ totalCharged: number; totalPaid: number; balance: number }> {
+  const { data, error } = await supabase.rpc('get_client_credit_summary', { p_client_id: client.id })
+  if (error) throw error
+  if (!data) throw new Error('Client not found')
+  const s = data as { total_charged: number; total_paid: number; balance: number }
+  return { totalCharged: s.total_charged, totalPaid: s.total_paid, balance: s.balance }
 }
 
 export async function listCreditCharges(clientId: string): Promise<CreditCharge[]> {

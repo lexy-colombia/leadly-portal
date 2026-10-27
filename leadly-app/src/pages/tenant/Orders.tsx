@@ -18,11 +18,10 @@ import {
   DELIVERY_STATUS_DOT_CLASS,
 } from '../../lib/api/orders'
 import type { OrderWithRelations, OrdersSummary } from '../../lib/api/orders'
-import { listClients } from '../../lib/api/clients'
 import { PAYMENT_METHOD_LABEL_KEY } from '../../lib/api/orderPayments'
-import type { Client, OrderStatus, OrderPaymentMethod, SalesOrder } from '../../types/domain'
+import type { OrderStatus, OrderPaymentMethod, SalesOrder } from '../../types/domain'
 import { PageSpinner } from '@/components/atoms'
-import { Card, ComboboxFilter, EmptyState, FilterField, IconInput, Pagination } from '@/components/molecules'
+import { Card, ClientSearchCombobox, ComboboxFilter, EmptyState, FilterField, IconInput, Pagination } from '@/components/molecules'
 import { ConfirmDialog } from '@/components/organisms'
 import { ChevronLeftIcon, PlusIcon, SearchIcon } from '@/components/atoms/icons'
 import { Button } from '@/components/ui/button'
@@ -163,7 +162,6 @@ export function Orders() {
   const [totalCount, setTotalCount] = useState(0)
   const [totalPages, setTotalPages] = useState(1)
   const [summary, setSummary] = useState<OrdersSummary | null>(null)
-  const [contacts, setContacts] = useState<Client[]>([])
   const [error, setError] = useState<string | null>(null)
   const [searchParams] = useSearchParams()
   // Estado inicial tomado de la URL (ver filtersFromParams) -- volver desde
@@ -236,11 +234,6 @@ export function Orders() {
   }
 
   useEffect(reload, [profile?.tenant_id, page, filters, debouncedSearch])
-
-  useEffect(() => {
-    if (!profile?.tenant_id) return
-    listClients(profile.tenant_id).then(setContacts).catch(() => {})
-  }, [profile?.tenant_id])
 
   useResetOnFilterChange(JSON.stringify([filters, debouncedSearch]), () => {
     setPage(1)
@@ -366,10 +359,10 @@ export function Orders() {
         </FilterField>
 
         <FilterField label={t('orders.filters.labels.client')}>
-          <ComboboxFilter
-            options={contacts.map((c) => ({ id: c.id, label: c.full_name }))}
+          <ClientSearchCombobox
+            tenantId={profile.tenant_id}
             value={draft.contact}
-            onChange={(id) => setDraft((d) => ({ ...d, contact: id }))}
+            onChange={(c) => setDraft((d) => ({ ...d, contact: c?.id ?? null }))}
             placeholder={t('orders.filters.allContacts')}
             searchPlaceholder={t('orders.filters.searchContact')}
             emptyLabel={t('orders.filters.noResults')}

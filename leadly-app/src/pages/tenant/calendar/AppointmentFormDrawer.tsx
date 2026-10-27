@@ -1,13 +1,13 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useAuth } from '../../../contexts/AuthContext'
 import { createAppointment, updateAppointment } from '../../../lib/api/appointments'
-import { listClients } from '../../../lib/api/clients'
+import { getClient } from '../../../lib/api/clients'
 import { listOpportunitiesForContact, type OpportunityWithRelations } from '../../../lib/api/opportunities'
 import { listProfilesByTenant } from '../../../lib/api/users'
 import { formatClientPhoneDisplay } from '../../../lib/phone'
 import type { AppointmentWithContact, Client, Profile } from '../../../types/domain'
 import { FieldError } from '@/components/atoms'
-import { ComboboxFilter } from '@/components/molecules'
+import { ClientSearchCombobox, ComboboxFilter } from '@/components/molecules'
 import { Drawer } from '@/components/organisms'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -73,7 +73,7 @@ export function AppointmentFormDrawer({
   const { profile } = useAuth()
   const { t } = useLanguage()
   const isEdit = !!editing
-  const [contacts, setContacts] = useState<Client[]>([])
+  const [selectedContact, setSelectedContact] = useState<Client | null>(null)
   const [contactId, setContactId] = useState<string | null>(null)
   const [date, setDate] = useState('')
   const [startTime, setStartTime] = useState('')
@@ -86,6 +86,7 @@ export function AppointmentFormDrawer({
   const [touched, setTouched] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+  const userPickedContactRef = useRef(false)
 
   useEffect(() => {
     if (!open) return
@@ -99,8 +100,20 @@ export function AppointmentFormDrawer({
     setAssignedTo(editing?.assignedTo ?? profile?.id ?? null)
     setTouched(false)
     setFormError(null)
-    listClients(tenantId).then(setContacts).catch(() => setContacts([]))
-    listProfilesByTenant(tenantId).then(setAgents).catch(() => setAgents([]))
+    setSelectedContact(null)
+    userPickedContactRef.current = false
+    let cancelled = false
+    if (editing?.contactId)
+      getClient(editing.contactId)
+        .then((c) => {
+          // Una respuesta tardía no debe pisar un contacto que el usuario ya cambió.
+          if (!cancelled && !userPickedContactRef.current) setSelectedContact(c)
+        })
+        .catch(() => {})
+    listProfilesByTenant(tenantId).then((a) => !cancelled && setAgents(a)).catch(() => !cancelled && setAgents([]))
+    return () => {
+      cancelled = true
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, tenantId, prefillDate, editing])
 
@@ -116,8 +129,10 @@ export function AppointmentFormDrawer({
     listOpportunitiesForContact(contactId).then(setOpportunities).catch(() => setOpportunities([]))
   }, [open, contactId])
 
-  function handleContactChange(id: string | null) {
-    setContactId(id)
+  function handleContactChange(client: Client | null) {
+    userPickedContactRef.current = true
+    setSelectedContact(client)
+    setContactId(client?.id ?? null)
     setOpportunityId(null)
   }
 
@@ -129,8 +144,13 @@ export function AppointmentFormDrawer({
     e.preventDefault()
     setTouched(true)
     setFormError(null)
-    const selectedContact = contacts.find((c) => c.id === contactId)
-    if (!date || !startTime || !selectedContact) return
+    if (!date || !startTime) return
+    if (!selectedContact) {
+      // Hay un contacto elegido pero su ficha aún no cargó (o ya no existe):
+      // no guardar en silencio.
+      if (contactId) setFormError(t('calendar.errors.contactUnavailable'))
+      return
+    }
 
     const scheduledAt = new Date(`${date}T${startTime}`)
     const endsAt = new Date(scheduledAt.getTime() + durationMinutes * 60000)
@@ -167,8 +187,9 @@ export function AppointmentFormDrawer({
         <div>
           <Label>{t('calendar.form.contact')}</Label>
           <div className="mt-1">
-            <ComboboxFilter
-              options={contacts.map((c) => ({ id: c.id, label: `${c.full_name} · ${formatClientPhoneDisplay(c.phone_prefix, c.phone)}` }))}
+            <ClientSearchCombobox
+              tenantId={tenantId}
+              optionLabel={(c) => `${c.full_name} · ${formatClientPhoneDisplay(c.phone_prefix, c.phone)}`}
               value={contactId}
               onChange={handleContactChange}
               placeholder={t('calendar.form.searchPlaceholder')}

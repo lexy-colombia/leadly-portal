@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { listClients, createClient } from '../../../lib/api/clients'
+import { searchClients, createClient } from '../../../lib/api/clients'
 import { createConversation, getConversationWindowStatus } from '../../../lib/api/conversations'
 import { listApprovedTemplates, sendTemplateMessage } from '../../../lib/api/templates'
 import { listWhatsappLinesByTenant } from '../../../lib/api/whatsappLines'
@@ -34,7 +34,11 @@ export function NewConversationDrawer({
   onCreated: (conversationId: string) => void
 }) {
   const { t } = useLanguage()
+  // Búsqueda de clientes en el servidor (searchClients): ya no se baja el tenant entero.
   const [contacts, setContacts] = useState<Client[]>([])
+  const [contactQuery, setContactQuery] = useState('')
+  const [contactsSearching, setContactsSearching] = useState(false)
+  const [selectedContact, setSelectedContact] = useState<Client | null>(null)
   const [lines, setLines] = useState<WhatsappLine[]>([])
   const [mode, setMode] = useState<Mode>('existing')
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null)
@@ -64,13 +68,39 @@ export function NewConversationDrawer({
     setTemplates(null)
     setSelectedTemplateId(null)
     setVariables([])
-    listClients(tenantId).then(setContacts).catch(() => setContacts([]))
+    setContactQuery('')
+    setSelectedContact(null)
     listWhatsappLinesByTenant(tenantId).then((all) => {
       const active = all.filter((l) => l.status === 'active')
       setLines(active)
       setLineId(active[0]?.id ?? '')
     })
   }, [open, tenantId])
+
+  useEffect(() => {
+    if (!open || mode !== 'existing') return
+    let cancelled = false
+    setContactsSearching(true)
+    const timer = setTimeout(
+      () => {
+        searchClients(tenantId, contactQuery, 20)
+          .then((rows) => {
+            if (!cancelled) setContacts(rows)
+          })
+          .catch(() => {
+            if (!cancelled) setContacts([])
+          })
+          .finally(() => {
+            if (!cancelled) setContactsSearching(false)
+          })
+      },
+      contactQuery ? 250 : 0,
+    )
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [open, mode, contactQuery, tenantId])
 
   const newNameError = touched && mode === 'new' && !isNotBlank(newName) ? t('inbox.newConv.errors.nameRequired') : undefined
   const newPhoneError = touched && mode === 'new' && !isValidE164Phone(newPhone) ? t('inbox.newConv.errors.invalidPhone') : undefined
@@ -94,7 +124,7 @@ export function NewConversationDrawer({
     try {
       let contact: Client
       if (mode === 'existing') {
-        contact = contacts.find((c) => c.id === selectedContactId)!
+        contact = selectedContact!
       } else {
         const { dialCode, localNumber } = splitPhone(newPhone)
         contact = await createClient({
@@ -107,7 +137,7 @@ export function NewConversationDrawer({
         // Reflect the new contact as "existing" so going back to this step
         // (e.g. from the template picker) never creates a duplicate contact
         // on a second submit.
-        setContacts((prev) => [contact, ...prev])
+        setSelectedContact(contact)
         setMode('existing')
         setSelectedContactId(contact.id)
       }
@@ -257,13 +287,13 @@ export function NewConversationDrawer({
         {mode === 'existing' ? (
           <div>
             <div className="overflow-hidden rounded-lg border border-input">
-              <Command>
-                <CommandInput placeholder={t('inbox.newConv.searchContact')} className="text-xs" />
+              <Command shouldFilter={false}>
+                <CommandInput value={contactQuery} onValueChange={setContactQuery} placeholder={t('inbox.newConv.searchContact')} className="text-xs" />
                 <CommandList className="max-h-56">
-                  <CommandEmpty className="text-xs">{t('common.status.noResults')}</CommandEmpty>
+                  {!contactsSearching && <CommandEmpty className="text-xs">{t('common.status.noResults')}</CommandEmpty>}
                   <CommandGroup>
                     {contacts.map((c) => (
-                      <CommandItem key={c.id} value={`${c.full_name} ${c.phone_prefix}${c.phone}`} onSelect={() => setSelectedContactId(c.id)} className="text-xs">
+                      <CommandItem key={c.id} value={c.id} onSelect={() => { setSelectedContact(c); setSelectedContactId(c.id) }} className="text-xs">
                         <span className="flex-1 truncate">{c.full_name}</span>
                         <span className="shrink-0 text-brand-400">{formatClientPhoneDisplay(c.phone_prefix, c.phone)}</span>
                       </CommandItem>
@@ -274,7 +304,7 @@ export function NewConversationDrawer({
             </div>
             {selectedContactId && (
               <p className="mt-1.5 text-xs text-brand-500">
-                {t('inbox.newConv.selected', { name: contacts.find((c) => c.id === selectedContactId)?.full_name ?? '' })}
+                {t('inbox.newConv.selected', { name: selectedContact?.full_name ?? '' })}
               </p>
             )}
             <FieldError message={contactMissingError} />

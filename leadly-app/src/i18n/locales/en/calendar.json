@@ -88,6 +88,7 @@
   "calendar.form.contact": "Contact",
   "calendar.form.change": "Change",
   "calendar.form.searchPlaceholder": "Search by name or phone…",
+  "calendar.errors.contactUnavailable": "Could not load the appointment contact. Wait a moment or choose the contact again.",
   "calendar.form.contactRequired": "Choose a contact.",
   "calendar.form.date": "Date",
   "calendar.form.startTime": "Start time",

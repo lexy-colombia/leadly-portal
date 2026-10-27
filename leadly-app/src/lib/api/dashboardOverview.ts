@@ -113,56 +113,24 @@ export async function listOverviewMessageTimings(
       a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id),
   )
 }
-/** Keep the live receivable balance complete beyond the Data API row cap. */
-export async function getOverviewCredit(tenantId: string) {
-  async function clients() {
-    return collectById<CreditClient>(async (after) => {
-      let query = supabase
-        .from('clients')
-        .select('id,full_name')
-        .eq('tenant_id', tenantId)
-        .eq('credit_enabled', true)
-        .is('deleted_at', null)
-        .order('id')
-        .limit(500)
-      if (after) query = query.gt('id', after)
-      const { data, error } = await query
-      if (error) throw error
-      return (data ?? []) as CreditClient[]
-    })
+/** Receivable balance per credit client, from the same server rule as the
+ * Cartera screen (RPC list_credit_clients: charges of cancelled/deleted orders
+ * do not count). The tenant is resolved server-side from the session, so the
+ * argument is only kept for the caller's query key. */
+export async function getOverviewCredit(_tenantId: string) {
+  const pageSize = 100
+  const rows: Array<{ client: CreditClient; totalCharged: number; totalPaid: number; balance: number }> = []
+  for (let page = 1; ; page++) {
+    const { data, error } = await supabase.rpc('list_credit_clients', { p_page: page, p_page_size: pageSize })
+    if (error) throw error
+    const res = data as {
+      rows: Array<{ client: CreditClient; total_charged: number; total_paid: number; balance: number }>
+      total: number
+    }
+    res.rows.forEach((r) =>
+      rows.push({ client: r.client, totalCharged: r.total_charged, totalPaid: r.total_paid, balance: r.balance }),
+    )
+    if (res.rows.length === 0 || page * pageSize >= res.total) break
   }
-  async function ledger(table: 'credit_charges' | 'credit_payments') {
-    return collectById(async (after) => {
-      let query = supabase
-        .from(table)
-        .select('id,client_id,amount')
-        .eq('tenant_id', tenantId)
-        .order('id')
-        .limit(500)
-      if (table === 'credit_payments') query = query.is('deleted_at', null)
-      if (after) query = query.gt('id', after)
-      const { data, error } = await query
-      if (error) throw error
-      return data ?? []
-    })
-  }
-  const [customers, charges, payments] = await Promise.all([
-    clients(),
-    ledger('credit_charges'),
-    ledger('credit_payments'),
-  ])
-  const charged = new Map<string, number>(),
-    paid = new Map<string, number>()
-  charges.forEach((row) =>
-    charged.set(row.client_id, (charged.get(row.client_id) ?? 0) + row.amount),
-  )
-  payments.forEach((row) =>
-    paid.set(row.client_id, (paid.get(row.client_id) ?? 0) + row.amount),
-  )
-  return customers.map((client) => ({
-    client,
-    totalCharged: charged.get(client.id) ?? 0,
-    totalPaid: paid.get(client.id) ?? 0,
-    balance: (charged.get(client.id) ?? 0) - (paid.get(client.id) ?? 0),
-  }))
+  return rows
 }

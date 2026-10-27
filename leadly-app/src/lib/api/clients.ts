@@ -53,18 +53,50 @@ export function dianDocumentTypeCodeToGeneric(code: string | null): TenantDocume
   }
 }
 
-export async function listClients(tenantId: string): Promise<Client[]> {
-  const { data, error } = await supabase
-    .from('clients')
-    .select('*')
-    .eq('tenant_id', tenantId)
-    .is('deleted_at', null)
-    .order('updated_at', { ascending: false })
-  if (error) throw error
-  return data
+export interface ClientListRow extends Client {
+  /** Último mensaje de WhatsApp de sus conversaciones (lo resuelve el servidor). */
+  last_contact_at: string | null
 }
 
-/** Server-side typeahead search (name or phone) instead of `listClients`'s
+export interface ClientsPageParams {
+  search?: string
+  tag?: string | null
+  agentId?: string | null
+  customField?: { fieldId: string; operator: string; value: string } | null
+  page: number
+  pageSize: number
+}
+
+/** Listado paginado del CRM: filtros, búsqueda, total y etiquetas disponibles
+ * los resuelve el servidor (RPC list_clients_page, migración 20261029150000)
+ * -- reemplaza al viejo listClients(tenantId), que bajaba el tenant entero y
+ * truncaba a 1000 clientes sin error. */
+export async function listClientsPage(params: ClientsPageParams): Promise<{ rows: ClientListRow[]; total: number; allTags: string[] }> {
+  const { data, error } = await supabase.rpc('list_clients_page', {
+    p_search: params.search?.trim() || null,
+    p_tag: params.tag ?? null,
+    p_agent: params.agentId ?? null,
+    p_cf_field: params.customField?.fieldId ?? null,
+    p_cf_operator: params.customField?.operator ?? null,
+    p_cf_value: params.customField?.value ?? null,
+    p_page: params.page,
+    p_page_size: params.pageSize,
+  })
+  if (error) throw error
+  const res = data as { rows: ClientListRow[]; total: number; all_tags: string[] }
+  return { rows: res.rows, total: res.total, allTags: res.all_tags }
+}
+
+/** Clientes del tenant por teléfono completo (indicativo + número), para
+ * reconstruir destinatarios de una campaña sin bajar todos los clientes. */
+export async function findClientsByFullPhone(phones: string[]): Promise<Client[]> {
+  if (phones.length === 0) return []
+  const { data, error } = await supabase.rpc('find_clients_by_full_phone', { p_phones: phones })
+  if (error) throw error
+  return (data ?? []) as Client[]
+}
+
+/** Server-side typeahead search (name or phone) instead of a
  * full-tenant fetch -- used by the "vincular cliente" picker on an inbound
  * WhatsApp conversation (see ChatPanel/LinkClientDrawer), which can't assume
  * a tenant's client list stays small the way categories/brands realistically
@@ -73,7 +105,8 @@ export async function listClients(tenantId: string): Promise<Client[]> {
  * anything. */
 export async function searchClients(tenantId: string, query: string, limit = 8): Promise<Client[]> {
   let request = supabase.from('clients').select('*').eq('tenant_id', tenantId).is('deleted_at', null)
-  const term = query.trim()
+  // Se quitan los caracteres que rompen la sintaxis de .or() de PostgREST.
+  const term = query.trim().replace(/[,()%*\\]/g, ' ').trim()
   // phone quedó como SOLO el número local (20260904000000_clients_phone_prefix_split.sql)
   // -- se busca también contra phone_prefix para no perder la posibilidad
   // de encontrar un cliente tipeando su indicativo.
@@ -103,7 +136,7 @@ export async function updateClient(id: string, input: Partial<ClientInput>): Pro
 
 /** Soft delete (see CLAUDE.md section 3) -- stamps deleted_at/deleted_by
  * instead of removing the row, so conversations/notes/etc. that reference
- * this client keep their history. `listClients`/`getClient` both filter
+ * this client keep their history. `listClientsPage`/`getClient` both filter
  * `deleted_at is null`, so it just disappears from the CRM. */
 export async function deleteClient(id: string): Promise<void> {
   const {

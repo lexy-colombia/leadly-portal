@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
-import { listOrders, type OrderWithRelations } from '../../../lib/api/orders'
+import { useEffect, useState } from 'react'
+import { listOrdersPage, type OrderWithRelations } from '../../../lib/api/orders'
 import { createReturn, listReturnableItemsForOrder } from '../../../lib/api/returns'
 import { listReturnStatuses } from '../../../lib/api/returnStatuses'
 import { RETURN_REASONS, RETURN_REASON_LABEL_KEY } from '../../../lib/returnReasons'
 import type { Return, ReturnReason, SalesOrderItem } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import { FieldError, PageSpinner } from '@/components/atoms'
-import { ComboboxFilter } from '@/components/molecules'
+import { RemoteSearchCombobox } from '@/components/molecules'
 import { Drawer } from '@/components/organisms'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -21,7 +21,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
  * algo que nunca se envió). */
 export function ReturnCreateDrawer({ open, onClose, tenantId, onCreated }: { open: boolean; onClose: () => void; tenantId: string; onCreated: (r: Return) => void }) {
   const { t } = useLanguage()
-  const [orders, setOrders] = useState<OrderWithRelations[]>([])
   const [orderId, setOrderId] = useState<string | null>(null)
   const [items, setItems] = useState<SalesOrderItem[] | null>(null)
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set())
@@ -42,9 +41,6 @@ export function ReturnCreateDrawer({ open, onClose, tenantId, onCreated }: { ope
     setNotes('')
     setTouched(false)
     setFormError(null)
-    listOrders(tenantId)
-      .then((all) => setOrders(all.filter((o) => o.status === 'confirmada')))
-      .catch(() => setOrders([]))
   }, [open, tenantId])
 
   useEffect(() => {
@@ -62,10 +58,12 @@ export function ReturnCreateDrawer({ open, onClose, tenantId, onCreated }: { ope
       .catch(() => setItems([]))
   }, [orderId])
 
-  const orderOptions = useMemo(
-    () => orders.map((o) => ({ id: o.id, label: `#${o.number} · ${o.contact?.full_name ?? '—'}` })),
-    [orders],
-  )
+  // Solo ventas confirmadas, buscadas en el servidor (paginado) en vez de
+  // bajar todo el historial del tenant.
+  async function searchConfirmedOrders(query: string): Promise<OrderWithRelations[]> {
+    const res = await listOrdersPage({ page: 1, pageSize: 20, status: 'confirmada', search: query })
+    return res.data
+  }
 
   function toggleItem(itemId: string, checked: boolean) {
     setSelectedItemIds((prev) => {
@@ -114,10 +112,12 @@ export function ReturnCreateDrawer({ open, onClose, tenantId, onCreated }: { ope
         <div>
           <Label>{t('returns.create.fields.order')}</Label>
           <div className="mt-1">
-            <ComboboxFilter
-              options={orderOptions}
+            <RemoteSearchCombobox<OrderWithRelations>
+              search={searchConfirmedOrders}
+              getId={(o) => o.id}
+              getLabel={(o) => `#${o.number} · ${o.contact?.full_name ?? '—'}`}
               value={orderId}
-              onChange={setOrderId}
+              onChange={(o) => setOrderId(o?.id ?? null)}
               placeholder={t('returns.create.fields.orderPlaceholder')}
               searchPlaceholder={t('returns.create.fields.orderPlaceholder')}
               emptyLabel={t('returns.empty')}

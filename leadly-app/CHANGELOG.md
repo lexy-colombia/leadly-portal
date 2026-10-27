@@ -4,6 +4,21 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [1.0.39] - 2026-10-26
+
+### Changed
+- **Clientes paginados en el servidor.** El listado de Clientes carga una página a la vez con búsqueda, etiquetas, agente y filtro por campo personalizado resueltos en la base; ya no se trunca en silencio al pasar de 1000 clientes. Si la página queda fuera de rango (por ejemplo al borrar la última fila de la última página), vuelve a la última válida.
+- **Selector de cliente con búsqueda en servidor** en citas, tareas, oportunidades, nueva conversación, campañas, devoluciones y órdenes (hasta 20 resultados por búsqueda). Un cliente ya elegido se conserva aunque no aparezca en la búsqueda.
+- **Cartera, saldo de crédito y saldo a favor calculados por el servidor.** El Dashboard y la Cartera muestran el mismo saldo. El saldo a favor ahora descuenta lo ya redimido. Un cargo de crédito de un pedido anulado o borrado deja de contar en el saldo.
+- **Devoluciones**: el selector de venta ya no descarga todos los pedidos; busca las ventas confirmadas en el servidor.
+
+### Fixed
+- El formulario de citas ya no guarda en silencio cuando el cliente elegido aún no cargó, ni deja que una respuesta tardía cambie el cliente de la cita.
+- La búsqueda de clientes ya no se rompe con comas ni paréntesis en el texto.
+
+### Removed
+- Funciones internas sin uso (recordatorios automáticos de citas por WhatsApp, carga de productos de demostración, edición de ítems de pedido obsoleta) y tablas de apoyo de la importación de Fudo.
+
 ## [1.0.38] - 2026-10-27
 
 ### Added

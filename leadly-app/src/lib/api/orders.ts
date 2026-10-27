@@ -176,32 +176,6 @@ export type OrderWithRelations = SalesOrder & {
 const ORDER_SELECT =
   '*, contact:clients(full_name, phone_prefix, phone), opportunity:opportunities(title), shipping_address:contact_addresses!shipping_address_id(label, line1, city, state_province), billing_address:contact_addresses!billing_address_id(label, line1, city), items:sales_order_items(count)'
 
-// PostgREST corta cualquier select en 1000 filas por request (db.max_rows) --
-// un tenant con más de 1000 pedidos dejaba de ver el resto en Orders.tsx sin
-// ningún error visible. Se pagina en batches de a 1000 hasta agotar el
-// resultado, en vez de un solo .select() sin límite.
-const ORDER_FETCH_CHUNK_SIZE = 1000
-
-export async function listOrders(tenantId: string): Promise<OrderWithRelations[]> {
-  const all: OrderWithRelations[] = []
-  let from = 0
-  for (;;) {
-    const { data, error } = await supabase
-      .from('sales_orders')
-      .select(ORDER_SELECT)
-      .eq('tenant_id', tenantId)
-      .is('deleted_at', null)
-      .order('created_at', { ascending: false })
-      .range(from, from + ORDER_FETCH_CHUNK_SIZE - 1)
-    if (error) throw error
-    const rows = data as unknown as OrderWithRelations[]
-    all.push(...rows)
-    if (rows.length < ORDER_FETCH_CHUNK_SIZE) break
-    from += ORDER_FETCH_CHUNK_SIZE
-  }
-  return all
-}
-
 export interface OrdersSummary {
   count: number
   total: number

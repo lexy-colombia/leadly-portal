@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
-import { listCreditClients, type ClientCreditSummary } from '../../lib/api/credit'
+import { listCreditClientsPage, type ClientCreditSummary, type CreditPortfolioTotals } from '../../lib/api/credit'
 import { InitialsAvatar, PageSpinner } from '@/components/atoms'
 import { Card, EmptyState, Pagination } from '@/components/molecules'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -22,41 +22,43 @@ export function Credit() {
   const { profile } = useAuth()
   const { t } = useLanguage()
   const navigate = useNavigate()
-  const [summaries, setSummaries] = useState<ClientCreditSummary[] | null>(null)
+  const [pageItems, setPageItems] = useState<ClientCreditSummary[] | null>(null)
+  const [totals, setTotals] = useState<CreditPortfolioTotals | null>(null)
+  const [totalCount, setTotalCount] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [page, setPage] = useState(1)
 
+  // Paginación y saldos en el servidor (RPC list_credit_clients): una página
+  // por llamada, con los totales de TODA la cartera.
   useEffect(() => {
     if (!profile?.tenant_id) return
-    listCreditClients(profile.tenant_id)
-      .then(setSummaries)
-      .catch((err) => setError(err instanceof Error ? err.message : t('credit.errors.load')))
+    let cancelled = false
+    setError(null)
+    listCreditClientsPage(page, PAGE_SIZE)
+      .then((res) => {
+        if (cancelled) return
+        setPageItems(res.rows)
+        setTotals(res.totals)
+        setTotalCount(res.total)
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : t('credit.errors.load'))
+      })
+    return () => {
+      cancelled = true
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile?.tenant_id])
+  }, [profile?.tenant_id, page])
 
-  const totalPages = summaries ? Math.max(1, Math.ceil(summaries.length / PAGE_SIZE)) : 1
-  const pageItems = useMemo(() => (summaries ? summaries.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE) : null), [summaries, page])
-
-  const totals = useMemo(() => {
-    if (!summaries) return null
-    return summaries.reduce(
-      (acc, { totalCharged, totalPaid, balance }) => ({
-        totalCharged: acc.totalCharged + totalCharged,
-        totalPaid: acc.totalPaid + totalPaid,
-        totalBalance: acc.totalBalance + balance,
-        withBalance: acc.withBalance + (balance > 0 ? 1 : 0),
-      }),
-      { totalCharged: 0, totalPaid: 0, totalBalance: 0, withBalance: 0 },
-    )
-  }, [summaries])
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
 
   return (
     <div className="space-y-4">
-      {summaries && totals && (
+      {totals && (
         <div className="grid grid-cols-2 divide-x divide-y divide-brand-100 overflow-hidden rounded-2xl border border-brand-100 bg-white sm:grid-cols-5 sm:divide-y-0">
           <div className="px-4 py-3">
             <p className="text-xs text-brand-400">{t('credit.summary.clients')}</p>
-            <p className="text-xs font-bold text-brand-800">{summaries.length}</p>
+            <p className="text-xs font-bold text-brand-800">{totals.clients}</p>
           </div>
           <div className="px-4 py-3">
             <p className="text-xs text-brand-400">{t('credit.summary.withBalance')}</p>
@@ -78,9 +80,9 @@ export function Credit() {
       )}
 
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
-      {!summaries && !error && <PageSpinner />}
+      {!pageItems && !error && <PageSpinner />}
 
-      {summaries && summaries.length === 0 && (
+      {pageItems && totalCount === 0 && (
         <Card>
           <EmptyState>{t('credit.empty')}</EmptyState>
         </Card>

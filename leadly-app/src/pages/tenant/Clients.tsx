@@ -9,9 +9,8 @@ import { formatDate } from "../../lib/dates";
 import { useResetOnFilterChange, useUrlFilterSync } from "../../lib/urlFilters";
 import { formatClientPhoneDisplay } from "../../lib/phone";
 import { listCustomFieldDefinitions } from "../../lib/api/customFields";
-import { formatCustomFieldValue, matchesCustomFieldFilter, operatorsFor, type CustomFieldOperator } from "../../lib/customFieldValues";
-import { deleteClient, listClients } from "../../lib/api/clients";
-import { listLastContactTimesByTenant } from "../../lib/api/conversations";
+import { formatCustomFieldValue, operatorsFor, type CustomFieldOperator } from "../../lib/customFieldValues";
+import { deleteClient, listClientsPage, type ClientListRow } from "../../lib/api/clients";
 import { listProfilesByTenant } from "../../lib/api/users";
 import type { Client, CustomFieldDefinition, Profile } from "../../types/domain";
 import { PageSpinner, InitialsAvatar } from "@/components/atoms";
@@ -69,12 +68,15 @@ export function Clients() {
   const navigate = useNavigate();
   const { slot: headerSearchSlot } = useHeaderSearchSlot();
 
-  const [contacts, setContacts] = useState<Client[] | null>(null);
+  // Una página por llamada: filtros, búsqueda, total y etiquetas los resuelve
+  // el servidor (RPC list_clients_page), no se baja el tenant entero.
+  const [contacts, setContacts] = useState<ClientListRow[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [allTags, setAllTags] = useState<string[]>([]);
+  const [reloadKey, setReloadKey] = useState(0);
   const [agents, setAgents] = useState<Profile[]>([]);
-  const [lastContact, setLastContact] = useState<Map<string, string>>(
-    new Map(),
-  );
   const [error, setError] = useState<string | null>(null);
+  const [listLoading, setListLoading] = useState(false);
   // Filtros, búsqueda y página arrancan de la URL y se espejan ahí (ver
   // lib/urlFilters.ts): volver desde la ficha de un cliente reconstruye la
   // vista tal cual estaba.
@@ -101,24 +103,13 @@ export function Clients() {
   useEffect(() => {
     if (!profile?.tenant_id) return;
     const tenantId = profile.tenant_id;
-    listClients(tenantId)
-      .then(setContacts)
-      .catch((err) => setError(err.message ?? t("contacts.errors.load")));
     listCustomFieldDefinitions(tenantId, "client")
       .then(setCustomDefs)
       .catch(() => {});
     listProfilesByTenant(tenantId)
       .then(setAgents)
       .catch(() => {});
-    listLastContactTimesByTenant(tenantId)
-      .then(setLastContact)
-      .catch(() => {});
   }, [profile?.tenant_id]);
-
-  const allTags = useMemo(() => {
-    if (!contacts) return [];
-    return Array.from(new Set(contacts.flatMap((c) => c.tags))).sort();
-  }, [contacts]);
 
   const cfDef = useMemo(() => customDefs.find((d) => d.id === cfField) ?? null, [customDefs, cfField]);
   const cfActiveOperator: CustomFieldOperator = cfDef
@@ -128,23 +119,46 @@ export function Clients() {
     : "eq";
   const visibleCols = useMemo(() => customDefs.filter((d) => customCols.includes(d.id)), [customDefs, customCols]);
 
-  const filtered = useMemo(() => {
-    if (!contacts) return null;
-    const term = search.trim().toLowerCase();
-    return contacts.filter((c) => {
-      if (tagFilter && !c.tags.includes(tagFilter)) return false;
-      if (agentFilter && c.assigned_to !== agentFilter) return false;
-      if (cfDef && !matchesCustomFieldFilter(cfDef, c.custom_fields?.[cfDef.id], cfActiveOperator, cfValue)) return false;
-      if (!term) return true;
-      return (
-        c.full_name.toLowerCase().includes(term) ||
-        c.phone.includes(term) ||
-        c.phone_prefix.includes(term) ||
-        c.company?.toLowerCase().includes(term) ||
-        c.tags.some((tag) => tag.toLowerCase().includes(term))
-      );
-    });
-  }, [contacts, search, tagFilter, agentFilter, cfDef, cfActiveOperator, cfValue]);
+  // La búsqueda por texto espera a que el usuario deje de teclear.
+  const [debouncedSearch, setDebouncedSearch] = useState(search);
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(id);
+  }, [search]);
+
+  const cfFilterKey = cfDef && cfValue.trim() !== "" ? `${cfDef.id}|${cfActiveOperator}|${cfValue}` : "";
+  const tenantIdForList = profile?.tenant_id;
+  useEffect(() => {
+    if (!tenantIdForList) return;
+    let cancelled = false;
+    setListLoading(true);
+    listClientsPage({
+      search: debouncedSearch,
+      tag: tagFilter,
+      agentId: agentFilter,
+      customField: cfDef && cfValue.trim() !== "" ? { fieldId: cfDef.id, operator: cfActiveOperator, value: cfValue } : null,
+      page,
+      pageSize: PAGE_SIZE,
+    })
+      .then((res) => {
+        if (cancelled) return;
+        setError(null);
+        setContacts(res.rows);
+        setTotal(res.total);
+        setAllTags(res.allTags);
+        setListLoading(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err.message ?? t("contacts.errors.load"));
+        setListLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // cfDef/cfActiveOperator/cfValue entran resumidos en cfFilterKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantIdForList, debouncedSearch, tagFilter, agentFilter, cfFilterKey, page, reloadKey]);
 
   useResetOnFilterChange(JSON.stringify([search, tagFilter, agentFilter, cfField, cfActiveOperator, cfValue]), () => setPage(1));
 
@@ -159,20 +173,21 @@ export function Clients() {
     page: page > 1 ? String(page) : null,
   });
 
-  const totalPages = filtered
-    ? Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
-    : 1;
-  const pageItems = filtered
-    ? filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
-    : null;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // Página fuera de rango (borraste la última fila de la última página, o ?page=N viejo).
+  useEffect(() => {
+    if (!listLoading && total > 0 && page > totalPages) setPage(totalPages);
+  }, [listLoading, total, page, totalPages]);
+  const pageItems = contacts;
+  const hasActiveFilters = Boolean(search.trim() || tagFilter || agentFilter || cfFilterKey);
 
   async function handleDelete(id: string) {
     setDeleting(true);
     setError(null);
     try {
       await deleteClient(id);
-      setContacts((prev) => (prev ? prev.filter((c) => c.id !== id) : prev));
       setDeletingId(null);
+      setReloadKey((k) => k + 1);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : t("contacts.errors.delete"),
@@ -245,9 +260,9 @@ export function Clients() {
         )}
 
         <span className="shrink-0 pb-1.5 text-xs text-brand-400">
-          {filtered?.length ?? 0}{" "}
+          {contacts ? total : 0}{" "}
           {t(
-            (filtered?.length ?? 0) === 1
+            total === 1
               ? "contacts.count.singular"
               : "contacts.count.plural",
           )}
@@ -269,10 +284,10 @@ export function Clients() {
       )}
       {!contacts && !error && <PageSpinner />}
 
-      {filtered && filtered.length === 0 && (
-        <Card>
+      {contacts && contacts.length === 0 && (
+        <Card aria-busy={listLoading} className={listLoading ? "opacity-50 transition-opacity" : "transition-opacity"}>
           <EmptyState>
-            {contacts && contacts.length > 0
+            {hasActiveFilters
               ? t("contacts.emptyState.noMatch")
               : t("contacts.emptyState.none")}
           </EmptyState>
@@ -281,7 +296,10 @@ export function Clients() {
 
       {pageItems && pageItems.length > 0 && (
         <>
-          <div className="overflow-hidden rounded-2xl border border-brand-100 bg-white">
+          <div
+            aria-busy={listLoading}
+            className={`overflow-hidden rounded-2xl border border-brand-100 bg-white transition-opacity ${listLoading ? "opacity-50" : ""}`}
+          >
             <Table>
               <TableHeader>
                 <TableRow>
@@ -325,7 +343,7 @@ export function Clients() {
                         ?.full_name ?? "-"}
                     </TableCell>
                     <TableCell className="text-xs text-brand-500">
-                      {formatLastContact(lastContact.get(contact.id), language)}
+                      {formatLastContact(contact.last_contact_at ?? undefined, language)}
                     </TableCell>
                     {visibleCols.map((def) => (
                       <TableCell key={def.id} className="text-xs text-brand-500">
@@ -393,14 +411,7 @@ export function Clients() {
         onClose={() => setDrawer({ open: false, contact: null })}
         tenantId={profile.tenant_id}
         contact={drawer.contact}
-        onSaved={(c) =>
-          setContacts((prev) => {
-            if (!prev) return [c];
-            return prev.some((p) => p.id === c.id)
-              ? prev.map((p) => (p.id === c.id ? c : p))
-              : [c, ...prev];
-          })
-        }
+        onSaved={() => setReloadKey((k) => k + 1)}
       />
     </div>
   );

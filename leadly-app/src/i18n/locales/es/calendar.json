@@ -88,6 +88,7 @@
   "calendar.form.contact": "Contacto",
   "calendar.form.change": "Cambiar",
   "calendar.form.searchPlaceholder": "Buscar por nombre o teléfono…",
+  "calendar.errors.contactUnavailable": "No se pudo cargar el contacto de la cita. Espera un momento o elige el contacto de nuevo.",
   "calendar.form.contactRequired": "Elige un contacto.",
   "calendar.form.date": "Fecha",
   "calendar.form.startTime": "Hora de inicio",

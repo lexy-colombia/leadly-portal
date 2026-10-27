@@ -38,28 +38,6 @@ export async function listConversations(tenantId: string): Promise<ConversationW
   return data as unknown as ConversationWithLine[]
 }
 
-/** "Último contacto" per CRM contact, used by the Clientes list -- derived
- * from the most recent WhatsApp message across all of a contact's linked
- * conversations rather than a stored column, since it's cheap to compute
- * from data that already exists (whatsapp_conversations is indexed on
- * contact_id) and never needs its own migration/trigger to stay in sync. */
-export async function listLastContactTimesByTenant(tenantId: string): Promise<Map<string, string>> {
-  const { data, error } = await supabase
-    .from('whatsapp_conversations')
-    .select('contact_id, last_message_at')
-    .eq('tenant_id', tenantId)
-    .not('contact_id', 'is', null)
-    .not('last_message_at', 'is', null)
-  if (error) throw error
-
-  const result = new Map<string, string>()
-  for (const row of data as { contact_id: string; last_message_at: string }[]) {
-    const current = result.get(row.contact_id)
-    if (!current || row.last_message_at > current) result.set(row.contact_id, row.last_message_at)
-  }
-  return result
-}
-
 /** Links (or re-links) a conversation to a client -- used from the Inbox
  * when a conversation came in unlinked (see whatsapp-webhook: it stopped
  * auto-creating a client per inbound number, since not every sender is

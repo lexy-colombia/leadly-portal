@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { CheckIcon, XIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createCampaign, updateCampaign } from '../../../lib/api/campaigns'
 import type { ParsedRecipient } from '../../../lib/api/campaigns'
 import { listApprovedTemplates } from '../../../lib/api/templates'
 import { listWhatsappLinesByTenant } from '../../../lib/api/whatsappLines'
-import { listClients } from '../../../lib/api/clients'
+import { findClientsByFullPhone, searchClients } from '../../../lib/api/clients'
 import { listCustomFieldDefinitions } from '../../../lib/api/customFields'
 import {
   FREE_SOURCE,
@@ -92,7 +92,13 @@ export function CampaignFormDrawer({
   const { t } = useLanguage()
   const [templates, setTemplates] = useState<WhatsappMessageTemplate[]>([])
   const [lines, setLines] = useState<WhatsappLine[]>([])
-  const [clients, setClients] = useState<Client[]>([])
+  // Selector de destinatarios con búsqueda en el servidor (ya no se baja el
+  // tenant entero). `knownClients` recuerda las fichas vistas (resultados y
+  // destinatarios de una campaña duplicada) para resolver variables.
+  const [pickerResults, setPickerResults] = useState<Client[]>([])
+  const [pickerQuery, setPickerQuery] = useState('')
+  const [pickerSearching, setPickerSearching] = useState(false)
+  const knownClients = useRef<Map<string, Client>>(new Map())
   const [customDefs, setCustomDefs] = useState<CustomFieldDefinition[]>([])
   // Origen de cada variable de la plantilla (campo de la ficha, campo
   // personalizado o libre) y, para las libres, un valor común opcional que se
@@ -123,24 +129,52 @@ export function CampaignFormDrawer({
     listApprovedTemplates(tenantId).then(setTemplates).catch(() => setTemplates([]))
     listWhatsappLinesByTenant(tenantId).then((all) => setLines(all.filter((l) => l.status === 'active'))).catch(() => setLines([]))
     listCustomFieldDefinitions(tenantId, 'client').then(setCustomDefs).catch(() => setCustomDefs([]))
-    listClients(tenantId)
-      .then((all) => {
-        setClients(all)
-        if (initial) {
+    if (initial) {
+      // campaign_recipients.contact_phone sigue siendo el número completo
+      // (esa tabla no la tocó el split) -- se buscan en el servidor las
+      // fichas que coinciden con prefijo + número.
+      findClientsByFullPhone(initial.recipients.map((r) => r.contact_phone))
+        .then((all) => {
+          for (const c of all) knownClients.current.set(c.id, c)
+          const byPhone = new Map(all.map((c) => [combinePhone(c.phone_prefix, c.phone), c]))
           setRecipients(
             initial.recipients.map((r) => {
-              // campaign_recipients.contact_phone sigue siendo el número
-              // completo (esa tabla no la tocó el split) -- hay que
-              // reconstruir el de cada cliente para poder matchear.
-              const match = all.find((c) => combinePhone(c.phone_prefix, c.phone) === r.contact_phone)
+              const match = byPhone.get(r.contact_phone)
               return { key: match?.id ?? crypto.randomUUID(), contact_phone: r.contact_phone, contact_name: r.contact_name, variables: r.variables }
             }),
           )
-        }
-      })
-      .catch(() => setClients([]))
+        })
+        .catch(() => {
+          setRecipients(initial.recipients.map((r) => ({ key: crypto.randomUUID(), contact_phone: r.contact_phone, contact_name: r.contact_name, variables: r.variables })))
+        })
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId])
+
+  useEffect(() => {
+    if (!pickerOpen) return
+    let cancelled = false
+    setPickerSearching(true)
+    const timer = setTimeout(
+      () => {
+        searchClients(tenantId, pickerQuery, 20)
+          .then((rows) => {
+            if (!cancelled) setPickerResults(rows)
+          })
+          .catch(() => {
+            if (!cancelled) setPickerResults([])
+          })
+          .finally(() => {
+            if (!cancelled) setPickerSearching(false)
+          })
+      },
+      pickerQuery ? 250 : 0,
+    )
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [pickerOpen, pickerQuery, tenantId])
 
   const selectedTemplate = templates.find((tpl) => tpl.id === templateId) ?? null
   const eligibleLines = useMemo(
@@ -190,7 +224,7 @@ export function CampaignFormDrawer({
     // de dónde sacar el dato y quedan como estaban (editables).
     setRecipients((prev) =>
       prev.map((r) => {
-        const client = clients.find((c) => c.id === r.key)
+        const client = knownClients.current.get(r.key)
         if (!client) return r
         return { ...r, variables: r.variables.map((v, i) => (i === index ? resolveVariable(source, client) : v)) }
       }),
@@ -203,6 +237,7 @@ export function CampaignFormDrawer({
   }
 
   function toggleClient(client: Client) {
+    knownClients.current.set(client.id, client)
     setRecipients((prev) => {
       const idx = prev.findIndex((r) => r.key === client.id)
       if (idx >= 0) return prev.filter((_, i) => i !== idx)
@@ -384,15 +419,15 @@ export function CampaignFormDrawer({
                       </TabsTrigger>
                     </TabsList>
                     <TabsContent value="clients" className="mt-0">
-                      <Command>
-                        <CommandInput placeholder={t('campaigns.newDrawer.searchContacts')} className="text-xs" />
+                      <Command shouldFilter={false}>
+                        <CommandInput value={pickerQuery} onValueChange={setPickerQuery} placeholder={t('campaigns.newDrawer.searchContacts')} className="text-xs" />
                         <CommandList className="max-h-56">
-                          <CommandEmpty className="text-xs">{t('common.status.noResults')}</CommandEmpty>
+                          {!pickerSearching && <CommandEmpty className="text-xs">{t('common.status.noResults')}</CommandEmpty>}
                           <CommandGroup>
-                            {clients.map((c) => {
+                            {pickerResults.map((c) => {
                               const checked = recipients.some((r) => r.key === c.id)
                               return (
-                                <CommandItem key={c.id} value={`${c.full_name} ${c.phone_prefix}${c.phone}`} onSelect={() => toggleClient(c)} className="text-xs">
+                                <CommandItem key={c.id} value={c.id} onSelect={() => toggleClient(c)} className="text-xs">
                                   <span className={cn('flex size-3.5 shrink-0 items-center justify-center rounded-sm border', checked ? 'border-primary bg-primary text-primary-foreground' : 'border-input')}>
                                     {checked && <CheckIcon className="size-2.5" />}
                                   </span>

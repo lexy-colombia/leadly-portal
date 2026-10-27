@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { createTask, TASK_PRIORITY_KEY, updateTask } from '../../../lib/api/tasks'
 import type { TaskWithRelations } from '../../../lib/api/tasks'
-import { listClients } from '../../../lib/api/clients'
 import { listOpportunities, type OpportunityWithRelations } from '../../../lib/api/opportunities'
 import { listProfilesByTenant } from '../../../lib/api/users'
 import { getAttachmentSignedUrl, listAttachmentsForTask, uploadTaskAttachment, validateTaskAttachmentFile } from '../../../lib/api/attachments'
-import type { Attachment, Client, Profile, TaskPriority } from '../../../types/domain'
+import type { Attachment, Profile, TaskPriority } from '../../../types/domain'
 import { FieldError } from '@/components/atoms'
-import { ComboboxFilter } from '@/components/molecules'
+import { ClientSearchCombobox, ComboboxFilter } from '@/components/molecules'
 import { Drawer } from '@/components/organisms'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -145,7 +144,6 @@ export function TaskDrawer({
   const [contactId, setContactId] = useState<string | null>(null)
   const [assignedTo, setAssignedTo] = useState<string | null>(null)
   const [opportunityId, setOpportunityId] = useState<string | null>(null)
-  const [contacts, setContacts] = useState<Client[]>([])
   const [agents, setAgents] = useState<Profile[]>([])
   const [opportunities, setOpportunities] = useState<OpportunityWithRelations[]>([])
   const [touched, setTouched] = useState(false)
@@ -168,7 +166,6 @@ export function TaskDrawer({
 
   useEffect(() => {
     if (!open) return
-    listClients(tenantId).then(setContacts).catch(() => {})
     listProfilesByTenant(tenantId).then(setAgents).catch(() => {})
     listOpportunities(tenantId).then(setOpportunities).catch(() => {})
   }, [open, tenantId])
@@ -245,10 +242,10 @@ export function TaskDrawer({
         <div>
           <Label>{t('tasks.field.contact')}</Label>
           <div className="mt-1">
-            <ComboboxFilter
-              options={contacts.map((c) => ({ id: c.id, label: c.full_name }))}
+            <ClientSearchCombobox
+              tenantId={tenantId}
               value={contactId}
-              onChange={setContactId}
+              onChange={(c) => setContactId(c?.id ?? null)}
               placeholder={t('tasks.field.noContact')}
               searchPlaceholder={t('contacts.search.placeholder')}
               emptyLabel={t('tasks.filter.noResults')}

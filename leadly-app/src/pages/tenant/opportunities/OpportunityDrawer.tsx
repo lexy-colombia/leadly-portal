@@ -1,9 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { createOpportunity, listStages, updateOpportunity, type OpportunityWithRelations } from '../../../lib/api/opportunities'
-import { listClients } from '../../../lib/api/clients'
-import type { Client, PipelineStage, OpportunityPriority } from '../../../types/domain'
+import type { PipelineStage, OpportunityPriority } from '../../../types/domain'
 import { FieldError } from '@/components/atoms'
-import { ComboboxFilter, CurrencyInput } from '@/components/molecules'
+import { ClientSearchCombobox, CurrencyInput } from '@/components/molecules'
 import { Drawer } from '@/components/organisms'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -48,7 +47,6 @@ export function OpportunityDrawer({
   const [priority, setPriority] = useState<OpportunityPriority>('media')
   const [expectedCloseDate, setExpectedCloseDate] = useState('')
   const [description, setDescription] = useState('')
-  const [contacts, setContacts] = useState<Client[]>([])
   const [stages, setStages] = useState<PipelineStage[]>([])
   const [touched, setTouched] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -69,7 +67,6 @@ export function OpportunityDrawer({
 
   useEffect(() => {
     if (!open) return
-    listClients(tenantId).then(setContacts).catch(() => {})
   }, [open, tenantId])
 
   useEffect(() => {
@@ -138,10 +135,10 @@ export function OpportunityDrawer({
         <div>
           <Label>{t('opportunities.drawer.fields.contact')}</Label>
           <div className="mt-1">
-            <ComboboxFilter
-              options={contacts.map((c) => ({ id: c.id, label: c.full_name }))}
+            <ClientSearchCombobox
+              tenantId={tenantId}
               value={contactId}
-              onChange={setContactId}
+              onChange={(c) => setContactId(c?.id ?? null)}
               placeholder={t('opportunities.drawer.fields.contactPlaceholder')}
               searchPlaceholder={t('contacts.search.placeholder')}
               emptyLabel={t('tasks.filter.noResults')}
