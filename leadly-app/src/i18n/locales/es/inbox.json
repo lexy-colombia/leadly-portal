@@ -119,5 +119,6 @@
   "inbox.newConv.errors.noActiveLine": "Necesitas al menos una línea de WhatsApp activa para iniciar una conversación.",
   "inbox.newConv.errors.createFailed": "No se pudo iniciar la conversación.",
   "inbox.media.sticker": "Sticker",
-  "inbox.media.video": "Video"
+  "inbox.media.video": "Video",
+  "inbox.media.audio": "Audio"
 }

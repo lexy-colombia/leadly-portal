@@ -1,10 +1,10 @@
-import { extractMessageText, inboundMedia, mediaExtension } from '../../functions/_shared/inboundMedia.ts';
+import { extractMessageText, inboundMedia, mediaExtension, acceptsInboundMessage } from '../../functions/_shared/inboundMedia.ts';
 function assert(value: unknown) { if (!value) throw new Error('Assertion failed'); }
 Deno.test('stickers and videos preserve media ids and captions', () => {
  const sticker={id:'s',type:'sticker',sticker:{id:'media-s',animated:true}};
  const video={id:'v',type:'video',video:{id:'media-v',caption:' Una fuga '}};
  assert(extractMessageText(sticker)==='[Sticker adjunto]' && inboundMedia(sticker)?.id==='media-s');
- assert(extractMessageText(video)==='Una fuga' && inboundMedia(video)?.id==='media-v');
+ assert(extractMessageText(video)==='Una fuga' && inboundMedia(video)===undefined && !acceptsInboundMessage(video));
  assert(extractMessageText({...video,video:{id:'media-v'}})==='[Video adjunto]');
 });
 Deno.test('existing text, buttons and images remain supported', () => {
@@ -14,8 +14,9 @@ Deno.test('existing text, buttons and images remain supported', () => {
 });
 Deno.test('mime types and size bounds are checked before storage', () => {
  assert(mediaExtension('sticker','image/webp',500)==='webp');
- assert(mediaExtension('video','video/mp4',16*1024*1024)==='mp4');
- assert(mediaExtension('video','video/3gpp',500)==='3gp');
+ assert(!acceptsInboundMessage({id:'a',type:'audio',audio:{id:'file'}}));
+ assert(inboundMedia({id:'a',type:'audio',audio:{id:'file'}})===undefined);
+
  for(const [type,mime,size] of [['video','text/html',500],['sticker','video/mp4',500],['video','video/mp4',16*1024*1024+1]] as const){
   let rejected=false;try{mediaExtension(type,mime,size)}catch{rejected=true}assert(rejected);
  }

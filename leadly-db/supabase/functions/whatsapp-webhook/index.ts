@@ -6,8 +6,8 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/cors.ts";
-import { downloadWhatsappMedia, isBsuid, verifyMetaSignature } from "../_shared/whatsapp.ts";
-import { extractMessageText, inboundMedia, mediaExtension, type InboundMessage as MetaMessage } from "../_shared/inboundMedia.ts";
+import { downloadWhatsappMedia, isBsuid, verifyMetaSignature, sendWhatsappText } from "../_shared/whatsapp.ts";
+import { extractMessageText, inboundMedia, mediaExtension, acceptsInboundMessage, AUDIO_NOT_SUPPORTED_REPLY, type InboundMessage as MetaMessage } from "../_shared/inboundMedia.ts";
 import { splitPhone } from "../_shared/phone.ts";
 
 // Ventana de servicio al cliente de Meta: 24 h desde el último mensaje del contacto.
@@ -80,6 +80,9 @@ Deno.serve(async (req: Request) => {
       let lineAccessTokenFetched = false;
 
       for (const message of value.messages) {
+        // Acknowledge Meta delivery but neither download nor persist video messages.
+        const blockedAudio = message.type === "audio";
+        if (!acceptsInboundMessage(message) && !blockedAudio) continue;
         // Meta redelivers a webhook event it didn't get a fast/clean 200 for
         // -- found live in production (2026-08-24): the same wamid landed as
         // 3 separate rows a few seconds apart, each one independently
@@ -272,6 +275,23 @@ Deno.serve(async (req: Request) => {
           if (insertError.code === "23505") continue; // duplicate wamid, race with another delivery -- already handled
           console.error(`Failed to insert inbound message ${message.id}`, insertError);
           hadPersistFailure = true;
+          continue;
+        }
+
+        if (blockedAudio) {
+          // Keep only a text receipt for chat visibility and webhook deduplication.
+          // The audio is never downloaded, stored or sent to an AI provider.
+          const { data: token } = await adminClient.rpc("get_whatsapp_line_access_token", { p_line_id: line.id });
+          if (token && line.status === "active") {
+            const sent = await sendWhatsappText(phoneNumberId, token, contactPhone, AUDIO_NOT_SUPPORTED_REPLY);
+            if (sent.ok) {
+              const { error: replyError } = await adminClient.from("whatsapp_messages").insert({
+                conversation_id: conversation.id, direction: "outbound", sender_type: "ia",
+                content: AUDIO_NOT_SUPPORTED_REPLY, wamid: sent.wamid,
+              });
+              if (replyError) console.error("Failed to record audio rejection reply");
+            } else console.error("Failed to send audio rejection reply");
+          }
           continue;
         }
 

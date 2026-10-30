@@ -6,7 +6,7 @@ import { useLanguage } from '@/contexts/LanguageContext'
  * and renders it -- the bucket is private (see 20260804000019_crm_attachments
  * migration), so there's no public URL to just drop into an <img src>.
  * Click opens the full image in a new tab; no custom lightbox, kept simple. */
-export function SignedMedia({ storagePath, alt, className, video = false }: { storagePath: string; alt?: string; className?: string; video?: boolean }) {
+export function SignedMedia({ storagePath, alt, className, video = false, audio = false }: { storagePath: string; alt?: string; className?: string; video?: boolean; audio?: boolean }) {
   const { t } = useLanguage()
   const [url, setUrl] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
@@ -37,6 +37,7 @@ export function SignedMedia({ storagePath, alt, className, video = false }: { st
   if (!url) {
     return <div className={`animate-pulse rounded-lg bg-brand-100 ${className ?? ''}`} />
   }
+  if (audio) return <audio key={url} src={url} controls preload="metadata" aria-label={alt} onError={() => setFailed(true)} className={`max-w-full ${className ?? ''}`} />
   if (video) return <video key={url} src={url} controls playsInline preload="metadata" aria-label={alt} onError={() => setFailed(true)} className={`max-w-full rounded-lg bg-brand-900 ${className ?? ''}`} />
   return (
     <a href={url} target="_blank" rel="noreferrer" className="block">

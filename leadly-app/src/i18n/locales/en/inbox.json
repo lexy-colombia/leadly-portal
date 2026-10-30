@@ -119,5 +119,6 @@
   "inbox.newConv.errors.noActiveLine": "You need at least one active WhatsApp line to start a conversation.",
   "inbox.newConv.errors.createFailed": "Couldn't start the conversation.",
   "inbox.media.sticker": "Sticker",
-  "inbox.media.video": "Video"
+  "inbox.media.video": "Video",
+  "inbox.media.audio": "Audio"
 }
