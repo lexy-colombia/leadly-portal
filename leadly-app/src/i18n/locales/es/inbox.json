@@ -117,5 +117,7 @@
   "inbox.newConv.errors.invalidPhone": "Teléfono inválido (formato internacional).",
   "inbox.newConv.errors.selectContact": "Selecciona un cliente.",
   "inbox.newConv.errors.noActiveLine": "Necesitas al menos una línea de WhatsApp activa para iniciar una conversación.",
-  "inbox.newConv.errors.createFailed": "No se pudo iniciar la conversación."
+  "inbox.newConv.errors.createFailed": "No se pudo iniciar la conversación.",
+  "inbox.media.sticker": "Sticker",
+  "inbox.media.video": "Video"
 }

@@ -7,16 +7,11 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { downloadWhatsappMedia, isBsuid, verifyMetaSignature } from "../_shared/whatsapp.ts";
+import { extractMessageText, inboundMedia, mediaExtension, type InboundMessage as MetaMessage } from "../_shared/inboundMedia.ts";
 import { splitPhone } from "../_shared/phone.ts";
 
 // Ventana de servicio al cliente de Meta: 24 h desde el último mensaje del contacto.
 const SERVICE_WINDOW_MS = 24 * 60 * 60 * 1000;
-
-const ATTACHMENT_MIME_TO_EXT: Record<string, string> = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-};
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -115,7 +110,8 @@ Deno.serve(async (req: Request) => {
         const content = extractMessageText(message);
 
         let media: { path: string; mimeType: string; sizeBytes: number } | null = null;
-        if (message.type === "image" && message.image?.id) {
+        const attachment = inboundMedia(message);
+        if (attachment?.id) {
           if (!lineAccessTokenFetched) {
             lineAccessTokenFetched = true;
             const { data: token } = await adminClient.rpc("get_whatsapp_line_access_token", { p_line_id: line.id });
@@ -123,8 +119,8 @@ Deno.serve(async (req: Request) => {
           }
           if (lineAccessToken) {
             try {
-              const downloaded = await downloadWhatsappMedia(message.image.id, lineAccessToken);
-              const ext = ATTACHMENT_MIME_TO_EXT[downloaded.mimeType] ?? "jpg";
+              const downloaded = await downloadWhatsappMedia(attachment.id, lineAccessToken);
+              const ext = mediaExtension(message.type, downloaded.mimeType, downloaded.bytes.byteLength);
               const path = `${line.tenant_id}/${message.id}.${ext}`;
               const { error: uploadError } = await adminClient.storage
                 .from("crm-attachments")
@@ -350,27 +346,6 @@ async function invokeAiRespondWithRetry(supabaseUrl: string, serviceRoleKey: str
     if (attempt < AI_RESPOND_MAX_ATTEMPTS) await sleep(AI_RESPOND_RETRY_DELAYS_MS[attempt - 1]);
   }
   console.error(`Giving up on whatsapp-ai-respond for conversation ${conversationId} after ${AI_RESPOND_MAX_ATTEMPTS} attempts`);
-}
-
-function extractMessageText(message: MetaMessage): string {
-  if (message.type === "text" && message.text?.body) return message.text.body;
-  if (message.type === "button" && message.button?.text) return message.button.text;
-  if (message.type === "interactive" && message.interactive?.button_reply?.title) return message.interactive.button_reply.title;
-  if (message.type === "interactive" && message.interactive?.list_reply?.title) return message.interactive.list_reply.title;
-  if (message.type === "image") return message.image?.caption?.trim() || "[Imagen adjunta]";
-  return `[mensaje no soportado: ${message.type}]`;
-}
-
-interface MetaMessage {
-  from?: string;
-  from_user_id?: string;
-  user_id?: string;
-  id: string;
-  type: string;
-  text?: { body: string };
-  button?: { text: string };
-  interactive?: { button_reply?: { title: string }; list_reply?: { title: string } };
-  image?: { id: string; mime_type?: string; caption?: string };
 }
 
 interface MetaWebhookPayload {

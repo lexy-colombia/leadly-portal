@@ -1,5 +1,5 @@
 import { AiSparkleIcon, UserIcon } from '@/components/atoms/icons'
-import { SignedImage } from '@/components/molecules'
+import { SignedMedia } from '@/components/molecules/AttachmentImage'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import type { TranslationKey, Language } from '../../../i18n/translations'
 import type { WhatsappMessage } from '../../../types/domain'
@@ -13,7 +13,7 @@ function formatTime(iso: string, language: Language): string {
 // literal value written server-side (always Spanish, regardless of the
 // viewer's language), so it must NOT be translated -- it's stored data, not
 // UI copy.
-const IMAGE_PLACEHOLDER_CONTENT = '[Imagen adjunta]'
+const MEDIA_PLACEHOLDERS = new Set(['[Imagen adjunta]', '[Sticker adjunto]', '[Video adjunto]'])
 
 const SENDER_LABEL_KEY: Record<WhatsappMessage['sender_type'], TranslationKey> = {
   contact: 'inbox.sender.contact',
@@ -24,6 +24,10 @@ const SENDER_LABEL_KEY: Record<WhatsappMessage['sender_type'], TranslationKey> =
 export function MessageBubble({ message }: { message: WhatsappMessage }) {
   const { t, language } = useLanguage()
   const isOutbound = message.direction === 'outbound'
+  const isSticker = message.content === '[Sticker adjunto]' || message.content === '[mensaje no soportado: sticker]'
+  const isVideo = message.media_mime_type?.startsWith('video/') || message.content === '[Video adjunto]' || message.content === '[mensaje no soportado: video]'
+  const mediaLabel = t(isSticker ? 'inbox.media.sticker' : isVideo ? 'inbox.media.video' : 'inbox.image.sentByContact')
+  const legacyMedia = /^\[mensaje no soportado: (sticker|video)\]$/.test(message.content)
   const isIa = message.sender_type === 'ia'
 
   const bubbleClasses = isOutbound
@@ -45,10 +49,10 @@ export function MessageBubble({ message }: { message: WhatsappMessage }) {
           </span>
         )}
         {message.media_storage_path && (
-          <SignedImage storagePath={message.media_storage_path} alt={t('inbox.image.sentByContact')} className="mb-1.5 max-h-64 w-full" />
+          <SignedMedia storagePath={message.media_storage_path} video={!!isVideo} alt={mediaLabel} className={isSticker ? "mb-1.5 size-28 object-contain" : "mb-1.5 max-h-64 w-full object-contain"} />
         )}
-        {!(message.media_storage_path && message.content === IMAGE_PLACEHOLDER_CONTENT) && (
-          <p className="whitespace-pre-wrap break-words text-xs leading-relaxed">{message.content}</p>
+        {!(message.media_storage_path && MEDIA_PLACEHOLDERS.has(message.content)) && (
+          <p className="whitespace-pre-wrap break-words text-xs leading-relaxed">{legacyMedia ? `${mediaLabel} · ${t('common.attachment.notAvailable')}` : message.content}</p>
         )}
         <span className={`mt-1 block text-right text-[10px] ${isOutbound && !isIa ? 'text-brand-300' : 'text-brand-400'}`}>
           {formatTime(message.created_at, language)}
