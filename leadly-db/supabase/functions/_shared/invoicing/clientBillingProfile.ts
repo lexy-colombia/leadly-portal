@@ -14,11 +14,9 @@ export interface FiscalAddress {
 
 interface ClientBillingProfile {
   legal_name?: string | null;
-  organization_type?: "1" | "2" | null;
   tax_level_code?: string | null;
   tax_scheme_code?: BuyerTaxSchemeCode | null;
   email?: string | null;
-  delivery_method?: "email" | "print" | null;
   address?: FiscalAddress | null;
 }
 
@@ -44,7 +42,7 @@ export function buildFiscalBuyer(client: FiscalClient | null) {
   let documentNumber = client?.document_number?.trim() || null;
   const legalName = profile?.legal_name?.trim() || client?.full_name?.trim() || null;
   const address = profile?.address ?? null;
-  const email = profile?.delivery_method === "print" ? null : profile?.email?.trim() || client?.email?.trim() || null;
+  const email = profile?.email?.trim() || client?.email?.trim() || null;
   const missing: string[] = [];
 
   if (!legalName) missing.push("nombre legal o razón social");
@@ -57,12 +55,9 @@ export function buildFiscalBuyer(client: FiscalClient | null) {
       documentNumber = nit[1];
       if (nit[2] && Number(nit[2]) !== computeNitCheckDigit(nit[1])) missing.push("dígito de verificación válido");
     }
-    if (!profile?.organization_type) missing.push("tipo de persona para el NIT");
   }
-  if (profile?.delivery_method === "email" && !email) missing.push("correo de facturación");
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && (profile?.email || profile?.delivery_method === "email")) {
-    missing.push("correo de facturación válido");
-  }
+  if (!email) missing.push("correo de facturación");
+  else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) missing.push("correo de facturación válido");
   if (address) {
     if (!address.line1?.trim()) missing.push("dirección fiscal");
     if (!address.country || !/^[A-Z]{2}$/.test(address.country) || address.country === "OT") missing.push("país de la dirección fiscal");
@@ -81,7 +76,7 @@ export function buildFiscalBuyer(client: FiscalClient | null) {
       email,
       phone: client?.phone ?? null,
       applies_withholding: client?.applies_withholding ?? false,
-      organization_type: profile?.organization_type ?? null,
+      organization_type: documentType === "31" || documentType === "50" ? "1" as const : "2" as const,
       tax_level_code: profile?.tax_level_code ?? "R-99-PN",
       tax_scheme_code: profile?.tax_scheme_code ?? null,
       address,

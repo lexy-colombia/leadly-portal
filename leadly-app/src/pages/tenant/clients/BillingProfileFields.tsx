@@ -4,7 +4,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useLanguage } from '../../../contexts/LanguageContext'
+import { COUNTRIES } from '../../../lib/referenceData'
 import type { TranslationKey } from '../../../i18n/translations'
+
+const FIELD_CLASS = 'mt-1 !h-7 !rounded-lg !text-xs'
 
 const emptyAddress: ClientBillingAddress = {
   line1: null, country: null, city: null, state_province: null, city_code: null, state_code: null,
@@ -12,12 +15,23 @@ const emptyAddress: ClientBillingAddress = {
 
 const responsibilities = ['O-13', 'O-15', 'O-23', 'O-47'] as const
 
-export function BillingProfileFields({ profile, onChange }: {
+export function BillingProfileFields({ profile, onChange, country, onCountryChange, disabled = false }: {
   profile: ClientBillingProfile
   onChange: (profile: ClientBillingProfile) => void
+  country: string
+  onCountryChange: (country: string) => void
+  disabled?: boolean
 }) {
-  const { t } = useLanguage()
+  const { language, t } = useLanguage()
   const address = profile.address ?? emptyAddress
+  const countries = COUNTRIES.filter(({ code }) => code !== 'OT')
+  const savedCountry = /^[A-Z]{2}$/.test(country) && country !== 'OT'
+    ? country
+    : null
+  const currentCountry = countries.find(({ code }) => code === savedCountry)
+  const existingCountryName = savedCountry && !currentCountry
+    ? new Intl.DisplayNames([language], { type: 'region' }).of(savedCountry) ?? savedCountry
+    : null
   const selected = profile.tax_level_code?.split(';') ?? []
   const update = (patch: Partial<ClientBillingProfile>) => onChange({ ...profile, ...patch })
   const updateAddress = (patch: Partial<ClientBillingAddress>) => {
@@ -26,35 +40,23 @@ export function BillingProfileFields({ profile, onChange }: {
   }
 
   return (
-    <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">{t('contacts.billing.hint')}</p>
+    <div className="space-y-2.5">
+      {!disabled && <p className="text-xs text-muted-foreground">{t('contacts.billing.hint')}</p>}
       <div>
         <Label htmlFor="billing-legal-name">{t('contacts.billing.legalName')}</Label>
-        <Input id="billing-legal-name" value={profile.legal_name ?? ''} onChange={(e) => update({ legal_name: e.target.value })} />
+        <Input id="billing-legal-name" className={FIELD_CLASS} value={profile.legal_name ?? ''} onChange={(e) => update({ legal_name: e.target.value })} />
       </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div>
-          <Label htmlFor="billing-person">{t('contacts.billing.person')}</Label>
-          <Select value={profile.organization_type ?? ''} onValueChange={(value) => update({ organization_type: value === '1' ? '1' : '2' })}>
-            <SelectTrigger id="billing-person" className="w-full"><SelectValue placeholder={t('common.form.selectPlaceholder')} /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="2">{t('contacts.billing.natural')}</SelectItem>
-              <SelectItem value="1">{t('contacts.billing.legal')}</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label htmlFor="billing-tax">{t('contacts.billing.tax')}</Label>
-          <Select value={profile.tax_scheme_code ?? ''} onValueChange={(value) => update({ tax_scheme_code: value as ClientBillingProfile['tax_scheme_code'] })}>
-            <SelectTrigger id="billing-tax" className="w-full"><SelectValue placeholder={t('common.form.selectPlaceholder')} /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="01">IVA</SelectItem>
-              <SelectItem value="04">INC</SelectItem>
-              <SelectItem value="ZA">IVA e INC</SelectItem>
-              <SelectItem value="ZZ">{t('contacts.billing.notApplicable')}</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+      <div>
+        <Label htmlFor="billing-tax">{t('contacts.billing.tax')}</Label>
+        <Select disabled={disabled} value={profile.tax_scheme_code ?? ''} onValueChange={(value) => update({ tax_scheme_code: value as ClientBillingProfile['tax_scheme_code'] })}>
+          <SelectTrigger id="billing-tax" className={`w-full ${FIELD_CLASS}`}><SelectValue placeholder={t('common.form.selectPlaceholder')} /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="01">IVA</SelectItem>
+            <SelectItem value="04">INC</SelectItem>
+            <SelectItem value="ZA">IVA e INC</SelectItem>
+            <SelectItem value="ZZ">{t('contacts.billing.notApplicable')}</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
       <fieldset className="space-y-1">
         <legend className="mb-1 text-sm font-medium">{t('contacts.billing.responsibilities')}</legend>
@@ -72,48 +74,50 @@ export function BillingProfileFields({ profile, onChange }: {
           {t('contacts.billing.notApplicable')}
         </label>
       </fieldset>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div>
-          <Label htmlFor="billing-delivery">{t('contacts.billing.delivery')}</Label>
-          <Select value={profile.delivery_method ?? 'default'} onValueChange={(value) => update({ delivery_method: value === 'default' ? null : value === 'email' ? 'email' : 'print' })}>
-            <SelectTrigger id="billing-delivery" className="w-full"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="default">{t('contacts.billing.defaultDelivery')}</SelectItem>
-              <SelectItem value="email">{t('contacts.billing.email')}</SelectItem>
-              <SelectItem value="print">{t('contacts.billing.print')}</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label htmlFor="billing-email">{t('contacts.billing.email')}</Label>
-          <Input id="billing-email" type="email" value={profile.email ?? ''} onChange={(e) => update({ email: e.target.value })} />
-        </div>
+      <div>
+        <Label htmlFor="billing-email">{t('contacts.billing.email')}</Label>
+        <Input id="billing-email" className={FIELD_CLASS} type="email" value={profile.email ?? ''} onChange={(e) => update({ email: e.target.value })} />
+        <p className="mt-1 text-xs text-muted-foreground">{t('contacts.billing.emailHint')}</p>
       </div>
       <div>
         <Label htmlFor="billing-line1">{t('contacts.billing.address')}</Label>
-        <Input id="billing-line1" value={address.line1 ?? ''} onChange={(e) => updateAddress({ line1: e.target.value })} />
+        <Input id="billing-line1" className={FIELD_CLASS} value={address.line1 ?? ''} onChange={(e) => updateAddress({ line1: e.target.value })} />
       </div>
       <div>
         <Label htmlFor="billing-country">{t('contacts.billing.country')}</Label>
-        <Input id="billing-country" placeholder="CO" maxLength={2} value={address.country ?? ''} onChange={(e) => updateAddress({
-          country: e.target.value.toUpperCase(), city: null, state_province: null, city_code: null, state_code: null,
-        })} />
+        <Select disabled={disabled} value={savedCountry ?? ''} onValueChange={(value) => {
+          const country = value === 'none' ? null : value
+          if (country === savedCountry) return
+          onCountryChange(country ?? '')
+          updateAddress({ country, city: null, state_province: null, city_code: null, state_code: null })
+        }}>
+          <SelectTrigger id="billing-country" className={`w-full ${FIELD_CLASS}`}>
+            <SelectValue placeholder={t('common.form.selectPlaceholder')}>
+              {currentCountry ? t(currentCountry.labelKey) : existingCountryName}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">{t('contacts.billing.noCountry')}</SelectItem>
+            {savedCountry && existingCountryName && <SelectItem value={savedCountry}>{existingCountryName}</SelectItem>}
+            {countries.map(({ code, labelKey }) => <SelectItem key={code} value={code}>{t(labelKey)}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </div>
-      {address.country === 'CO' ? (
-        <GeoSelect idPrefix="billing-address" stateCode={address.state_code} cityCode={address.city_code}
+      {savedCountry === 'CO' ? (
+        <GeoSelect disabled={disabled} idPrefix="billing-address" stateCode={address.state_code} cityCode={address.city_code}
           stateLabel={t('contacts.billing.state')} cityLabel={t('contacts.billing.city')}
           onChange={(geo) => updateAddress({
             state_code: geo.stateCode, city_code: geo.cityCode, state_province: geo.stateName, city: geo.cityName,
           })} />
-      ) : address.country && (
+      ) : savedCountry && (
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <Label htmlFor="billing-state">{t('contacts.billing.state')}</Label>
-            <Input id="billing-state" value={address.state_province ?? ''} onChange={(e) => updateAddress({ state_province: e.target.value })} />
+            <Input id="billing-state" className={FIELD_CLASS} value={address.state_province ?? ''} onChange={(e) => updateAddress({ state_province: e.target.value })} />
           </div>
           <div>
             <Label htmlFor="billing-city">{t('contacts.billing.city')}</Label>
-            <Input id="billing-city" value={address.city ?? ''} onChange={(e) => updateAddress({ city: e.target.value })} />
+            <Input id="billing-city" className={FIELD_CLASS} value={address.city ?? ''} onChange={(e) => updateAddress({ city: e.target.value })} />
           </div>
         </div>
       )}

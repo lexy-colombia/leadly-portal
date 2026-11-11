@@ -15,7 +15,6 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { COUNTRIES } from '../../../lib/referenceData'
 import { isNotBlank, isValidE164Phone, isValidEmail } from '../../../lib/validation'
 import { combinePhone, splitPhone } from '../../../lib/phone'
 import { useLanguage } from '../../../contexts/LanguageContext'
@@ -89,7 +88,7 @@ export function ContactDrawer({
     setTags(contact?.tags ?? [])
     setAssignedTo(contact?.assigned_to ?? null)
     setDocumentNumber(contact?.document_number ?? '')
-    setCountry(contact?.country ?? '')
+    setCountry(contact?.billing_profile?.address?.country ?? contact?.country ?? '')
     setNotes(contact?.notes ?? '')
     setIsActive(contact?.is_active ?? true)
     setCreditEnabled(contact?.credit_enabled ?? false)
@@ -118,6 +117,20 @@ export function ContactDrawer({
   const nameError = touched && !isNotBlank(fullName) ? t('contacts.drawer.errors.nameRequired') : undefined
   const phoneError = touched && !isValidE164Phone(phone) ? t('contacts.drawer.errors.invalidPhone') : undefined
   const emailError = touched && isNotBlank(email) && !isValidEmail(email) ? t('contacts.drawer.errors.invalidEmail') : undefined
+
+  const documentOptions = dianDocumentTypes.map(({ code, name }) => ({
+    code,
+    label: name,
+    organizationType: code === '31' || code === '50' ? '1' as const : '2' as const,
+  }))
+  const selectedDocument = documentOptions.find((option) => option.code === dianDocumentTypeCode)
+
+  function selectDocument(code: string) {
+    const option = documentOptions.find((item) => item.code === code)
+    if (!option) return
+    setDianDocumentTypeCode(option.code)
+    setBillingProfile((profile) => ({ ...profile, organization_type: option.organizationType }))
+  }
 
   /** Devuelve el objeto a enviar, o null si NO debe enviarse la clave:
    * sin definiciones activas, o sin cambios respecto de lo guardado (en
@@ -175,11 +188,13 @@ export function ContactDrawer({
         applies_withholding: appliesWithholding,
         ...(contact?.is_walk_in ? {} : {
           billing_profile: {
-            ...billingProfile,
+            organization_type: selectedDocument?.organizationType ?? billingProfile.organization_type ?? null,
+            tax_level_code: billingProfile.tax_level_code ?? null,
+            tax_scheme_code: billingProfile.tax_scheme_code ?? null,
             legal_name: billingProfile.legal_name?.trim() || null,
             email: billingProfile.email?.trim() || null,
-            address: billingProfile.address?.line1?.trim() || billingProfile.address?.country
-              ? { ...billingProfile.address, line1: billingProfile.address.line1?.trim() || null }
+            address: billingProfile.address && (billingProfile.address.line1?.trim() || billingProfile.address.city || billingProfile.address.state_province)
+              ? { ...billingProfile.address, country: country || null, line1: billingProfile.address.line1?.trim() || null }
               : null,
           },
         }),
@@ -245,80 +260,40 @@ export function ContactDrawer({
         </Section>
 
         <Section title={t('contacts.drawer.sections.einvoicing')}>
-          {/* Un solo tipo/número de documento -- pedido explícito del
-              usuario 2026-09-09: antes se pedía tres veces (NIT suelto,
-              "Tipo de documento" genérico, y "Tipo de documento DIAN" en
-              la sección de facturación electrónica, los tres compartiendo
-              en el fondo el mismo número). El catálogo DIAN es el que de
-              verdad hace falta para facturar, así que es el único que se
-              muestra -- ClientPickerCard.tsx/PosReceiptTicket.tsx siguen
-              mostrando una etiqueta corta derivada de esto (ver
-              dianDocumentTypeCodeToGeneric en handleSubmit). */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="contact-dian-document-type">{t('contacts.drawer.fields.dianDocumentType')}</Label>
-              {/* `key` incluye el propio valor a propósito -- pasarle solo un
-               * `value` nuevo a un Select de Radix ya montado no alcanzaba
-               * para que mostrara la etiqueta correcta al editar (se quedaba
-               * en blanco aun con la etiqueta ya resuelta explícita más
-               * abajo). Forzar un remount completo cada vez que
-               * dianDocumentTypeCode cambia (por el useEffect al abrir en
-               * modo edición, o por el propio onValueChange) elimina
-               * cualquier estado interno de Radix que no se estuviera
-               * actualizando solo. */}
-              <Select key={`${contact?.id ?? 'new'}-${dianDocumentTypeCode}-${dianDocumentTypes.length}`} value={dianDocumentTypeCode} onValueChange={setDianDocumentTypeCode}>
-                <SelectTrigger id="contact-dian-document-type" className={`mt-1 w-full ${FIELD_CLASS}`}>
-                  {/* Radix solo aprende la etiqueta de un item una vez que
-                   * SelectContent se monta (recién al abrir el dropdown una
-                   * vez), así que un <SelectValue /> vacío se ve en blanco
-                   * al editar aunque dianDocumentTypeCode ya traiga un valor
-                   * real -- se pasa la etiqueta ya resuelta en vez de
-                   * depender de eso (mismo fix que ProductDrawer.tsx). */}
-                  <SelectValue placeholder={t('common.form.selectPlaceholder')}>{dianDocumentTypes.find((d) => d.code === dianDocumentTypeCode)?.name}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {dianDocumentTypes.map((d) => (
-                    <SelectItem key={d.code} value={d.code}>
-                      {d.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          {contact?.is_walk_in && <p className="text-xs text-muted-foreground">{t('contacts.billing.walkInHint')}</p>}
+          <fieldset disabled={contact?.is_walk_in} className="min-w-0 space-y-2.5">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="contact-dian-document-type">{t('contacts.drawer.fields.dianDocumentType')}</Label>
+                <Select value={dianDocumentTypeCode} onValueChange={selectDocument} disabled={contact?.is_walk_in}>
+                  <SelectTrigger id="contact-dian-document-type" className={`mt-1 w-full ${FIELD_CLASS}`}>
+                    <SelectValue placeholder={t('common.form.selectPlaceholder')}>
+                      {selectedDocument?.label}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {documentOptions.map((option) => (
+                      <SelectItem key={option.code} value={option.code}>{option.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="contact-document-number">{t('contacts.drawer.fields.documentNumber')}</Label>
+                <Input id="contact-document-number" value={documentNumber} onChange={(e) => setDocumentNumber(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
+              </div>
             </div>
-            <div>
-              <Label htmlFor="contact-document-number">{t('contacts.drawer.fields.documentNumber')}</Label>
-              <Input id="contact-document-number" value={documentNumber} onChange={(e) => setDocumentNumber(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
+            <BillingProfileFields profile={billingProfile} onChange={setBillingProfile} country={country} onCountryChange={setCountry} disabled={contact?.is_walk_in} />
+            <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
+              <div>
+                <Label htmlFor="contact-withholding" className="font-normal text-brand-700">
+                  {t('contacts.drawer.fields.appliesWithholding')}
+                </Label>
+                <p className="mt-0.5 text-[11px] text-brand-400">{t('contacts.drawer.fields.appliesWithholdingHint')}</p>
+              </div>
+              <Switch id="contact-withholding" checked={appliesWithholding} onCheckedChange={setAppliesWithholding} disabled={contact?.is_walk_in} />
             </div>
-          </div>
-          <div>
-            <Label htmlFor="contact-country">{t('contacts.drawer.fields.country')}</Label>
-            <Select key={`${contact?.id ?? 'new'}-${country}`} value={country} onValueChange={setCountry}>
-              <SelectTrigger id="contact-country" className={`mt-1 w-full sm:w-1/2 ${FIELD_CLASS}`}>
-                {/* Mismo fix que el select de tipo de documento arriba --
-                 * ver ese comentario. */}
-                <SelectValue placeholder={t('common.form.selectPlaceholder')}>{COUNTRIES.find((c) => c.code === country) ? t(COUNTRIES.find((c) => c.code === country)!.labelKey) : undefined}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {COUNTRIES.map((c) => (
-                  <SelectItem key={c.code} value={c.code}>
-                    {t(c.labelKey)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {!contact?.is_walk_in && (
-            <BillingProfileFields profile={billingProfile} onChange={setBillingProfile} />
-          )}
-          <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
-            <div>
-              <Label htmlFor="contact-withholding" className="font-normal text-brand-700">
-                {t('contacts.drawer.fields.appliesWithholding')}
-              </Label>
-              <p className="mt-0.5 text-[11px] text-brand-400">{t('contacts.drawer.fields.appliesWithholdingHint')}</p>
-            </div>
-            <Switch id="contact-withholding" checked={appliesWithholding} onCheckedChange={setAppliesWithholding} />
-          </div>
+          </fieldset>
         </Section>
 
         <Section title={t('contacts.drawer.sections.classification')}>

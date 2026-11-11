@@ -289,7 +289,6 @@ export interface ClientBillingProfile {
   tax_level_code?: string | null
   tax_scheme_code?: '01' | '04' | 'ZA' | 'ZZ' | null
   email?: string | null
-  delivery_method?: 'email' | 'print' | null
   address?: ClientBillingAddress | null
 }
 
