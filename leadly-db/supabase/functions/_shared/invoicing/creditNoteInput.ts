@@ -11,6 +11,9 @@ export interface CreditNoteBuyerSnapshot {
   document_number: string | null;
   full_name: string | null;
   applies_withholding?: boolean;
+  organization_type?: "1" | "2" | null;
+  tax_level_code?: string | null;
+  tax_scheme_code?: "01" | "04" | "ZA" | "ZZ" | null;
   /** Correo del cliente -- ya viene en el snapshot desde
    * queueInvoiceGeneration.ts. Lo exige la regla CAK55 de la NOTA CRÉDITO
    * (en la factura el correo obligatorio es el del emisor, FAJ71; acá es
@@ -105,7 +108,9 @@ export function buildCreditNoteXmlInput(p: CreditNoteInputParams): BuildCreditNo
       countryCode: buyer.address?.country ?? "CO",
       cityCode: buyer.address?.city_code ?? null,
       stateCode: buyer.address?.state_code ?? null,
-      taxLevelCode: buyer.applies_withholding ? "O-15" : "R-99-PN",
+      organizationType: buyer.organization_type ?? undefined,
+      taxLevelCode: buyer.tax_level_code ?? (buyer.applies_withholding ? "O-15" : "R-99-PN"),
+      taxSchemeCode: buyer.tax_scheme_code ?? undefined,
       electronicMail: buyer.email ?? null,
     },
     referencedInvoice: {

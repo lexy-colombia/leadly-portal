@@ -7,7 +7,7 @@ import type { CreditNoteFixture, InvoiceFixture, ItemRow, ProfileRow, SellerSnap
 const r2 = (v: number) => Math.round(v * 100) / 100;
 
 /** Línea de venta: `price` es el precio de LISTA con impuesto incluido; `discount` en %. */
-function item(description: string, qty: number, price: number, code: string | null, rate: number, opts: { discount?: number; sku?: string | null } = {}): ItemRow {
+function item(description: string, qty: number, price: number, code: string | null, rate: number, opts: { discount?: number; sku?: string | null; referencePrice?: number } = {}): ItemRow {
   const gross = r2(qty * price);
   const subtotal = r2(gross * (1 - (opts.discount ?? 0) / 100));
   const base = code ? r2(subtotal / (1 + rate / 100)) : subtotal;
@@ -17,6 +17,7 @@ function item(description: string, qty: number, price: number, code: string | nu
     sku: opts.sku ?? null,
     quantity: qty,
     unit_price: price,
+    reference_unit_price: opts.referencePrice,
     subtotal,
     tax_type_code: code,
     tax_rate: code ? rate : 0,
@@ -99,7 +100,7 @@ export const SYNTHETIC_INVOICES: InvoiceFixture[] = [
   inv("faw01-gratis-y-descuento-100", {
     invoiceNumber: 103,
     issuedAtIso: "2026-09-29T17:00:00Z",
-    items: [item("Plato", 1, 27000, "04", 8), item("Huevo x sopa (gratis)", 1, 0, "04", 8), item("Postre cortesía", 1, 8000, "04", 8, { discount: 100 })],
+    items: [item("Plato", 1, 27000, "04", 8), item("Huevo x sopa (gratis)", 1, 0, "04", 8, { referencePrice: 2160 }), item("Postre cortesía", 1, 8000, "04", 8, { discount: 100 })],
   }),
   // FAD06: suma con ruido de coma flotante (52777.78 + 17592.59 + 3703.70).
   inv("fad06-ruido-flotante", {

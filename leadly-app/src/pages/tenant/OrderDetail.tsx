@@ -2497,7 +2497,8 @@ export function OrderDetail() {
   // la función directo), esto es solo la parte de UX.
   const isFullyPaid = paymentsReady && balance === 0;
   const canSendInvoice =
-    latestInvoice?.status === "pending" && isInvoiceAdmin && isFullyPaid;
+    (latestInvoice?.status === "pending" || latestInvoice?.status === "blocked_missing_buyer_data") &&
+    isInvoiceAdmin && isFullyPaid;
   // Reintentar sólo tiene sentido sobre un intento que ya fracasó: el índice
   // único parcial de sales_invoices no admite un segundo intento vivo
   // mientras el anterior no esté en 'rejected'/'error'.
@@ -2513,6 +2514,7 @@ export function OrderDetail() {
     !isFullyPaid &&
     isInvoiceAdmin &&
     (latestInvoice?.status === "pending" ||
+      latestInvoice?.status === "blocked_missing_buyer_data" ||
       latestInvoice?.status === "rejected" ||
       latestInvoice?.status === "error");
   // Saldo disponible para acreditar = total de la factura vigente menos lo
@@ -3006,7 +3008,7 @@ export function OrderDetail() {
           <div
             className={`grid grid-cols-1 gap-y-4 ${showShipping ? "sm:grid-cols-3" : "sm:grid-cols-2"} sm:gap-x-6`}
           >
-            {/* Columna 1: Cliente + Facturación */}
+            {/* Cliente */}
             <div className="min-w-0 space-y-4">
               <div>
                 <ClientPickerCard
@@ -3020,7 +3022,6 @@ export function OrderDetail() {
                 />
                 <FieldError message={contactError} />
               </div>
-              {addressField("billing")}
             </div>
 
             {/* Columna 2: Envío + Estado de envío -- no existe en un pedido

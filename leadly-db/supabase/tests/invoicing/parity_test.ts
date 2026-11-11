@@ -17,7 +17,7 @@
  * Correr:  deno test -A leadly-db/supabase/tests/invoicing/
  * Regenerar snapshots: S0_UPDATE_SNAPSHOTS=1 deno test -A ...
  */
-import { assert, assertEquals, assertMatch } from "jsr:@std/assert@1";
+import { assert, assertEquals, assertMatch, assertRejects } from "jsr:@std/assert@1";
 import {
   buildCreditNoteXml, buildInvoiceXml, creditNoteFixtureToInput, extractFacts, invoiceFixtureToInput, makeSelfSignedCertificate,
   parseXml, specHash, type Fixture,
@@ -169,4 +169,41 @@ Deno.test("BF1: colombiaDateOfInstant -- bordes y fallback", () => {
   assertEquals(colombiaDateOfInstant("2026-10-09T03:17:18.123456+00:00"), "2026-10-08"); // microsegundos PostgREST
   assertEquals(colombiaDateOfInstant(null), null);
   assertEquals(colombiaDateOfInstant("no-es-fecha"), null);
+});
+
+// FAW03: referencia comercial independiente del cobro y de la cantidad.
+Deno.test("FAW03: menú 19000 + regalo de referencia 1000 conserva total 19000", async () => {
+  const fx = structuredClone(SYNTHETIC_INVOICES.find((x) => x.label === "faw01-gratis-y-descuento-100")!);
+  fx.items = [
+    { description: "Menú", sku: null, quantity: 1, unit_price: 19000, subtotal: 19000, tax_type_code: null, tax_rate: 0, tax_amount: 0, taxable_base: 19000 },
+    { description: "Huevo x sopa", sku: null, quantity: 2, unit_price: 0, reference_unit_price: 1000, subtotal: 0, tax_type_code: null, tax_rate: 0, tax_amount: 0, taxable_base: 0 },
+  ];
+  const { xml } = await buildInvoiceXml(invoiceFixtureToInput(fx).input);
+  const facts = extractFacts(xml, "invoice");
+  assertEquals(facts.payable, 19000);
+  const doc = parseXml(xml);
+  const gift = doc.getElementsByTagName("cac:InvoiceLine")[1];
+  assertEquals(gift.getElementsByTagName("cbc:FreeOfChargeIndicator")[0].textContent, "true");
+  const reference = gift.getElementsByTagName("cac:AlternativeConditionPrice")[0];
+  assertEquals(reference.getElementsByTagName("cbc:PriceAmount")[0].textContent, "1000.00");
+  assertEquals(gift.getElementsByTagName("cac:Price")[0].getElementsByTagName("cbc:PriceAmount")[0].textContent, "0.00");
+});
+
+Deno.test("FAW03: no transmite referencia cero, ausente o inválida", async () => {
+  const fx = SYNTHETIC_INVOICES.find((x) => x.label === "faw01-gratis-y-descuento-100")!;
+  for (const value of [null, 0, -1, NaN, Infinity, 0.001]) {
+    const { input } = invoiceFixtureToInput(fx);
+    input.lines[1].referenceUnitPrice = value;
+    await assertRejects(() => buildInvoiceXml(input), Error, "FAW03");
+  }
+});
+
+Deno.test("FAW03: descuento total usa precio unitario de lista sin multiplicar cantidad", async () => {
+  const fx = SYNTHETIC_INVOICES.find((x) => x.label === "faw01-gratis-y-descuento-100")!;
+  const { input } = invoiceFixtureToInput(fx);
+  input.lines[2].quantity = 3;
+  const { xml } = await buildInvoiceXml(input);
+  const doc = parseXml(xml);
+  const reference = doc.getElementsByTagName("cac:InvoiceLine")[2].getElementsByTagName("cac:AlternativeConditionPrice")[0];
+  assertEquals(reference.getElementsByTagName("cbc:PriceAmount")[0].textContent, "7407.41");
 });

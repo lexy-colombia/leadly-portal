@@ -63,6 +63,10 @@ interface BuyerSnapshot {
   document_number: string | null;
   full_name: string | null;
   applies_withholding: boolean;
+  email?: string | null;
+  organization_type?: "1" | "2" | null;
+  tax_level_code?: string | null;
+  tax_scheme_code?: "01" | "04" | "ZA" | "ZZ" | null;
   address: {
     line1: string | null;
     line2: string | null;
@@ -193,7 +197,7 @@ async function doSendInvoiceToDian(adminClient: any, tenantId: string, invoiceId
   if (invoicePreError || !invoicePre) throw new Error("Factura no encontrada.");
   // En dry run se permite cualquier estado -- justamente sirve para inspeccionar
   // el XML de una factura YA rechazada, sin crear un intento nuevo.
-  if (!dryRun && invoicePre.status !== "pending") {
+  if (!dryRun && !["pending", "blocked_missing_buyer_data"].includes(invoicePre.status)) {
     throw new Error(`Esta factura está en estado "${invoicePre.status}", no "pending" -- para reintentar hay que crear un intento nuevo (ver retry_invoice en dian-submit).`);
   }
 
@@ -216,7 +220,7 @@ async function doSendInvoiceToDian(adminClient: any, tenantId: string, invoiceId
 
   const { data: items, error: itemsError } = await adminClient
     .from("sales_invoice_items")
-    .select("description:product_name, sku, quantity, unit_price, subtotal, tax_type_code, tax_rate, tax_amount, taxable_base, display_order")
+    .select("description:product_name, sku, quantity, unit_price, reference_unit_price, subtotal, tax_type_code, tax_rate, tax_amount, taxable_base, display_order")
     .eq("invoice_id", invoiceId)
     .order("display_order");
   if (itemsError) throw new Error(itemsError.message);
@@ -324,6 +328,7 @@ async function doSendInvoiceToDian(adminClient: any, tenantId: string, invoiceId
     sku: item.sku ? String(item.sku) : null,
     quantity: Number(item.quantity),
     unitPrice: Number(item.unit_price),
+    referenceUnitPrice: item.reference_unit_price == null ? null : Number(item.reference_unit_price),
     lineExtensionAmount: Number(item.subtotal),
     tax: item.tax_type_code
       ? { code: String(item.tax_type_code), rate: Number(item.tax_rate), taxableAmount: Number(item.taxable_base), taxAmount: Number(item.tax_amount) }
@@ -365,7 +370,10 @@ async function doSendInvoiceToDian(adminClient: any, tenantId: string, invoiceId
       countryCode: buyer.address?.country ?? "CO",
       cityCode: buyer.address?.city_code ?? null,
       stateCode: buyer.address?.state_code ?? null,
-      taxLevelCode: buyer.applies_withholding ? "O-15" : "R-99-PN",
+      organizationType: buyer.organization_type ?? undefined,
+      taxLevelCode: buyer.tax_level_code ?? (buyer.applies_withholding ? "O-15" : "R-99-PN"),
+      taxSchemeCode: buyer.tax_scheme_code ?? undefined,
+      electronicMail: buyer.email ?? null,
     },
     lines,
     withholdings: [], // el cálculo real de retenciones (tenant_withholding_configs + applies_withholding) es trabajo futuro, ver plan

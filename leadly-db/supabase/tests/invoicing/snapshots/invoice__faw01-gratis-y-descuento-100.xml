@@ -213,7 +213,7 @@ URL=https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=443951517a02
       <cbc:FreeOfChargeIndicator>true</cbc:FreeOfChargeIndicator>
       <cac:PricingReference>
          <cac:AlternativeConditionPrice>
-            <cbc:PriceAmount currencyID="COP">0.00</cbc:PriceAmount>
+            <cbc:PriceAmount currencyID="COP">2000.00</cbc:PriceAmount>
             <cbc:PriceTypeCode>03</cbc:PriceTypeCode>
             <cbc:PriceType>Otro valor</cbc:PriceType>
          </cac:AlternativeConditionPrice>

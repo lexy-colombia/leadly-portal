@@ -316,9 +316,6 @@ async function handleSendPosInvoice(req: Request, body: { order_id?: string }): 
     .limit(1)
     .maybeSingle();
   if (!invoice) return jsonResponse({ error: "Este pedido no tiene una factura DIAN reservada." }, 404);
-  if (invoice.status === "blocked_missing_buyer_data") {
-    return jsonResponse({ error: "Faltan datos fiscales del comprador elegido para esta factura." }, 409);
-  }
   // Idempotencia: un reintento de red que ya había llegado a buen puerto no
   // debe reenviar -- devuelve el resultado ya final en vez de fallar o
   // duplicar el envío.
@@ -333,7 +330,7 @@ async function handleSendPosInvoice(req: Request, body: { order_id?: string }): 
       invoiceNumber: invoice.invoice_number ?? 0,
     });
   }
-  if (invoice.status !== "pending") {
+  if (!["pending", "blocked_missing_buyer_data"].includes(invoice.status)) {
     return jsonResponse({ error: `Esta factura está en estado "${invoice.status}", no se puede enviar.` }, 409);
   }
 

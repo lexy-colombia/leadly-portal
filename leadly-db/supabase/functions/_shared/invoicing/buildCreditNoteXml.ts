@@ -44,6 +44,7 @@
  * una respuesta real de la DIAN. */
 
 import { computeCude, computeSoftwareSecurityCode } from "./cufe.ts";
+import { BUYER_TAX_SCHEMES, countryName } from "./clientBillingProfile.ts";
 import { computeNitCheckDigit } from "./nit.ts";
 
 const TAX_SCHEME_NAME: Record<string, string> = { "01": "IVA", "03": "ICA", "04": "INC" };
@@ -68,6 +69,7 @@ export interface CreditNoteXmlParty {
   stateCode?: string | null;
   organizationType?: "1" | "2";
   taxLevelCode?: string;
+  taxSchemeCode?: keyof typeof BUYER_TAX_SCHEMES;
   /** Ver buildInvoiceXml.ts::InvoiceXmlParty -- mismo grupo cac:Contact/
    * cbc:ElectronicMail del emisor (regla FAJ71), no probado todavía contra
    * una nota crédito real de producción pero misma estructura de Party. */
@@ -165,6 +167,9 @@ function partyBlock(tag: "cac:AccountingSupplierParty" | "cac:AccountingCustomer
   } schemeName="${esc(party.documentTypeCode)}"`;
   const organizationType = party.organizationType ?? (party.documentTypeCode === "31" ? "1" : "2");
   const taxLevelCode = party.taxLevelCode ?? "R-99-PN";
+  const taxSchemeCode = party.taxSchemeCode ?? "01";
+  const countryCode = party.countryCode.toLowerCase() === "colombia" ? "CO" : party.countryCode;
+  const localizedCountry = party.addressLine ? countryName(countryCode) : "";
   const cityCodeXml = party.cityCode ? `\n               <cbc:ID>${esc(party.cityCode)}</cbc:ID>` : "";
   const stateCodeXml = party.stateCode ? `\n               <cbc:CountrySubentityCode>${esc(party.stateCode)}</cbc:CountrySubentityCode>` : "";
   // cac:PartyIdentification (reglas FAK61/FAK62/FAK63, ver el mismo fix en
@@ -207,8 +212,8 @@ function partyBlock(tag: "cac:AccountingSupplierParty" | "cac:AccountingCustomer
                   <cbc:Line>${esc(party.addressLine ?? "")}</cbc:Line>
                </cac:AddressLine>
                <cac:Country>
-                  <cbc:IdentificationCode>${esc(party.countryCode)}</cbc:IdentificationCode>
-                  <cbc:Name languageID="es">Colombia</cbc:Name>
+                  <cbc:IdentificationCode>${esc(countryCode)}</cbc:IdentificationCode>
+                  <cbc:Name languageID="es">${esc(localizedCountry)}</cbc:Name>
                </cac:Country>
             </cac:Address>
          </cac:PhysicalLocation>`;
@@ -222,8 +227,8 @@ function partyBlock(tag: "cac:AccountingSupplierParty" | "cac:AccountingCustomer
                   <cbc:Line>${esc(party.addressLine ?? "")}</cbc:Line>
                </cac:AddressLine>
                <cac:Country>
-                  <cbc:IdentificationCode>${esc(party.countryCode)}</cbc:IdentificationCode>
-                  <cbc:Name languageID="es">Colombia</cbc:Name>
+                  <cbc:IdentificationCode>${esc(countryCode)}</cbc:IdentificationCode>
+                  <cbc:Name languageID="es">${esc(localizedCountry)}</cbc:Name>
                </cac:Country>
             </cac:RegistrationAddress>`;
   return `
@@ -238,8 +243,8 @@ function partyBlock(tag: "cac:AccountingSupplierParty" | "cac:AccountingCustomer
             <cbc:CompanyID ${companyIdAttrs}>${esc(party.documentNumber)}</cbc:CompanyID>
             <cbc:TaxLevelCode>${esc(taxLevelCode)}</cbc:TaxLevelCode>${registrationAddressXml}
             <cac:TaxScheme>
-               <cbc:ID>01</cbc:ID>
-               <cbc:Name>IVA</cbc:Name>
+               <cbc:ID>${taxSchemeCode}</cbc:ID>
+               <cbc:Name>${BUYER_TAX_SCHEMES[taxSchemeCode]}</cbc:Name>
             </cac:TaxScheme>
          </cac:PartyTaxScheme>
          <cac:PartyLegalEntity>

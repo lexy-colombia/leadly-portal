@@ -241,17 +241,12 @@
  *    AlternativeConditionPrice` (orden y estructura confirmados contra la
  *    línea 2 de `Generica.xml`, el único ejemplo oficial de línea gratuita
  *    que trae el kit de la DIAN). El `PriceAmount` de esa referencia es el
- *    mismo 0.00 que de verdad se cobra -- esta plataforma no guarda un
- *    "precio de lista" separado para una línea gratuita/100% descontada
- *    (`sales_invoice_items` no conserva el descuento aparte), y la regla
- *    exige que el GRUPO exista, no que su valor sea mayor a cero; inventar
- *    una cifra sin respaldo real habría sido peor. Las demás líneas (con
- *    monto real) no cambian en nada. **Sin probar contra la DIAN todavía**
- *    -- pendiente que el usuario reintente uno de los pedidos afectados
- *    (#28276, #28322, #28515, #28743) o deje correr la cola de pendientes;
- *    consume un intento real contra un documento fiscal, no se simula acá. */
+ *    precio comercial unitario, distinto del cobro. FAW03 rechaza una
+ *    referencia en cero aunque el grupo exista. Los productos sin precio
+ *    de lista necesitan una referencia explícita; nunca se inventa. */
 
 import { computeCufe, computeSoftwareSecurityCode } from "./cufe.ts";
+import { BUYER_TAX_SCHEMES, countryName } from "./clientBillingProfile.ts";
 import { computeNitCheckDigit } from "./nit.ts";
 
 /** Códigos DIAN (tax_types.code) -> nombre exacto que exige el XML en
@@ -294,6 +289,7 @@ export interface InvoiceXmlParty {
    * responsable) si no se especifica -- nunca se inventa O-13/O-23/O-47
    * sin dato real. */
   taxLevelCode?: string;
+  taxSchemeCode?: keyof typeof BUYER_TAX_SCHEMES;
   /** cac:Contact/cbc:ElectronicMail (regla FAJ71, rechazo) -- correo de
    * recepción de documentos electrónicos del EMISOR ante la DIAN. Solo
    * aplica al vendedor (ver el comentario de cabecera, ronda 2026-09-10);
@@ -314,6 +310,8 @@ export interface InvoiceXmlLine {
   description: string;
   quantity: number;
   unitPrice: number; // precio de LISTA, CON impuesto incluido, sin descuento (BaseQuantity=1 implícito) -- ver el comentario en netUnitPrice, más abajo en este archivo
+  /** Precio comercial unitario CON impuesto; separado del cobro a $0. */
+  referenceUnitPrice?: number | null;
   lineExtensionAmount: number; // subtotal de la línea sin impuesto
   tax: InvoiceXmlLineTax | null;
   /** cac:Item/cac:StandardItemIdentification, regla FAZ09 (notificación) --
@@ -394,6 +392,9 @@ function partyBlock(
   } schemeName="${esc(party.documentTypeCode)}"`;
   const organizationType = party.organizationType ?? (party.documentTypeCode === "31" ? "1" : "2");
   const taxLevelCode = party.taxLevelCode ?? "R-99-PN";
+  const taxSchemeCode = party.taxSchemeCode ?? "01";
+  const countryCode = party.countryCode.toLowerCase() === "colombia" ? "CO" : party.countryCode;
+  const localizedCountry = party.addressLine ? countryName(countryCode) : "";
   const cityCodeXml = party.cityCode ? `\n               <cbc:ID>${esc(party.cityCode)}</cbc:ID>` : "";
   const stateCodeXml = party.stateCode ? `\n               <cbc:CountrySubentityCode>${esc(party.stateCode)}</cbc:CountrySubentityCode>` : "";
   // Grupos de dirección (FAK07/FAK27, "opcional, si se informa el grupo
@@ -413,8 +414,8 @@ function partyBlock(
                   <cbc:Line>${esc(party.addressLine ?? "")}</cbc:Line>
                </cac:AddressLine>
                <cac:Country>
-                  <cbc:IdentificationCode>${esc(party.countryCode)}</cbc:IdentificationCode>
-                  <cbc:Name languageID="es">Colombia</cbc:Name>
+                  <cbc:IdentificationCode>${esc(countryCode)}</cbc:IdentificationCode>
+                  <cbc:Name languageID="es">${esc(localizedCountry)}</cbc:Name>
                </cac:Country>
             </cac:Address>
          </cac:PhysicalLocation>`;
@@ -428,8 +429,8 @@ function partyBlock(
                   <cbc:Line>${esc(party.addressLine ?? "")}</cbc:Line>
                </cac:AddressLine>
                <cac:Country>
-                  <cbc:IdentificationCode>${esc(party.countryCode)}</cbc:IdentificationCode>
-                  <cbc:Name languageID="es">Colombia</cbc:Name>
+                  <cbc:IdentificationCode>${esc(countryCode)}</cbc:IdentificationCode>
+                  <cbc:Name languageID="es">${esc(localizedCountry)}</cbc:Name>
                </cac:Country>
             </cac:RegistrationAddress>`;
   const corporateRegistrationSchemeXml = branchPrefix
@@ -449,14 +450,9 @@ function partyBlock(
             <cbc:ID ${companyIdAttrs}>${esc(party.documentNumber)}</cbc:ID>
          </cac:PartyIdentification>`
       : "";
-  // cac:Contact/cbc:ElectronicMail (regla FAJ71) -- solo el emisor
-  // (AccountingSupplierParty), ver el comentario de cabecera. Se omite el
-  // grupo entero sin un correo real cargado. Va DESPUÉS de PartyLegalEntity
-  // -- orden exacto del esquema UBL 2.1 PartyType (PartyIdentification*,
-  // PartyName*, PostalAddress?, PhysicalLocation?, PartyTaxScheme*,
-  // PartyLegalEntity*, Contact?, Person*...), no junto a PartyName.
+  // Party/Contact va después de PartyLegalEntity en UBL 2.1.
   const contactXml =
-    tag === "cac:AccountingSupplierParty" && party.electronicMail
+    party.electronicMail
       ? `
          <cac:Contact>
             <cbc:ElectronicMail>${esc(party.electronicMail)}</cbc:ElectronicMail>
@@ -474,8 +470,8 @@ function partyBlock(
             <cbc:CompanyID ${companyIdAttrs}>${esc(party.documentNumber)}</cbc:CompanyID>
             <cbc:TaxLevelCode>${esc(taxLevelCode)}</cbc:TaxLevelCode>${registrationAddressXml}
             <cac:TaxScheme>
-               <cbc:ID>01</cbc:ID>
-               <cbc:Name>IVA</cbc:Name>
+               <cbc:ID>${taxSchemeCode}</cbc:ID>
+               <cbc:Name>${BUYER_TAX_SCHEMES[taxSchemeCode]}</cbc:Name>
             </cac:TaxScheme>
          </cac:PartyTaxScheme>
          <cac:PartyLegalEntity>
@@ -696,46 +692,18 @@ export async function buildInvoiceXml(input: BuildInvoiceXmlInput): Promise<{ xm
             <cbc:ID>${esc(line.sku)}</cbc:ID>
          </cac:SellersItemIdentification>`
         : "";
-      // FAW01 (rechazo real 2026-09-29, Barriles de la sexta -- pedidos
-      // #28276/#28322/#28515/#28743, todos con una línea de un producto
-      // genuinamente gratuito, ej. "Huevo x sopa" a $0, o una línea con
-      // descuento del 100%): la DIAN rechaza la factura ENTERA cuando una
-      // línea tiene LineExtensionAmount en cero y no declara
-      // cac:PricingReference -- no basta con que las demás líneas sí
-      // tengan impuesto/base, alcanza con UNA línea en $0 sin ese grupo.
-      // Orden y estructura confirmados contra el único caso real de línea
-      // gratuita que trae el kit oficial de la DIAN (línea 2 de
-      // dian-reference/ejemplos-xml/Generica.xml): FreeOfChargeIndicator
-      // primero, PricingReference después, los dos entre
-      // LineExtensionAmount y TaxTotal.
-      //
-      // CORREGIDO (review 2026-09-29): la ronda anterior de este fix decía
-      // en este comentario que "esta plataforma no guarda un precio de
-      // lista separado" -- ES FALSO, confirmado trazando el dato de punta a
-      // punta. sales_order_items/sales_invoice_items SÍ tienen unit_price
-      // (precio de LISTA, sin descuento) como columna separada de subtotal
-      // (el monto ya con descuento aplicado) -- ver computeOrderTotals.ts:
-      // `gross = quantity * unit_price` y `lineSubtotal = gross -
-      // discount_amount`, unit_price nunca viene pre-descontado. Los dos
-      // ejemplos oficiales del repo (Generica.xml:471,
-      // EmisorAutoretenedor.xml:524) usan 100.00 en este campo, un valor
-      // DISTINTO de cero, precisamente porque PricingReference declara "lo
-      // que hubiera costado" (precio de lista), no "lo que cobré" (eso ya
-      // lo cubre cac:Price/PriceAmount, en 0.00 más abajo).
-      //
-      // Por eso el valor de referencia se calcula desde line.unitPrice
-      // (precio de lista, con impuesto incluido, ANTES de descuento) por la
-      // cantidad, extrayéndole el impuesto de la línea con la misma tarifa
-      // ya resuelta en `tax` -- misma fórmula que usa computeLineTax
-      // (queueInvoiceGeneration.ts) para extraer impuesto de cualquier
-      // monto bruto. Cuando el producto es GENUINAMENTE gratuito
-      // (unitPrice=0, ej. "Huevo x sopa", sin precio de lista real que
-      // declarar), la misma fórmula da 0.00 sola -- no hace falta una rama
-      // aparte para ese caso, el cálculo cubre los dos escenarios.
+      // FAW01/FAW03: una cortesía conserva su cobro en cero, pero debe
+      // declarar un precio comercial unitario positivo. Para descuentos
+      // del 100% se conserva el precio de lista; si el precio de venta era
+      // cero se usa la referencia explícita capturada en el snapshot.
       const isFreeLine = round2(netAmount) === 0;
       const freeOfChargeXml = isFreeLine ? `\n      <cbc:FreeOfChargeIndicator>true</cbc:FreeOfChargeIndicator>` : "";
-      const listGrossAmount = line.unitPrice * line.quantity;
-      const referencePriceAmount = tax.rate ? listGrossAmount / (1 + tax.rate / 100) : listGrossAmount;
+      const referenceGross = line.unitPrice > 0 ? line.unitPrice : line.referenceUnitPrice;
+      const referencePriceAmount = referenceGross == null ? 0
+        : tax.rate ? referenceGross / (1 + tax.rate / 100) : referenceGross;
+      if (isFreeLine && (!Number.isFinite(referencePriceAmount) || round2(referencePriceAmount) <= 0)) {
+        throw new Error(`FAW03: El producto "${line.description}" se cobra a $0, pero necesita un precio comercial de referencia mayor que cero para DIAN. Configure el precio de referencia del producto; el cobro seguirá en $0.`);
+      }
       const pricingReferenceXml = isFreeLine
         ? `
       <cac:PricingReference>

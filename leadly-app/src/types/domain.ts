@@ -274,6 +274,25 @@ export interface ConversationTag {
   created_at: string
 }
 
+export interface ClientBillingAddress {
+  line1: string | null
+  country: string | null
+  state_province: string | null
+  city: string | null
+  state_code: string | null
+  city_code: string | null
+}
+
+export interface ClientBillingProfile {
+  legal_name?: string | null
+  organization_type?: '1' | '2' | null
+  tax_level_code?: string | null
+  tax_scheme_code?: '01' | '04' | 'ZA' | 'ZZ' | null
+  email?: string | null
+  delivery_method?: 'email' | 'print' | null
+  address?: ClientBillingAddress | null
+}
+
 export interface Client {
   id: string
   tenant_id: string
@@ -289,6 +308,7 @@ export interface Client {
   document_type: TenantDocumentType | null
   document_number: string | null
   dian_document_type_code: string | null
+  billing_profile?: ClientBillingProfile
   applies_withholding: boolean
   country: string | null
   notes: string | null

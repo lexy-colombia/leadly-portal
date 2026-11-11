@@ -3,8 +3,9 @@ import { createClient, updateClient, dianDocumentTypeCodeToGeneric } from '../..
 import { listProfilesByTenant } from '../../../lib/api/users'
 import { listCustomFieldDefinitions } from '../../../lib/api/customFields'
 import { inputToPayload, payloadToInput } from '../../../lib/customFieldValues'
+import { BillingProfileFields } from './BillingProfileFields'
 import { CustomFieldInput } from './CustomFieldInput'
-import type { Client, CustomFieldDefinition, Profile } from '../../../types/domain'
+import type { Client, ClientBillingProfile, CustomFieldDefinition, Profile } from '../../../types/domain'
 import { FieldError } from '@/components/atoms'
 import { ComboboxFilter, PhoneInput, TagInput } from '@/components/molecules'
 import { Drawer } from '@/components/organisms'
@@ -52,6 +53,7 @@ export function ContactDrawer({
   onSaved: (contact: Client) => void
 }) {
   const { t } = useLanguage()
+  const [billingProfile, setBillingProfile] = useState<ClientBillingProfile>({})
   const [fullName, setFullName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
@@ -74,6 +76,7 @@ export function ContactDrawer({
 
   useEffect(() => {
     if (!open) return
+    setBillingProfile(contact?.billing_profile ?? {})
     setFullName(contact?.full_name ?? '')
     // clients.phone_prefix/phone quedaron separados en la base
     // (20260904000000_clients_phone_prefix_split.sql) -- PhoneInput sigue
@@ -140,6 +143,10 @@ export function ContactDrawer({
     setFormError(null)
     if (!isNotBlank(fullName) || !isValidE164Phone(phone) || (isNotBlank(email) && !isValidEmail(email))) return
 
+    if (billingProfile.email?.trim() && !isValidEmail(billingProfile.email.trim())) {
+      setFormError(t('contacts.billing.invalidEmail'))
+      return
+    }
     setSubmitting(true)
     try {
       const { dialCode, localNumber } = splitPhone(phone)
@@ -166,6 +173,16 @@ export function ContactDrawer({
         credit_enabled: creditEnabled,
         dian_document_type_code: dianDocumentTypeCode || null,
         applies_withholding: appliesWithholding,
+        ...(contact?.is_walk_in ? {} : {
+          billing_profile: {
+            ...billingProfile,
+            legal_name: billingProfile.legal_name?.trim() || null,
+            email: billingProfile.email?.trim() || null,
+            address: billingProfile.address?.line1?.trim() || billingProfile.address?.country
+              ? { ...billingProfile.address, line1: billingProfile.address.line1?.trim() || null }
+              : null,
+          },
+        }),
         // Se parte de lo ya guardado (incluye valores de campos hoy
         // inactivos, que no se tocan) y se pisan solo los campos activos
         // del formulario; vacío = se quita la clave. La validación la hace
@@ -227,7 +244,7 @@ export function ContactDrawer({
           </div>
         </Section>
 
-        <Section title={t('contacts.drawer.sections.identification')}>
+        <Section title={t('contacts.drawer.sections.einvoicing')}>
           {/* Un solo tipo/número de documento -- pedido explícito del
               usuario 2026-09-09: antes se pedía tres veces (NIT suelto,
               "Tipo de documento" genérico, y "Tipo de documento DIAN" en
@@ -290,6 +307,18 @@ export function ContactDrawer({
               </SelectContent>
             </Select>
           </div>
+          {!contact?.is_walk_in && (
+            <BillingProfileFields profile={billingProfile} onChange={setBillingProfile} />
+          )}
+          <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
+            <div>
+              <Label htmlFor="contact-withholding" className="font-normal text-brand-700">
+                {t('contacts.drawer.fields.appliesWithholding')}
+              </Label>
+              <p className="mt-0.5 text-[11px] text-brand-400">{t('contacts.drawer.fields.appliesWithholdingHint')}</p>
+            </div>
+            <Switch id="contact-withholding" checked={appliesWithholding} onCheckedChange={setAppliesWithholding} />
+          </div>
         </Section>
 
         <Section title={t('contacts.drawer.sections.classification')}>
@@ -334,18 +363,6 @@ export function ContactDrawer({
               <p className="mt-0.5 text-[11px] text-brand-400">{t('contacts.drawer.fields.creditEnabledHint')}</p>
             </div>
             <Switch id="contact-credit" checked={creditEnabled} onCheckedChange={setCreditEnabled} />
-          </div>
-        </Section>
-
-        <Section title={t('contacts.drawer.sections.einvoicing')}>
-          <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
-            <div>
-              <Label htmlFor="contact-withholding" className="font-normal text-brand-700">
-                {t('contacts.drawer.fields.appliesWithholding')}
-              </Label>
-              <p className="mt-0.5 text-[11px] text-brand-400">{t('contacts.drawer.fields.appliesWithholdingHint')}</p>
-            </div>
-            <Switch id="contact-withholding" checked={appliesWithholding} onCheckedChange={setAppliesWithholding} />
           </div>
         </Section>
 

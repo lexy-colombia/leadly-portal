@@ -58,6 +58,7 @@ export interface ItemRow {
   sku: string | null;
   quantity: number;
   unit_price: number;
+  reference_unit_price?: number | null;
   subtotal: number; // CON impuesto
   tax_type_code: string | null;
   tax_rate: number;
@@ -145,6 +146,7 @@ export function invoiceFixtureToInput(fx: InvoiceFixture, technicalKeyOverride?:
     sku: item.sku ? String(item.sku) : null,
     quantity: Number(item.quantity),
     unitPrice: Number(item.unit_price),
+    referenceUnitPrice: item.reference_unit_price,
     lineExtensionAmount: Number(item.subtotal),
     tax: item.tax_type_code
       ? { code: String(item.tax_type_code), rate: Number(item.tax_rate), taxableAmount: Number(item.taxable_base), taxAmount: Number(item.tax_amount) }

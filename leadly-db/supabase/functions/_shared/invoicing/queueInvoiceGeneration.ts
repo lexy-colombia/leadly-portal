@@ -1,12 +1,11 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
+import { buildFiscalBuyer } from "./clientBillingProfile.ts";
 import { resolveCityName } from "./cityName.ts";
 
 /** Fase 1 (cimientos) de facturación electrónica DIAN: reserva una fila en
  * sales_invoices si el tenant tiene una credencial activa de 'dian_directo'
  * (integration_providers), validando que el comprador tenga documento fiscal
- * completo -- la dirección de facturación ya está garantizada por
- * confirmSalesOrder (contact_addresses vía sales_orders.billing_address_id),
- * no se vuelve a pedir acá. Si falta el documento, la fila igual se crea
+ * completo y tomando la dirección fiscal del perfil del cliente. Si falta el documento, la fila igual se crea
  * pero en 'blocked_missing_buyer_data' con el detalle de qué falta, para que
  * la pantalla "Facturas" se lo muestre al tenant en vez de fallar en
  * silencio. Generar/firmar/enviar el XML real (incluyendo el desglose de
@@ -131,9 +130,17 @@ export async function refreshInvoiceSnapshot(
   orderId: string,
 ): Promise<void> {
   const snap = await buildOrderSnapshot(adminClient, tenantId, orderId);
+  if (snap.status === "blocked_missing_buyer_data") {
+    await adminClient.from("sales_invoices").update({
+      status: snap.status, status_detail: snap.statusDetail,
+    }).eq("id", invoiceId).eq("tenant_id", tenantId).in("status", ["pending", "blocked_missing_buyer_data"]);
+    throw new Error(snap.statusDetail ?? "Faltan datos fiscales del cliente.");
+  }
   const { error } = await adminClient
     .from("sales_invoices")
     .update({
+      status: "pending",
+      status_detail: null,
       subtotal: snap.subtotal,
       tax_total: snap.taxTotal,
       total: snap.total,
@@ -142,7 +149,8 @@ export async function refreshInvoiceSnapshot(
       seller_snapshot: snap.sellerSnapshot,
     })
     .eq("id", invoiceId)
-    .eq("tenant_id", tenantId);
+    .eq("tenant_id", tenantId)
+    .in("status", ["pending", "blocked_missing_buyer_data"]);
   if (error) throw new Error(error.message);
   await replaceInvoiceItems(adminClient, tenantId, invoiceId, snap.items);
 }
@@ -168,6 +176,7 @@ async function replaceInvoiceItems(
       sku: item.sku,
       quantity: item.quantity,
       unit_price: item.unit_price,
+      reference_unit_price: item.reference_unit_price ?? null,
       subtotal: item.subtotal,
       tax_type_code: item.tax_type_code,
       tax_rate: item.tax_rate,
@@ -190,9 +199,10 @@ async function buildOrderSnapshot(
   const { data: order } = await adminClient
     .from("sales_orders")
     .select(
-      "subtotal, tax_total, total, currency, contact_id, billing_address_id",
+      "subtotal, tax_total, total, currency, contact_id",
     )
     .eq("id", orderId)
+    .eq("tenant_id", tenantId)
     .maybeSingle();
   if (!order) throw new Error("El pedido de esta factura ya no existe.");
 
@@ -207,23 +217,28 @@ async function buildOrderSnapshot(
   const { data: client, error: clientError } = await adminClient
     .from("clients")
     .select(
-      "id, full_name, email, phone, document_number, dian_document_type_code, applies_withholding",
+      "id, full_name, email, phone, document_number, dian_document_type_code, applies_withholding, billing_profile, is_walk_in",
     )
     .eq("id", order.contact_id)
+    .eq("tenant_id", tenantId)
+    .is("deleted_at", null)
     .maybeSingle();
   if (clientError) throw new Error(clientError.message);
 
-  const { data: address } = order.billing_address_id
-    ? await adminClient.from("contact_addresses").select(
-      "line1, line2, city, state_province, country, tax_id, city_code, state_code",
-    ).eq("id", order.billing_address_id).maybeSingle()
-    : { data: null };
-
-  const missing: string[] = [];
-  if (!client?.dian_document_type_code) {
-    missing.push("tipo de documento del cliente");
+  const { buyer: buyerSnapshot, missing } = buildFiscalBuyer(client);
+  const address = buyerSnapshot.address;
+  if (address?.country === "CO" && address.city_code && address.state_code) {
+    const [{ data: city, error: cityError }, { data: department, error: departmentError }] = await Promise.all([
+      adminClient.from("cities").select("name").eq("code", address.city_code).eq("department_code", address.state_code).maybeSingle(),
+      adminClient.from("departments").select("name").eq("code", address.state_code).maybeSingle(),
+    ]);
+    if (cityError || departmentError) throw new Error("No se pudo verificar la dirección fiscal.");
+    if (!city || !department) missing.push("municipio y departamento compatibles");
+    else {
+      address.city = city.name;
+      address.state_province = department.name;
+    }
   }
-  if (!client?.document_number) missing.push("número de documento del cliente");
 
   const { data: tenant } = await adminClient
     .from("tenants")
@@ -242,16 +257,6 @@ async function buildOrderSnapshot(
 
   const cityName = await resolveCityName(adminClient, tenant?.city_code);
 
-  const buyerSnapshot = {
-    client_id: client?.id ?? null,
-    document_type_code: client?.dian_document_type_code ?? null,
-    document_number: client?.document_number ?? null,
-    full_name: client?.full_name ?? null,
-    email: client?.email ?? null,
-    phone: client?.phone ?? null,
-    applies_withholding: client?.applies_withholding ?? false,
-    address: address ?? null,
-  };
   const sellerSnapshot = {
     tenant_id: tenantId,
     legal_name: tenant?.legal_name ?? null,
@@ -287,13 +292,22 @@ async function buildOrderSnapshot(
   const statusDetail = missing.length > 0
     ? `Falta: ${missing.join(", ")}`
     : null;
-  const { data: orderItems } = await adminClient
+  const { data: orderItems, error: orderItemsError } = await adminClient
     .from("sales_order_items")
     .select(
-      "id, product_name, sku, quantity, unit_price, subtotal, tax_type_code, tax_rate, tax_amount, taxable_base, display_order",
+      "id, product_name, sku, quantity, unit_price, subtotal, tax_type_code, tax_rate, tax_amount, taxable_base, display_order, product_id",
     )
     .eq("order_id", orderId)
     .order("display_order");
+  if (orderItemsError) throw new Error(orderItemsError.message);
+  const productIds = [...new Set((orderItems ?? []).map((item) => item.product_id).filter(Boolean))];
+  const referencePrices = new Map<string, number | null>();
+  if (productIds.length > 0) {
+    const { data: products, error: productsError } = await adminClient.from("products")
+      .select("id, dian_reference_price").eq("tenant_id", tenantId).in("id", productIds);
+    if (productsError) throw new Error(productsError.message);
+    for (const product of products ?? []) referencePrices.set(product.id, product.dian_reference_price);
+  }
 
   return {
     status: status as "pending" | "blocked_missing_buyer_data",
@@ -304,7 +318,10 @@ async function buildOrderSnapshot(
     currency: order.currency,
     buyerSnapshot,
     sellerSnapshot,
-    items: orderItems ?? [],
+    items: (orderItems ?? []).map((item) => ({
+      ...item,
+      reference_unit_price: referencePrices.get(item.product_id) ?? null,
+    })),
   };
 }
 

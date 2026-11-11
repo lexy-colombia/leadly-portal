@@ -42,28 +42,15 @@ export interface RenderedInvoicePdf {
 export async function renderInvoicePdfForOrder(adminClient: any, orderId: string): Promise<RenderedInvoicePdf> {
   const { data: order } = await adminClient
     .from("sales_orders")
-    .select("id, tenant_id, number, created_at, subtotal, tax_total, total, currency, contact_id, billing_address_id")
+    .select("id, tenant_id, number, created_at, subtotal, tax_total, total, currency, contact_id")
     .eq("id", orderId)
     .maybeSingle();
   if (!order) throw new Error("Pedido no encontrado.");
 
-  // TODO se lee EN VIVO del pedido, no de los snapshots de sales_invoices.
-  // El snapshot existe para dejar registro de lo que se le transmitió a la
-  // DIAN (lo firma el CUFE), pero como fuente del PDF quedaba desfasado: el
-  // pedido sigue siendo editable después de confirmarse, y el usuario espera
-  // ver "lo que tengo en pantalla" (pedido explícito 2026-09-04). El envío a
-  // la DIAN ahora rearma ese snapshot justo antes de transmitir (ver
-  // refreshInvoiceSnapshot), y desde ese momento el pedido queda bloqueado,
-  // así que PDF y documento fiscal no pueden divergir.
-  //
-  // De la factura solo salen los datos que NO existen en el pedido: el
-  // consecutivo DIAN, el CUFE y el estado.
-  const [{ data: items }, { data: client }, { data: address }, { data: tenant }, { data: dianProfile }, { data: credential }, { data: lastPayment }, { data: comments }, { data: invoice }] = await Promise.all([
+  // Para un documento fiscal, los datos del comprador vienen del snapshot enviado.
+  const [{ data: items }, { data: client }, { data: tenant }, { data: dianProfile }, { data: credential }, { data: lastPayment }, { data: comments }, { data: invoice }] = await Promise.all([
     adminClient.from("sales_order_items").select("*").eq("order_id", order.id).order("display_order"),
-    adminClient.from("clients").select("full_name, email, phone, document_number, dian_document_type_code").eq("id", order.contact_id).maybeSingle(),
-    order.billing_address_id
-      ? adminClient.from("contact_addresses").select("line1, line2, city, state_province, country").eq("id", order.billing_address_id).maybeSingle()
-      : Promise.resolve({ data: null }),
+    adminClient.from("clients").select("full_name, email, phone, document_number, dian_document_type_code, billing_profile").eq("id", order.contact_id).maybeSingle(),
     adminClient.from("tenants").select("legal_name, document_type, document_number, country, state_province, billing_address, contact_email, contact_phone, logo_url, fiscal_regime, is_self_withholding_agent, city_code").eq("id", order.tenant_id).maybeSingle(),
     adminClient.from("tenant_dian_profile").select("resolution_number, resolution_prefix, resolution_range_from, resolution_range_to, resolution_valid_from, resolution_valid_until").eq("tenant_id", order.tenant_id).maybeSingle(),
     adminClient.from("integration_credentials").select("mode").eq("tenant_id", order.tenant_id).eq("provider_key", "dian_directo").eq("is_active", true).is("deleted_at", null).maybeSingle(),
@@ -71,7 +58,7 @@ export async function renderInvoicePdfForOrder(adminClient: any, orderId: string
     // Solo el hilo público -- `is_internal = true` son las "Notas" del
     // equipo, que no se imprimen.
     adminClient.from("sales_order_comments").select("content").eq("order_id", order.id).eq("is_internal", false).order("created_at"),
-    adminClient.from("sales_invoices").select("status, status_detail, invoice_prefix, invoice_number, issue_date, cufe, withholding_total").eq("order_id", order.id).order("attempt_number", { ascending: false }).limit(1).maybeSingle(),
+    adminClient.from("sales_invoices").select("status, status_detail, invoice_prefix, invoice_number, issue_date, cufe, withholding_total, buyer_snapshot").eq("order_id", order.id).order("attempt_number", { ascending: false }).limit(1).maybeSingle(),
   ]);
 
   // CORREGIDO 2026-09-05 -- error grave reportado por el usuario: antes
@@ -91,13 +78,13 @@ export async function renderInvoicePdfForOrder(adminClient: any, orderId: string
   const isValidated = invoice?.status === "sent" || invoice?.status === "accepted";
   const isRemision = !(invoice && isValidated && invoice.cufe && invoice.invoice_number != null);
 
-  const buyer: InvoicePdfBuyer = {
+  const buyer: InvoicePdfBuyer = !isRemision && invoice.buyer_snapshot?.full_name ? invoice.buyer_snapshot : {
     full_name: client?.full_name ?? null,
     document_type_code: client?.dian_document_type_code ?? null,
     document_number: client?.document_number ?? null,
     phone: client?.phone ?? null,
     email: client?.email ?? null,
-    address: address ?? null,
+    address: client?.billing_profile?.address ?? null,
   };
   const seller: InvoicePdfSeller = {
     legal_name: tenant?.legal_name ?? null,
