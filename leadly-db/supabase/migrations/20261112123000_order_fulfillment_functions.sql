@@ -266,8 +266,8 @@ revoke execute on function public.guard_sales_order_confirmation() from public, 
 -- (billing_profile_id del pedido o, si es null, el predeterminado del cliente).
 -- SIN respaldo desde clients: un cliente sin perfil queda bloqueado con
 -- "perfil de facturación"; el Consumidor Final (walk-in) usa el documento
--- 222222222222, ignora el perfil predeterminado y queda bloqueado por
--- "correo de facturación" hasta que llegue el correo del comprobante (TS).
+-- 222222222222, ignora el perfil predeterminado y su correo es opcional (solo
+-- el de cada comprobante, invoice_email); sin él la factura queda pending.
 -- Es una reserva: sendInvoiceToDian vuelve a armar el snapshot desde TS
 -- (refreshInvoiceSnapshot) antes de transmitir, así que esta copia SQL solo
 -- decide el estado inicial (pending / blocked_missing_buyer_data) y lo que
@@ -391,10 +391,11 @@ begin
         );
       elsif coalesce(v_client.is_walk_in, false) then
         -- Consumidor Final sin perfil: documento oficial y SIN correo. El correo
-        -- NUNCA sale de la ficha compartida del walk-in (clients.email): llega
-        -- por comprobante (invoice_email) al enviar. Hasta entonces la factura
-        -- queda bloqueada por "correo de facturación" (igual que buildFiscalBuyer).
-        v_missing := array_append(v_missing, 'correo de facturación');
+        -- NUNCA sale de la ficha compartida del walk-in (clients.email); si el
+        -- comprador lo pide llega por comprobante (invoice_email) al enviar. Es
+        -- OPCIONAL (Anexo 1.9 FAK55: para consumidor final ElectronicMail es
+        -- opcional): sin correo la factura queda `pending`, no bloqueada (igual
+        -- que buildFiscalBuyer).
         v_buyer_snapshot := jsonb_build_object(
           'client_id', v_client.id,
           'document_type_code', coalesce(case when v_client.document_number is not null then v_client.dian_document_type_code end, '13'),

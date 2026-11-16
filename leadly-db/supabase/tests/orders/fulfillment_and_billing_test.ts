@@ -67,10 +67,11 @@ Deno.test("factura pedida: los faltantes son los MISMOS que buildFiscalBuyer", (
   assertEquals(evaluateFulfillmentAndBilling({ ...base, fulfillmentMethod: "on_site", billingProfileIdGiven: "p1", billingProfile: incompletos[0] }).ok, true);
   // cliente sin perfil que no es walk-in
   assertEquals(evaluateFulfillmentAndBilling({ ...base, fulfillmentMethod: "on_site", invoiceRequested: true, client }).missingBilling, ["perfil de facturación"]);
-  // walk-in: pide el correo del comprobante
+  // walk-in: el correo del comprobante es OPCIONAL (FAK55); si se manda debe ser válido
   const walk = { id: C, is_walk_in: true };
-  assertEquals(evaluateFulfillmentAndBilling({ ...base, fulfillmentMethod: "on_site", invoiceRequested: true, client: walk }).missingBilling, ["correo de facturación"]);
+  assertEquals(evaluateFulfillmentAndBilling({ ...base, fulfillmentMethod: "on_site", invoiceRequested: true, client: walk }).ok, true);
   assertEquals(evaluateFulfillmentAndBilling({ ...base, fulfillmentMethod: "on_site", invoiceRequested: true, client: walk, invoiceEmail: "a@b.co" }).ok, true);
+  assertEquals(evaluateFulfillmentAndBilling({ ...base, fulfillmentMethod: "on_site", invoiceRequested: true, client: walk, invoiceEmail: "mal" }).missingBilling, ["correo de facturación válido"]);
 });
 
 Deno.test("utilidades: método válido, snapshot de destino y errores 23503", () => {

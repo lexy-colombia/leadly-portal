@@ -110,12 +110,13 @@ begin
     i.status = 'blocked_missing_buyer_data' and i.status_detail like '%correo de facturación%', i.status || ' ' || coalesce(i.status_detail, ''));
 
   -- B1/B2: el walk-in NO usa respaldo desde clients. Aunque la ficha compartida tenga correo,
-  -- el snapshot NO lo copia: queda bloqueado por "correo de facturación" (llega por comprobante).
+  -- el snapshot NO lo copia. El correo del Consumidor Final es OPCIONAL (Anexo 1.9 FAK55):
+  -- sin invoice_email la factura queda pending, sin correo.
   update public.clients set email = 'ficha@walkin.co' where id = t.id('A_walkin');
   perform t.q('e4', 'A_walkin', 'pos', 'on_site');
   r := t.confirm('e4'); i := t.inv('e4');
-  perform t.ok('E4 Consumidor Final: doc 222222222222, SIN correo de la ficha, blocked "correo de facturación", sin billing_profile_id',
-    i.status = 'blocked_missing_buyer_data' and i.status_detail like '%correo de facturación%' and i.buyer_snapshot ->> 'client_id' = t.id('A_walkin')::text
+  perform t.ok('E4 Consumidor Final: doc 222222222222, SIN correo de la ficha, pending (el correo es opcional), sin billing_profile_id',
+    i.status = 'pending' and i.status_detail is null and i.buyer_snapshot ->> 'client_id' = t.id('A_walkin')::text
     and not (i.buyer_snapshot ? 'billing_profile_id') and i.buyer_snapshot ->> 'document_number' = '222222222222'
     and i.buyer_snapshot ->> 'email' is null, i.status || ' ' || coalesce(i.status_detail, '') || ' ' || coalesce(i.buyer_snapshot::text, ''));
 

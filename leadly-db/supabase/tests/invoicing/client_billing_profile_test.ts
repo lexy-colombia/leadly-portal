@@ -89,9 +89,12 @@ Deno.test("perfil incompleto: faltantes exactos, sin respaldo desde clients", ()
   assertEquals(sinDomicilio.buyer.address, null);
 });
 
-Deno.test("Consumidor Final: documento 222222222222 y correo por comprobante (nunca de la ficha)", () => {
+Deno.test("Consumidor Final: documento 222222222222; correo OPCIONAL por comprobante (nunca de la ficha)", () => {
   const sinCorreo = buildFiscalBuyer({ client: walkIn, profile: null });
-  assertEquals(sinCorreo.missing, ["correo de facturación"]);
+  // FAK55: para consumidor final ElectronicMail es opcional -> no bloquea.
+  assertEquals(sinCorreo.missing, []);
+  assertEquals(sinCorreo.buyer.email, null);
+  assertEquals(sinCorreo.buyer.email_source, null);
   assertEquals(sinCorreo.buyer.document_number, "222222222222");
   assertEquals(sinCorreo.buyer.address, null);
   const conCorreo = buildFiscalBuyer({ client: walkIn, profile: null, invoiceEmail: "final@example.com" });
@@ -112,10 +115,11 @@ Deno.test("B1: el walk-in IGNORA is_default y cualquier perfil (no se factura a 
   assertEquals(r.buyer.full_name, "Consumidor final");
   assertEquals(r.buyer.email, "final@example.com");
   assertEquals(r.buyer.billing_profile_id, null);
-  // sin invoice_email: bloqueado, nunca con el correo del perfil del tercero
+  // sin invoice_email: sin correo (pending), nunca con el correo del perfil del tercero
   const sin = buildFiscalBuyer({ client: walkIn, profile: tercero });
-  assertEquals(sin.missing, ["correo de facturación"]);
+  assertEquals(sin.missing, []);
   assertEquals(sin.buyer.email, null);
+  assertEquals(sin.buyer.document_number, "222222222222");
 });
 
 Deno.test("B2: el correo de un walk-in solo es reutilizable si vino de invoice_email", () => {
@@ -156,4 +160,24 @@ Deno.test("L1: parseInvoiceEmail valida tipo, longitud y formato", () => {
   assertEquals(parseInvoiceEmail("a@b"), null);
   assertEquals(parseInvoiceEmail("a".repeat(250) + "@b.co"), null);
   assertEquals(parseInvoiceEmail(""), null);
+});
+
+Deno.test("XML: Consumidor Final sin correo NO emite cac:Contact del adquirente; con invoice_email sí", async () => {
+  const sin = SYNTHETIC_INVOICES.find((f) => f.label === "inc8-consumidor-final")!;
+  const con = SYNTHETIC_INVOICES.find((f) => f.label === "perfil-consumidor-final-correo")!;
+  const buyerParty = async (fx: typeof sin) => {
+    const { xml } = await buildInvoiceXml(invoiceFixtureToInput(fx).input);
+    return parseXml(xml).getElementsByTagName("cac:AccountingCustomerParty")[0];
+  };
+  const pSin = await buyerParty(sin);
+  assertEquals(pSin.getElementsByTagName("cac:Contact").length, 0);
+  assertEquals(pSin.getElementsByTagName("cbc:ElectronicMail").length, 0);
+  const pCon = await buyerParty(con);
+  assertEquals(pCon.getElementsByTagName("cbc:ElectronicMail")[0].textContent, "cliente.final@example.invalid");
+  // el comprador armado por buildFiscalBuyer sin correo produce el mismo XML (sin Contact)
+  const { buyer } = buildFiscalBuyer({ client: walkIn, profile: null });
+  const { input } = invoiceFixtureToInput(sin);
+  input.buyer = mapInvoiceBuyer(buyer);
+  const { xml } = await buildInvoiceXml(input);
+  assertEquals(parseXml(xml).getElementsByTagName("cac:AccountingCustomerParty")[0].getElementsByTagName("cac:Contact").length, 0);
 });

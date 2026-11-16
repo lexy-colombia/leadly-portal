@@ -38,9 +38,9 @@ begin
   update public.clients set email = 'ficha@walkin.co' where id = t.id('A_walkin');
   perform t.q('w1', 'A_walkin', 'pos', 'on_site');
   r := t.confirm('w1'); i := t.inv('w1');
-  perform t.ok('W5 walk-in con perfil predeterminado forzado: el SQL NO lo toma (doc 222222222222, sin correo)',
+  perform t.ok('W5 walk-in con perfil predeterminado forzado: el SQL NO lo toma (doc 222222222222, sin correo, pending)',
     i.buyer_snapshot ->> 'document_number' = '222222222222' and i.buyer_snapshot ->> 'email' is null
-    and not (i.buyer_snapshot ? 'billing_profile_id') and i.status = 'blocked_missing_buyer_data', coalesce(i.buyer_snapshot::text, 'sin factura'));
+    and not (i.buyer_snapshot ? 'billing_profile_id') and i.status = 'pending', coalesce(i.buyer_snapshot::text, 'sin factura'));
   delete from public.client_billing_profiles where id = bp;
 
   -- ===== M3: correct_order_shipping atomica =====

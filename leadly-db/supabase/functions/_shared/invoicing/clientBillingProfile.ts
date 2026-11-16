@@ -118,7 +118,7 @@ export interface BuildFiscalBuyerInput {
   client: FiscalClientRef | null;
   /** Perfil elegido (el del pedido o el predeterminado del cliente). */
   profile: BillingProfileRow | null;
-  /** Correo del COMPROBANTE, solo para Consumidor Final sin perfil: se congela
+  /** Correo del COMPROBANTE, OPCIONAL, solo para Consumidor Final sin perfil: se congela
    * únicamente en el buyer_snapshot de esa factura, nunca en la ficha del
    * walk-in (compartida por todas las ventas de mostrador). */
   invoiceEmail?: string | null;
@@ -137,10 +137,13 @@ export function buildFiscalBuyer(input: BuildFiscalBuyerInput) {
   // perfil (la base tampoco admite perfiles bajo un walk-in): de lo contrario
   // un perfil de un tercero facturaría las ventas de mostrador a ese tercero.
   if (client?.is_walk_in) {
+    // El correo del Consumidor Final es OPCIONAL (Anexo Técnico 1.9, FAK55:
+    // "Para consumidor final el elemento ElectronicMail es opcional"): sin
+    // invoice_email la factura sale sin cac:Contact del adquirente y NO se
+    // bloquea. Si se manda uno, debe tener formato válido.
     const email = input.invoiceEmail?.trim() || null;
     const missing: string[] = [];
-    if (!email) missing.push("correo de facturación");
-    else if (!EMAIL_RE.test(email)) missing.push("correo de facturación válido");
+    if (email && !EMAIL_RE.test(email)) missing.push("correo de facturación válido");
     const documentType = client.dian_document_type_code && client.document_number ? client.dian_document_type_code : CONSUMIDOR_FINAL_DOCUMENT.type;
     const documentNumber = client.dian_document_type_code && client.document_number ? client.document_number : CONSUMIDOR_FINAL_DOCUMENT.number;
     return {
