@@ -7,15 +7,18 @@
  * MISMO mapeo que usan los orquestadores:
  *   - factura:      sendInvoiceToDian.ts   (mapeo en ~l.321-385)
  *   - nota crédito: sendCreditNoteToDian.ts (mapeo en ~l.195-248)
- * ⚠️ Esas dos funciones no exportan el mapeo, así que acá hay una COPIA. Si el
- * mapeo cambia allá y no acá, este harness deja de ser fiel (anotado en el
- * reporte; S2 debería extraer el mapeo a una función exportada).
+ * El comprador de la factura usa `mapInvoiceBuyer` (invoiceInput.ts) y el de
+ * la nota crédito `buildCreditNoteXmlInput` (creditNoteInput.ts): las mismas
+ * funciones que producción. El resto del mapeo de la factura (líneas, resolución,
+ * pago) sigue siendo una copia: si cambia en sendInvoiceToDian.ts, actualizarlo acá.
  */
 // PRIMER import, igual que en dian-submit/index.ts: el shim de `process`.
 import "../../functions/_shared/invoicing/nodeCompatShim.ts";
 
 import { DOMParser } from "npm:@xmldom/xmldom@0.8";
 import { buildInvoiceXml, type BuildInvoiceXmlInput, type InvoiceXmlLine } from "../../functions/_shared/invoicing/buildInvoiceXml.ts";
+import type { InvoiceDeliverySnapshot } from "../../functions/_shared/invoicing/invoiceDelivery.ts";
+import { mapInvoiceBuyer, mapInvoiceDelivery } from "../../functions/_shared/invoicing/invoiceInput.ts";
 import { buildCreditNoteXml, type BuildCreditNoteXmlInput } from "../../functions/_shared/invoicing/buildCreditNoteXml.ts";
 import { colombiaIssueMoment } from "../../functions/_shared/invoicing/colombiaTime.ts";
 import { buildCreditNoteXmlInput } from "../../functions/_shared/invoicing/creditNoteInput.ts";
@@ -31,6 +34,9 @@ export interface BuyerSnapshot {
   full_name: string | null;
   email?: string | null;
   applies_withholding: boolean;
+  organization_type?: "1" | "2" | null;
+  tax_level_code?: string | null;
+  tax_scheme_code?: "01" | "04" | "ZA" | "ZZ" | null;
   address: {
     line1: string | null;
     line2?: string | null;
@@ -40,6 +46,8 @@ export interface BuyerSnapshot {
     city_code?: string | null;
     state_code?: string | null;
   } | null;
+  /** buyer_snapshot.delivery (invoiceDelivery.ts), ya validado. */
+  delivery?: InvoiceDeliverySnapshot | null;
 }
 export interface SellerSnapshot {
   legal_name: string | null;
@@ -173,18 +181,11 @@ export function invoiceFixtureToInput(fx: InvoiceFixture, technicalKeyOverride?:
       taxLevelCode: seller.is_self_withholding_agent ? "O-15" : "R-99-PN",
       electronicMail: seller.contact_email ?? null,
     },
-    buyer: {
-      legalName: buyer.full_name ?? "N/A",
-      documentTypeCode: buyer.document_type_code!,
-      documentNumber: buyer.document_number!,
-      addressLine: buyer.address?.line1 ?? null,
-      city: buyer.address?.city ?? null,
-      stateProvince: buyer.address?.state_province ?? null,
-      countryCode: buyer.address?.country ?? "CO",
-      cityCode: buyer.address?.city_code ?? null,
-      stateCode: buyer.address?.state_code ?? null,
-      taxLevelCode: buyer.applies_withholding ? "O-15" : "R-99-PN",
-    },
+    // MISMA función que ejecuta producción (sendInvoiceToDian.ts): antes el
+    // harness tenía una copia que no pasaba organizationType / taxSchemeCode /
+    // electronicMail.
+    buyer: mapInvoiceBuyer(buyer),
+    delivery: mapInvoiceDelivery(buyer),
     lines,
     withholdings: [],
     resolution: {

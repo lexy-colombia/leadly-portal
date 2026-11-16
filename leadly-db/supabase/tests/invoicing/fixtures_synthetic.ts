@@ -64,6 +64,65 @@ const BUYER_FINAL = {
   address: null,
 };
 
+// Perfiles de facturación (autosuficientes). Persona natural con cédula.
+const BUYER_PERSONA_NATURAL = {
+  document_type_code: "13",
+  document_number: "79123456",
+  full_name: "MARIA PEREZ GOMEZ",
+  email: "maria@example.invalid",
+  applies_withholding: false,
+  organization_type: "2" as const,
+  tax_level_code: "R-99-PN",
+  tax_scheme_code: "ZZ" as const,
+  address: { line1: "Calle 10 # 20-30", city: "Bogotá D.C.", state_province: "Bogotá D.C.", country: "CO", city_code: "11001", state_code: "11" },
+};
+// Empresa con NIT (el DV 8 de 900123456 se valida en el test del perfil).
+const BUYER_EMPRESA_NIT = {
+  document_type_code: "31",
+  document_number: "900123456",
+  full_name: "EMPRESA DE PRUEBA S.A.S.",
+  email: "facturas@empresa.example.invalid",
+  applies_withholding: false,
+  organization_type: "1" as const,
+  tax_level_code: "O-13;O-23",
+  tax_scheme_code: "01" as const,
+  address: { line1: "Carrera 7 # 71-21", city: "Bogotá D.C.", state_province: "Bogotá D.C.", country: "CO", city_code: "11001", state_code: "11" },
+};
+// Extranjero: pasaporte, domicilio fuera de Colombia (sin DIVIPOLA).
+const BUYER_EXTRANJERO = {
+  document_type_code: "41",
+  document_number: "X1234567",
+  full_name: "JOHN DOE",
+  email: "john@example.invalid",
+  applies_withholding: false,
+  organization_type: "2" as const,
+  tax_level_code: "R-99-PN",
+  tax_scheme_code: "ZZ" as const,
+  address: { line1: "1 Main St", city: "Miami", state_province: "Florida", country: "US" },
+};
+// Consumidor Final con correo POR COMPROBANTE (walk-in sin perfil).
+const BUYER_FINAL_CON_CORREO = {
+  document_type_code: "13",
+  document_number: "222222222222",
+  full_name: "Consumidor final",
+  email: "cliente.final@example.invalid",
+  applies_withholding: false,
+  organization_type: "2" as const,
+  tax_level_code: "R-99-PN",
+  tax_scheme_code: null,
+  address: null,
+};
+
+// Lugar de entrega ya validado (buyer_snapshot.delivery): Medellín, DIVIPOLA 05001/05.
+const DELIVERY_MEDELLIN = {
+  line1: "Carrera 43A # 1-50, Torre 2 Apto 301",
+  city: "Medellín",
+  state_province: "Antioquia",
+  country: "CO" as const,
+  city_code: "05001",
+  state_code: "05",
+};
+
 function inv(label: string, overrides: Partial<InvoiceFixture> & Pick<InvoiceFixture, "items" | "issuedAtIso" | "invoiceNumber">): InvoiceFixture {
   return {
     kind: "invoice",
@@ -82,6 +141,7 @@ function inv(label: string, overrides: Partial<InvoiceFixture> & Pick<InvoiceFix
   };
 }
 
+export { DELIVERY_MEDELLIN };
 export const SYNTHETIC_INVOICES: InvoiceFixture[] = [
   // Restaurante: todo INC 8%, consumidor final sin dirección, hora diurna.
   inv("inc8-consumidor-final", {
@@ -89,6 +149,46 @@ export const SYNTHETIC_INVOICES: InvoiceFixture[] = [
     issuedAtIso: "2026-09-10T18:30:15Z", // 13:30:15 Colombia
     buyer: BUYER_FINAL,
     items: [item("Bandeja paisa", 2, 38000, "04", 8, { sku: "BP-1" }), item("Limonada", 3, 9500, "04", 8), item("Postre", 1, 14000, "04", 8)],
+  }),
+  // Perfiles de facturación: persona natural, empresa NIT, extranjero y
+  // Consumidor Final con correo del comprobante.
+  inv("perfil-persona-natural", {
+    invoiceNumber: 107,
+    issuedAtIso: "2026-11-02T16:00:00Z",
+    buyer: BUYER_PERSONA_NATURAL,
+    items: [item("Producto", 2, 11900, "01", 19, { sku: "P-1" })],
+  }),
+  inv("perfil-empresa-nit", {
+    invoiceNumber: 108,
+    issuedAtIso: "2026-11-02T17:00:00Z",
+    buyer: BUYER_EMPRESA_NIT,
+    items: [item("Servicio", 1, 119000, "01", 19)],
+  }),
+  inv("perfil-extranjero", {
+    invoiceNumber: 109,
+    issuedAtIso: "2026-11-02T18:00:00Z",
+    buyer: BUYER_EXTRANJERO,
+    items: [item("Producto exportado", 1, 50000, null, 0)],
+  }),
+  // cac:Delivery (Res. 227/2025 num. 3.2: adquirente SIN NIT en domicilio) y
+  // opcional con NIT (3.1). Entre AccountingCustomerParty y PaymentMeans.
+  inv("entrega-cedula-divipola", {
+    invoiceNumber: 111,
+    issuedAtIso: "2026-11-12T16:00:00Z",
+    buyer: { ...BUYER_PERSONA_NATURAL, delivery: DELIVERY_MEDELLIN },
+    items: [item("Producto a domicilio", 2, 11900, "01", 19, { sku: "P-2" })],
+  }),
+  inv("entrega-nit-divipola", {
+    invoiceNumber: 112,
+    issuedAtIso: "2026-11-12T17:00:00Z",
+    buyer: { ...BUYER_EMPRESA_NIT, delivery: DELIVERY_MEDELLIN },
+    items: [item("Servicio a domicilio", 1, 119000, "01", 19)],
+  }),
+  inv("perfil-consumidor-final-correo", {
+    invoiceNumber: 110,
+    issuedAtIso: "2026-11-02T19:00:00Z",
+    buyer: BUYER_FINAL_CON_CORREO,
+    items: [item("Almuerzo", 1, 27000, "04", 8)],
   }),
   // Mixta IVA 19 + IVA 5 + línea sin impuesto (regresión FAU04 3ª ronda).
   inv("iva19-iva5-y-sin-impuesto", {

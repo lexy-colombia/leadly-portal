@@ -80,6 +80,9 @@ export interface CheckoutAddressInput {
   line2?: string
   city: string
   state_province?: string
+  /** Códigos DANE (DIVIPOLA), capturados con el selector de departamento/municipio. */
+  state_code?: string
+  city_code?: string
   postal_code?: string
   country?: string
 }
@@ -99,12 +102,6 @@ export interface StorefrontSavedAddress {
   state_province: string | null
   postal_code: string | null
   country: string | null
-  /** Envío y facturación son roles independientes -- una dirección puede
-   * servir para uno, el otro, o los dos (ver CLAUDE.md, "Módulo de
-   * direcciones"). El picker de cada paso del checkout filtra por el flag
-   * que corresponde. */
-  is_shipping: boolean
-  is_billing: boolean
   is_default: boolean
 }
 
@@ -116,6 +113,37 @@ export interface VerifyOtpResult {
    * nunca antes. */
   client: { full_name: string; document_type: string | null; document_number: string | null } | null
   addresses: StorefrontSavedAddress[]
+  /** Perfiles de facturación del cliente: el servidor solo los devuelve DESPUÉS
+   * de probar el teléfono por OTP; un invitado nunca los ve. */
+  billing_profiles?: StorefrontBillingProfileSummary[]
+}
+
+export interface StorefrontBillingProfileSummary {
+  id: string
+  label: string
+  is_default: boolean
+  document_type_code: string | null
+  document_number: string | null
+  legal_name: string | null
+  email: string | null
+}
+
+/** Datos para crear un perfil de facturación nuevo al hacer el pedido. El
+ * servidor valida la lista de faltantes (422) y, si el documento ya existe
+ * para ese cliente, reutiliza el perfil. */
+export interface CheckoutBillingProfileInput {
+  document_type_code: string
+  document_number: string
+  legal_name?: string
+  email: string
+  phone?: string
+  address_line1?: string
+  address_line2?: string
+  country?: string
+  state_code?: string
+  city_code?: string
+  state_province?: string
+  city?: string
 }
 
 /** Respuesta de get_order_status -- se consulta al volver del checkout
@@ -243,12 +271,11 @@ export function checkoutStorefrontCart(params: {
    * o cargar una nueva (que además queda guardada para la próxima compra). */
   address_id?: string
   address?: CheckoutAddressInput
-  /** Default true en el backend si se omite -- factura a la misma dirección
-   * de envío. En false, se necesita billing_address_id o billing_address
-   * (misma lógica de "uno de los dos" que la de envío). */
-  billing_same_as_shipping?: boolean
-  billing_address_id?: string
-  billing_address?: CheckoutAddressInput
+  /** Factura opcional. Sin dirección de facturación: los datos fiscales van
+   * en un perfil (uno ya guardado del cliente verificado, o uno nuevo). */
+  wants_invoice?: boolean
+  billing_profile_id?: string
+  billing_profile?: CheckoutBillingProfileInput
   payment_method?: 'wompi' | 'credito'
   /** A dónde vuelve el cliente después de pagar en Wompi -- el browser es
    * quien sabe su propio origin real (ver storefront/index.ts::checkout),

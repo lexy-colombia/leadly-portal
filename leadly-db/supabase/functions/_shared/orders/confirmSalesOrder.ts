@@ -60,11 +60,13 @@ export async function getDefaultAddress(
  * patrón de texto que ahora también usa el trigger de DB, ver
  * guard_sales_order_confirmation en 20260903180000_sales_order_confirm_triggers.sql. */
 export function isPlaceholderAddressText(value: string): boolean {
-  return /no registrad|sin direcci[oó]n|pendiente|desconocid|por definir|n\/a|na\b/i.test(value);
+  return /no registrad|sin direcci[oó]n|pendiente|desconocid|por definir|n\/a|\bna\b/i.test(value);
 }
 
 export type ConfirmSalesOrderResult =
-  | { blocked: true; reason: "billing_address_required" | "shipping_address_required" | "insufficient_stock"; detail?: string }
+  // "billing_address_required" ya no existe: la dirección de facturación dejó
+  // de exigirse al confirmar (el comprador sale del perfil de facturación).
+  | { blocked: true; reason: "shipping_address_required" | "insufficient_stock"; detail?: string }
   | { blocked: false; order: { id: string; number: number } };
 
 /** "Confirmar una venta" -- llamado por whatsapp-ai-tools' confirm_quote
@@ -102,7 +104,6 @@ export async function confirmSalesOrder(adminClient: SupabaseClient, tenantId: s
   const { error } = await adminClient.from("sales_orders").update({ status: "confirmada" }).eq("id", order.id);
   if (error) {
     const message = error.message ?? "";
-    if (message.startsWith("BILLING_ADDRESS_REQUIRED")) return { blocked: true, reason: "billing_address_required" };
     if (message.startsWith("SHIPPING_ADDRESS_REQUIRED")) return { blocked: true, reason: "shipping_address_required" };
     if (message.startsWith("INSUFFICIENT_STOCK")) return { blocked: true, reason: "insufficient_stock", detail: message };
     throw new Error(message);

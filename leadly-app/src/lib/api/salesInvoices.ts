@@ -48,6 +48,14 @@ export async function listSalesInvoicesForOrder(orderId: string): Promise<SalesI
   return data
 }
 
+/** Mensaje legible de un error de envío de factura: el código técnico que
+ * responde dian-submit para un correo mal formado se traduce; el resto se
+ * muestra tal cual lo dijo el servidor. */
+export function invoiceSendErrorMessage(err: unknown, t: (key: 'billingTo.invoiceEmail.invalid') => string, fallback: string): string {
+  if (!(err instanceof Error)) return fallback
+  return err.message === 'invalid_invoice_email' ? t('billingTo.invoiceEmail.invalid') : err.message
+}
+
 export interface SendSalesInvoiceResult {
   /** `accepted`/`rejected`: veredicto REAL ya confirmado por la DIAN --
    * pedido explícito del usuario 2026-09-09, el propio envío consulta el
@@ -80,8 +88,10 @@ export interface SendSalesInvoiceResult {
  * falla de la llamada. Solo se lanza excepción para fallas de la llamada
  * misma (sin sesión, sin permiso, factura inexistente) -- mismo patrón de
  * extracción de mensaje que createWompiPaymentLink en orderPayments.ts. */
-export async function sendSalesInvoiceToDian(invoiceId: string): Promise<SendSalesInvoiceResult> {
-  return invokeDianSubmit('send_invoice', invoiceId)
+export async function sendSalesInvoiceToDian(invoiceId: string, invoiceEmail?: string): Promise<SendSalesInvoiceResult> {
+  // `invoiceEmail`: correo del comprobante, solo para Consumidor Final sin
+  // perfil (el servidor lo congela en el snapshot de ESA factura).
+  return invokeDianSubmit('send_invoice', invoiceId, invoiceEmail)
 }
 
 /** Reintenta una factura que la DIAN rechazó (o que falló al enviarse). No
@@ -94,13 +104,13 @@ export async function sendSalesInvoiceToDian(invoiceId: string): Promise<SendSal
  *
  * Por eso hay que refrescar el listado después de llamarla: aparece un
  * intento más, no cambia el que ya estaba. */
-export async function retrySalesInvoiceToDian(invoiceId: string): Promise<SendSalesInvoiceResult> {
-  return invokeDianSubmit('retry_invoice', invoiceId)
+export async function retrySalesInvoiceToDian(invoiceId: string, invoiceEmail?: string): Promise<SendSalesInvoiceResult> {
+  return invokeDianSubmit('retry_invoice', invoiceId, invoiceEmail)
 }
 
-async function invokeDianSubmit(action: 'send_invoice' | 'retry_invoice', invoiceId: string): Promise<SendSalesInvoiceResult> {
+async function invokeDianSubmit(action: 'send_invoice' | 'retry_invoice', invoiceId: string, invoiceEmail?: string): Promise<SendSalesInvoiceResult> {
   const { data, error } = await supabase.functions.invoke<SendSalesInvoiceResult & { error?: string }>('dian-submit', {
-    body: { action, invoice_id: invoiceId },
+    body: { action, invoice_id: invoiceId, invoice_email: invoiceEmail || undefined },
   })
   if (error) {
     const context = (error as { context?: Response }).context
@@ -127,9 +137,9 @@ async function invokeDianSubmit(action: 'send_invoice' | 'retry_invoice', invoic
  * `sales_channel='pos'` ya pagos del todo). Nunca crea una factura -- si el
  * pedido no tiene ninguna reservada, o el comprador elegido no tiene datos
  * fiscales, el servidor responde con un error claro. */
-export async function sendPosInvoiceForOrder(orderId: string): Promise<SendSalesInvoiceResult> {
+export async function sendPosInvoiceForOrder(orderId: string, invoiceEmail?: string): Promise<SendSalesInvoiceResult> {
   const { data, error } = await supabase.functions.invoke<SendSalesInvoiceResult & { error?: string }>('dian-submit', {
-    body: { action: 'send_pos_invoice', order_id: orderId },
+    body: { action: 'send_pos_invoice', order_id: orderId, invoice_email: invoiceEmail || undefined },
   })
   if (error) {
     const context = (error as { context?: Response }).context

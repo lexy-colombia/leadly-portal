@@ -73,6 +73,16 @@ import { persistOrderItems, type ResolvedOrderItem } from "../_shared/orders/per
 import { computeOrderTotals } from "../_shared/orders/computeOrderTotals.ts";
 import { isTenantTaxEnabled } from "../_shared/invoicing/queueInvoiceGeneration.ts";
 import { findStockShortfalls, parseStockRejection } from "../_shared/orders/stockAvailability.ts";
+import {
+  buildOneOffSnapshot,
+  describeOrderLinkError,
+  isFulfillmentMethod,
+  normalizeShippingDestination,
+  REQUIRE_DANE_FOR_DELIVERY,
+  resolveFulfillmentAndBilling,
+  type FulfillmentMethod,
+  type ShippingDestinationInput,
+} from "../_shared/orders/fulfillmentAndBilling.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 
 interface RawItemInput {
@@ -103,7 +113,29 @@ interface CalculateOrderBody {
   notes?: string | null;
   valid_until?: string | null;
   shipping_address_id?: string | null;
+  /** @deprecated la dirección de facturación fue reemplazada por
+   * `billing_profile_id`; se sigue aceptando mientras el frontend (S5) y
+   * whatsapp-ai-tools (S4) la escriban. */
   billing_address_id?: string | null;
+  /** 'delivery' | 'pickup' | 'on_site'. En un carrito del POS siempre es
+   * 'on_site' (el servidor lo fuerza; el body se ignora). Sin valor, un carrito
+   * nuevo nace 'delivery'. */
+  fulfillment_method?: FulfillmentMethod;
+  /** Perfil de facturación (client_billing_profiles) elegido. Debe ser del
+   * mismo tenant y del mismo cliente del pedido/carrito; null lo quita. */
+  billing_profile_id?: string | null;
+  /** Obligatorio al CORREGIR el destino (shipping_address_id) de un pedido ya
+   * confirmado: queda en sales_order_shipping_corrections. Exige el permiso
+   * `sales.correct_shipping`. */
+  shipping_correction_reason?: string | null;
+  /** Destino de UN SOLO USO ("Usar en este pedido"): se guarda como
+   * `shipping_snapshot` con `shipping_address_id = null`, sin tocar la libreta
+   * del cliente. Excluyente con `shipping_address_id` (400). `line1`
+   * obligatoria (422 "Falta: dirección de entrega."); DANE cuando
+   * REQUIRE_DANE_FOR_DELIVERY se active. `null` limpia el destino puntual.
+   * Mientras haya uno activo, el cliente debe reenviarlo en cada guardado
+   * (omitirlo lo conserva; mandar un `shipping_address_id` lo reemplaza). */
+  shipping_destination?: ShippingDestinationInput | null;
   shipping?: number;
   items?: RawItemInput[];
   origin?: "portal" | "pos";
@@ -142,6 +174,18 @@ Deno.serve(async (req) => {
     if (!Number.isFinite(item.unit_price) || item.unit_price < 0) return json({ error: `Precio inválido para "${item.product_name}".` }, 400);
   }
 
+  const destInput: ShippingDestinationInput | null | undefined =
+    body.shipping_destination === undefined || body.shipping_destination === null ? body.shipping_destination : normalizeShippingDestination(body.shipping_destination);
+  if (destInput === null && body.shipping_destination !== null && body.shipping_destination !== undefined) {
+    return json({ error: "shipping_destination debe ser un objeto." }, 400);
+  }
+  if (destInput && body.shipping_address_id) {
+    return json({ error: "Elige una dirección guardada (shipping_address_id) o un destino puntual (shipping_destination), no ambos.", code: "shipping_destination_conflict" }, 400);
+  }
+  if (body.fulfillment_method !== undefined && !isFulfillmentMethod(body.fulfillment_method)) {
+    return json({ error: "fulfillment_method inválido (delivery, pickup u on_site)." }, 400);
+  }
+
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -174,7 +218,7 @@ Deno.serve(async (req) => {
     callerClient.from("profiles").select("tenant_id").eq("id", caller.id).maybeSingle(),
     // También en preview: el carrito (leído con RLS del caller, así que solo
     // uno del propio tenant) se usa para excluir SUS reservas del disponible.
-    (isCartPath || body.preview) && requestedCartId ? callerClient.from("carts").select("id, status, origin").eq("id", requestedCartId).maybeSingle() : Promise.resolve(null),
+    (isCartPath || body.preview) && requestedCartId ? callerClient.from("carts").select("id, status, origin, contact_id, fulfillment_method").eq("id", requestedCartId).maybeSingle() : Promise.resolve(null),
   ]);
   ms.profile = Date.now() - tProfile;
   if (!profile?.tenant_id) return json({ error: "No se pudo resolver el tenant del usuario." }, 403);
@@ -200,6 +244,7 @@ Deno.serve(async (req) => {
     { field: "opportunity_id", table: "opportunities", id: body.opportunity_id },
     { field: "shipping_address_id", table: "contact_addresses", id: body.shipping_address_id },
     { field: "billing_address_id", table: "contact_addresses", id: body.billing_address_id },
+    { field: "billing_profile_id", table: "client_billing_profiles", id: body.billing_profile_id },
   ];
   // Las consultas de dueño son independientes: van en paralelo (mismos
   // selects, mismo .eq("tenant_id")). El resultado se evalúa en el orden de
@@ -329,6 +374,53 @@ Deno.serve(async (req) => {
     if (!r.owned) return json({ error: `${r.field} no pertenece a este tenant.` }, 403);
   }
 
+  // Pertenencia al CLIENTE del pedido/carrito (no solo al tenant): la dirección
+  // de envío y el perfil de facturación son del cliente. La base también lo
+  // impone (trigger + FK compuesta), pero acá se devuelve un 403 claro en vez
+  // de un 23503 crudo. `contactId` es el cliente EFECTIVO tras este guardado.
+  const validateLinks = async (contactId: string | null, method: FulfillmentMethod): Promise<Response | null> => {
+    if (!body.shipping_address_id && !body.billing_profile_id && !destInput) return null;
+    const check = await resolveFulfillmentAndBilling(adminClient, {
+      tenantId,
+      contactId,
+      // Para una dirección guardada / perfil solo importa la pertenencia; un
+      // destino puntual pasa por las mismas reglas de completitud.
+      fulfillmentMethod: method,
+      shippingAddressId: body.shipping_address_id ?? null,
+      shippingDestination: destInput ?? null,
+      billingProfileId: body.billing_profile_id ?? null,
+      requireDane: REQUIRE_DANE_FOR_DELIVERY,
+    });
+    if (check.forbidden.length > 0) return json({ error: check.forbidden[0] }, 403);
+    if (destInput && check.missingDestination.length > 0) return json({ error: `Falta: ${check.missingDestination.join(", ")}.`, code: "shipping_destination_incomplete" }, 422);
+    return null;
+  };
+  // Destino puntual en el parche: snapshot propio y sin dirección de libreta.
+  // Elegir una dirección de libreta (no nula) o mandar `shipping_destination:
+  // null` lo limpia; `shipping_address_id: null` solo NO lo toca.
+  const applyDestination = (target: Record<string, unknown>) => {
+    if (destInput) {
+      target.shipping_snapshot = buildOneOffSnapshot(destInput);
+      target.shipping_address_id = null;
+    } else if (body.shipping_destination === null || body.shipping_address_id) {
+      target.shipping_snapshot = null;
+    }
+  };
+  const sameDestination = (snapshot: unknown, d: ShippingDestinationInput): boolean => {
+    const snap = (snapshot ?? {}) as Record<string, unknown>;
+    return (["recipient_name", "phone", "line1", "line2", "city", "state_province", "state_code", "city_code", "postal_code", "notes", "country"] as const).every(
+      (k) => ((snap[k] as string | null | undefined) ?? null) === (d[k] ?? null),
+    );
+  };
+  // Al cambiar de cliente, la dirección y el perfil del cliente anterior ya no
+  // le pertenecen: se limpian explícitamente (el trigger enforce_order_cart_links
+  // hace lo mismo como red de seguridad) salvo que el body mande otros nuevos.
+  const clearStaleLinks = (target: Record<string, unknown>, previousContactId: string | null) => {
+    if (body.contact_id === undefined || body.contact_id === previousContactId) return;
+    if (body.shipping_address_id === undefined) target.shipping_address_id = null;
+    if (body.billing_profile_id === undefined) target.billing_profile_id = null;
+  };
+
   if (body.preview) {
     const totalsRes = await resolveTotals(body.shipping ?? 0);
     if (!totalsRes.ok) return json({ error: totalsRes.message }, 500);
@@ -342,8 +434,12 @@ Deno.serve(async (req) => {
   if (orderId) {
     // RLS de sales_orders ya aísla por tenant -- si el pedido es de otro
     // tenant, esto viene null, igual que "no existe".
-    const { data: existingOrder } = await callerClient.from("sales_orders").select("id, status, delivery_status").eq("id", orderId).maybeSingle();
+    const { data: existingOrder } = await callerClient.from("sales_orders").select("id, status, delivery_status, contact_id, shipping_address_id, billing_profile_id, shipping_snapshot, fulfillment_method").eq("id", orderId).maybeSingle();
     if (!existingOrder) return json({ error: "Pedido no encontrado." }, 404);
+    const previousOrderContact = (existingOrder.contact_id as string | null) ?? null;
+    const effectiveOrderContact = body.contact_id !== undefined ? (body.contact_id ?? null) : previousOrderContact;
+    const linksError = await validateLinks(effectiveOrderContact, (body.fulfillment_method ?? existingOrder.fulfillment_method ?? "delivery") as FulfillmentMethod);
+    if (linksError) return linksError;
 
     // Única puerta de escritura de la composición del pedido (cliente,
     // direcciones, envío, ítems/precios). Candado real -- el frontend
@@ -397,8 +493,69 @@ Deno.serve(async (req) => {
       if (!canEditConfirmed) {
         return json({ error: "El cliente de este pedido ya no se puede cambiar (el pedido ya está confirmado) -- hace falta el permiso para editar pedidos confirmados." }, 409);
       }
-      const { error: contactPatchError } = await adminClient.from("sales_orders").update({ contact_id: body.contact_id }).eq("id", orderId);
-      if (contactPatchError) return json({ error: contactPatchError.message }, 500);
+      const contactPatch: Record<string, unknown> = { contact_id: body.contact_id };
+      clearStaleLinks(contactPatch, previousOrderContact);
+      const { error: contactPatchError } = await adminClient.from("sales_orders").update(contactPatch).eq("id", orderId);
+      if (contactPatchError) {
+        const linkErr = describeOrderLinkError(contactPatchError);
+        return json({ error: linkErr?.message ?? contactPatchError.message }, linkErr?.status ?? 500);
+      }
+    }
+
+    // Pedido YA confirmado (no cotización): destino y perfil de facturación
+    // tienen reglas propias. Solo se actúa si el valor CAMBIA respecto al
+    // guardado (un autoguardado que reenvía el mismo valor no es una edición).
+    if (existingOrder.status !== "cotizacion") {
+      const shippingChanged =
+        (body.shipping_address_id !== undefined && (body.shipping_address_id ?? null) !== ((existingOrder.shipping_address_id as string | null) ?? null)) ||
+        (!!destInput && !sameDestination(existingOrder.shipping_snapshot, destInput));
+      const billingChanged = body.billing_profile_id !== undefined && (body.billing_profile_id ?? null) !== ((existingOrder.billing_profile_id as string | null) ?? null);
+      if (shippingChanged || billingChanged) {
+        if (dianLocked) {
+          return json({ error: "Este pedido ya tiene una factura transmitida a la DIAN: no se puede cambiar el destino ni el perfil de facturación." }, 409);
+        }
+        if (billingChanged) {
+          const { data: canEditConfirmed } = await callerClient.rpc("has_permission", { p_action_key: "sales.edit_invoiced_order" });
+          if (!canEditConfirmed) {
+            return json({ error: "El perfil de facturación de este pedido ya no se puede cambiar (el pedido ya está confirmado) -- hace falta el permiso para editar pedidos confirmados." }, 409);
+          }
+          const { error: billingPatchError } = await adminClient.from("sales_orders").update({ billing_profile_id: body.billing_profile_id ?? null }).eq("id", orderId);
+          if (billingPatchError) {
+            const linkErr = describeOrderLinkError(billingPatchError);
+            return json({ error: linkErr?.message ?? billingPatchError.message }, linkErr?.status ?? 500);
+          }
+        }
+        if (shippingChanged) {
+          const { data: canCorrect } = await callerClient.rpc("has_permission", { p_action_key: "sales.correct_shipping" });
+          if (!canCorrect) return json({ error: "Corregir el destino de un pedido confirmado requiere el permiso para corregir envíos." }, 403);
+          const reason = (body.shipping_correction_reason ?? "").trim();
+          if (!reason) return json({ error: "Indica el motivo de la corrección del destino (shipping_correction_reason)." }, 400);
+          if (!body.shipping_address_id && !destInput && existingOrder.fulfillment_method === "delivery") {
+            return json({ error: "Un pedido a domicilio necesita una dirección de entrega." }, 422);
+          }
+          // UNA sola transacción en la base (migración 20261112128000): UPDATE del
+          // pedido + shipping_snapshot + fila de auditoría. Si algo falla, no
+          // queda nada escrito (sin reversa manual). El permiso y el motivo ya
+          // se exigieron arriba con el JWT del usuario.
+          const { error: correctError } = await adminClient.rpc("correct_order_shipping", {
+            p_tenant_id: tenantId,
+            p_order_id: orderId,
+            p_new_address_id: body.shipping_address_id ?? null,
+            p_reason: reason,
+            p_corrected_by: caller.id,
+            p_new_destination: destInput ?? null,
+          });
+          if (correctError) {
+            const linkErr = describeOrderLinkError(correctError);
+            if (linkErr) return json({ error: linkErr.message }, linkErr.status);
+            if (correctError.code === "LX404") return json({ error: "La dirección o el pedido no existe." }, 404);
+            if (correctError.code === "LX409") return json({ error: "Solo se corrige el destino de un pedido confirmado." }, 409);
+            if (correctError.code === "22023") return json({ error: correctError.message.replace(/^[A-Z_]+:\s*/, "") }, 422);
+            if (correctError.code === "P0001") return json({ error: "Este pedido ya tiene una factura transmitida a la DIAN: no se puede cambiar el destino." }, 409);
+            return json({ error: correctError.message }, 500);
+          }
+        }
+      }
     }
 
     // Ítems/precios y el resto de la cabecera: candado SIN CAMBIOS
@@ -427,15 +584,24 @@ Deno.serve(async (req) => {
     // contact_id ya se resolvió arriba (candado propio) cuando estaba
     // bloqueado; en cotización (nunca bloqueado) se aplica acá igual que
     // siempre.
-    if (body.contact_id !== undefined && !contactLocked) headerPatch.contact_id = body.contact_id;
+    if (body.contact_id !== undefined && !contactLocked) {
+      headerPatch.contact_id = body.contact_id;
+      clearStaleLinks(headerPatch, previousOrderContact);
+    }
+    if (body.fulfillment_method !== undefined) headerPatch.fulfillment_method = body.fulfillment_method;
+    if (body.billing_profile_id !== undefined) headerPatch.billing_profile_id = body.billing_profile_id;
     if (body.opportunity_id !== undefined) headerPatch.opportunity_id = body.opportunity_id;
     if (body.notes !== undefined) headerPatch.notes = body.notes;
     if (body.valid_until !== undefined) headerPatch.valid_until = body.valid_until;
     if (body.shipping_address_id !== undefined) headerPatch.shipping_address_id = body.shipping_address_id;
     if (body.billing_address_id !== undefined) headerPatch.billing_address_id = body.billing_address_id;
+    applyDestination(headerPatch);
     if (Object.keys(headerPatch).length > 0) {
       const { error: headerError } = await adminClient.from("sales_orders").update(headerPatch).eq("id", orderId);
-      if (headerError) return json({ error: headerError.message }, 500);
+      if (headerError) {
+        const linkErr = describeOrderLinkError(headerError);
+        return json({ error: linkErr?.message ?? headerError.message }, linkErr?.status ?? 500);
+      }
     }
 
     const productIds = Array.from(new Set(items.map((i) => i.product_id).filter((id): id is string => !!id)));
@@ -501,6 +667,10 @@ Deno.serve(async (req) => {
   } else if (!body.contact_id) {
     return json({ error: "contact_id es requerido para crear un carrito." }, 400);
   }
+  const previousCartContact = ((existingCart?.contact_id as string | null | undefined) ?? null);
+  const effectiveCartContact = body.contact_id !== undefined ? (body.contact_id ?? null) : previousCartContact;
+  const cartLinksError = await validateLinks(effectiveCartContact, (cartOrigin === "pos" ? "on_site" : (body.fulfillment_method ?? existingCart?.fulfillment_method ?? "delivery")) as FulfillmentMethod);
+  if (cartLinksError) return cartLinksError;
 
   // Chequeo de stock -- ver el comentario de `stock_shortfalls` en la
   // cabecera del archivo. Se lanzó arriba en paralelo con los checks de
@@ -582,6 +752,12 @@ Deno.serve(async (req) => {
     if (body.valid_until !== undefined) patch.valid_until = body.valid_until;
     if (body.shipping_address_id !== undefined) patch.shipping_address_id = body.shipping_address_id;
     if (body.billing_address_id !== undefined) patch.billing_address_id = body.billing_address_id;
+    if (body.billing_profile_id !== undefined) patch.billing_profile_id = body.billing_profile_id;
+    // POS: siempre on_site, lo fuerza el servidor (y el trigger force_pos_on_site).
+    if (cartOrigin === "pos") patch.fulfillment_method = "on_site";
+    else if (body.fulfillment_method !== undefined) patch.fulfillment_method = body.fulfillment_method;
+    clearStaleLinks(patch, previousCartContact);
+    applyDestination(patch);
     if (body.shipping !== undefined) patch.shipping = body.shipping;
     if (body.pos_point_id !== undefined) patch.pos_point_id = body.pos_point_id;
     if (body.label !== undefined) patch.label = body.label;
@@ -594,6 +770,8 @@ Deno.serve(async (req) => {
     if (saveError) {
       // SQLSTATE propios de la función: se traducen igual que las
       // validaciones previas (por si el carrito cambió entre la lectura y el guardado).
+      const linkErr = describeOrderLinkError(saveError);
+      if (linkErr) return json({ error: linkErr.message }, linkErr.status);
       if (saveError.code === "LX404") return json({ error: "Carrito no encontrado." }, 404);
       if (saveError.code === "LX409") return json({ error: "Este carrito ya no está abierto." }, 409);
       // LX422: otra cuenta reservó el stock entre el chequeo de arriba y el
@@ -616,8 +794,11 @@ Deno.serve(async (req) => {
         opportunity_id: body.opportunity_id ?? null,
         notes: body.notes ?? null,
         valid_until: body.valid_until ?? null,
-        shipping_address_id: body.shipping_address_id ?? null,
+        shipping_address_id: destInput ? null : (body.shipping_address_id ?? null),
+        shipping_snapshot: destInput ? buildOneOffSnapshot(destInput) : null,
         billing_address_id: body.billing_address_id ?? null,
+        billing_profile_id: body.billing_profile_id ?? null,
+        fulfillment_method: (body.origin ?? "portal") === "pos" ? "on_site" : (body.fulfillment_method ?? "delivery"),
         shipping: body.shipping ?? 0,
         origin: body.origin ?? "portal",
         pos_point_id: body.pos_point_id ?? null,
@@ -625,7 +806,10 @@ Deno.serve(async (req) => {
       })
       .select("*")
       .single();
-    if (cartInsertError) return json({ error: cartInsertError.message }, 500);
+    if (cartInsertError) {
+      const linkErr = describeOrderLinkError(cartInsertError);
+      return json({ error: linkErr?.message ?? cartInsertError.message }, linkErr?.status ?? 500);
+    }
     cartRow = newCart as Record<string, unknown>;
     cartId = cartRow.id as string;
     // Carrito recién creado: no tiene ítems que borrar, solo insertar.

@@ -1,6 +1,8 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
-import { buildFiscalBuyer } from "./clientBillingProfile.ts";
+import { buildFiscalBuyer, loadBillingProfileForOrder } from "./clientBillingProfile.ts";
 import { resolveCityName } from "./cityName.ts";
+import { REQUIRE_DANE_FOR_DELIVERY } from "../orders/fulfillmentAndBilling.ts";
+import { deliveryDivipolaCodes, evaluateInvoiceDelivery } from "./invoiceDelivery.ts";
 
 /** Fase 1 (cimientos) de facturación electrónica DIAN: reserva una fila en
  * sales_invoices si el tenant tiene una credencial activa de 'dian_directo'
@@ -52,6 +54,17 @@ async function hasActiveDianCredential(
   return !!data;
 }
 
+/** Parámetros del comprobante que NO viven en la ficha del cliente. */
+export interface InvoiceBuyerOptions {
+  /** Correo del comprobante: solo para Consumidor Final sin perfil (walk-in).
+   * Se congela únicamente en el buyer_snapshot de ESA factura. */
+  invoiceEmail?: string | null;
+  /** Solo para pruebas: fuerza la regla "adquirente no-NIT + domicilio sin
+   * municipio/departamento de entrega => bloqueada". Por defecto sigue la
+   * constante REQUIRE_DANE_FOR_DELIVERY (fulfillmentAndBilling.ts). */
+  requireDeliveryDivipola?: boolean;
+}
+
 export interface InvoiceAttemptResult {
   invoiceId: string;
   status: "pending" | "blocked_missing_buyer_data";
@@ -76,13 +89,17 @@ export async function createInvoiceAttempt(
   tenantId: string,
   orderId: string,
   attemptNumber: number,
+  buyerOptions: InvoiceBuyerOptions = {},
 ): Promise<InvoiceAttemptResult> {
   if (!(await hasActiveDianCredential(adminClient, tenantId))) {
     throw new Error(
       "El tenant no tiene una credencial activa de facturación DIAN.",
     );
   }
-  const snap = await buildOrderSnapshot(adminClient, tenantId, orderId);
+  // Reintento de un walk-in: parte del correo que el cajero ya capturó para
+  // esta venta en un intento anterior (solo si vino de invoice_email).
+  const invoiceEmail = buyerOptions.invoiceEmail?.trim() || (await previousInvoiceEmail(adminClient, tenantId, orderId));
+  const snap = await buildOrderSnapshot(adminClient, tenantId, orderId, { invoiceEmail, requireDeliveryDivipola: buyerOptions.requireDeliveryDivipola });
 
   const { data: invoice, error: invoiceError } = await adminClient
     .from("sales_invoices")
@@ -128,8 +145,13 @@ export async function refreshInvoiceSnapshot(
   tenantId: string,
   invoiceId: string,
   orderId: string,
+  buyerOptions: InvoiceBuyerOptions = {},
 ): Promise<void> {
-  const snap = await buildOrderSnapshot(adminClient, tenantId, orderId);
+  // Consumidor Final: el correo del comprobante puede haberse capturado en una
+  // solicitud anterior de ESTA venta que falló después. Solo se reutiliza un
+  // correo que vino de invoice_email (email_source), nunca uno de la ficha.
+  const invoiceEmail = buyerOptions.invoiceEmail?.trim() || (await previousInvoiceEmail(adminClient, tenantId, orderId));
+  const snap = await buildOrderSnapshot(adminClient, tenantId, orderId, { invoiceEmail, requireDeliveryDivipola: buyerOptions.requireDeliveryDivipola });
   if (snap.status === "blocked_missing_buyer_data") {
     await adminClient.from("sales_invoices").update({
       status: snap.status, status_detail: snap.statusDetail,
@@ -153,6 +175,24 @@ export async function refreshInvoiceSnapshot(
     .in("status", ["pending", "blocked_missing_buyer_data"]);
   if (error) throw new Error(error.message);
   await replaceInvoiceItems(adminClient, tenantId, invoiceId, snap.items);
+}
+
+/** Correo de comprobante capturado en un intento anterior de la MISMA venta
+ * (buyer_snapshot.email_source = 'invoice_email'). Nunca el de una ficha ni el
+ * de otra venta. */
+export async function previousInvoiceEmail(adminClient: SupabaseClient, tenantId: string, orderId: string): Promise<string | null> {
+  const { data } = await adminClient
+    .from("sales_invoices")
+    .select("buyer_snapshot")
+    .eq("tenant_id", tenantId)
+    .eq("order_id", orderId)
+    .order("attempt_number", { ascending: false })
+    .limit(10);
+  for (const row of data ?? []) {
+    const snap = row.buyer_snapshot as { email?: string | null; email_source?: string | null } | null;
+    if (snap?.email_source === "invoice_email" && snap.email?.trim()) return snap.email.trim();
+  }
+  return null;
 }
 
 async function replaceInvoiceItems(
@@ -195,37 +235,39 @@ async function buildOrderSnapshot(
   adminClient: SupabaseClient,
   tenantId: string,
   orderId: string,
+  buyerOptions: InvoiceBuyerOptions = {},
 ) {
   const { data: order } = await adminClient
     .from("sales_orders")
     .select(
-      "subtotal, tax_total, total, currency, contact_id",
+      "subtotal, tax_total, total, currency, contact_id, billing_profile_id, fulfillment_method, shipping_snapshot",
     )
     .eq("id", orderId)
     .eq("tenant_id", tenantId)
     .maybeSingle();
   if (!order) throw new Error("El pedido de esta factura ya no existe.");
 
-  // clients no tiene columna propia de fiscal_regime (solo
-  // tenant_dian_profile la tiene, para el propio tenant) -- pedirla acá
-  // rompía todo el select en PostgREST (columna inexistente = error de la
-  // query completa), y como el error se descartaba silenciosamente el
-  // cliente quedaba "no encontrado" para CUALQUIER venta con impuestos
-  // activados, sin importar si sus datos estaban completos. Encontrado
-  // recién probando el flujo end-to-end contra la base real -- no dejar
-  // que un select con una columna inexistente falle en silencio otra vez.
+  // El comprador sale del PERFIL DE FACTURACIÓN (el elegido en el pedido o el
+  // predeterminado del cliente), autosuficiente: de `clients` solo se lee la
+  // identidad no fiscal y el flag de Consumidor Final. Sin respaldo desde
+  // clients (legal_name||full_name, email, phone, retención): si falta algo,
+  // se bloquea con la lista. Ver clientBillingProfile.ts.
   const { data: client, error: clientError } = await adminClient
     .from("clients")
-    .select(
-      "id, full_name, email, phone, document_number, dian_document_type_code, applies_withholding, billing_profile, is_walk_in",
-    )
+    .select("id, full_name, document_number, dian_document_type_code, is_walk_in")
     .eq("id", order.contact_id)
     .eq("tenant_id", tenantId)
     .is("deleted_at", null)
     .maybeSingle();
   if (clientError) throw new Error(clientError.message);
 
-  const { buyer: buyerSnapshot, missing } = buildFiscalBuyer(client);
+  const { profile, chosenMissing } = await loadBillingProfileForOrder(adminClient, tenantId, order.contact_id, order.billing_profile_id ?? null, !!client?.is_walk_in);
+  const { buyer: buyerSnapshot, missing } = buildFiscalBuyer({ client, profile, invoiceEmail: buyerOptions.invoiceEmail ?? null });
+  if (chosenMissing) {
+    // El pedido apunta a un perfil que ya no existe (o fue borrado): no se cae
+    // al predeterminado en silencio.
+    missing.splice(0, missing.length, "perfil de facturación elegido (ya no existe)");
+  }
   const address = buyerSnapshot.address;
   if (address?.country === "CO" && address.city_code && address.state_code) {
     const [{ data: city, error: cityError }, { data: department, error: departmentError }] = await Promise.all([
@@ -239,6 +281,32 @@ async function buildOrderSnapshot(
       address.state_province = department.name;
     }
   }
+
+  // Lugar de entrega (cac:Delivery, Res. DIAN 227/2025 num. 3.2/3.3 + Anexo
+  // 1.9 FAM01-FAM14): se lee del shipping_snapshot CONGELADO del pedido (no de
+  // la libreta viva) y se valida contra el catálogo DIVIPOLA igual que la
+  // dirección fiscal. Se guarda en buyer_snapshot.delivery; ver invoiceDelivery.ts.
+  const shipping = (order.shipping_snapshot ?? null) as Record<string, unknown> | null;
+  let divipola: { cityName: string; departmentName: string } | null = null;
+  const deliveryCodes = order.fulfillment_method === "delivery" ? deliveryDivipolaCodes(shipping) : null;
+  if (deliveryCodes) {
+    const [{ data: dCity, error: dCityError }, { data: dDepartment, error: dDepartmentError }] = await Promise.all([
+      adminClient.from("cities").select("name").eq("code", deliveryCodes.cityCode).eq("department_code", deliveryCodes.stateCode).maybeSingle(),
+      adminClient.from("departments").select("name").eq("code", deliveryCodes.stateCode).maybeSingle(),
+    ]);
+    if (dCityError || dDepartmentError) throw new Error("No se pudo verificar la dirección de entrega.");
+    if (dCity && dDepartment) divipola = { cityName: dCity.name, departmentName: dDepartment.name };
+  }
+  const { delivery, missing: deliveryMissing } = evaluateInvoiceDelivery({
+    fulfillmentMethod: order.fulfillment_method,
+    shippingSnapshot: shipping,
+    buyerDocumentTypeCode: buyerSnapshot.document_type_code,
+    divipola,
+    requireDane: buyerOptions.requireDeliveryDivipola ?? REQUIRE_DANE_FOR_DELIVERY,
+  });
+  // Si el comprador ni siquiera está identificado, su propio faltante ya
+  // bloquea; no se suma ruido sobre el destino.
+  if (buyerSnapshot.document_type_code) missing.push(...deliveryMissing);
 
   const { data: tenant } = await adminClient
     .from("tenants")
@@ -316,7 +384,7 @@ async function buildOrderSnapshot(
     taxTotal: order.tax_total,
     total: order.total,
     currency: order.currency,
-    buyerSnapshot,
+    buyerSnapshot: { ...buyerSnapshot, delivery },
     sellerSnapshot,
     items: (orderItems ?? []).map((item) => ({
       ...item,

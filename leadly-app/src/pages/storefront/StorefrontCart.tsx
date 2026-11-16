@@ -3,6 +3,7 @@ import { Link, useOutletContext, useSearchParams } from 'react-router-dom'
 import { REGEXP_ONLY_DIGITS } from 'input-otp'
 import { CheckIcon, Loader2Icon, MapPinIcon, PlusIcon, TrashIcon } from 'lucide-react'
 import { useLanguage } from '../../contexts/LanguageContext'
+import type { TranslationKey } from '../../i18n/translations'
 import {
   checkoutStorefrontCart,
   getStorefrontCart,
@@ -20,6 +21,7 @@ import {
   type StorefrontSavedAddress,
   type VerifyOtpResult,
 } from '../../lib/api/storefront'
+import type { StorefrontBillingProfileSummary } from '../../lib/api/storefront'
 import type { OrderTotalsBreakdown } from '../../lib/api/orders'
 import { OrderTotalsSummary } from '@/components/molecules/OrderTotalsSummary'
 import { ClearCartButton } from '@/components/storefront/ClearCartButton'
@@ -40,7 +42,7 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { PhoneInput } from '@/components/molecules'
+import { GeoSelect, PhoneInput, type GeoValue } from '@/components/molecules'
 import { StorefrontImage } from '@/components/storefront/StorefrontImage'
 
 function formatCurrency(value: number): string {
@@ -55,6 +57,15 @@ interface AddressDisplay {
   state_province: string | null
 }
 
+/** Tipos de documento DIAN que ofrece la tienda para la factura. */
+const INVOICE_DOCUMENT_TYPES: { code: string; labelKey: TranslationKey }[] = [
+  { code: '13', labelKey: 'storefront.cart.invoiceDocTypes.13' },
+  { code: '22', labelKey: 'storefront.cart.invoiceDocTypes.22' },
+  { code: '31', labelKey: 'storefront.cart.invoiceDocTypes.31' },
+  { code: '41', labelKey: 'storefront.cart.invoiceDocTypes.41' },
+  { code: '42', labelKey: 'storefront.cart.invoiceDocTypes.42' },
+]
+
 /** Snapshot de lo que efectivamente se compró, tomado en `submitCheckout`
  * ANTES de limpiar el token del carrito -- `items`/`total` del estado
  * principal no sirven para la pantalla de éxito: en cuanto se limpia el
@@ -66,8 +77,8 @@ interface OrderSummary {
   fullName: string
   phone: string
   shippingAddress: AddressDisplay
-  billingAddress: AddressDisplay
-  billingSameAsShipping: boolean
+  /** Nombre/documento del perfil de facturación si pidió factura. */
+  invoiceTo: string | null
 }
 
 /** Carrito + checkout en 4 pasos -- ver CLAUDE.md, "Verificación de
@@ -150,12 +161,23 @@ export function StorefrontCart() {
   const [shippingLine1, setShippingLine1] = useState('')
   const [shippingCity, setShippingCity] = useState('')
   const [shippingStateProvince, setShippingStateProvince] = useState('')
+  const [shippingStateCode, setShippingStateCode] = useState<string | null>(null)
+  const [shippingCityCode, setShippingCityCode] = useState<string | null>(null)
 
-  const [billingSameAsShipping, setBillingSameAsShipping] = useState(true)
-  const [selectedBillingId, setSelectedBillingId] = useState<string | null>(null)
-  const [billingLine1, setBillingLine1] = useState('')
-  const [billingCity, setBillingCity] = useState('')
-  const [billingStateProvince, setBillingStateProvince] = useState('')
+  // Factura (opcional): sin dirección de facturación, solo datos fiscales.
+  const [wantsInvoice, setWantsInvoice] = useState(false)
+  const [billingProfiles, setBillingProfiles] = useState<StorefrontBillingProfileSummary[]>([])
+  // null = «usar otros datos» (perfil nuevo)
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
+  const [invoiceDocType, setInvoiceDocType] = useState('13')
+  const [invoiceDocNumber, setInvoiceDocNumber] = useState('')
+  const [invoiceLegalName, setInvoiceLegalName] = useState('')
+  const [invoiceEmail, setInvoiceEmail] = useState('')
+  const [invoiceLine1, setInvoiceLine1] = useState('')
+  const [invoiceStateCode, setInvoiceStateCode] = useState<string | null>(null)
+  const [invoiceCityCode, setInvoiceCityCode] = useState<string | null>(null)
+  const [invoiceStateName, setInvoiceStateName] = useState('')
+  const [invoiceCityName, setInvoiceCityName] = useState('')
 
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<CheckoutResult | null>(null)
@@ -249,12 +271,12 @@ export function StorefrontCart() {
       if (res.client.document_number) setDocumentNumber(res.client.document_number)
     }
     setSavedAddresses(res.addresses)
-    // Mismo criterio que shippingAddresses/billingAddresses de abajo: la
-    // preselección mira TODAS las direcciones guardadas, no solo las
-    // marcadas para ese rol puntual.
     const defaultAddressId = res.addresses.find((a) => a.is_default)?.id ?? res.addresses[0]?.id ?? null
     setSelectedShippingId(defaultAddressId)
-    setSelectedBillingId(defaultAddressId)
+    // Perfiles de facturación guardados (solo llegan tras probar el teléfono).
+    const profiles = res.billing_profiles ?? []
+    setBillingProfiles(profiles)
+    setSelectedProfileId(profiles.find((p) => p.is_default)?.id ?? profiles[0]?.id ?? null)
     setStep('details')
   }
 
@@ -322,25 +344,15 @@ export function StorefrontCart() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, slug, paymentReturn])
 
-  // Deliberadamente NO se filtra por is_shipping/is_billing acá -- a
-  // diferencia de OrderDetail.tsx (portal interno, un agente eligiendo entre
-  // direcciones ya clasificadas de un cliente conocido), en el checkout de
-  // la tienda el cliente ve TODAS sus direcciones guardadas en los dos
-  // pickers. Bug real encontrado probando con un cliente real: una dirección
-  // cargada por la IA en una conversación de WhatsApp había quedado
-  // is_billing=true/is_shipping=false, así que el picker de envío la ocultaba
-  // por completo aunque el cliente la tenía guardada -- para una compra
-  // rápida, minimizar fricción (mostrar todo lo que tiene) importa más que
-  // respetar esa clasificación interna.
+  // Se muestran TODAS las direcciones guardadas del cliente como destino.
   const shippingAddresses = savedAddresses
-  const billingAddresses = savedAddresses
   const selectedShipping = selectedShippingId ? shippingAddresses.find((a) => a.id === selectedShippingId) : undefined
   const usingNewShipping = shippingAddresses.length === 0 || !selectedShipping
-  const selectedBilling = selectedBillingId ? billingAddresses.find((a) => a.id === selectedBillingId) : undefined
-  const usingNewBilling = !billingSameAsShipping && (billingAddresses.length === 0 || !selectedBilling)
 
   const shippingValid = usingNewShipping ? !!shippingLine1 && !!shippingCity : true
-  const billingValid = billingSameAsShipping || (usingNewBilling ? !!billingLine1 && !!billingCity : true)
+  const usingSavedProfile = wantsInvoice && selectedProfileId !== null && billingProfiles.some((p) => p.id === selectedProfileId)
+  // Solo se exige lo mínimo para armar la solicitud; el servidor valida el resto (422).
+  const invoiceValid = !wantsInvoice || usingSavedProfile || (!!invoiceDocNumber && !!invoiceEmail)
 
   const redirectUrl = `${window.location.origin}/tienda/${slug}/carrito?payment=return`
 
@@ -367,14 +379,18 @@ export function StorefrontCart() {
     setBusy(true)
     try {
       const shippingAddress: CheckoutAddressInput = usingNewShipping
-        ? { line1: shippingLine1, city: shippingCity, state_province: shippingStateProvince || undefined }
+        ? {
+            line1: shippingLine1,
+            city: shippingCity,
+            state_province: shippingStateProvince || undefined,
+            state_code: shippingStateCode ?? undefined,
+            city_code: shippingCityCode ?? undefined,
+            country: shippingCityCode ? 'CO' : undefined,
+          }
         : { line1: selectedShipping!.line1, city: selectedShipping!.city ?? '', state_province: selectedShipping!.state_province ?? undefined }
 
-      const billingAddress: CheckoutAddressInput = billingSameAsShipping
-        ? shippingAddress
-        : usingNewBilling
-          ? { line1: billingLine1, city: billingCity, state_province: billingStateProvince || undefined }
-          : { line1: selectedBilling!.line1, city: selectedBilling!.city ?? '', state_province: selectedBilling!.state_province ?? undefined }
+      const savedProfile = usingSavedProfile ? billingProfiles.find((p) => p.id === selectedProfileId) : undefined
+      const invoiceTo = wantsInvoice ? (savedProfile ? (savedProfile.legal_name ?? savedProfile.label) : invoiceLegalName || fullName) : null
 
       // Se toma ANTES de mandar el checkout -- ver el comentario de
       // OrderSummary arriba sobre por qué no alcanza con `items`/`total`.
@@ -384,8 +400,7 @@ export function StorefrontCart() {
         fullName,
         phone,
         shippingAddress: { line1: shippingAddress.line1, city: shippingAddress.city, state_province: shippingAddress.state_province ?? null },
-        billingAddress: { line1: billingAddress.line1, city: billingAddress.city, state_province: billingAddress.state_province ?? null },
-        billingSameAsShipping,
+        invoiceTo,
       }
 
       const res = await checkoutStorefrontCart({
@@ -396,9 +411,23 @@ export function StorefrontCart() {
         document_number: documentNumber || undefined,
         address_id: usingNewShipping ? undefined : selectedShipping!.id,
         address: usingNewShipping ? shippingAddress : undefined,
-        billing_same_as_shipping: billingSameAsShipping,
-        billing_address_id: !billingSameAsShipping && !usingNewBilling ? selectedBilling!.id : undefined,
-        billing_address: !billingSameAsShipping && usingNewBilling ? billingAddress : undefined,
+        wants_invoice: wantsInvoice || undefined,
+        billing_profile_id: usingSavedProfile ? selectedProfileId! : undefined,
+        billing_profile:
+          wantsInvoice && !usingSavedProfile
+            ? {
+                document_type_code: invoiceDocType,
+                document_number: invoiceDocNumber.trim(),
+                legal_name: invoiceLegalName.trim() || fullName,
+                email: invoiceEmail.trim(),
+                address_line1: invoiceLine1.trim() || undefined,
+                country: invoiceCityName ? 'CO' : undefined,
+                state_code: invoiceStateCode ?? undefined,
+                city_code: invoiceCityCode ?? undefined,
+                state_province: invoiceStateName || undefined,
+                city: invoiceCityName || undefined,
+              }
+            : undefined,
         // Vuelve a esta misma página -- pedido explícito del usuario. El
         // token del carrito NO se limpia acá abajo cuando el método es
         // Wompi: tiene que sobrevivir el viaje de ida y vuelta a la página
@@ -580,39 +609,131 @@ export function StorefrontCart() {
               usingNew={usingNewShipping}
               line1={shippingLine1}
               onLine1Change={setShippingLine1}
-              city={shippingCity}
-              onCityChange={setShippingCity}
-              stateProvince={shippingStateProvince}
-              onStateProvinceChange={setShippingStateProvince}
+              stateCode={shippingStateCode}
+              cityCode={shippingCityCode}
+              onGeoChange={(geo) => {
+                setShippingStateCode(geo.stateCode)
+                setShippingCityCode(geo.cityCode)
+                setShippingStateProvince(geo.stateName ?? '')
+                setShippingCity(geo.cityName ?? '')
+              }}
             />
           </div>
 
-          <div className="space-y-2 border-t border-border pt-3">
+          <div className="space-y-3 border-t border-border pt-3">
             <label className="flex items-center gap-2 text-xs">
-              <Checkbox checked={billingSameAsShipping} onCheckedChange={(checked) => setBillingSameAsShipping(checked === true)} />
-              {t('storefront.cart.billingSameAsShipping')}
+              <Checkbox
+                checked={wantsInvoice}
+                onCheckedChange={(checked) => {
+                  const on = checked === true
+                  setWantsInvoice(on)
+                  if (on && !invoiceDocNumber) setInvoiceDocNumber(documentNumber)
+                  if (on && !invoiceLegalName) setInvoiceLegalName(fullName)
+                }}
+              />
+              {t('storefront.cart.needInvoice')}
             </label>
 
-            {!billingSameAsShipping && (
-              <div className="space-y-2 pt-1">
-                <Label>{t('storefront.cart.billingAddress')}</Label>
-                <AddressPicker
-                  addresses={billingAddresses}
-                  selectedId={selectedBillingId}
-                  onSelectId={setSelectedBillingId}
-                  usingNew={usingNewBilling}
-                  line1={billingLine1}
-                  onLine1Change={setBillingLine1}
-                  city={billingCity}
-                  onCityChange={setBillingCity}
-                  stateProvince={billingStateProvince}
-                  onStateProvinceChange={setBillingStateProvince}
-                />
+            {wantsInvoice && (
+              <div className="space-y-3">
+                {billingProfiles.length > 0 && (
+                  <div className="space-y-2">
+                    {billingProfiles.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => setSelectedProfileId(p.id)}
+                        className={`flex w-full items-start gap-2.5 rounded-lg border p-3 text-left text-xs transition-colors ${
+                          selectedProfileId === p.id ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted'
+                        }`}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-foreground">{p.legal_name ?? p.label}</p>
+                          <p className="text-xs text-muted-foreground">{[p.document_number, p.email].filter(Boolean).join(' · ')}</p>
+                        </div>
+                        {selectedProfileId === p.id && <CheckIcon className="mt-0.5 size-4 shrink-0 text-primary" />}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedProfileId(null)}
+                      className={`flex w-full items-center gap-2.5 rounded-lg border p-3 text-left text-xs transition-colors ${
+                        selectedProfileId === null ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted'
+                      }`}
+                    >
+                      <PlusIcon className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="font-medium text-foreground">{t('storefront.cart.newInvoiceData')}</span>
+                    </button>
+                  </div>
+                )}
+
+                {!usingSavedProfile && (
+                  <div className="space-y-3 rounded-lg border border-dashed border-border p-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label>{t('storefront.cart.invoiceDocType')}</Label>
+                        <Select value={invoiceDocType} onValueChange={setInvoiceDocType}>
+                          <SelectTrigger className="h-9 w-full text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {INVOICE_DOCUMENT_TYPES.map((d) => (
+                              <SelectItem key={d.code} value={d.code}>
+                                {t(d.labelKey)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>{t('storefront.cart.invoiceDocNumber')}</Label>
+                        <Input value={invoiceDocNumber} onChange={(e) => setInvoiceDocNumber(e.target.value)} inputMode="numeric" />
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>{t('storefront.cart.invoiceLegalName')}</Label>
+                      <Input value={invoiceLegalName} onChange={(e) => setInvoiceLegalName(e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>{t('storefront.cart.invoiceEmail')}</Label>
+                      <Input type="email" value={invoiceEmail} onChange={(e) => setInvoiceEmail(e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>{t('storefront.cart.invoiceAddress')}</Label>
+                      <Input value={invoiceLine1} onChange={(e) => setInvoiceLine1(e.target.value)} />
+                      {(selectedShipping || shippingLine1) && (
+                        <button
+                          type="button"
+                          className="text-xs font-medium text-primary hover:underline"
+                          onClick={() => {
+                            // Solo valor inicial editable: no queda vinculado a la entrega.
+                            setInvoiceLine1(selectedShipping ? selectedShipping.line1 : shippingLine1)
+                          }}
+                        >
+                          {t('storefront.cart.useShippingAsFiscal')}
+                        </button>
+                      )}
+                    </div>
+                    <GeoSelect
+                      idPrefix="invoice-geo"
+                      stateCode={invoiceStateCode}
+                      cityCode={invoiceCityCode}
+                      stateLabel={t('storefront.cart.stateProvince')}
+                      cityLabel={t('storefront.cart.city')}
+                      onChange={(geo) => {
+                        setInvoiceStateCode(geo.stateCode)
+                        setInvoiceCityCode(geo.cityCode)
+                        setInvoiceStateName(geo.stateName ?? '')
+                        setInvoiceCityName(geo.cityName ?? '')
+                      }}
+                    />
+                  </div>
+                )}
               </div>
             )}
           </div>
 
-          <Button size="lg" className="w-full" disabled={busy || !fullName || !shippingValid || !billingValid} onClick={() => submitCheckout()}>
+          <Button size="lg" className="w-full" disabled={busy || !fullName || !shippingValid || !invoiceValid} onClick={() => submitCheckout()}>
             {busy ? t('common.actions.saving') : t('storefront.cart.placeOrder')}
           </Button>
         </div>
@@ -632,10 +753,9 @@ function AddressPicker({
   usingNew,
   line1,
   onLine1Change,
-  city,
-  onCityChange,
-  stateProvince,
-  onStateProvinceChange,
+  stateCode,
+  cityCode,
+  onGeoChange,
 }: {
   addresses: StorefrontSavedAddress[]
   selectedId: string | null
@@ -643,10 +763,9 @@ function AddressPicker({
   usingNew: boolean
   line1: string
   onLine1Change: (value: string) => void
-  city: string
-  onCityChange: (value: string) => void
-  stateProvince: string
-  onStateProvinceChange: (value: string) => void
+  stateCode: string | null
+  cityCode: string | null
+  onGeoChange: (geo: GeoValue) => void
 }) {
   const { t } = useLanguage()
 
@@ -693,16 +812,14 @@ function AddressPicker({
             <Label>{t('storefront.cart.address')}</Label>
             <Input value={line1} onChange={(e) => onLine1Change(e.target.value)} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>{t('storefront.cart.city')}</Label>
-              <Input value={city} onChange={(e) => onCityChange(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>{t('storefront.cart.stateProvince')}</Label>
-              <Input value={stateProvince} onChange={(e) => onStateProvinceChange(e.target.value)} />
-            </div>
-          </div>
+          <GeoSelect
+            idPrefix="shipping-geo"
+            stateCode={stateCode}
+            cityCode={cityCode}
+            stateLabel={t('storefront.cart.stateProvince')}
+            cityLabel={t('storefront.cart.city')}
+            onChange={onGeoChange}
+          />
         </div>
       )}
     </div>
@@ -760,17 +877,12 @@ function OrderSuccessSummary({ result, summary }: { result: CheckoutResult; summ
         <p className="text-muted-foreground">{[summary.shippingAddress.city, summary.shippingAddress.state_province].filter(Boolean).join(', ')}</p>
       </div>
 
-      <div className="space-y-1 rounded-xl border border-border bg-card p-4 text-xs">
-        <p className="font-semibold text-foreground">{t('storefront.cart.billingAddress')}</p>
-        {summary.billingSameAsShipping ? (
-          <p className="text-muted-foreground">{t('storefront.cart.sameAsShippingNote')}</p>
-        ) : (
-          <>
-            <p className="text-muted-foreground">{summary.billingAddress.line1}</p>
-            <p className="text-muted-foreground">{[summary.billingAddress.city, summary.billingAddress.state_province].filter(Boolean).join(', ')}</p>
-          </>
-        )}
-      </div>
+      {summary.invoiceTo && (
+        <div className="space-y-1 rounded-xl border border-border bg-card p-4 text-xs">
+          <p className="font-semibold text-foreground">{t('storefront.cart.invoiceTo')}</p>
+          <p className="text-muted-foreground">{summary.invoiceTo}</p>
+        </div>
+      )}
 
       {(result.payment_method || result.payment_pending) && (
         <div className="rounded-xl border border-border bg-card p-4 text-center">

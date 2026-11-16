@@ -17,6 +17,8 @@ import { persistOrderItems, type ResolvedOrderItem } from "../_shared/orders/per
 import { computeOrderTotals } from "../_shared/orders/computeOrderTotals.ts";
 import { chargeSalesOrderToCredit, createSalesOrderPaymentLink } from "../_shared/payments/salesOrderPayments.ts";
 import { isTenantTaxEnabled } from "../_shared/invoicing/queueInvoiceGeneration.ts";
+import { billingProfileMissing, type BillingProfileRow } from "../_shared/invoicing/clientBillingProfile.ts";
+import { REQUIRE_DANE_FOR_DELIVERY, resolveFulfillmentAndBilling } from "../_shared/orders/fulfillmentAndBilling.ts";
 import { sendWhatsappTemplate } from "../_shared/whatsapp.ts";
 import { splitPhone } from "../_shared/phone.ts";
 import { loadAvailabilitySummary, parseStockRejection } from "../_shared/orders/stockAvailability.ts";
@@ -692,8 +694,16 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       // false), pero el checkout puede pedir explícitamente una dirección
       // de facturación separada (guardada o nueva).
       const billingSameAsShipping = body.billing_same_as_shipping !== false;
+      // LEGADO: la dirección de facturación ya no se exige ni se pide (el
+      // comprador de la factura sale del perfil de facturación). Se sigue
+      // aceptando si el frontend (hasta S5) manda una separada explícita.
       const billingAddressId = body.billing_address_id ? String(body.billing_address_id).trim() : "";
       const billingAddressInput = body.billing_address as Record<string, unknown> | undefined;
+      // Facturación: `billing_profile_id` (perfil del cliente identificado por
+      // OTP) o `billing_profile` (datos para crear uno). `wants_invoice` solo.
+      const billingProfileIdInput = body.billing_profile_id ? String(body.billing_profile_id).trim() : "";
+      const billingProfileInput = body.billing_profile as Record<string, unknown> | undefined;
+      const wantsInvoice = body.wants_invoice === true || !!billingProfileIdInput || !!billingProfileInput;
       // El browser es quien sabe su propio origin real (localhost en dev, el
       // dominio de producción, y se autoajusta solo si ese dominio cambia) --
       // más simple y confiable que hardcodear una URL de la tienda acá.
@@ -704,8 +714,8 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
       if (!fullName) throw new StorefrontError("full_name es requerido.");
       if (!phone) throw new StorefrontError("phone es requerido.");
       if (!addressId && !addressInput) throw new StorefrontError("Elegí una dirección de envío o cargá una nueva.");
-      if (!billingSameAsShipping && !billingAddressId && !billingAddressInput) {
-        throw new StorefrontError("Elegí una dirección de facturación o cargá una nueva.");
+      if (wantsInvoice && !billingProfileIdInput && !billingProfileInput) {
+        throw new StorefrontError("Elegí un perfil de facturación o cargá los datos para la factura.");
       }
 
       const cart = await resolveCart(adminClient, sessionToken);
@@ -738,14 +748,30 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
 
       const shippingAddressRowId = await resolveOrderAddress(adminClient, cart.tenant_id, clientId, addressId, addressInput, fullName, phone, {
         is_shipping: true,
-        is_billing: billingSameAsShipping,
+        is_billing: false,
       });
-      const billingAddressRowId = billingSameAsShipping
-        ? shippingAddressRowId
-        : await resolveOrderAddress(adminClient, cart.tenant_id, clientId, billingAddressId, billingAddressInput, fullName, phone, {
+      // Solo si el frontend viejo manda una dirección de facturación separada.
+      const billingAddressRowId = !billingSameAsShipping && (billingAddressId || billingAddressInput)
+        ? await resolveOrderAddress(adminClient, cart.tenant_id, clientId, billingAddressId, billingAddressInput, fullName, phone, {
             is_shipping: false,
             is_billing: true,
-          });
+          })
+        : null;
+
+      // Destino (entrega a domicilio) validado con la regla única de todos los
+      // canales; el perfil se resuelve/crea para el cliente identificado.
+      const links = await resolveFulfillmentAndBilling(adminClient, {
+        tenantId: cart.tenant_id,
+        contactId: clientId,
+        fulfillmentMethod: "delivery",
+        shippingAddressId: shippingAddressRowId,
+        requireDane: REQUIRE_DANE_FOR_DELIVERY,
+      });
+      if (links.forbidden.length > 0) throw new StorefrontError(links.forbidden[0], 403);
+      if (links.missingDestination.length > 0) throw new StorefrontError(`Falta: ${links.missingDestination.join(", ")}.`, 422);
+      const billingProfileRowId = wantsInvoice
+        ? await resolveOrderBillingProfile(adminClient, cart.tenant_id, clientId, billingProfileIdInput, billingProfileInput, fullName, phone)
+        : null;
 
       // Placeholder -- persistOrderItems recalcula subtotal/tax_total/total
       // reales más abajo, única fuente de verdad compartida con
@@ -757,7 +783,9 @@ async function handleAction(adminClient: SupabaseClient, action: string, body: R
           cart_id: cart.id,
           contact_id: clientId,
           billing_address_id: billingAddressRowId,
+          billing_profile_id: billingProfileRowId,
           shipping_address_id: shippingAddressRowId,
+          fulfillment_method: "delivery",
           subtotal: 0,
           tax_total: 0,
           total: 0,
@@ -1162,6 +1190,10 @@ async function resolveOrderAddress(
   const line1 = String(address.line1 ?? "").trim();
   const city = String(address.city ?? "").trim();
   if (!line1 || !city) throw new StorefrontError("La dirección necesita al menos dirección (line1) y ciudad.");
+  const line2 = address.line2 ? String(address.line2).trim() : null;
+  const country = address.country ? String(address.country).trim() : "Colombia";
+  const cityCode = address.city_code ? String(address.city_code).trim() : null;
+  const stateCode = address.state_code ? String(address.state_code).trim() : null;
   const { data: addressRow, error: addressError } = await adminClient
     .from("contact_addresses")
     .insert({
@@ -1172,16 +1204,119 @@ async function resolveOrderAddress(
       recipient_name: fullName,
       phone,
       line1,
-      line2: address.line2 ? String(address.line2).trim() : null,
+      line2,
       city,
       state_province: address.state_province ? String(address.state_province).trim() : null,
       postal_code: address.postal_code ? String(address.postal_code).trim() : null,
-      country: address.country ? String(address.country).trim() : "Colombia",
+      country,
+      city_code: cityCode,
+      state_code: stateCode,
     })
     .select("id")
     .single();
-  if (addressError) throw new Error(addressError.message);
+  if (addressError) {
+    // Dirección ya guardada del mismo cliente (índice
+    // contact_addresses_unique_address_per_client): se reutiliza la existente,
+    // sin duplicar y sin tocar su is_default ni sus flags.
+    if (addressError.code === "23505" && (addressError.message ?? "").includes("contact_addresses_unique_address_per_client")) {
+      const { data: key } = await adminClient.rpc("contact_address_dedupe_key", {
+        p_line1: line1, p_line2: line2, p_city: city, p_city_code: cityCode, p_country: country,
+      });
+      if (key) {
+        const { data: existing } = await adminClient
+          .from("contact_addresses")
+          .select("id")
+          .eq("tenant_id", tenantId)
+          .eq("contact_id", clientId)
+          .eq("address_dedupe_key", key)
+          .is("deleted_at", null)
+          .maybeSingle();
+        if (existing) return existing.id;
+      }
+    }
+    throw new Error(addressError.message);
+  }
   return addressRow.id;
+}
+
+function toIsoCountry(value: unknown): string {
+  const v = String(value ?? "").trim();
+  if (!v || v.toLowerCase() === "colombia") return "CO";
+  return v.length === 2 ? v.toUpperCase() : v;
+}
+
+/** Perfil de facturación del comprador (ya identificado por OTP). Con
+ * `profileId` reutiliza uno del cliente (verificando dueño); sin él crea uno
+ * nuevo con los datos recibidos. Un documento ya guardado para este cliente se
+ * reutiliza (índice client_billing_profiles_document_uidx) sin duplicar. Un
+ * invitado sin cliente previo solo puede crear su primer perfil: nunca ve ni
+ * elige perfiles de otro. */
+async function resolveOrderBillingProfile(
+  adminClient: SupabaseClient,
+  tenantId: string,
+  clientId: string,
+  profileId: string,
+  input: Record<string, unknown> | undefined,
+  fullName: string,
+  phone: string,
+): Promise<string> {
+  if (profileId) {
+    const { data: owned } = await adminClient
+      .from("client_billing_profiles")
+      .select("id")
+      .eq("id", profileId)
+      .eq("tenant_id", tenantId)
+      .eq("client_id", clientId)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (!owned) throw new StorefrontError("Ese perfil de facturación no es válido.", 403);
+    return owned.id;
+  }
+
+  const i = input ?? {};
+  const str = (v: unknown) => (v == null || String(v).trim() === "" ? null : String(v).trim());
+  const documentType = str(i.document_type_code);
+  const row = {
+    tenant_id: tenantId,
+    client_id: clientId,
+    label: str(i.label) ?? "Principal",
+    document_type_code: documentType,
+    document_number: str(i.document_number),
+    legal_name: str(i.legal_name) ?? fullName,
+    email: str(i.email),
+    phone: str(i.phone) ?? phone,
+    organization_type: (documentType === "31" || documentType === "50" ? "1" : "2") as "1" | "2",
+    tax_level_code: "R-99-PN",
+    tax_scheme_code: null,
+    applies_withholding: false,
+    address_line1: str(i.address_line1),
+    address_line2: str(i.address_line2),
+    country: str(i.address_line1) || str(i.country) || str(i.city) ? toIsoCountry(i.country) : null,
+    state_code: str(i.state_code),
+    city_code: str(i.city_code),
+    state_province: str(i.state_province),
+    city: str(i.city),
+  };
+  // Misma lista de faltantes que usa la emisión (billingProfileMissing).
+  const { missing } = billingProfileMissing({ id: "new", ...row, is_default: false } as unknown as BillingProfileRow);
+  if (missing.length > 0) throw new StorefrontError(`Faltan datos para la factura: ${missing.join(", ")}.`, 422);
+
+  const { data: created, error } = await adminClient.from("client_billing_profiles").insert(row).select("id").single();
+  if (error) {
+    if (error.code === "23505") {
+      const { data: existing } = await adminClient
+        .from("client_billing_profiles")
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .eq("client_id", clientId)
+        .eq("document_number", row.document_number)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (existing) return existing.id;
+    }
+    throw new Error(error.message);
+  }
+  return created.id;
 }
 
 /** Precarga nombre/documento + direcciones guardadas (mismo
@@ -1194,7 +1329,7 @@ async function loadClientIdentity(
   adminClient: SupabaseClient,
   tenantId: string,
   phone: string,
-): Promise<{ client: { full_name: string; document_type: string | null; document_number: string | null } | null; addresses: Record<string, unknown>[] }> {
+): Promise<{ client: { full_name: string; document_type: string | null; document_number: string | null } | null; addresses: Record<string, unknown>[]; billing_profiles: Record<string, unknown>[] }> {
   // clients.phone quedó como SOLO el número local desde
   // 20260904000000_clients_phone_prefix_split.sql -- `phone` acá sigue
   // siendo el número completo verificado por OTP, hay que partirlo.
@@ -1208,7 +1343,7 @@ async function loadClientIdentity(
     .is("deleted_at", null)
     .maybeSingle();
 
-  if (!existingClient) return { client: null, addresses: [] };
+  if (!existingClient) return { client: null, addresses: [], billing_profiles: [] };
 
   const { data: addressRows } = await adminClient
     .from("contact_addresses")
@@ -1219,9 +1354,21 @@ async function loadClientIdentity(
     .order("is_default", { ascending: false })
     .order("created_at", { ascending: false });
 
+  // Solo se llega acá con el teléfono ya probado por OTP: un invitado nunca
+  // recibe perfiles guardados.
+  const { data: profileRows } = await adminClient
+    .from("client_billing_profiles")
+    .select("id, label, is_default, document_type_code, document_number, legal_name, email")
+    .eq("tenant_id", tenantId)
+    .eq("client_id", existingClient.id)
+    .is("deleted_at", null)
+    .order("is_default", { ascending: false })
+    .order("created_at", { ascending: false });
+
   return {
     client: { full_name: existingClient.full_name, document_type: existingClient.document_type, document_number: existingClient.document_number },
     addresses: addressRows ?? [],
+    billing_profiles: profileRows ?? [],
   };
 }
 

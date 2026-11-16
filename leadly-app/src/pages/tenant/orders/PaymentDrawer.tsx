@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { createPayment, createWompiPaymentLink, PAYMENT_METHOD_LABEL_KEY } from '../../../lib/api/orderPayments'
 import { getOrderTotalsBreakdown, type OrderTotalsBreakdown } from '../../../lib/api/orders'
 import { getPaymentCredentialStatus } from '../../../lib/api/billing'
-import { sendPosInvoiceForOrder } from '../../../lib/api/salesInvoices'
+import { invoiceSendErrorMessage, sendPosInvoiceForOrder } from '../../../lib/api/salesInvoices'
 import type { Client, OrderPaymentMethod, SalesOrder } from '../../../types/domain'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import { FieldError } from '@/components/atoms'
@@ -21,7 +21,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Copy } from 'lucide-react'
-import { ClientPickerCard } from '../clients/ClientPickerCard'
+import { BillingProfilePicker } from '../clients/BillingProfilePicker'
 
 function formatCurrency(value: number, currency = 'COP'): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
@@ -57,8 +57,7 @@ export function PaymentDrawer({
   storeCreditBalance,
   pendingAmount,
   dianConnected = false,
-  defaultBuyer = null,
-  onSearchBuyers,
+  buyerClient = null,
   onSaved,
 }: {
   open: boolean
@@ -81,7 +80,7 @@ export function PaymentDrawer({
    * había perdido sus productos (bug reportado 2026-09-04). Ahora abrir el
    * drawer no escribe nada: recién al guardar se crea el pedido y, acto
    * seguido, su pago. */
-  createOrder?: (buyerContactId?: string | null) => Promise<SalesOrder>
+  createOrder?: (billingProfileId?: string | null) => Promise<SalesOrder & { billing_missing?: string[] }>
   /** Only clients with clients.credit_enabled can be charged to their
    * credit account -- 'credito' is hidden from the method select
    * otherwise (also enforced server-side, see apply_credit_payment_charge). */
@@ -101,17 +100,11 @@ export function PaymentDrawer({
    * facturación se renderiza ni corre: la feature queda 100% inerte para
    * cualquier tenant sin facturación electrónica. */
   dianConnected?: boolean
-  /** Comprador ya elegido de la cuenta/pedido -- precarga el selector de
-   * "a nombre de quién factura" para que el caso común (facturarle al mismo
-   * que ya está en la cuenta) no pida ningún click extra. Solo se usa
-   * cuando `order` es null (flujo de creación, POS) -- un pedido ya
-   * existente ("Agregar pago") ya tiene comprador fijo, no se puede
-   * cambiar acá. */
-  defaultBuyer?: Client | null
-  /** Fuente de candidatos para el selector de comprador -- mismo callback
-   * que ya le pasa el caller a su propio ClientPickerCard (ej.
-   * searchPosClients), no se reimplementa la búsqueda acá. */
-  onSearchBuyers?: (query: string) => Promise<Client[]>
+  /** Cliente de la venta (null = Consumidor Final). Es el DUEÑO del pedido
+   * (crédito, saldo a favor): «Facturar a» no lo cambia. Si es Consumidor
+   * Final no hay perfiles de facturación: solo se pide el correo del
+   * comprobante. */
+  buyerClient?: Client | null
   /** Recibe el pedido que se acaba de cobrar (el existente, o el que
    * `createOrder` acaba de crear) -- así el caller puede, por ejemplo,
    * disparar la impresión del ticket sin tener que volver a resolverlo.
@@ -152,8 +145,16 @@ export function PaymentDrawer({
   // Nunca marcado por default: es una decisión explícita del cajero en
   // cada cobro, no algo que se herede de un cobro anterior.
   const [wantsInvoice, setWantsInvoice] = useState(false)
-  const [invoiceBuyer, setInvoiceBuyer] = useState<Client | null>(null)
+  // «Facturar a» de ESTE cobro (cada cobro de una cuenta dividida empieza sin
+  // elegir: rige el predeterminado del cliente) y correo del comprobante.
+  const [invoiceProfileId, setInvoiceProfileId] = useState('')
+  const [invoiceEmail, setInvoiceEmail] = useState('')
+  const [billingMissing, setBillingMissing] = useState<string[]>([])
+  // Una vez creado el pedido (el cobro se reintenta con el mismo token), el
+  // perfil «Facturar a» queda fijo: el servidor no lo reescribe en el reintento.
+  const [orderCreated, setOrderCreated] = useState(false)
   const [sendingInvoice, setSendingInvoice] = useState(false)
+  const isWalkInBuyer = !buyerClient || buyerClient.is_walk_in
 
   useEffect(() => {
     if (!open) return
@@ -166,7 +167,10 @@ export function PaymentDrawer({
     setWompiError(null)
     setWompiCopied(false)
     setWantsInvoice(false)
-    setInvoiceBuyer(defaultBuyer)
+    setInvoiceProfileId('')
+    setInvoiceEmail('')
+    setBillingMissing([])
+    setOrderCreated(false)
     setSendingInvoice(false)
     if (!order) {
       // Todavía no hay pedido (POS): el desglose ya viene calculado por el
@@ -268,8 +272,11 @@ export function PaymentDrawer({
       // Acá es donde el cobro se hace real: si el pedido todavía no existe
       // (POS), se crea y confirma recién ahora -- cerrar este drawer sin
       // guardar no deja nada hecho.
-      const target = order ?? (createOrder ? await createOrder(wantsInvoice ? (invoiceBuyer?.id ?? null) : undefined) : null)
+      const target = order ?? (createOrder ? await createOrder(wantsInvoice && invoiceProfileId && !isWalkInBuyer ? invoiceProfileId : undefined) : null)
       if (!target) throw new Error(t('orders.paymentDrawer.errors.save'))
+      if (!order) setOrderCreated(true)
+      // Lo que el servidor dice que le falta al perfil: informativo, el cobro sigue.
+      if ('billing_missing' in target && Array.isArray(target.billing_missing)) setBillingMissing(target.billing_missing)
 
       // Inserción SECUENCIAL, no Promise.all: triggers como
       // apply_credit_payment_charge/apply_store_credit_redemption validan
@@ -315,7 +322,7 @@ export function PaymentDrawer({
           // negocio esperado, no una falla de la llamada), mismo criterio
           // que ya usa OrderDetail.tsx::handleSendInvoice. Sin este chequeo
           // explícito, un rechazo real quedaba tratado como éxito.
-          const result = await sendPosInvoiceForOrder(target.id)
+          const result = await sendPosInvoiceForOrder(target.id, isWalkInBuyer ? invoiceEmail.trim() || undefined : undefined)
           // 'rejected' ya es el veredicto real de la DIAN (el propio envío
           // lo consulta antes de responder, ver sendInvoiceToDian.ts).
           const failureDetail = result.status === 'error' ? result.faultReason : result.status === 'rejected' ? result.rejectionDetail : null
@@ -325,7 +332,7 @@ export function PaymentDrawer({
             accepted: result.status === 'accepted',
           }
         } catch (err) {
-          einvoicing = { attempted: true, error: err instanceof Error ? err.message : t('orders.paymentDrawer.einvoicing.errors.send'), accepted: false }
+          einvoicing = { attempted: true, error: invoiceSendErrorMessage(err, t, t('orders.paymentDrawer.einvoicing.errors.send')), accepted: false }
         } finally {
           setSendingInvoice(false)
         }
@@ -413,21 +420,25 @@ export function PaymentDrawer({
               {t('orders.paymentDrawer.einvoicing.checkbox')}
             </Label>
           </div>
-          {wantsInvoice && !order && (
+          {wantsInvoice && isWalkInBuyer && (
             <div className="mt-2">
-              <ClientPickerCard
+              <Label htmlFor="payment-invoice-email" className="text-xs">{t('billingTo.invoiceEmail.label')}</Label>
+              <Input id="payment-invoice-email" type="email" value={invoiceEmail} onChange={(e) => setInvoiceEmail(e.target.value)} className="mt-1 !h-7 !rounded-lg !text-xs" />
+              <p className="mt-1 text-[11px] text-brand-400">{t('billingTo.invoiceEmail.hint')}</p>
+            </div>
+          )}
+          {wantsInvoice && !isWalkInBuyer && !order && buyerClient && (
+            <div className="mt-2">
+              <BillingProfilePicker
                 tenantId={tenantId}
-                client={invoiceBuyer}
-                onSelect={setInvoiceBuyer}
-                onSearch={onSearchBuyers ?? (async () => [])}
-                emptyLabel={t('pos.customer.walkIn')}
-                allowClear
-                clearActionLabel={t('pos.customer.useWalkIn')}
-                bare
+                clientId={buyerClient.id}
+                value={invoiceProfileId}
+                onChange={setInvoiceProfileId}
+                serverMissing={billingMissing}
+                disabled={orderCreated}
+                lockedHint={orderCreated ? t('billingTo.lockedAfterCharge') : undefined}
+                idPrefix="payment-billing-to"
               />
-              {invoiceBuyer && (!invoiceBuyer.dian_document_type_code || !invoiceBuyer.document_number) && (
-                <p className="mt-1 text-[11px] text-amber-700">{t('orders.paymentDrawer.einvoicing.missingDocWarning')}</p>
-              )}
             </div>
           )}
         </div>

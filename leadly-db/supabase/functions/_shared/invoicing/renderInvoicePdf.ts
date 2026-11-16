@@ -14,6 +14,7 @@
  * pedido con el JWT del usuario antes de delegar; el envío por correo sale
  * de una factura que ya se resolvió por tenant). */
 import { resolveCityName } from "./cityName.ts";
+import { loadBillingProfileForOrder, profileAddress } from "./clientBillingProfile.ts";
 import { buildInvoicePdf, invoiceDisplayLabel, type InvoicePdfBuyer, type InvoicePdfItem, type InvoicePdfSeller } from "./buildInvoicePdf.ts";
 
 const PAYMENT_METHOD_LABEL: Record<string, string> = {
@@ -42,15 +43,22 @@ export interface RenderedInvoicePdf {
 export async function renderInvoicePdfForOrder(adminClient: any, orderId: string): Promise<RenderedInvoicePdf> {
   const { data: order } = await adminClient
     .from("sales_orders")
-    .select("id, tenant_id, number, created_at, subtotal, tax_total, total, currency, contact_id")
+    .select("id, tenant_id, number, created_at, subtotal, tax_total, total, currency, contact_id, billing_profile_id")
     .eq("id", orderId)
     .maybeSingle();
   if (!order) throw new Error("Pedido no encontrado.");
 
   // Para un documento fiscal, los datos del comprador vienen del snapshot enviado.
-  const [{ data: items }, { data: client }, { data: tenant }, { data: dianProfile }, { data: credential }, { data: lastPayment }, { data: comments }, { data: invoice }] = await Promise.all([
+  // Para la remisión (no fiscal) se muestra el perfil de facturación del pedido
+  // (o el predeterminado del cliente) y, solo para identificar al cliente, su
+  // ficha -- solo lectura, nada de esto entra a un documento fiscal.
+  const [{ data: items }, { data: client }, billingProfileRes, { data: tenant }, { data: dianProfile }, { data: credential }, { data: lastPayment }, { data: comments }, { data: invoice }] = await Promise.all([
     adminClient.from("sales_order_items").select("*").eq("order_id", order.id).order("display_order"),
-    adminClient.from("clients").select("full_name, email, phone, document_number, dian_document_type_code, billing_profile").eq("id", order.contact_id).maybeSingle(),
+    adminClient.from("clients").select("full_name, email, phone, document_number, dian_document_type_code, is_walk_in").eq("id", order.contact_id).maybeSingle(),
+    loadBillingProfileForOrder(adminClient, order.tenant_id, order.contact_id, order.billing_profile_id ?? null).catch((err: unknown) => {
+      console.error("[renderInvoicePdf] no se pudo leer el perfil de facturación (remisión)", err);
+      return { profile: null, chosenMissing: false };
+    }),
     adminClient.from("tenants").select("legal_name, document_type, document_number, country, state_province, billing_address, contact_email, contact_phone, logo_url, fiscal_regime, is_self_withholding_agent, city_code").eq("id", order.tenant_id).maybeSingle(),
     adminClient.from("tenant_dian_profile").select("resolution_number, resolution_prefix, resolution_range_from, resolution_range_to, resolution_valid_from, resolution_valid_until").eq("tenant_id", order.tenant_id).maybeSingle(),
     adminClient.from("integration_credentials").select("mode").eq("tenant_id", order.tenant_id).eq("provider_key", "dian_directo").eq("is_active", true).is("deleted_at", null).maybeSingle(),
@@ -78,13 +86,27 @@ export async function renderInvoicePdfForOrder(adminClient: any, orderId: string
   const isValidated = invoice?.status === "sent" || invoice?.status === "accepted";
   const isRemision = !(invoice && isValidated && invoice.cufe && invoice.invoice_number != null);
 
-  const buyer: InvoicePdfBuyer = !isRemision && invoice.buyer_snapshot?.full_name ? invoice.buyer_snapshot : {
+  // L5: la REMISIÓN es un documento NO fiscal; esta rama solo decide qué se
+  // IMPRIME (nunca llega a la DIAN ni al buyer_snapshot). Por eso conserva a
+  // `clients` como respaldo visual (nombre/documento/teléfono/correo) cuando el
+  // cliente no tiene perfil; el comprador de una FACTURA sale siempre del
+  // buyer_snapshot. El Consumidor Final ignora todo perfil.
+  const billingProfile = client?.is_walk_in ? null : billingProfileRes.profile;
+  const profileAddr = billingProfile ? profileAddress(billingProfile) : null;
+  const buyer: InvoicePdfBuyer = !isRemision && invoice.buyer_snapshot?.full_name ? invoice.buyer_snapshot : billingProfile ? {
+    full_name: billingProfile.legal_name ?? client?.full_name ?? null,
+    document_type_code: billingProfile.document_type_code,
+    document_number: billingProfile.document_number,
+    phone: billingProfile.phone ?? client?.phone ?? null,
+    email: billingProfile.email ?? null,
+    address: profileAddr,
+  } : {
     full_name: client?.full_name ?? null,
     document_type_code: client?.dian_document_type_code ?? null,
     document_number: client?.document_number ?? null,
     phone: client?.phone ?? null,
     email: client?.email ?? null,
-    address: client?.billing_profile?.address ?? null,
+    address: null,
   };
   const seller: InvoicePdfSeller = {
     legal_name: tenant?.legal_name ?? null,

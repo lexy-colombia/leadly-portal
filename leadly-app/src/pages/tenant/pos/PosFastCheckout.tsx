@@ -12,7 +12,9 @@ import { usePosReceiptPrinter } from '../../../lib/usePosReceiptPrinter'
 import { getClientCreditSummary } from '../../../lib/api/credit'
 import { getStoreCreditBalance } from '../../../lib/api/returns'
 import { isDianDirectoConnected } from '../../../lib/api/integrations'
-import { sendPosInvoiceForOrder } from '../../../lib/api/salesInvoices'
+import { Input } from '@/components/ui/input'
+import { BillingProfilePicker } from '../clients/BillingProfilePicker'
+import { invoiceSendErrorMessage, sendPosInvoiceForOrder } from '../../../lib/api/salesInvoices'
 import type { Client, OrderPaymentMethod } from '../../../types/domain'
 import { PageSpinner } from '@/components/atoms'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -131,6 +133,16 @@ export function PosFastCheckout() {
   // cualquier tenant sin 'dian_directo' conectado.
   const [dianConnected, setDianConnected] = useState(false)
   const [wantsInvoice, setWantsInvoice] = useState(false)
+  // «Facturar a» (perfil del cliente de la venta) y correo del comprobante
+  // (solo Consumidor Final).
+  const [invoiceProfileId, setInvoiceProfileId] = useState('')
+  const [invoiceEmail, setInvoiceEmail] = useState('')
+  // Tras el primer intento de cobro (mismo token) el pedido puede existir ya: «Facturar a» queda fijo.
+  const [chargeAttempted, setChargeAttempted] = useState(false)
+  // El perfil elegido es de un cliente: al cambiar de cliente se descarta.
+  useEffect(() => {
+    setInvoiceProfileId('')
+  }, [customer?.id])
   const [sendingInvoice, setSendingInvoice] = useState(false)
   const [einvoicingError, setEinvoicingError] = useState<string | null>(null)
 
@@ -367,6 +379,7 @@ export function PosFastCheckout() {
       return
     }
     setCharging(true)
+    setChargeAttempted(true)
     setEinvoicingError(null)
     try {
       const response = await posCheckout({
@@ -381,6 +394,7 @@ export function PosFastCheckout() {
           amount_tendered: l.method === 'efectivo' ? Number(l.tendered) || 0 : undefined,
         })),
         checkout_token: checkoutTokenRef.current,
+        billing_profile_id: wantsInvoice && customer && !customer.is_walk_in && invoiceProfileId ? invoiceProfileId : undefined,
       })
       setResult(response)
       // Sin factura pedida, el ticket sale de una vez (si el flag está activo).
@@ -397,12 +411,12 @@ export function PosFastCheckout() {
         setSendingInvoice(true)
         let invoiceAccepted = false
         try {
-          const invoiceResult = await sendPosInvoiceForOrder(response.order.id)
+          const invoiceResult = await sendPosInvoiceForOrder(response.order.id, !customer || customer.is_walk_in ? invoiceEmail.trim() || undefined : undefined)
           invoiceAccepted = invoiceResult.status === 'accepted'
           const failureDetail = invoiceResult.status === 'error' ? invoiceResult.faultReason : invoiceResult.status === 'rejected' ? invoiceResult.rejectionDetail : null
           if (failureDetail !== null) setEinvoicingError(failureDetail || t('orders.paymentDrawer.einvoicing.errors.send'))
         } catch (err) {
-          setEinvoicingError(err instanceof Error ? err.message : t('orders.paymentDrawer.einvoicing.errors.send'))
+          setEinvoicingError(invoiceSendErrorMessage(err, t, t('orders.paymentDrawer.einvoicing.errors.send')))
         } finally {
           setSendingInvoice(false)
         }
@@ -423,6 +437,9 @@ export function PosFastCheckout() {
     setPaymentLines([createPaymentLine()])
     setResult(null)
     setWantsInvoice(false)
+    setInvoiceProfileId('')
+    setInvoiceEmail('')
+    setChargeAttempted(false)
     setEinvoicingError(null)
     setQuery('')
     // Venta nueva -- nuevo token, para que no quede pegado al intento de
@@ -776,8 +793,26 @@ export function PosFastCheckout() {
                   {t('orders.paymentDrawer.einvoicing.checkbox')}
                 </Label>
               </div>
-              {wantsInvoice && customer && (!customer.dian_document_type_code || !customer.document_number) && (
-                <p className="mt-1 text-[11px] text-amber-700">{t('orders.paymentDrawer.einvoicing.missingDocWarning')}</p>
+              {wantsInvoice && (!customer || customer.is_walk_in) && (
+                <div className="mt-2">
+                  <Label htmlFor="pos-invoice-email" className="text-xs">{t('billingTo.invoiceEmail.label')}</Label>
+                  <Input id="pos-invoice-email" type="email" value={invoiceEmail} onChange={(e) => setInvoiceEmail(e.target.value)} className="mt-1 !h-7 !rounded-lg !text-xs" />
+                  <p className="mt-1 text-[11px] text-brand-400">{t('billingTo.invoiceEmail.hint')}</p>
+                </div>
+              )}
+              {wantsInvoice && customer && !customer.is_walk_in && (
+                <div className="mt-2">
+                  <BillingProfilePicker
+                    key={customer.id}
+                    tenantId={tenantId}
+                    clientId={customer.id}
+                    value={invoiceProfileId}
+                    onChange={setInvoiceProfileId}
+                    idPrefix="pos-billing-to"
+                    disabled={chargeAttempted}
+                    lockedHint={chargeAttempted ? t('billingTo.lockedAfterCharge') : undefined}
+                  />
+                </div>
               )}
             </div>
           )}

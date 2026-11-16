@@ -182,8 +182,30 @@ Deno.serve(async (req) => {
 
   const summary = summaryRaw as OrdersSummaryRow;
 
+  // Perfil de facturación resumido de cada pedido de la página. Se resuelve en
+  // una consulta aparte (acotada por tenant y a los ids de ESTA página) y no
+  // como embed de PostgREST: un embed ambiguo o con FK compuesta rompería todo
+  // el listado, y el resumen no justifica ese riesgo. Los embeds existentes
+  // (`contact_addresses!shipping_address_id` / `!billing_address_id`) no se
+  // tocan: la feature no agrega ninguna FK de sales_orders hacia
+  // contact_addresses, así que no hay ambigüedad nueva.
+  // deno-lint-ignore no-explicit-any
+  const orderRows = (rows ?? []) as any[];
+  const profileIds = Array.from(new Set(orderRows.map((r) => r.billing_profile_id).filter((id): id is string => !!id)));
+  const profileById = new Map<string, Record<string, unknown>>();
+  if (profileIds.length > 0) {
+    const { data: profiles, error: profilesError } = await adminClient
+      .from("client_billing_profiles")
+      .select("id, label, legal_name, document_type_code, document_number, email")
+      .eq("tenant_id", tenantId)
+      .in("id", profileIds);
+    if (profilesError) return json({ error: profilesError.message }, 500);
+    for (const pr of profiles ?? []) profileById.set(pr.id as string, pr);
+  }
+  const data = orderRows.map((r) => ({ ...r, billing_profile: r.billing_profile_id ? profileById.get(r.billing_profile_id) ?? null : null }));
+
   return json({
-    data: rows ?? [],
+    data,
     count: count ?? 0,
     page,
     page_size: pageSize,

@@ -73,6 +73,7 @@ import {
   listSalesInvoicesForOrder,
   getSalesOrderPdf,
   sendSalesInvoiceToDian,
+  invoiceSendErrorMessage,
   retrySalesInvoiceToDian,
   listCreditNotesForInvoice,
   retryCreditNote,
@@ -96,6 +97,7 @@ import { listTasksForOpportunity } from "../../lib/api/tasks";
 import type { TaskWithRelations } from "../../lib/api/tasks";
 import type {
   ContactAddress,
+  FulfillmentMethod,
   SalesOrderPayment,
   OrderPaymentMethod,
   OrderStatus,
@@ -158,7 +160,23 @@ import {
 } from "../../lib/api/dispatches";
 import { getStoreCreditBalance } from "../../lib/api/returns";
 import { StockShortfallDialog } from "./orders/StockShortfallDialog";
-import { AddressDrawer } from "./clients/AddressDrawer";
+import { BillingProfilePicker } from "./clients/BillingProfilePicker";
+import { ShippingDestinationDrawer } from "./orders/ShippingDestinationDrawer";
+import {
+  destinationFields,
+  destinationFromSnapshot,
+  destinationPayload,
+  formatDestination,
+  type ShippingDestination,
+} from "../../lib/shippingDestination";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ClientPickerCard } from "./clients/ClientPickerCard";
 
 function addressLabel(a: ContactAddress): string {
@@ -517,6 +535,7 @@ export function OrderDetail() {
   const navigate = useNavigate();
   const { profile, enabledModules } = useAuth();
   const canEditInvoicedOrder = usePermission("sales.edit_invoiced_order");
+  const canCorrectShipping = usePermission("sales.correct_shipping");
   const { t, language } = useLanguage();
   const toast = useToast();
   const isNew = !id;
@@ -555,7 +574,16 @@ export function OrderDetail() {
   const [status, setStatus] = useState<OrderStatus>("confirmada");
   const [validUntil, setValidUntil] = useState("");
   const [shippingAddressId, setShippingAddressId] = useState("");
-  const [billingAddressId, setBillingAddressId] = useState("");
+  // «Facturar a»: perfil de facturación elegido ("" = el predeterminado del
+  // cliente, lo resuelve el servidor). Independiente del cliente de la venta.
+  const [billingProfileId, setBillingProfileId] = useState("");
+  // Modalidad: solo 'delivery' lleva dirección de entrega.
+  // Destino de un solo uso (no entra a la libreta del cliente).
+  const [oneOffDestination, setOneOffDestination] =
+    useState<ShippingDestination | null>(null);
+  const [destinationTarget, setDestinationTarget] = useState<"draft" | "correction">("draft");
+  const [fulfillmentMethod, setFulfillmentMethod] =
+    useState<FulfillmentMethod>("delivery");
   const [contactChangedNotice, setContactChangedNotice] = useState(false);
   // Contacto ahora lo maneja ClientPickerCard entero (su propio estado de
   // "buscando" interno) -- este componente solo le pasa el id resuelto a
@@ -567,7 +595,6 @@ export function OrderDetail() {
   // captura: la dirección se ve como texto plano, editar es una acción
   // aparte).
   const [editingShippingAddress, setEditingShippingAddress] = useState(false);
-  const [editingBillingAddress, setEditingBillingAddress] = useState(false);
   const [touched, setTouched] = useState(false);
 
   // ----- carrito (solo modo "nuevo") -- el borrador de un pedido nuevo
@@ -957,12 +984,16 @@ export function OrderDetail() {
    * modificada. */
   async function handleSendInvoice(retry = false) {
     if (!latestInvoice) return;
+    // El correo del comprobante solo aplica si el comprador es Consumidor Final.
+    const walkInEmail = selectedContact?.is_walk_in
+      ? walkInInvoiceEmail.trim() || undefined
+      : undefined;
     setSendingInvoice(true);
     setSendInvoiceError(null);
     try {
       const result = retry
-        ? await retrySalesInvoiceToDian(latestInvoice.id)
-        : await sendSalesInvoiceToDian(latestInvoice.id);
+        ? await retrySalesInvoiceToDian(latestInvoice.id, walkInEmail)
+        : await sendSalesInvoiceToDian(latestInvoice.id, walkInEmail);
       // 'rejected' ya es el veredicto REAL de la DIAN (el propio envío lo
       // consulta antes de responder, ver sendInvoiceToDian.ts) -- se
       // muestra igual que un error de envío para feedback inmediato, sin
@@ -981,7 +1012,7 @@ export function OrderDetail() {
       reloadInvoices();
     } catch (err) {
       setSendInvoiceError(
-        err instanceof Error ? err.message : t("einvoicing.detail.sendError"),
+        invoiceSendErrorMessage(err, t, t("einvoicing.detail.sendError")),
       );
     } finally {
       setSendingInvoice(false);
@@ -1114,6 +1145,18 @@ export function OrderDetail() {
   }, [order?.contact_id]);
 
   const [addressDrawerOpen, setAddressDrawerOpen] = useState(false);
+  // Corrección de destino de un pedido ya confirmado (con motivo).
+  const [correction, setCorrection] = useState<{
+    open: boolean;
+    addressId: string;
+    /** Destino de un solo uso elegido para la corrección (no entra a la libreta). */
+    destination: ShippingDestination | null;
+    reason: string;
+    saving: boolean;
+    error: string | null;
+  }>({ open: false, addressId: "", destination: null, reason: "", saving: false, error: null });
+  // Correo del comprobante cuando el comprador es Consumidor Final.
+  const [walkInInvoiceEmail, setWalkInInvoiceEmail] = useState("");
   const [deletePaymentId, setDeletePaymentId] = useState<string | null>(null);
   const [confirmingVoid, setConfirmingVoid] = useState(false);
   // Estado de envío elegido mientras el pedido tiene saldo pendiente -- ver
@@ -1215,6 +1258,12 @@ export function OrderDetail() {
       });
   }
 
+  // El correo del comprobante nunca pasa de un pedido a otro (la instancia se
+  // reutiliza al navegar entre pedidos).
+  useEffect(() => {
+    setWalkInInvoiceEmail("");
+  }, [id]);
+
   useEffect(() => {
     if (isNew) return;
     setOrder(undefined);
@@ -1257,7 +1306,9 @@ export function OrderDetail() {
     setStatus(order.status);
     setValidUntil(order.valid_until ?? "");
     setShippingAddressId(order.shipping_address_id ?? "");
-    setBillingAddressId(order.billing_address_id ?? "");
+    setBillingProfileId(order.billing_profile_id ?? "");
+    setFulfillmentMethod(order.fulfillment_method);
+    setOneOffDestination(destinationFromSnapshot(order.shipping_snapshot));
     setShippingDraft(String(order.shipping));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order?.id]);
@@ -1479,8 +1530,6 @@ export function OrderDetail() {
     if (!isNew) return;
     if (shippingAddressId && !addresses.some((a) => a.id === shippingAddressId))
       setShippingAddressId("");
-    if (billingAddressId && !addresses.some((a) => a.id === billingAddressId))
-      setBillingAddressId("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addresses]);
 
@@ -1605,7 +1654,9 @@ export function OrderDetail() {
     opportunityId,
     validUntil,
     shippingAddressId,
-    billingAddressId,
+    oneOffDestination,
+    billingProfileId,
+    fulfillmentMethod,
     shippingDraft,
     items,
     orderStatus: order?.status ?? null,
@@ -1617,7 +1668,9 @@ export function OrderDetail() {
     opportunityId,
     validUntil,
     shippingAddressId,
-    billingAddressId,
+    oneOffDestination,
+    billingProfileId,
+    fulfillmentMethod,
     shippingDraft,
     items,
     orderStatus: order?.status ?? null,
@@ -1635,13 +1688,18 @@ export function OrderDetail() {
     // la lista vacía a mitad del reemplazo y la guardó -- el pedido quedó
     // sin productos.
     if (d.orderStatus && d.orderStatus !== "cotizacion")
-      return JSON.stringify({ contactId: d.contactId });
+      return JSON.stringify({
+      contactId: d.contactId,
+      billingProfileId: d.billingProfileId,
+    });
     return JSON.stringify({
       contactId: d.contactId,
       opportunityId: d.opportunityId,
       validUntil: d.validUntil,
       shippingAddressId: d.shippingAddressId,
-      billingAddressId: d.billingAddressId,
+      oneOff: d.oneOffDestination ? destinationPayload(d.oneOffDestination) : null,
+      billingProfileId: d.billingProfileId,
+      fulfillmentMethod: d.fulfillmentMethod,
       shippingDraft: d.shippingDraft,
       items: d.items,
     });
@@ -1706,6 +1764,7 @@ export function OrderDetail() {
           ? {
               order_id: orderId,
               contact_id: d.contactId,
+              billing_profile_id: d.billingProfileId || null,
               shipping: 0,
               items: [],
             }
@@ -1714,8 +1773,13 @@ export function OrderDetail() {
               contact_id: d.contactId,
               opportunity_id: d.opportunityId || null,
               valid_until: d.validUntil || null,
-              shipping_address_id: d.shippingAddressId || null,
-              billing_address_id: d.billingAddressId || null,
+              fulfillment_method: d.fulfillmentMethod,
+              ...destinationFields({
+          delivery: d.fulfillmentMethod === "delivery",
+          shippingAddressId: d.shippingAddressId,
+          oneOff: d.oneOffDestination,
+        }),
+              billing_profile_id: d.billingProfileId || null,
               shipping: Number(d.shippingDraft) || 0,
               items: d.items,
             },
@@ -1793,7 +1857,9 @@ export function OrderDetail() {
     opportunityId,
     validUntil,
     shippingAddressId,
-    billingAddressId,
+    oneOffDestination,
+    billingProfileId,
+    fulfillmentMethod,
     shippingDraft,
     items,
   ]);
@@ -1824,8 +1890,13 @@ export function OrderDetail() {
         contact_id: d.contactId,
         opportunity_id: d.opportunityId || null,
         valid_until: d.validUntil || null,
-        shipping_address_id: d.shippingAddressId || null,
-        billing_address_id: d.billingAddressId || null,
+        fulfillment_method: d.fulfillmentMethod,
+        ...destinationFields({
+          delivery: d.fulfillmentMethod === "delivery",
+          shippingAddressId: d.shippingAddressId,
+          oneOff: d.oneOffDestination,
+        }),
+        billing_profile_id: d.billingProfileId || null,
         shipping: Number(d.shippingDraft) || 0,
         items: d.items,
         origin: "portal",
@@ -1859,7 +1930,9 @@ export function OrderDetail() {
           setOpportunityId(cart.opportunity_id ?? "");
           setValidUntil(cart.valid_until ?? "");
           setShippingAddressId(cart.shipping_address_id ?? "");
-          setBillingAddressId(cart.billing_address_id ?? "");
+          setBillingProfileId(cart.billing_profile_id ?? "");
+          setFulfillmentMethod(cart.fulfillment_method);
+          setOneOffDestination(destinationFromSnapshot(cart.shipping_snapshot));
           setShippingDraft(String(cart.shipping ?? 0));
           setItems(
             cart.items.map((i) => ({
@@ -1926,7 +1999,9 @@ export function OrderDetail() {
     opportunityId,
     validUntil,
     shippingAddressId,
-    billingAddressId,
+    oneOffDestination,
+    billingProfileId,
+    fulfillmentMethod,
     shippingDraft,
     items,
   ]);
@@ -1937,10 +2012,13 @@ export function OrderDetail() {
     // Cambiar de cliente invalida oportunidad/direcciones del cliente
     // anterior -- solo tiene sentido resetearlas en modo edición (al crear
     // todavía no había nada elegido).
+    // El destino y el perfil de facturación son del cliente anterior: se
+    // limpian siempre (el servidor también los limpia al cambiar de cliente).
+    setShippingAddressId("");
+    setOneOffDestination(null);
+    setBillingProfileId("");
     if (!isNew) {
       setOpportunityId("");
-      setShippingAddressId("");
-      setBillingAddressId("");
       setContactChangedNotice(true);
     }
   }
@@ -2079,17 +2157,10 @@ export function OrderDetail() {
     setValidUntil(value);
   }
 
-  function handleAddressSelect(
-    kind: "shipping" | "billing",
-    addressId: string | null,
-  ) {
-    if (kind === "shipping") {
-      setEditingShippingAddress(false);
-      setShippingAddressId(addressId ?? "");
-    } else {
-      setEditingBillingAddress(false);
-      setBillingAddressId(addressId ?? "");
-    }
+  function handleAddressSelect(addressId: string | null) {
+    setEditingShippingAddress(false);
+    setShippingAddressId(addressId ?? "");
+    if (addressId) setOneOffDestination(null);
   }
 
   /** New address created inline (see the "+" next to each address field) --
@@ -2098,11 +2169,18 @@ export function OrderDetail() {
    * instead of create-then-pick. Solo toca estado local -- el autosave
    * centralizado se encarga de persistirlo. */
   function handleAddressCreated(newAddress: ContactAddress) {
-    setAddresses((prev) => [newAddress, ...prev]);
-    if (newAddress.is_shipping && !shippingAddressId)
+    setAddresses((prev) => [
+      newAddress,
+      ...prev.filter((a) => a.id !== newAddress.id),
+    ]);
+    // Desde el diálogo de corrección solo se elige ahí; en el borrador queda
+    // elegida para este pedido.
+    if (correction.open) {
+      setCorrection((c) => ({ ...c, addressId: newAddress.id }));
+    } else {
       setShippingAddressId(newAddress.id);
-    if (newAddress.is_billing && !billingAddressId)
-      setBillingAddressId(newAddress.id);
+      setOneOffDestination(null);
+    }
   }
 
   async function handleAddNote(e: FormEvent) {
@@ -2158,8 +2236,13 @@ export function OrderDetail() {
           contact_id: d.contactId,
           opportunity_id: d.opportunityId || null,
           valid_until: d.validUntil || null,
-          shipping_address_id: d.shippingAddressId || null,
-          billing_address_id: d.billingAddressId || null,
+          fulfillment_method: d.fulfillmentMethod,
+          ...destinationFields({
+          delivery: d.fulfillmentMethod === "delivery",
+          shippingAddressId: d.shippingAddressId,
+          oneOff: d.oneOffDestination,
+        }),
+          billing_profile_id: d.billingProfileId || null,
           shipping: Number(d.shippingDraft) || 0,
           items: validItems,
           origin: "portal",
@@ -2374,27 +2457,65 @@ export function OrderDetail() {
   // para nadie, ni a los ítems/precios del resto del borrador.
   const clientPickerDisabled = draftLocked && !canOverrideConfirmedLock;
 
-  const addressField = (kind: "shipping" | "billing") => {
-    const value = kind === "shipping" ? shippingAddressId : billingAddressId;
-    const filtered = addresses.filter((a) =>
-      kind === "shipping" ? a.is_shipping : a.is_billing,
-    );
+  const addressField = () => {
+    const value = shippingAddressId;
+    const filtered = addresses;
     const selected = filtered.find((a) => a.id === value);
-    const editing =
-      kind === "shipping" ? editingShippingAddress : editingBillingAddress;
-    const setEditing =
-      kind === "shipping"
-        ? setEditingShippingAddress
-        : setEditingBillingAddress;
+    const editing = editingShippingAddress;
+    const setEditing = setEditingShippingAddress;
+    if (oneOffDestination) {
+      return (
+        <div>
+          <Label>{t("orders.detail.shipping")}</Label>
+          <div className="mt-1 flex items-start justify-between gap-2">
+            <div className="min-w-0 text-xs">
+              <p className="font-medium text-brand-800">
+                {t("orders.destination.oneOffTitle")}
+              </p>
+              {oneOffDestination.recipient_name && (
+                <p className="truncate text-brand-800">
+                  {oneOffDestination.recipient_name}
+                </p>
+              )}
+              <p className="truncate text-brand-800">
+                {formatDestination(oneOffDestination)}
+              </p>
+              {oneOffDestination.phone && (
+                <p className="truncate text-brand-400">
+                  {formatPhoneDisplay(oneOffDestination.phone)}
+                </p>
+              )}
+            </div>
+            {!draftLocked && (
+              <div className="flex shrink-0 gap-1">
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  aria-label={t("orders.destination.changeAria")}
+                  onClick={() => {
+                    setDestinationTarget("draft");
+                    setAddressDrawerOpen(true);
+                  }}
+                >
+                  <PencilIcon width={12} height={12} />
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setOneOffDestination(null)}
+                >
+                  {t("orders.destination.discard")}
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
     return (
       <div>
-        <Label>
-          {t(
-            kind === "shipping"
-              ? "orders.detail.shipping"
-              : "orders.detail.billing",
-          )}
-        </Label>
+        <Label>{t("orders.detail.shipping")}</Label>
         {selected && !editing ? (
           <div className="mt-1 flex items-start justify-between gap-2">
             <div className="min-w-0 text-xs">
@@ -2421,11 +2542,6 @@ export function OrderDetail() {
                   {formatPhoneDisplay(selected.phone)}
                 </p>
               )}
-              {selected.tax_id && (
-                <p className="truncate text-xs text-brand-400">
-                  {t("orders.detail.addressTaxId")}: {selected.tax_id}
-                </p>
-              )}
             </div>
             {!draftLocked && (
               <Button
@@ -2448,7 +2564,7 @@ export function OrderDetail() {
                 label: addressLabel(a),
               }))}
               value={value || null}
-              onChange={(v) => handleAddressSelect(kind, v)}
+              onChange={(v) => handleAddressSelect(v)}
               placeholder={t("orders.detail.noAddress")}
               searchPlaceholder={t("orders.detail.searchAddress")}
               emptyLabel={t("orders.detail.noAddressResults")}
@@ -2460,7 +2576,10 @@ export function OrderDetail() {
               type="button"
               variant="default"
               size="icon"
-              onClick={() => setAddressDrawerOpen(true)}
+              onClick={() => {
+                setDestinationTarget("draft");
+                setAddressDrawerOpen(true);
+              }}
               disabled={!contactId || draftLocked}
               aria-label={t("orders.detail.newAddressAria")}
               className="shrink-0"
@@ -2623,6 +2742,23 @@ export function OrderDetail() {
                   amount: formatCurrency(balance, order?.currency),
                 })}
               </p>
+            )}
+            {(canSendInvoice || canRetryInvoice) && order?.contact_id && selectedContact?.is_walk_in && (
+              <div className="mt-2">
+                <Label htmlFor="walkin-invoice-email">
+                  {t("billingTo.invoiceEmail.label")}
+                </Label>
+                <Input
+                  id="walkin-invoice-email"
+                  type="email"
+                  value={walkInInvoiceEmail}
+                  onChange={(e) => setWalkInInvoiceEmail(e.target.value)}
+                  className="mt-1 !h-7 !rounded-lg !text-xs"
+                />
+                <p className="mt-1 text-[11px] text-brand-400">
+                  {t("billingTo.invoiceEmail.hint")}
+                </p>
+              </div>
             )}
             {sendInvoiceError && <FieldError message={sendInvoiceError} />}
           </div>
@@ -3022,13 +3158,85 @@ export function OrderDetail() {
                 />
                 <FieldError message={contactError} />
               </div>
+              <BillingProfilePicker
+                tenantId={profile?.tenant_id ?? ""}
+                clientId={contactId || null}
+                isWalkIn={selectedContact?.is_walk_in ?? false}
+                value={billingProfileId}
+                onChange={setBillingProfileId}
+                disabled={
+                  clientPickerDisabled ||
+                  (!isNew && (dianLocksOrder || invoicesUnknown)) ||
+                  (!isNew && order?.status === "cancelada")
+                }
+              />
             </div>
 
             {/* Columna 2: Envío + Estado de envío -- no existe en un pedido
                 de mostrador (ver showShipping). */}
             {showShipping && (
               <div className="min-w-0 space-y-4 sm:border-l sm:border-brand-100 sm:pl-4">
-                {addressField("shipping")}
+                <div>
+                  <Label htmlFor="fulfillment-method">
+                    {t("orders.detail.fulfillment.label")}
+                  </Label>
+                  <Select
+                    value={fulfillmentMethod}
+                    onValueChange={(v) => {
+                      setFulfillmentMethod(v as FulfillmentMethod);
+                      if (v !== "delivery") {
+                        setShippingAddressId("");
+                        setOneOffDestination(null);
+                      }
+                    }}
+                    disabled={isNew ? creating : draftLocked || order?.status !== "cotizacion"}
+                  >
+                    <SelectTrigger
+                      id="fulfillment-method"
+                      className="mt-1 !h-7 w-full !rounded-lg !text-xs"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="delivery">
+                        {t("orders.detail.fulfillment.delivery")}
+                      </SelectItem>
+                      <SelectItem value="pickup">
+                        {t("orders.detail.fulfillment.pickup")}
+                      </SelectItem>
+                      <SelectItem value="on_site">
+                        {t("orders.detail.fulfillment.on_site")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {fulfillmentMethod === "delivery" && addressField()}
+                {fulfillmentMethod === "delivery" &&
+                  !isNew &&
+                  order?.status === "confirmada" &&
+                  canCorrectShipping &&
+                  !dianLocksOrder &&
+                  !dispatchLocksOrder &&
+                  !invoicesUnknown &&
+                  !dispatchUnknown && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        setCorrection({
+                          open: true,
+                          addressId: shippingAddressId,
+                          destination: oneOffDestination,
+                          reason: "",
+                          saving: false,
+                          error: null,
+                        })
+                      }
+                    >
+                      {t("orders.detail.correctShipping.button")}
+                    </Button>
+                  )}
                 {/* Estado de envío -- solo edición + venta confirmada (concepto
                   aparte del estado comercial, ver DeliveryStatus). No aplica
                   en cotización/cancelada, no hay nada que enviar todavía o
@@ -3636,14 +3844,138 @@ export function OrderDetail() {
       {detailsContent}
 
       {profile?.tenant_id && contactId && (
-        <AddressDrawer
+        <ShippingDestinationDrawer
           open={addressDrawerOpen}
           onClose={() => setAddressDrawerOpen(false)}
           tenantId={profile.tenant_id}
           contactId={contactId}
-          onSaved={handleAddressCreated}
+          initial={destinationTarget === "draft" ? oneOffDestination : correction.destination}
+          onUseOnce={(dest) => {
+            if (destinationTarget === "correction") {
+              setCorrection((c) => ({ ...c, destination: dest, addressId: "" }));
+            } else {
+              setOneOffDestination(dest);
+              setShippingAddressId("");
+            }
+          }}
+          onSavedToClient={(address) => {
+            if (destinationTarget === "correction")
+              setCorrection((c) => ({ ...c, destination: null }));
+            handleAddressCreated(address);
+          }}
         />
       )}
+
+      <Dialog
+        open={correction.open}
+        onOpenChange={(o) => !o && setCorrection((c) => ({ ...c, open: false }))}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("orders.detail.correctShipping.title")}</DialogTitle>
+            <DialogDescription>
+              {t("orders.detail.correctShipping.description")}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label>{t("orders.detail.shipping")}</Label>
+              <div className="mt-1">
+                <ComboboxFilter
+                  options={addresses.map((a) => ({ id: a.id, label: addressLabel(a) }))}
+                  value={correction.addressId || null}
+                  onChange={(v) =>
+                    setCorrection((c) => ({ ...c, addressId: v ?? "", destination: v ? null : c.destination }))
+                  }
+                  placeholder={t("orders.detail.noAddress")}
+                  searchPlaceholder={t("orders.detail.searchAddress")}
+                  emptyLabel={t("orders.detail.noAddressResults")}
+                  className="w-full"
+                />
+              </div>
+              {correction.destination && (
+                <p className="mt-1 text-xs text-brand-800">
+                  {t("orders.destination.oneOffTitle")}:{" "}
+                  {formatDestination(correction.destination)}
+                </p>
+              )}
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                className="px-0"
+                onClick={() => {
+                  setDestinationTarget("correction");
+                  setAddressDrawerOpen(true);
+                }}
+              >
+                {t("orders.detail.newAddressAria")}
+              </Button>
+            </div>
+            <div>
+              <Label htmlFor="correction-reason">
+                {t("orders.detail.correctShipping.reason")}
+              </Label>
+              <Textarea
+                id="correction-reason"
+                rows={3}
+                value={correction.reason}
+                onChange={(e) => setCorrection((c) => ({ ...c, reason: e.target.value }))}
+                className="mt-1 !rounded-lg !text-xs"
+              />
+            </div>
+            {correction.error && <FieldError message={correction.error} />}
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setCorrection((c) => ({ ...c, open: false }))}
+            >
+              {t("common.actions.cancel")}
+            </Button>
+            <Button
+              type="button"
+              disabled={correction.saving || !order}
+              onClick={async () => {
+                if (!order) return;
+                setCorrection((c) => ({ ...c, saving: true, error: null }));
+                try {
+                  await calculateOrder({
+                    order_id: order.id,
+                    contact_id: order.contact_id,
+                    ...(correction.destination
+                      ? {
+                          shipping_destination: destinationPayload(correction.destination),
+                        }
+                      : { shipping_address_id: correction.addressId || null }),
+                    shipping_correction_reason: correction.reason,
+                    shipping: 0,
+                    items: [],
+                  });
+                  setShippingAddressId(correction.destination ? "" : correction.addressId);
+                  setOneOffDestination(correction.destination);
+                  setCorrection((c) => ({ ...c, open: false, saving: false }));
+                  await reloadOrder();
+                } catch (err) {
+                  setCorrection((c) => ({
+                    ...c,
+                    saving: false,
+                    error:
+                      err instanceof Error
+                        ? err.message
+                        : t("orders.detail.correctShipping.error"),
+                  }));
+                }
+              }}
+            >
+              {correction.saving
+                ? t("common.actions.saving")
+                : t("orders.detail.correctShipping.confirm")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {!isNew && order && profile?.tenant_id && (
         <PaymentDrawer

@@ -4,6 +4,20 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 
 > **Nota (2026-09-11)**: este archivo estuvo sin actualizar desde la versión 1.0.0 (2026-08-04) pese a meses de trabajo real -- pivote a ERP, POS, facturación electrónica DIAN, inventario, cartera, devoluciones, etc. Las versiones 1.0.1 a 1.0.4 se reconstruyeron recién hoy a partir del historial real del proyecto ([CLAUDE.md](../CLAUDE.md)), agrupado en versiones que nunca se etiquetaron en su momento -- el contenido es real, los cortes de versión son aproximados. Se retoma el hábito desde acá en más: de ahora en adelante, cada commit actualiza este archivo.
 
+## [Unreleased]
+
+### Added
+- **Datos de facturación del cliente.** Nueva pestaña «Datos de facturación» en la ficha del cliente: varios perfiles fiscales por cliente (paginados), con perfil predeterminado, agregar, editar y eliminar (permiso `contacts.edit_billing`) y la lista de lo que falta para emitir la factura.
+- **«Facturar a» en Órdenes y POS.** Cada venta (también cada cobro de una cuenta dividida) puede facturarse a un perfil distinto del cliente sin cambiar el cliente de la venta ni su crédito. Para Consumidor Final solo se pide el correo del comprobante, que no se guarda en su ficha.
+- **Modalidad de entrega en Órdenes**: domicilio, retiro o consumo en sitio; solo el domicilio lleva dirección. Los pedidos confirmados permiten corregir el destino con un motivo (permiso `sales.correct_shipping`).
+- **Destino de un solo uso** en Órdenes: «Usar en este pedido» (no entra a las direcciones del cliente) o «Guardar también en el cliente»; con país y, para Colombia, departamento y municipio con código DANE. Se puede cambiar o descartar, y en un pedido confirmado se corrige con motivo.
+- **Tienda**: opción «Necesito factura» con datos fiscales propios; ya no se pide dirección de facturación.
+
+### Changed
+- Las direcciones del cliente son ahora solo de entrega (destinatario, país, departamento y municipio con código DANE, indicaciones). Si se intenta guardar una dirección que el cliente ya tiene, se reutiliza la existente.
+- El formulario de cliente ya no captura datos fiscales (razón social, responsabilidades, domicilio fiscal, retención): viven en los perfiles de facturación.
+- El ticket muestra la dirección de entrega solo en pedidos a domicilio y, si hay perfil de facturación, su razón social y documento.
+
 ## [1.0.39] - 2026-10-26
 
 ### Changed

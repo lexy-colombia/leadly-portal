@@ -251,11 +251,17 @@ export interface PosCheckoutInput {
    * fila en vez de crear una cotización duplicada. Ver comentario de
    * cabecera de pos-checkout. */
   checkout_token?: string
+  /** Perfil de facturación («Facturar a») de ESTA venta; independiente del
+   * cliente. Ausente = el predeterminado del cliente. No aplica a Consumidor
+   * Final (su correo viaja aparte, al pedir la factura). */
+  billing_profile_id?: string
 }
 
 export interface PosCheckoutResult {
   order: Pick<SalesOrder, 'id' | 'number' | 'subtotal' | 'total' | 'tax_total' | 'currency'>
   invoice: { id: string; status: string; cufe: string | null; status_detail: string | null } | null
+  /** Lo que le falta al perfil elegido para emitir (informativo, no frena el cobro). */
+  billing_missing?: string[]
 }
 
 /** Una sola llamada: crea el pedido, lo confirma (con el chequeo de stock

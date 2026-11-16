@@ -1,6 +1,11 @@
 import { supabase } from '../supabaseClient'
 import { mapApiStockShortfalls, type ApiStockShortfall, type OrderItemInput, type OrderTotalsBreakdown, type StockShortfall } from './orders'
-import type { Cart, CartItem, OrderPaymentMethod, SalesOrder } from '../../types/domain'
+import type { Cart, CartItem, FulfillmentMethod, OrderPaymentMethod, SalesOrder } from '../../types/domain'
+
+/** Respuesta de create-order: la fila del pedido más `billing_missing`, lo que
+ * le falta al perfil elegido para poder emitir la factura (informativo: NO
+ * frena el cobro; la factura queda bloqueada con la misma lista). */
+export type CreatedOrder = SalesOrder & { billing_missing?: string[] }
 
 export type CartWithItems = Cart & { items: CartItem[] }
 
@@ -57,7 +62,12 @@ export interface SaveCartDraftInput {
   notes?: string | null
   valid_until?: string | null
   shipping_address_id?: string | null
-  billing_address_id?: string | null
+  /** Destino de un solo uso (ver CalculateOrderInput). */
+  shipping_destination?: Record<string, string> | null
+  /** Modalidad de entrega. En un carrito de POS el servidor la fuerza a 'on_site'. */
+  fulfillment_method?: FulfillmentMethod
+  /** Perfil de facturación elegido para esta cuenta (null = ninguno). */
+  billing_profile_id?: string | null
   shipping?: number
   items: OrderItemInput[]
   origin?: 'portal' | 'pos'
@@ -138,27 +148,25 @@ export async function createOrderFromCart(
     keepCartOpen = false,
     confirm = false,
     checkoutToken,
-    buyerContactId,
+    billingProfileId,
   }: {
     keepCartOpen?: boolean
     confirm?: boolean
     checkoutToken?: string
-    /** Comprador de ESTA orden puntual (facturación DIAN por división del
-     * POS) -- ausente = el contacto de la cuenta de siempre; string = un
-     * cliente puntual distinto; `null` explícito = el walk-in del tenant.
-     * `undefined` se omite del body (JSON.stringify no serializa claves
-     * `undefined`), así el servidor distingue "no mandaron nada" de "sí,
-     * mandaron null" -- ver create-order/index.ts. */
-    buyerContactId?: string | null
+    /** Perfil de facturación de ESTA venta (cuenta dividida: cada cobro lleva
+     * el suyo). Ausente (`undefined`) = el del carrito; `null` = ninguno
+     * (Consumidor Final). Es independiente del cliente de la venta: elegir otro
+     * perfil NUNCA cambia el dueño del pedido ni su crédito. */
+    billingProfileId?: string | null
   } = {},
-): Promise<SalesOrder> {
-  return invokeAndUnwrap<SalesOrder>('create-order', {
+): Promise<CreatedOrder> {
+  return invokeAndUnwrap<CreatedOrder>('create-order', {
     cart_id: cartId,
     items,
     keep_cart_open: keepCartOpen,
     confirm,
     checkout_token: checkoutToken,
-    buyer_contact_id: buyerContactId,
+    billing_profile_id: billingProfileId,
   })
 }
 
