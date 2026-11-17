@@ -2,7 +2,7 @@ import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { buildFiscalBuyer, loadBillingProfileForOrder } from "./clientBillingProfile.ts";
 import { resolveCityName } from "./cityName.ts";
 import { REQUIRE_DANE_FOR_DELIVERY } from "../orders/fulfillmentAndBilling.ts";
-import { deliveryDivipolaCodes, evaluateInvoiceDelivery } from "./invoiceDelivery.ts";
+import { deliveryDivipolaCodes, EMIT_DELIVERY_IN_XML, evaluateInvoiceDelivery } from "./invoiceDelivery.ts";
 
 /** Fase 1 (cimientos) de facturación electrónica DIAN: reserva una fila en
  * sales_invoices si el tenant tiene una credencial activa de 'dian_directo'
@@ -63,6 +63,8 @@ export interface InvoiceBuyerOptions {
    * municipio/departamento de entrega => bloqueada". Por defecto sigue la
    * constante REQUIRE_DANE_FOR_DELIVERY (fulfillmentAndBilling.ts). */
   requireDeliveryDivipola?: boolean;
+  /** Solo para pruebas: override de EMIT_DELIVERY_IN_XML (invoiceDelivery.ts). */
+  emitDelivery?: boolean;
 }
 
 export interface InvoiceAttemptResult {
@@ -99,7 +101,7 @@ export async function createInvoiceAttempt(
   // Reintento de un walk-in: parte del correo que el cajero ya capturó para
   // esta venta en un intento anterior (solo si vino de invoice_email).
   const invoiceEmail = buyerOptions.invoiceEmail?.trim() || (await previousInvoiceEmail(adminClient, tenantId, orderId));
-  const snap = await buildOrderSnapshot(adminClient, tenantId, orderId, { invoiceEmail, requireDeliveryDivipola: buyerOptions.requireDeliveryDivipola });
+  const snap = await buildOrderSnapshot(adminClient, tenantId, orderId, { invoiceEmail, requireDeliveryDivipola: buyerOptions.requireDeliveryDivipola, emitDelivery: buyerOptions.emitDelivery });
 
   const { data: invoice, error: invoiceError } = await adminClient
     .from("sales_invoices")
@@ -151,7 +153,7 @@ export async function refreshInvoiceSnapshot(
   // solicitud anterior de ESTA venta que falló después. Solo se reutiliza un
   // correo que vino de invoice_email (email_source), nunca uno de la ficha.
   const invoiceEmail = buyerOptions.invoiceEmail?.trim() || (await previousInvoiceEmail(adminClient, tenantId, orderId));
-  const snap = await buildOrderSnapshot(adminClient, tenantId, orderId, { invoiceEmail, requireDeliveryDivipola: buyerOptions.requireDeliveryDivipola });
+  const snap = await buildOrderSnapshot(adminClient, tenantId, orderId, { invoiceEmail, requireDeliveryDivipola: buyerOptions.requireDeliveryDivipola, emitDelivery: buyerOptions.emitDelivery });
   if (snap.status === "blocked_missing_buyer_data") {
     await adminClient.from("sales_invoices").update({
       status: snap.status, status_detail: snap.statusDetail,
@@ -288,7 +290,8 @@ async function buildOrderSnapshot(
   // dirección fiscal. Se guarda en buyer_snapshot.delivery; ver invoiceDelivery.ts.
   const shipping = (order.shipping_snapshot ?? null) as Record<string, unknown> | null;
   let divipola: { cityName: string; departmentName: string } | null = null;
-  const deliveryCodes = order.fulfillment_method === "delivery" ? deliveryDivipolaCodes(shipping) : null;
+  const emitDelivery = buyerOptions.emitDelivery ?? EMIT_DELIVERY_IN_XML;
+  const deliveryCodes = emitDelivery && order.fulfillment_method === "delivery" ? deliveryDivipolaCodes(shipping) : null;
   if (deliveryCodes) {
     const [{ data: dCity, error: dCityError }, { data: dDepartment, error: dDepartmentError }] = await Promise.all([
       adminClient.from("cities").select("name").eq("code", deliveryCodes.cityCode).eq("department_code", deliveryCodes.stateCode).maybeSingle(),
@@ -303,6 +306,7 @@ async function buildOrderSnapshot(
     buyerDocumentTypeCode: buyerSnapshot.document_type_code,
     divipola,
     requireDane: buyerOptions.requireDeliveryDivipola ?? REQUIRE_DANE_FOR_DELIVERY,
+    emit: emitDelivery,
   });
   // Si el comprador ni siquiera está identificado, su propio faltante ya
   // bloquea; no se suma ruido sobre el destino.
@@ -384,7 +388,8 @@ async function buildOrderSnapshot(
     taxTotal: order.tax_total,
     total: order.total,
     currency: order.currency,
-    buyerSnapshot: { ...buyerSnapshot, delivery },
+    // Con el interruptor apagado el snapshot NO lleva la clave `delivery`.
+    buyerSnapshot: emitDelivery ? { ...buyerSnapshot, delivery } : buyerSnapshot,
     sellerSnapshot,
     items: (orderItems ?? []).map((item) => ({
       ...item,

@@ -4,7 +4,7 @@
  * tenía una copia a mano que no pasaba organizationType / taxSchemeCode /
  * electronicMail). El equivalente de la nota crédito es creditNoteInput.ts. */
 import type { InvoiceXmlDelivery, InvoiceXmlParty } from "./buildInvoiceXml.ts";
-import { sanitizeAddressLine, type InvoiceDeliverySnapshot } from "./invoiceDelivery.ts";
+import { EMIT_DELIVERY_IN_XML, sanitizeAddressLine, type InvoiceDeliverySnapshot } from "./invoiceDelivery.ts";
 
 export interface InvoiceBuyerSnapshot {
   document_type_code: string | null;
@@ -54,7 +54,10 @@ export function mapInvoiceBuyer(buyer: InvoiceBuyerSnapshot): InvoiceXmlParty {
  * vuelve a exigir lo que el Anexo 1.9 rechaza si falta (FAM05/08 DIVIPOLA,
  * FAM10 línea, FAM12 país) y se OMITE el grupo entero si algo no está. Nunca
  * emite un Delivery a medias. */
-export function mapInvoiceDelivery(buyer: Pick<InvoiceBuyerSnapshot, "delivery">): InvoiceXmlDelivery | null {
+export function mapInvoiceDelivery(buyer: Pick<InvoiceBuyerSnapshot, "delivery">, emit: boolean = EMIT_DELIVERY_IN_XML): InvoiceXmlDelivery | null {
+  // Interruptor general: con EMIT_DELIVERY_IN_XML=false se ignora incluso un
+  // delivery ya guardado en el snapshot de una factura anterior.
+  if (!emit) return null;
   const d = buyer.delivery;
   if (!d) return null;
   const line = sanitizeAddressLine(d.line1 ?? "");

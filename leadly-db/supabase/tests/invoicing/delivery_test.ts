@@ -7,14 +7,15 @@
  * UBL-Invoice-2.1.xsd en disco): la posición se verifica contra los ejemplos
  * oficiales (Exento de IVA.xml:342-412, Generica.xml:265-334) y la tabla del
  * Anexo, no contra el esquema. */
-import { assert, assertEquals, assertNotEquals } from "jsr:@std/assert@1";
+import { assert, assertEquals, assertNotEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import { buildCreditNoteXml, buildInvoiceXml, creditNoteFixtureToInput, invoiceFixtureToInput, parseXml } from "./harness.ts";
-import { DELIVERY_MEDELLIN, SYNTHETIC_CREDIT_NOTES, SYNTHETIC_INVOICES } from "./fixtures_synthetic.ts";
+import { DELIVERY_MEDELLIN, DELIVERY_OVERRIDE_INVOICES, SYNTHETIC_CREDIT_NOTES, SYNTHETIC_INVOICES } from "./fixtures_synthetic.ts";
 import {
   DELIVERY_ADDRESS_MISSING,
   sanitizeAddressLine,
   DELIVERY_DIVIPOLA_MISSING,
   evaluateInvoiceDelivery,
+  EMIT_DELIVERY_IN_XML,
   type EvaluateInvoiceDeliveryInput,
 } from "../../functions/_shared/invoicing/invoiceDelivery.ts";
 import { mapInvoiceDelivery } from "../../functions/_shared/invoicing/invoiceInput.ts";
@@ -28,8 +29,12 @@ const SNAP = {
 };
 
 function evalInput(over: Partial<EvaluateInvoiceDeliveryInput> = {}): EvaluateInvoiceDeliveryInput {
-  return { fulfillmentMethod: "delivery", shippingSnapshot: SNAP, buyerDocumentTypeCode: "13", divipola: MEDELLIN, requireDane: false, ...over };
+  return { fulfillmentMethod: "delivery", shippingSnapshot: SNAP, buyerDocumentTypeCode: "13", divipola: MEDELLIN, requireDane: false, emit: true, ...over };
 }
+
+Deno.test("el interruptor EMIT_DELIVERY_IN_XML está APAGADO (decisión del usuario: la factura no lleva cac:Delivery)", () => {
+  assertEquals(EMIT_DELIVERY_IN_XML, false);
+});
 
 Deno.test("la constante REQUIRE_DANE_FOR_DELIVERY sigue apagada (decisión S2)", () => {
   assertEquals(REQUIRE_DANE_FOR_DELIVERY, false);
@@ -100,11 +105,11 @@ function childNames(xml: string): string[] {
   return out;
 }
 
-const fx = (label: string) => SYNTHETIC_INVOICES.find((f) => f.label === label)!;
+const fx = (label: string) => [...SYNTHETIC_INVOICES, ...DELIVERY_OVERRIDE_INVOICES].find((f) => f.label === label)!;
 
 Deno.test("orden de elementos: AccountingCustomerParty -> Delivery -> PaymentMeans (cédula y NIT)", async () => {
   for (const label of ["entrega-cedula-divipola", "entrega-nit-divipola"]) {
-    const { xml } = await buildInvoiceXml(invoiceFixtureToInput(fx(label)).input);
+    const { xml } = await buildInvoiceXml(invoiceFixtureToInput(fx(label), undefined, undefined, true).input);
     const names = childNames(xml);
     const i = names.indexOf("cac:AccountingCustomerParty");
     assertEquals(names[i + 1], "cac:Delivery", label);
@@ -126,7 +131,7 @@ Deno.test("orden de elementos: AccountingCustomerParty -> Delivery -> PaymentMea
 
 Deno.test("sin delivery (pickup/on_site/exterior/incompleto): el XML NO trae cac:Delivery", async () => {
   for (const label of ["inc8-consumidor-final", "perfil-extranjero", "perfil-empresa-nit"]) {
-    const { xml } = await buildInvoiceXml(invoiceFixtureToInput(fx(label)).input);
+    const { xml } = await buildInvoiceXml(invoiceFixtureToInput(fx(label), undefined, undefined, true).input);
     assertEquals(parseXml(xml).getElementsByTagName("cac:Delivery").length, 0, label);
   }
 });
@@ -134,8 +139,8 @@ Deno.test("sin delivery (pickup/on_site/exterior/incompleto): el XML NO trae cac
 Deno.test("el CUFE, los totales y el resto del XML NO cambian por tener Delivery", async () => {
   const con = fx("entrega-cedula-divipola");
   const sin = { ...con, buyer: { ...con.buyer, delivery: null } };
-  const a = await buildInvoiceXml(invoiceFixtureToInput(con).input);
-  const b = await buildInvoiceXml(invoiceFixtureToInput(sin).input);
+  const a = await buildInvoiceXml(invoiceFixtureToInput(con, undefined, undefined, true).input);
+  const b = await buildInvoiceXml(invoiceFixtureToInput(sin, undefined, undefined, true).input);
   assertEquals(a.cufe, b.cufe, "el CUFE no debe depender de cac:Delivery");
   // Quitando el bloque, los bytes son idénticos (el cambio es solo estructural).
   const bloque = a.xml.slice(a.xml.indexOf("\n   <cac:Delivery>"), a.xml.indexOf("</cac:Delivery>") + "</cac:Delivery>".length);
@@ -148,7 +153,7 @@ Deno.test("el CUFE, los totales y el resto del XML NO cambian por tener Delivery
 Deno.test("escape XML en la dirección de entrega", async () => {
   const con = fx("entrega-cedula-divipola");
   const f = { ...con, buyer: { ...con.buyer, delivery: { ...DELIVERY_MEDELLIN, line1: "Calle 1 & <2> \"x\"" } } };
-  const { xml } = await buildInvoiceXml(invoiceFixtureToInput(f).input);
+  const { xml } = await buildInvoiceXml(invoiceFixtureToInput(f, undefined, undefined, true).input);
   const line = parseXml(xml).getElementsByTagName("cac:DeliveryAddress")[0].getElementsByTagName("cbc:Line")[0].textContent;
   assertEquals(line, 'Calle 1 & <2> "x"');
   assert(xml.includes("Calle 1 &amp; &lt;2&gt; &quot;x&quot;"));
@@ -156,16 +161,16 @@ Deno.test("escape XML en la dirección de entrega", async () => {
 
 Deno.test("mapInvoiceDelivery: defensa en profundidad, nunca emite a medias", () => {
   const ok = { ...DELIVERY_MEDELLIN };
-  assert(mapInvoiceDelivery({ delivery: ok }));
-  assertEquals(mapInvoiceDelivery({}), null);
-  assertEquals(mapInvoiceDelivery({ delivery: null }), null);
-  assertEquals(mapInvoiceDelivery({ delivery: { ...ok, city_code: "" } }), null);
-  assertEquals(mapInvoiceDelivery({ delivery: { ...ok, state_code: "" } }), null);
-  assertEquals(mapInvoiceDelivery({ delivery: { ...ok, line1: "  " } }), null);
-  assertEquals(mapInvoiceDelivery({ delivery: { ...ok, state_code: "11" } }), null, "municipio 05001 no pertenece al departamento 11");
-  assertEquals(mapInvoiceDelivery({ delivery: { ...ok, city_code: "Medellín" } }), null);
+  assert(mapInvoiceDelivery({ delivery: ok }, true));
+  assertEquals(mapInvoiceDelivery({}, true), null);
+  assertEquals(mapInvoiceDelivery({ delivery: null }, true), null);
+  assertEquals(mapInvoiceDelivery({ delivery: { ...ok, city_code: "" } }, true), null);
+  assertEquals(mapInvoiceDelivery({ delivery: { ...ok, state_code: "" } }, true), null);
+  assertEquals(mapInvoiceDelivery({ delivery: { ...ok, line1: "  " } }, true), null);
+  assertEquals(mapInvoiceDelivery({ delivery: { ...ok, state_code: "11" } }, true), null, "municipio 05001 no pertenece al departamento 11");
+  assertEquals(mapInvoiceDelivery({ delivery: { ...ok, city_code: "Medellín" } }, true), null);
   // deno-lint-ignore no-explicit-any
-  assertEquals(mapInvoiceDelivery({ delivery: { ...ok, country: "US" as any } }), null);
+  assertEquals(mapInvoiceDelivery({ delivery: { ...ok, country: "US" as any } }, true), null);
 });
 
 Deno.test("nota crédito: no lleva cac:Delivery (CAM01 0..1; no se cambia)", async () => {
@@ -226,7 +231,7 @@ function world(over: { profile?: Record<string, unknown>; order?: Record<string,
 }
 
 async function attempt(w: ReturnType<typeof world>, requireDeliveryDivipola?: boolean) {
-  const r = await createInvoiceAttempt(w.client, "t", "o1", 1, { requireDeliveryDivipola });
+  const r = await createInvoiceAttempt(w.client, "t", "o1", 1, { requireDeliveryDivipola, emitDelivery: true });
   const inv = w.inserted.find((i) => i.table === "sales_invoices")!.row;
   return { r, buyer: inv.buyer_snapshot as Any };
 }
@@ -319,7 +324,7 @@ Deno.test("línea con caracteres peligrosos: el XML generado sigue siendo parsea
   assertEquals(r.delivery!.line1, "Calle 1 & <2> \"x\" 'y' Apto" + "😀".repeat(5));
   const con = fx("entrega-cedula-divipola");
   const f = { ...con, buyer: { ...con.buyer, delivery: { ...DELIVERY_MEDELLIN, line1: sucia } } };
-  const { xml } = await buildInvoiceXml(invoiceFixtureToInput(f).input);
+  const { xml } = await buildInvoiceXml(invoiceFixtureToInput(f, undefined, undefined, true).input);
   assert(!/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/.test(xml));
   const line = parseXml(xml).getElementsByTagName("cac:DeliveryAddress")[0].getElementsByTagName("cbc:Line")[0].textContent;
   assertEquals(line, "Calle 1 & <2> \"x\" 'y' Apto" + "😀".repeat(5));
@@ -327,7 +332,7 @@ Deno.test("línea con caracteres peligrosos: el XML generado sigue siendo parsea
   const larga = evaluateInvoiceDelivery(evalInput({ shippingSnapshot: { ...SNAP, line1: "y".repeat(299), line2: "😀😀" } }));
   assertEquals(Array.from(larga.delivery!.line1).length, 300);
   const f2 = { ...con, buyer: { ...con.buyer, delivery: larga.delivery } };
-  const x2 = (await buildInvoiceXml(invoiceFixtureToInput(f2).input)).xml;
+  const x2 = (await buildInvoiceXml(invoiceFixtureToInput(f2, undefined, undefined, true).input)).xml;
   assertEquals(parseXml(x2).getElementsByTagName("cac:DeliveryAddress")[0].getElementsByTagName("cbc:Line")[0].textContent, larga.delivery!.line1);
   // Una línea que queda vacía tras el saneo se trata como ausente.
   assertEquals(evaluateInvoiceDelivery(evalInput({ shippingSnapshot: { ...SNAP, line1: "\u0001\n" }, requireDane: true })).missing, [DELIVERY_ADDRESS_MISSING]);
@@ -377,4 +382,79 @@ Deno.test("contrato: todo productor SQL/TS del shipping_snapshot usa las 5 clave
     assertEquals(r.delivery?.city_code, "05001");
     assertEquals(r.delivery?.line1, "Cra 1 # 2-3, Apto 4");
   }
+});
+
+// ---- Ronda 4: Delivery apagado por defecto ----
+
+const noDelivery = (xml: string) => {
+  assert(!xml.includes("cac:Delivery"), "el XML no debe contener cac:Delivery");
+  assert(!xml.includes("cac:DeliveryAddress"), "el XML no debe contener cac:DeliveryAddress");
+  assertEquals(parseXml(xml).getElementsByTagName("cac:Delivery").length, 0);
+};
+
+Deno.test("snapshots de los fixtures de entrega (con override explícito)", async () => {
+  const UPDATE = Deno.env.get("S0_UPDATE_SNAPSHOTS") === "1";
+  for (const f of DELIVERY_OVERRIDE_INVOICES) {
+    const { xml } = await buildInvoiceXml(invoiceFixtureToInput(f, undefined, undefined, true).input);
+    const file = new URL(`./snapshots/delivery-override__${f.label}.xml`, import.meta.url);
+    if (UPDATE) await Deno.writeTextFile(file, xml);
+    else assertEquals(xml, await Deno.readTextFile(file), f.label);
+    assertStringIncludes(xml, "<cac:Delivery>");
+  }
+});
+
+Deno.test("POR DEFECTO ningún fixture produce cac:Delivery (cédula, NIT, on_site, exterior, delivery ya guardado)", async () => {
+  const todos = [...SYNTHETIC_INVOICES, ...DELIVERY_OVERRIDE_INVOICES];
+  for (const f of todos) {
+    const { xml } = await buildInvoiceXml(invoiceFixtureToInput(f).input);
+    noDelivery(xml);
+  }
+  // Un buyer_snapshot con delivery YA guardado (de una ronda anterior) también se ignora.
+  const guardado = { ...fx("perfil-persona-natural"), buyer: { ...fx("perfil-persona-natural").buyer, delivery: DELIVERY_MEDELLIN } };
+  assert(guardado.buyer.delivery);
+  assertEquals(mapInvoiceDelivery(guardado.buyer), null);
+  noDelivery((await buildInvoiceXml(invoiceFixtureToInput(guardado).input)).xml);
+  // Mismo fixture con override: ahí sí aparece (prueba de que el interruptor es lo que lo apaga).
+  assertStringIncludes((await buildInvoiceXml(invoiceFixtureToInput(guardado, undefined, undefined, true).input)).xml, "<cac:Delivery>");
+});
+
+Deno.test("POR DEFECTO evaluateInvoiceDelivery omite siempre y nunca agrega faltantes (ni con REQUIRE_DANE encendida)", () => {
+  const casos: Partial<EvaluateInvoiceDeliveryInput>[] = [
+    {}, // cédula con DIVIPOLA completo
+    { buyerDocumentTypeCode: "31" },
+    { fulfillmentMethod: "on_site" },
+    { shippingSnapshot: { ...SNAP, country: "US" } },
+    { shippingSnapshot: { ...SNAP, city_code: null }, divipola: null },
+    { shippingSnapshot: null, divipola: null },
+  ];
+  for (const c of casos) {
+    for (const requireDane of [false, true]) {
+      const { emit: _omit, ...base } = evalInput();
+      assertEquals(evaluateInvoiceDelivery({ ...base, ...c, requireDane }), { delivery: null, missing: [] });
+    }
+  }
+});
+
+Deno.test("POR DEFECTO createInvoiceAttempt no arma buyer_snapshot.delivery ni bloquea por entrega (ni con la regla encendida)", async () => {
+  const sinDivipola = { ...SNAP, city_code: null, state_code: null };
+  for (const order of [{}, { shipping_snapshot: sinDivipola }, { fulfillment_method: "on_site", shipping_snapshot: null }, { shipping_snapshot: { ...SNAP, country: "US" } }]) {
+    const w = world({ order });
+    const r = await createInvoiceAttempt(w.client, "t", "o1", 1, { requireDeliveryDivipola: true });
+    assertEquals(r.status, "pending");
+    assertEquals(r.statusDetail, null);
+    const buyer = w.inserted.find((i) => i.table === "sales_invoices")!.row.buyer_snapshot;
+    assert(!("delivery" in buyer), "buyer_snapshot no debe tener la clave delivery");
+  }
+});
+
+Deno.test("ningún snapshot del flujo por defecto contiene cac:Delivery (solo delivery-override__*)", async () => {
+  const dir = new URL("./snapshots/", import.meta.url);
+  let n = 0;
+  for await (const e of Deno.readDir(dir)) {
+    if (!e.name.endsWith(".xml")) continue;
+    n++;
+    const txt = await Deno.readTextFile(new URL(e.name, dir));
+    assertEquals(txt.includes("cac:Delivery"), e.name.startsWith("delivery-override__"), e.name);
+  }
+  assert(n >= 16);
 });

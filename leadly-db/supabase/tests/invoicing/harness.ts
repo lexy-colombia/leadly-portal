@@ -145,7 +145,7 @@ export interface BuiltInvoiceInput {
   invalidRate: string | null;
 }
 
-export function invoiceFixtureToInput(fx: InvoiceFixture, technicalKeyOverride?: string, pinOverride?: string): BuiltInvoiceInput {
+export function invoiceFixtureToInput(fx: InvoiceFixture, technicalKeyOverride?: string, pinOverride?: string, emitDelivery?: boolean): BuiltInvoiceInput {
   const now = new Date(fx.issuedAtIso);
   const { issueDate, issueTime } = colombiaIssueMoment(now);
   const lines: InvoiceXmlLine[] = fx.items.map((item, idx) => ({
@@ -185,7 +185,7 @@ export function invoiceFixtureToInput(fx: InvoiceFixture, technicalKeyOverride?:
     // harness tenía una copia que no pasaba organizationType / taxSchemeCode /
     // electronicMail.
     buyer: mapInvoiceBuyer(buyer),
-    delivery: mapInvoiceDelivery(buyer),
+    delivery: mapInvoiceDelivery(buyer, emitDelivery),
     lines,
     withholdings: [],
     resolution: {

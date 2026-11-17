@@ -28,6 +28,20 @@
  * No toca nada que entre al CUFE ni a los totales: es solo estructura. */
 import { PLACEHOLDER_RE } from "../orders/fulfillmentAndBilling.ts";
 
+/** INTERRUPTOR GENERAL (decisión del usuario, 2026-11): la factura NO lleva
+ * `cac:Delivery` en ningún caso. Con `false`:
+ *  - `evaluateInvoiceDelivery` devuelve siempre "omitir" (sin delivery y sin
+ *    faltantes), así que `queueInvoiceGeneration` no arma
+ *    `buyer_snapshot.delivery`, no consulta el catálogo para eso y no agrega
+ *    ningún faltante por entrega;
+ *  - `mapInvoiceDelivery` ignora un `buyer_snapshot.delivery` ya guardado por
+ *    una ronda anterior, y `buildInvoiceXml` nunca recibe `delivery`;
+ *  - la regla de bloqueo (`REQUIRE_DANE_FOR_DELIVERY`) queda INERTE: código
+ *    latente, listo para reactivarse.
+ * Para volver a emitir: cambiar esta línea a `true` (y redesplegar). Las
+ * pruebas ejercitan la lógica con el override explícito `emit: true`. */
+export const EMIT_DELIVERY_IN_XML = false;
+
 /** Faltante que ve el usuario cuando el destino no tiene DIVIPOLA completo. */
 export const DELIVERY_DIVIPOLA_MISSING = "departamento y municipio de entrega";
 /** Faltante cuando ni siquiera hay una línea de dirección utilizable. */
@@ -61,6 +75,8 @@ export interface EvaluateInvoiceDeliveryInput {
    * compatibles (municipio pertenece al departamento); null si no. */
   divipola: { cityName: string; departmentName: string } | null;
   requireDane: boolean;
+  /** Override (pruebas): por defecto `EMIT_DELIVERY_IN_XML`. */
+  emit?: boolean;
 }
 
 export interface EvaluateInvoiceDeliveryResult {
@@ -107,6 +123,7 @@ export function deliveryDivipolaCodes(shippingSnapshot: Record<string, unknown> 
 }
 
 export function evaluateInvoiceDelivery(input: EvaluateInvoiceDeliveryInput): EvaluateInvoiceDeliveryResult {
+  if (!(input.emit ?? EMIT_DELIVERY_IN_XML)) return { delivery: null, missing: [] };
   if (input.fulfillmentMethod !== "delivery") return { delivery: null, missing: [] };
 
   const snap = input.shippingSnapshot ?? null;
