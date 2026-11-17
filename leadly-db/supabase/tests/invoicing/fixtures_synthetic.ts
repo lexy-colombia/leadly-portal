@@ -170,20 +170,6 @@ export const SYNTHETIC_INVOICES: InvoiceFixture[] = [
     buyer: BUYER_EXTRANJERO,
     items: [item("Producto exportado", 1, 50000, null, 0)],
   }),
-  // cac:Delivery (Res. 227/2025 num. 3.2: adquirente SIN NIT en domicilio) y
-  // opcional con NIT (3.1). Entre AccountingCustomerParty y PaymentMeans.
-  inv("entrega-cedula-divipola", {
-    invoiceNumber: 111,
-    issuedAtIso: "2026-11-12T16:00:00Z",
-    buyer: { ...BUYER_PERSONA_NATURAL, delivery: DELIVERY_MEDELLIN },
-    items: [item("Producto a domicilio", 2, 11900, "01", 19, { sku: "P-2" })],
-  }),
-  inv("entrega-nit-divipola", {
-    invoiceNumber: 112,
-    issuedAtIso: "2026-11-12T17:00:00Z",
-    buyer: { ...BUYER_EMPRESA_NIT, delivery: DELIVERY_MEDELLIN },
-    items: [item("Servicio a domicilio", 1, 119000, "01", 19)],
-  }),
   inv("perfil-consumidor-final-correo", {
     invoiceNumber: 110,
     issuedAtIso: "2026-11-02T19:00:00Z",
@@ -226,6 +212,27 @@ export const SYNTHETIC_INVOICES: InvoiceFixture[] = [
     issuedAtIso: "2026-09-09T14:45:30Z",
     paymentMethod: "credito",
     items: [item("Item decimal", 3, 3333.33, "01", 19), item("Item B", 7, 1234.5, "01", 0)],
+  }),
+];
+
+/** Fixtures de cac:Delivery: SOLO se ejercitan con el override explícito
+ * `emitDelivery: true` (EMIT_DELIVERY_IN_XML está apagado: la factura no lleva
+ * Delivery en el flujo por defecto). Sus snapshots viven aparte
+ * (`delivery-override__*.xml`) y no forman parte de la paridad por defecto. */
+export const DELIVERY_OVERRIDE_INVOICES: InvoiceFixture[] = [
+  // cac:Delivery (Res. 227/2025 num. 3.2: adquirente SIN NIT en domicilio) y
+  // opcional con NIT (3.1). Entre AccountingCustomerParty y PaymentMeans.
+  inv("entrega-cedula-divipola", {
+    invoiceNumber: 111,
+    issuedAtIso: "2026-11-12T16:00:00Z",
+    buyer: { ...BUYER_PERSONA_NATURAL, delivery: DELIVERY_MEDELLIN },
+    items: [item("Producto a domicilio", 2, 11900, "01", 19, { sku: "P-2" })],
+  }),
+  inv("entrega-nit-divipola", {
+    invoiceNumber: 112,
+    issuedAtIso: "2026-11-12T17:00:00Z",
+    buyer: { ...BUYER_EMPRESA_NIT, delivery: DELIVERY_MEDELLIN },
+    items: [item("Servicio a domicilio", 1, 119000, "01", 19)],
   }),
 ];
 
