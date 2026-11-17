@@ -11,6 +11,7 @@ Todos los cambios notables de Leadly se documentan en este archivo. Formato basa
 - **«Facturar a» en Órdenes y POS.** Cada venta (también cada cobro de una cuenta dividida) puede facturarse a un perfil distinto del cliente sin cambiar el cliente de la venta ni su crédito. Para Consumidor Final el correo para enviar la factura es opcional (si se deja vacío se entrega la representación impresa) y no se guarda en su ficha.
 - **Modalidad de entrega en Órdenes**: domicilio, retiro o consumo en sitio; solo el domicilio lleva dirección. Los pedidos confirmados permiten corregir el destino con un motivo (permiso `sales.correct_shipping`).
 - **Destino de un solo uso** en Órdenes: «Usar en este pedido» (no entra a las direcciones del cliente) o «Guardar también en el cliente»; con país y, para Colombia, departamento y municipio con código DANE. Se puede cambiar o descartar, y en un pedido confirmado se corrige con motivo.
+- El correo es obligatorio (y con formato válido) al crear o editar datos de facturación de un cliente, también en la tienda; para Consumidor Final sigue siendo opcional. Un perfil antiguo sin correo se puede seguir eligiendo (se avisa).
 - **Tienda**: opción «Necesito factura» con datos fiscales propios; ya no se pide dirección de facturación.
 
 ### Changed

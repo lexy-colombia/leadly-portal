@@ -100,8 +100,10 @@ export function billingProfileMissing(p: BillingProfileRow, email: string | null
       if (nit[2] && Number(nit[2]) !== computeNitCheckDigit(nit[1])) missing.push("dígito de verificación válido");
     }
   }
-  if (!email) missing.push("correo de facturación");
-  else if (!EMAIL_RE.test(email)) missing.push("correo de facturación válido");
+  // El correo es OPCIONAL en el servidor (la DIAN no lo exige: FAK55 0..1; sin
+  // correo no se emite cac:Contact). La captura obligatoria es del frontend.
+  // Si viene, debe tener formato válido.
+  if (email && !EMAIL_RE.test(email)) missing.push("correo de facturación válido");
   if (!p.tax_level_code) missing.push("responsabilidad tributaria");
   const address = profileAddress(p);
   if (address) {

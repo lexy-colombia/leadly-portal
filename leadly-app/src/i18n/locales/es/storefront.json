@@ -102,5 +102,6 @@
   "storefront.cart.invoiceDocTypes.22": "Cédula de extranjería",
   "storefront.cart.invoiceDocTypes.31": "NIT",
   "storefront.cart.invoiceDocTypes.41": "Pasaporte",
-  "storefront.cart.invoiceDocTypes.42": "Documento de identificación extranjero"
+  "storefront.cart.invoiceDocTypes.42": "Documento de identificación extranjero",
+  "storefront.cart.invoiceEmailInvalid": "Escribe un correo válido."
 }

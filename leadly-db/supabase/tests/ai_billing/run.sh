@@ -17,7 +17,8 @@ mut M2-gate-siempre-exige-factura "$M" 's/if (input.invoiceRequested) {/if (true
 mut M3-sin-eleccion-por-option "$M" 's/option !== null ? items.find/false ? items.find/' MODULE_PATH; m3=$?
 mut M4-documento-sin-enmascarar "$M" 's/return digits.length <= 4 ? "\*\*\*\*" : `\*\*\*\*${digits.slice(-3)}`;/return digits;/' MODULE_PATH; m4=$?
 mut M6-solo-nombre-exacto "$M" 's/isSubset(wanted, baseTokens(c.name))/false/' MODULE_PATH; m6=$?
+mut M7-sin-exigir-correo "$M" 's/return \[...base, ...captureEmailMissing(row.email)\];/return base;/' MODULE_PATH; m7=$?
 mut M5-vuelve-is_billing "$FN/whatsapp-ai-tools/index.ts" 's/^const CATALOG_SEARCH_LIMIT = 15;/const CATALOG_SEARCH_LIMIT = 15; const x = { is_billing: true };/' INDEX_PATH; m5=$?
-echo "exit real=$real m1=$m1 m2=$m2 m3=$m3 m4=$m4 m5=$m5 m6=$m6"
-if [ "$real" -eq 0 ] && [ $m1 -ne 0 ] && [ $m2 -ne 0 ] && [ $m3 -ne 0 ] && [ $m4 -ne 0 ] && [ $m5 -ne 0 ] && [ $m6 -ne 0 ]; then echo "RESULTADO OK"; exit 0; fi
+echo "exit real=$real m1=$m1 m2=$m2 m3=$m3 m4=$m4 m5=$m5 m6=$m6 m7=$m7"
+if [ "$real" -eq 0 ] && [ $m1 -ne 0 ] && [ $m2 -ne 0 ] && [ $m3 -ne 0 ] && [ $m4 -ne 0 ] && [ $m5 -ne 0 ] && [ $m6 -ne 0 ] && [ $m7 -ne 0 ]; then echo "RESULTADO OK"; exit 0; fi
 echo "RESULTADO FALLA"; exit 1

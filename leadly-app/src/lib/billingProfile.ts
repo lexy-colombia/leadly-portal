@@ -15,8 +15,6 @@ export type BillingMissingKey =
   | 'documentNumber'
   | 'validNit'
   | 'validCheckDigit'
-  | 'email'
-  | 'validEmail'
   | 'taxLevel'
   | 'addressLine'
   | 'country'
@@ -39,6 +37,19 @@ export function nitCheckDigit(nit: string): number {
   return remainder <= 1 ? remainder : 11 - remainder
 }
 
+/** Formato de correo del formulario de perfiles (única regla de campo que el
+ * frontend aplica a propósito, por decisión del usuario: el servidor ya no
+ * exige correo a compradores con nombre). */
+export function isValidProfileEmail(email: string | null | undefined): boolean {
+  return EMAIL_RE.test((email ?? '').trim())
+}
+
+/** Perfil guardado sin correo (p. ej. uno antiguo): solo informativo en los
+ * selectores, no impide elegirlo ni emitir. */
+export function profileHasNoEmail(p: { email: string | null }): boolean {
+  return !(p.email ?? '').trim()
+}
+
 export function billingProfileMissingKeys(p: FiscalFields): BillingMissingKey[] {
   const missing: BillingMissingKey[] = []
   const documentNumber = p.document_number?.trim() || null
@@ -50,9 +61,6 @@ export function billingProfileMissingKeys(p: FiscalFields): BillingMissingKey[] 
     if (!nit) missing.push('validNit')
     else if (nit[2] && Number(nit[2]) !== nitCheckDigit(nit[1])) missing.push('validCheckDigit')
   }
-  const email = p.email?.trim() || null
-  if (!email) missing.push('email')
-  else if (!EMAIL_RE.test(email)) missing.push('validEmail')
   if (!p.tax_level_code) missing.push('taxLevel')
   const hasAddress = !!(p.address_line1?.trim() || p.country || p.city?.trim())
   if (hasAddress) {

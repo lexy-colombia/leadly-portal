@@ -106,8 +106,9 @@ begin
 
   perform t.q('e3', 'c_noemail', 'pos', 'on_site');
   r := t.confirm('e3'); i := t.inv('e3');
-  perform t.ok('E3 perfil sin correo: blocked_missing_buyer_data con "correo de facturación"',
-    i.status = 'blocked_missing_buyer_data' and i.status_detail like '%correo de facturación%', i.status || ' ' || coalesce(i.status_detail, ''));
+  perform t.ok('E3 perfil CON NOMBRE sin correo: el correo es opcional => pending, snapshot sin correo (sin tomarlo de clients)',
+    i.status = 'pending' and i.status_detail is null and i.buyer_snapshot ->> 'email' is null and i.buyer_snapshot ->> 'full_name' is not null,
+    i.status || ' ' || coalesce(i.status_detail, '') || ' ' || coalesce(i.buyer_snapshot::text, ''));
 
   -- B1/B2: el walk-in NO usa respaldo desde clients. Aunque la ficha compartida tenga correo,
   -- el snapshot NO lo copia. El correo del Consumidor Final es OPCIONAL (Anexo 1.9 FAK55):

@@ -81,12 +81,12 @@ const tests: [string, () => void | Promise<void>][] = [
 
   // ---------------- saved_profiles
   ["buildSavedProfiles: documento enmascarado, completo/incompleto, option, selected", () => {
-    const rows = [completeProfile(), completeProfile({ id: "p2", label: "Empresa", document_type_code: "31", document_number: "900123456", legal_name: "ACME SAS", email: null, is_default: false })];
+    const rows = [completeProfile(), completeProfile({ id: "p2", label: "Empresa", document_type_code: "31", document_number: "900123456", legal_name: null, email: "acme@x.co", is_default: false })];
     const r = m.buildSavedProfiles(rows, "p2");
     eq(r.map((p: { option: number }) => p.option), [1, 2], "options");
     eq(r[0].document, "****050", "mask");
     eq(r[0].complete, true, "p1 completo");
-    eq(r[1].complete, false, "p2 incompleto"); assert(r[1].missing.includes("correo de facturación"), "falta correo");
+    eq(r[1].complete, false, "p2 incompleto"); assert(r[1].missing.includes("nombre legal o razón social"), "falta nombre");
     eq([r[0].selected, r[1].selected], [false, true], "selected");
     eq(r[1].document_type, "NIT", "tipo");
     assert(!JSON.stringify(r).includes("1020304050") && !JSON.stringify(r).includes("900123456"), "documento completo nunca aparece");
@@ -118,10 +118,11 @@ const tests: [string, () => void | Promise<void>][] = [
       eq(a, b, JSON.stringify(p));
       eq(a, billingProfileMissing(p).missing, "billingProfileMissing");
     }
-    assert(m.profileMissing(completeProfile({ email: null })).includes("correo de facturación"), "correo obligatorio");
+    assert(m.profileMissing(completeProfile({ email: "mal" })).includes("correo de facturación válido"), "correo inválido sigue marcado");
+    eq(m.profileMissing(completeProfile({ email: null })), [], "el servidor ya no exige correo (S2): la exigencia es de la captura");
   }],
   ["profileMissing de un perfil NUEVO sin datos pide todo lo obligatorio", () => {
-    const miss = m.profileMissing({});
+    const miss = m.newProfileMissing({});
     for (const f of ["nombre legal o razón social", "tipo de documento del cliente", "número de documento del cliente", "correo de facturación"]) assert(miss.includes(f), f);
   }],
   ["pickProfileFields: mapeo de tipo de documento, organización y correo en minúsculas; solo lo enviado", () => {
@@ -170,10 +171,10 @@ const tests: [string, () => void | Promise<void>][] = [
     const ev2 = evaluateFulfillmentAndBilling({
       tenantId: "t1", contactId: "c1", fulfillmentMethod: "delivery",
       shippingAddressIdGiven: "a1", shippingAddress: { id: "a1", tenant_id: "t1", contact_id: "c1", line1: "Calle 1 # 2-3" },
-      billingProfileIdGiven: "p1", billingProfile: completeProfile({ email: null }), invoiceRequested: true, client: { id: "c1", is_walk_in: false },
+      billingProfileIdGiven: "p1", billingProfile: completeProfile({ legal_name: null }), invoiceRequested: true, client: { id: "c1", is_walk_in: false },
     });
     const g2 = m.evaluateConfirmGate({ fulfillmentMethod: "delivery", shippingAddressId: "a1", invoiceRequested: true, billingProfileId: "p1", billingMissing: ev2.missingBilling });
-    eq(g2, { reason: "billing_profile_required", missing: ["correo de facturación"] }, "faltante de S2");
+    eq(g2, { reason: "billing_profile_required", missing: ["nombre legal o razón social"] }, "faltante de S2");
   }],
 
   // ---------------- DIVIPOLA
@@ -323,6 +324,20 @@ const tests: [string, () => void | Promise<void>][] = [
     const k = src.indexOf('case "list_billing_profiles"');
     assert(/assertNotWalkIn/.test(src.slice(k, k + 300)), "list_billing_profiles rechaza walk-in");
     assert(/tax_regime_note/.test(src), "aviso de régimen en perfiles de empresa");
+  }],
+  ["correo obligatorio al CREAR un perfil (comprobación propia de la IA): falta / inválido / válido; no depende de la lista del servidor", () => {
+    eq(m.captureEmailMissing(null), ["correo de facturación"], "null"); eq(m.captureEmailMissing("  "), ["correo de facturación"], "vacío");
+    eq(m.captureEmailMissing("no-es-correo"), ["correo de facturación válido"], "inválido"); eq(m.captureEmailMissing("a@x.co"), [], "válido");
+    const sinCorreo = completeProfile({ email: null });
+    assert(m.newProfileMissing(sinCorreo).includes("correo de facturación"), "perfil nuevo sin correo -> falta");
+    eq(m.newProfileMissing(completeProfile({ email: "mal" })), ["correo de facturación válido"], "inválido sin duplicar");
+    eq(m.newProfileMissing(completeProfile()), [], "completo con correo");
+    eq(m.newProfileMissing(completeProfile({ email: null, legal_name: null })).filter((x: string) => /correo/.test(x)).length, 1, "sin duplicar");
+  }],
+  ["código: perfil nuevo usa newProfileMissing con hint de correo; el existente no exige correo si no se toca", async () => {
+    const src = await Deno.readTextFile(indexPath);
+    assert(/existing \? profileMissing\(merged\) : newProfileMissing\(merged\)/.test(src), "nuevo exige correo, existente no");
+    assert(/EMAIL_HINT/.test(src) && /captureEmailMissing\(fields\.email\)/.test(src), "hint y validación al tocar el correo");
   }],
   ["sin gate de factura sin pedirla: el gate solo se evalúa con invoiceRequested", async () => {
     const src = await Deno.readTextFile(indexPath);

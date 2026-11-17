@@ -27,13 +27,14 @@ test('perfil completo: nada falta', () => {
 
 test('perfil vacío: lista lo mismo que el servidor', () => {
   const m = bp.billingProfileMissingKeys({ legal_name: null, document_type_code: null, document_number: null, email: null, tax_level_code: '', address_line1: null, country: null, city: null, state_code: null, city_code: null })
-  assert.deepEqual(m, ['legalName', 'documentType', 'documentNumber', 'email', 'taxLevel'])
+  assert.deepEqual(m, ['legalName', 'documentType', 'documentNumber', 'taxLevel'])
 })
 
-test('NIT con DV equivocado, NIT mal formado y correo inválido', () => {
+test('NIT con DV equivocado y NIT mal formado; el correo ya no es faltante de emisión', () => {
   assert.deepEqual(bp.billingProfileMissingKeys({ ...complete, document_number: '800197268-9' }), ['validCheckDigit'])
   assert.deepEqual(bp.billingProfileMissingKeys({ ...complete, document_number: 'abc' }), ['validNit'])
-  assert.deepEqual(bp.billingProfileMissingKeys({ ...complete, email: 'sin-arroba' }), ['validEmail'])
+  assert.deepEqual(bp.billingProfileMissingKeys({ ...complete, email: null }), [])
+  assert.deepEqual(bp.billingProfileMissingKeys({ ...complete, email: 'sin-arroba' }), [])
 })
 
 test('domicilio: sin dirección no exige nada; con dirección CO exige DANE; país inválido', () => {
@@ -98,4 +99,15 @@ test('destino puntual: igualdad y texto', () => {
   assert.equal(sd.sameDestination({ line1: 'a ' }, { line1: 'a' }), true)
   assert.equal(sd.sameDestination({ line1: 'a' }, null), false)
   assert.equal(sd.formatDestination({ line1: 'Cra 5', city: 'Cali', state_province: 'Valle' }), 'Cra 5, Cali, Valle')
+})
+
+test('correo del formulario de perfiles: obligatorio y con formato válido; perfil viejo sin correo solo se avisa', () => {
+  assert.equal(bp.isValidProfileEmail('a@b.co'), true)
+  assert.equal(bp.isValidProfileEmail(' a@b.co '), true)
+  assert.equal(bp.isValidProfileEmail(''), false)
+  assert.equal(bp.isValidProfileEmail(null), false)
+  assert.equal(bp.isValidProfileEmail('sin-arroba'), false)
+  assert.equal(bp.profileHasNoEmail({ email: null }), true)
+  assert.equal(bp.profileHasNoEmail({ email: '  ' }), true)
+  assert.equal(bp.profileHasNoEmail({ email: 'a@b.co' }), false)
 })

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { createBillingProfile, updateBillingProfile, type BillingProfileInput } from '../../../lib/api/billingProfiles'
-import { billingProfileMissingKeys, isUniqueViolation, organizationTypeForDocument } from '../../../lib/billingProfile'
+import { billingProfileMissingKeys, isUniqueViolation, isValidProfileEmail, organizationTypeForDocument } from '../../../lib/billingProfile'
 import { listDianDocumentTypes } from '../../../lib/api/tenantDianProfile'
 import type { ClientBillingProfile, DianDocumentType } from '../../../types/domain'
+import { FieldError } from '@/components/atoms'
 import { Drawer } from '@/components/organisms'
 import { CountrySelect, GeoSelect } from '@/components/molecules'
 import { Button } from '@/components/ui/button'
@@ -74,6 +75,7 @@ export function BillingProfileDrawer({
   const [cityName, setCityName] = useState('')
   // Tipo de persona: null = deducido del documento (editable).
   const [organizationType, setOrganizationType] = useState<'1' | '2' | null>(null)
+  const [touched, setTouched] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
@@ -105,9 +107,11 @@ export function BillingProfileDrawer({
     setCityName(addr?.city ?? '')
     // Al editar se respeta lo guardado; en uno nuevo se deduce del documento.
     setOrganizationType(src ? src.organization_type : null)
+    setTouched(false)
     setFormError(null)
   }, [open, profile, seed])
 
+  const emailError = touched && !isValidProfileEmail(email) ? t(email.trim() ? 'contacts.billingProfiles.errors.emailInvalid' : 'contacts.billingProfiles.errors.emailRequired') : undefined
   const selectedType = documentTypes.find((d) => d.code === documentTypeCode)
   const selectedLevels = taxLevel.split(';')
   const draftMissing = useMemo(
@@ -134,7 +138,10 @@ export function BillingProfileDrawer({
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
+    setTouched(true)
     setFormError(null)
+    // Campo requerido del formulario (único chequeo del cliente): correo válido.
+    if (!isValidProfileEmail(email)) return
     setSubmitting(true)
     try {
       const hasAddress = !!(line1.trim() || country || cityName.trim())
@@ -215,8 +222,9 @@ export function BillingProfileDrawer({
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <Label htmlFor="bp-email">{t('contacts.billing.email')}</Label>
-            <Input id="bp-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
+            <Label htmlFor="bp-email">{t('contacts.billingProfiles.fields.emailRequired')}</Label>
+            <Input id="bp-email" type="email" value={email} aria-invalid={!!emailError} onChange={(e) => setEmail(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
+            <FieldError message={emailError} />
           </div>
           <div>
             <Label htmlFor="bp-phone">{t('contacts.billingProfiles.fields.phone')}</Label>
@@ -316,7 +324,7 @@ export function BillingProfileDrawer({
         {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError}</p>}
 
         <div className="flex gap-2 border-t border-brand-100 pt-4">
-          <Button type="submit" disabled={submitting}>{submitting ? t('common.actions.saving') : t('common.actions.save')}</Button>
+          <Button type="submit" disabled={submitting || !isValidProfileEmail(email)}>{submitting ? t('common.actions.saving') : t('common.actions.save')}</Button>
           <Button type="button" variant="ghost" onClick={onClose}>{t('common.actions.cancel')}</Button>
         </div>
       </form>

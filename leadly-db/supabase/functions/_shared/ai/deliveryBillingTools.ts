@@ -282,6 +282,27 @@ export function profileMissing(row: Partial<BillingProfileRow> & Record<string, 
   return billingProfileMissing(full).missing;
 }
 
+const CAPTURE_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** El CORREO es obligatorio al CAPTURAR un perfil por WhatsApp (la IA es un
+ * canal de captura), aunque el servidor ya no lo exija al emitir a un comprador
+ * con nombre. Comprobación PROPIA de la herramienta: no depende de la lista de
+ * faltantes de `buildFiscalBuyer`. */
+export function captureEmailMissing(email: unknown): string[] {
+  const v = typeof email === "string" ? email.trim() : "";
+  if (!v) return ["correo de facturación"];
+  return CAPTURE_EMAIL_RE.test(v) ? [] : ["correo de facturación válido"];
+}
+
+/** Faltantes para GUARDAR un perfil nuevo desde el chat: los del servidor más el
+ * correo (sin duplicar si el servidor también lo reporta). */
+export function newProfileMissing(row: Partial<BillingProfileRow> & Record<string, unknown>): string[] {
+  const base = profileMissing(row).filter((m) => !/^correo de facturación/.test(m));
+  return [...base, ...captureEmailMissing(row.email)];
+}
+
+export const EMAIL_HINT = "Pídele al cliente el correo electrónico donde enviar la factura (es obligatorio para guardar el perfil) y vuelve a llamar con todos los datos.";
+
 export interface ProfileRowForSummary extends BillingProfileRow {
   label: string | null;
 }

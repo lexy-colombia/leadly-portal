@@ -73,7 +73,6 @@ Deno.test("perfil incompleto: faltantes exactos, sin respaldo desde clients", ()
   assertEquals(incomplete.missing, [
     "nombre legal o razón social",
     "número de documento del cliente",
-    "correo de facturación",
     "departamento y municipio de la dirección fiscal",
   ]);
   // Sin perfil y no walk-in: se pide el perfil, no se inventa nada desde clients.
@@ -104,7 +103,8 @@ Deno.test("Consumidor Final: documento 222222222222; correo OPCIONAL por comprob
   assertEquals(buildFiscalBuyer({ client: walkIn, profile: null, invoiceEmail: "mal" }).missing, ["correo de facturación válido"]);
   // El correo del comprobante NO se aplica a un cliente con perfil.
   const conPerfil = buildFiscalBuyer({ client, profile: profile({ email: null }), invoiceEmail: "otro@example.com" });
-  assertEquals(conPerfil.missing, ["correo de facturación"]);
+  assertEquals(conPerfil.missing, []);
+  assertEquals(conPerfil.buyer.email, null);
 });
 
 Deno.test("B1: el walk-in IGNORA is_default y cualquier perfil (no se factura a un tercero)", () => {
@@ -178,6 +178,21 @@ Deno.test("XML: Consumidor Final sin correo NO emite cac:Contact del adquirente;
   const { buyer } = buildFiscalBuyer({ client: walkIn, profile: null });
   const { input } = invoiceFixtureToInput(sin);
   input.buyer = mapInvoiceBuyer(buyer);
+  const { xml } = await buildInvoiceXml(input);
+  assertEquals(parseXml(xml).getElementsByTagName("cac:AccountingCustomerParty")[0].getElementsByTagName("cac:Contact").length, 0);
+});
+
+Deno.test("Ronda 5: perfil CON NOMBRE sin correo no bloquea; con correo inválido sí; sin Contact en el XML", async () => {
+  const sin = buildFiscalBuyer({ client, profile: profile({ email: null }) });
+  assertEquals(sin.missing, []);
+  assertEquals(sin.buyer.email, null);
+  assertEquals(sin.buyer.email_source, null);
+  assertEquals(buildFiscalBuyer({ client, profile: profile({ email: "   " }) }).missing, []);
+  assertEquals(buildFiscalBuyer({ client, profile: profile({ email: "sin-arroba" }) }).missing, ["correo de facturación válido"]);
+  // el resto de faltantes no cambia
+  assertEquals(buildFiscalBuyer({ client, profile: profile({ email: null, legal_name: null, document_number: null }) }).missing, ["nombre legal o razón social", "número de documento del cliente"]);
+  const { input } = invoiceFixtureToInput(SYNTHETIC_INVOICES[0]);
+  input.buyer = mapInvoiceBuyer(sin.buyer);
   const { xml } = await buildInvoiceXml(input);
   assertEquals(parseXml(xml).getElementsByTagName("cac:AccountingCustomerParty")[0].getElementsByTagName("cac:Contact").length, 0);
 });

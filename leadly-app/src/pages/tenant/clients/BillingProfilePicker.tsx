@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { listBillingProfilesForPicker } from '../../../lib/api/billingProfiles'
-import { billingProfileMissingKeys } from '../../../lib/billingProfile'
+import { billingProfileMissingKeys, profileHasNoEmail } from '../../../lib/billingProfile'
 import type { ClientBillingProfile } from '../../../types/domain'
 import { usePermission } from '../../../contexts/AuthContext'
 import { useLanguage } from '../../../contexts/LanguageContext'
@@ -126,6 +126,7 @@ export function BillingProfilePicker({
         </div>
       )}
       {unavailable && <p className="mt-1 text-xs text-red-700">{t('billingTo.unavailable')}</p>}
+      {effective && profileHasNoEmail(effective) && <p className="mt-1 text-[11px] text-amber-700">{t('billingTo.noEmail')}</p>}
       {lockedHint && <p className="mt-1 text-[11px] text-brand-400">{lockedHint}</p>}
       {rows && total > rows.length && <p className="mt-1 text-[11px] text-brand-400">{t('billingTo.moreProfiles', { count: total })}</p>}
       {clientId && rows && (

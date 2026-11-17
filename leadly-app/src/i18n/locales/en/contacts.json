@@ -198,7 +198,7 @@
   "contacts.billingProfiles.fields.labelPlaceholder": "Main, Company...",
   "contacts.billingProfiles.fields.phone": "Phone (optional)",
   "contacts.billingProfiles.fields.taxNone": "Not set",
-  "contacts.billingProfiles.emailHint": "A valid email is needed to issue the invoice; it is not required to save.",
+  "contacts.billingProfiles.emailHint": "The email is required to save the billing details.",
   "contacts.billingProfiles.fiscalAddress": "Fiscal address",
   "contacts.billingProfiles.aria.edit": "Edit billing details",
   "contacts.billingProfiles.aria.delete": "Delete billing details",
@@ -215,8 +215,6 @@
   "contacts.billingProfiles.missing.documentNumber": "Document number",
   "contacts.billingProfiles.missing.validNit": "Valid NIT",
   "contacts.billingProfiles.missing.validCheckDigit": "Valid check digit",
-  "contacts.billingProfiles.missing.email": "Billing email",
-  "contacts.billingProfiles.missing.validEmail": "Valid billing email",
   "contacts.billingProfiles.missing.taxLevel": "Tax responsibility",
   "contacts.billingProfiles.missing.addressLine": "Fiscal address",
   "contacts.billingProfiles.missing.country": "Country of the fiscal address",
@@ -227,5 +225,9 @@
   "contacts.billingProfiles.deleteConfirm.defaultDescription": "This is the default profile. If you delete it, the client will have no default profile until you mark another. Continue?",
   "contacts.billingProfiles.fields.organizationType": "Person type",
   "contacts.billingProfiles.fields.orgLegal": "Legal entity",
-  "contacts.billingProfiles.fields.orgNatural": "Natural person"
+  "contacts.billingProfiles.fields.orgNatural": "Natural person",
+  "billingTo.noEmail": "This profile has no email; add one to be able to email the invoice.",
+  "contacts.billingProfiles.fields.emailRequired": "Billing email (required)",
+  "contacts.billingProfiles.errors.emailRequired": "The email is required.",
+  "contacts.billingProfiles.errors.emailInvalid": "Enter a valid email."
 }

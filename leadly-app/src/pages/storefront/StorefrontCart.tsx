@@ -42,6 +42,7 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { isValidProfileEmail } from '../../lib/billingProfile'
 import { GeoSelect, PhoneInput, type GeoValue } from '@/components/molecules'
 import { StorefrontImage } from '@/components/storefront/StorefrontImage'
 
@@ -352,7 +353,7 @@ export function StorefrontCart() {
   const shippingValid = usingNewShipping ? !!shippingLine1 && !!shippingCity : true
   const usingSavedProfile = wantsInvoice && selectedProfileId !== null && billingProfiles.some((p) => p.id === selectedProfileId)
   // Solo se exige lo mínimo para armar la solicitud; el servidor valida el resto (422).
-  const invoiceValid = !wantsInvoice || usingSavedProfile || (!!invoiceDocNumber && !!invoiceEmail)
+  const invoiceValid = !wantsInvoice || usingSavedProfile || (!!invoiceDocNumber && isValidProfileEmail(invoiceEmail))
 
   const redirectUrl = `${window.location.origin}/tienda/${slug}/carrito?payment=return`
 
@@ -696,7 +697,8 @@ export function StorefrontCart() {
                     </div>
                     <div className="space-y-1.5">
                       <Label>{t('storefront.cart.invoiceEmail')}</Label>
-                      <Input type="email" value={invoiceEmail} onChange={(e) => setInvoiceEmail(e.target.value)} />
+                      <Input type="email" value={invoiceEmail} aria-invalid={!!invoiceEmail && !isValidProfileEmail(invoiceEmail)} onChange={(e) => setInvoiceEmail(e.target.value)} />
+                      {!!invoiceEmail && !isValidProfileEmail(invoiceEmail) && <p className="text-xs text-destructive">{t('storefront.cart.invoiceEmailInvalid')}</p>}
                     </div>
                     <div className="space-y-1.5">
                       <Label>{t('storefront.cart.invoiceAddress')}</Label>

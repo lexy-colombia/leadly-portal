@@ -19,6 +19,9 @@ import {
   evaluateConfirmGate,
   pickProfileFields,
   profileMissing,
+  newProfileMissing,
+  captureEmailMissing,
+  EMAIL_HINT,
   redactBillingParameters,
   resolveDivipola,
   resolveReference,
@@ -2847,13 +2850,23 @@ async function saveBillingProfileForConversation(
     ...(existing ?? {}),
     ...fields,
   } as Partial<BillingProfileRow> & Record<string, unknown>;
-  const missing = profileMissing(merged);
+  // Perfil NUEVO: el correo es obligatorio (comprobación propia de la IA, canal de
+  // captura). Perfil EXISTENTE: no se exige si el cliente no lo toca; si manda un
+  // correo, tiene que ser válido.
+  const emailTouched = "email" in fields;
+  const missing = existing ? profileMissing(merged) : newProfileMissing(merged);
+  const emailProblem = existing && emailTouched ? captureEmailMissing(fields.email) : [];
+  if (emailProblem.length > 0) {
+    return { saved: false, missing: emailProblem, hint: EMAIL_HINT, message: "No se actualizó el perfil: el correo no es válido." };
+  }
 
   if (!existing && missing.length > 0) {
+    const emailMissing = missing.some((m) => /^correo de facturación/.test(m));
     return {
       saved: false,
       missing,
-      ...(geoHint ? { hint: geoHint } : {}),
+      ...(emailMissing ? { hint: EMAIL_HINT } : {}),
+      ...(geoHint && !emailMissing ? { hint: geoHint } : {}),
       message: "No se guardó el perfil: pídele al cliente lo que falta y vuelve a llamar esta herramienta con todos los datos.",
     };
   }

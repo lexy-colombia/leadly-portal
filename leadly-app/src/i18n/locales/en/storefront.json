@@ -102,5 +102,6 @@
   "storefront.cart.invoiceDocTypes.22": "Foreigner ID (CE)",
   "storefront.cart.invoiceDocTypes.31": "NIT",
   "storefront.cart.invoiceDocTypes.41": "Passport",
-  "storefront.cart.invoiceDocTypes.42": "Foreign identification document"
+  "storefront.cart.invoiceDocTypes.42": "Foreign identification document",
+  "storefront.cart.invoiceEmailInvalid": "Enter a valid email."
 }

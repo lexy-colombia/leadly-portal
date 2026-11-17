@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { StarIcon } from 'lucide-react'
 import { BILLING_PROFILES_PAGE_SIZE, deleteBillingProfile, listBillingProfilesPage, setDefaultBillingProfile } from '../../../lib/api/billingProfiles'
-import { billingProfileMissingKeys } from '../../../lib/billingProfile'
+import { billingProfileMissingKeys, profileHasNoEmail } from '../../../lib/billingProfile'
 import type { ClientBillingProfile } from '../../../types/domain'
 import { usePermission } from '../../../contexts/AuthContext'
 import { useLanguage } from '../../../contexts/LanguageContext'
@@ -136,6 +136,7 @@ export function ClientBillingProfilesPanel({
                   </div>
                 )}
               </div>
+              {profileHasNoEmail(p) && <p className="mt-1 text-[11px] text-amber-700">{t('billingTo.noEmail')}</p>}
               <div className="mt-2">
                 <BillingMissingList keys={billingProfileMissingKeys(p)} />
               </div>

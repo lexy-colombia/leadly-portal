@@ -198,7 +198,7 @@
   "contacts.billingProfiles.fields.labelPlaceholder": "Principal, Empresa...",
   "contacts.billingProfiles.fields.phone": "Teléfono (opcional)",
   "contacts.billingProfiles.fields.taxNone": "Sin definir",
-  "contacts.billingProfiles.emailHint": "Se necesita un correo válido para emitir la factura; no es obligatorio para guardar.",
+  "contacts.billingProfiles.emailHint": "El correo es obligatorio para guardar los datos de facturación.",
   "contacts.billingProfiles.fiscalAddress": "Domicilio fiscal",
   "contacts.billingProfiles.aria.edit": "Editar datos de facturación",
   "contacts.billingProfiles.aria.delete": "Eliminar datos de facturación",
@@ -215,8 +215,6 @@
   "contacts.billingProfiles.missing.documentNumber": "Número de documento",
   "contacts.billingProfiles.missing.validNit": "NIT válido",
   "contacts.billingProfiles.missing.validCheckDigit": "Dígito de verificación válido",
-  "contacts.billingProfiles.missing.email": "Correo de facturación",
-  "contacts.billingProfiles.missing.validEmail": "Correo de facturación válido",
   "contacts.billingProfiles.missing.taxLevel": "Responsabilidad tributaria",
   "contacts.billingProfiles.missing.addressLine": "Dirección fiscal",
   "contacts.billingProfiles.missing.country": "País de la dirección fiscal",
@@ -227,5 +225,9 @@
   "contacts.billingProfiles.deleteConfirm.defaultDescription": "Este es el perfil predeterminado. Si lo eliminas, el cliente quedará sin perfil predeterminado hasta que marques otro. ¿Continuar?",
   "contacts.billingProfiles.fields.organizationType": "Tipo de persona",
   "contacts.billingProfiles.fields.orgLegal": "Persona jurídica",
-  "contacts.billingProfiles.fields.orgNatural": "Persona natural"
+  "contacts.billingProfiles.fields.orgNatural": "Persona natural",
+  "billingTo.noEmail": "Este perfil no tiene correo; agrégalo para poder enviar la factura por correo.",
+  "contacts.billingProfiles.fields.emailRequired": "Correo de facturación (obligatorio)",
+  "contacts.billingProfiles.errors.emailRequired": "El correo es obligatorio.",
+  "contacts.billingProfiles.errors.emailInvalid": "Escribe un correo válido."
 }
