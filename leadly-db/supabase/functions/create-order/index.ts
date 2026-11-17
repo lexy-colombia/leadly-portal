@@ -81,6 +81,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { persistOrderItems, type ResolvedOrderItem } from "../_shared/orders/persistOrderItems.ts";
 import { findStockShortfalls } from "../_shared/orders/stockAvailability.ts";
+import { BILLING_PROFILE_MISMATCH_CODE, BILLING_PROFILE_MISMATCH_MESSAGE, billingProfileMismatch, describeOrderLinkError, normalizeShippingDestination, REQUIRE_DANE_FOR_DELIVERY, resolveFulfillmentAndBilling, type FulfillmentMethod } from "../_shared/orders/fulfillmentAndBilling.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 
 interface CreateOrderBody {
@@ -97,7 +98,21 @@ interface CreateOrderBody {
   // walk-in del tenant. Nunca se aplica sobre un pedido ya existente
   // (retry por checkout_token) -- el comprador de un pedido ya creado no
   // se puede cambiar después.
+  //
+  // @deprecated (feature perfiles de facturación): `buyer_contact_id` REEMPLAZA
+  // `sales_orders.contact_id`, y de ese contact_id cuelgan los cargos de
+  // crédito y el saldo a favor -- facturar "a otro" movía también la deuda.
+  // Con perfiles ya no hace falta: el cliente de la venta (contact_id) no
+  // cambia y "Facturar a" se expresa con `billing_profile_id`. Se mantiene
+  // funcionando SOLO como compatibilidad hasta que el frontend (S5) deje de
+  // enviarlo; no cambia el contact_id del pedido más de lo que ya hacía.
   buyer_contact_id?: string | null;
+  // "Facturar a" de ESTA venta (cada parte de una cuenta dividida es su propio
+  // pedido y su propia factura). undefined = el perfil guardado en la cuenta
+  // (carrito), si es del mismo cliente; null = sin perfil elegido. Debe ser un
+  // perfil vivo del cliente del pedido y del tenant. Solo se aplica al INSERT:
+  // en un reintento por checkout_token el pedido existente no se reescribe.
+  billing_profile_id?: string | null;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -140,7 +155,7 @@ Deno.serve(async (req) => {
   // esto viene null, igual que "no existe".
   const { data: cart } = await callerClient
     .from("carts")
-    .select("id, contact_id, opportunity_id, notes, valid_until, shipping_address_id, billing_address_id, shipping, origin, status, pos_point_id, label")
+    .select("id, contact_id, opportunity_id, notes, valid_until, shipping_address_id, shipping_snapshot, billing_address_id, billing_profile_id, fulfillment_method, shipping, origin, status, pos_point_id, label")
     .eq("id", body.cart_id)
     .maybeSingle();
   if (!cart) return json({ error: "Carrito no encontrado." }, 404);
@@ -215,12 +230,19 @@ Deno.serve(async (req) => {
   if (checkoutToken) {
     const { data: existingOrder, error: existingOrderError } = await adminClient
       .from("sales_orders")
-      .select("id, status")
+      .select("id, status, billing_profile_id")
       .eq("tenant_id", tenantId)
       .eq("checkout_token", checkoutToken)
       .maybeSingle();
     if (existingOrderError) return json({ error: existingOrderError.message }, 500);
     if (existingOrder) {
+      // Reintento de un cobro que ya creó el pedido: "Facturar a" quedó fijado
+      // al INSERT y no se reescribe. Si el cajero lo cambió después de fallar el
+      // cobro, la factura saldría al perfil ORIGINAL sin que lo sepa: se
+      // rechaza con un código estable, sin tocar nada.
+      if (billingProfileMismatch(body.billing_profile_id, existingOrder.billing_profile_id as string | null)) {
+        return json({ error: BILLING_PROFILE_MISMATCH_MESSAGE, code: BILLING_PROFILE_MISMATCH_CODE }, 409);
+      }
       orderId = existingOrder.id as string;
       alreadyConfirmed = existingOrder.status === "confirmada";
     }
@@ -243,6 +265,39 @@ Deno.serve(async (req) => {
       if (!buyer) return json({ error: "Cliente no encontrado." }, 404);
       resolvedContactId = buyer.id as string;
     }
+  }
+
+  // Campos de entrega/facturación del pedido nuevo (solo se calculan para un
+  // INSERT; en un reintento por token la fila existente se retoma tal cual).
+  // La dirección y el perfil del carrito pertenecen al cliente de la cuenta:
+  // si el comprador cambió (buyer_contact_id, deprecado), no se copian.
+  const sameContact = resolvedContactId === cart.contact_id;
+  const orderFulfillment: FulfillmentMethod = cart.origin === "pos" ? "on_site" : (cart.fulfillment_method as FulfillmentMethod) ?? "delivery";
+  const orderShippingAddressId: string | null = sameContact ? (cart.shipping_address_id ?? null) : null;
+  const orderBillingProfileId: string | null = body.billing_profile_id !== undefined ? body.billing_profile_id : sameContact ? (cart.billing_profile_id ?? null) : null;
+  let billingMissing: string[] = [];
+  if (!orderId) {
+    const links = await resolveFulfillmentAndBilling(adminClient, {
+      tenantId,
+      contactId: resolvedContactId,
+      fulfillmentMethod: orderFulfillment,
+      shippingAddressId: orderShippingAddressId,
+      shippingDestination: orderShippingAddressId ? null : normalizeShippingDestination(cart.shipping_snapshot),
+      billingProfileId: orderBillingProfileId,
+      // Elegir un perfil = se va a facturar a ese perfil. Solo informativo:
+      // un perfil incompleto NO bloquea la venta (la factura queda
+      // bloqueada con la misma lista, ver billing_missing en la respuesta).
+      invoiceRequested: !!orderBillingProfileId,
+      requireDane: REQUIRE_DANE_FOR_DELIVERY,
+      useDefaultDestination: !!body.confirm,
+    });
+    if (links.forbidden.length > 0) return json({ error: links.forbidden[0] }, 403);
+    // Un envío sin destino se rechaza ANTES de insertar nada (el trigger de
+    // confirmación lo rechazaría igual, pero dejaría una cotización huérfana).
+    if (body.confirm && links.missingDestination.length > 0) {
+      return json({ error: `Falta: ${links.missingDestination.join(", ")}.` }, 409);
+    }
+    billingMissing = links.missingBilling;
   }
 
   if (!orderId) {
@@ -271,8 +326,16 @@ Deno.serve(async (req) => {
         opportunity_id: cart.opportunity_id,
         notes: cart.notes,
         valid_until: cart.valid_until,
-        shipping_address_id: cart.shipping_address_id,
-        billing_address_id: cart.billing_address_id,
+        shipping_address_id: orderShippingAddressId,
+        // Destino de un solo uso del carrito (sin dirección de la libreta): se
+        // copia al pedido tal cual al INSERT; el guard de confirmación lo respeta.
+        shipping_snapshot: orderShippingAddressId ? null : (cart.shipping_snapshot ?? null),
+        // @deprecated: la dirección de facturación fue reemplazada por el
+        // perfil de facturación; se sigue copiando mientras quede código que
+        // la lea (SQL de transición de apply_sales_order_confirmed_effects).
+        billing_address_id: sameContact ? cart.billing_address_id : null,
+        billing_profile_id: orderBillingProfileId,
+        fulfillment_method: orderFulfillment,
         status: "cotizacion",
         subtotal: 0,
         discount_total: 0,
@@ -291,7 +354,10 @@ Deno.serve(async (req) => {
       })
       .select("id")
       .single();
-    if (insertError) return json({ error: insertError.message }, 500);
+    if (insertError) {
+      const linkErr = describeOrderLinkError(insertError);
+      return json({ error: linkErr?.message ?? insertError.message }, linkErr?.status ?? 500);
+    }
     orderId = newOrder.id as string;
 
     try {
@@ -356,5 +422,7 @@ Deno.serve(async (req) => {
 
   const { data: order, error: reloadError } = await adminClient.from("sales_orders").select("*").eq("id", resolvedOrderId).single();
   if (reloadError) return json({ error: reloadError.message }, 500);
-  return json(order);
+  // `billing_missing`: faltantes del perfil elegido (misma lista que usa la
+  // emisión). Informativo -- no bloquea la venta.
+  return json({ ...order, billing_missing: billingMissing });
 });

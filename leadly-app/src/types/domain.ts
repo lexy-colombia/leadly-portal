@@ -283,7 +283,10 @@ export interface ClientBillingAddress {
   city_code: string | null
 }
 
-export interface ClientBillingProfile {
+/** Forma del JSONB legado `clients.billing_profile` (sigue en la tabla hasta
+ * F5; la UI ya no lo escribe: los datos fiscales viven en
+ * `client_billing_profiles`, ver ClientBillingProfile). */
+export interface LegacyClientBillingProfile {
   legal_name?: string | null
   organization_type?: '1' | '2' | null
   tax_level_code?: string | null
@@ -291,6 +294,41 @@ export interface ClientBillingProfile {
   email?: string | null
   address?: ClientBillingAddress | null
 }
+
+/** Perfil de facturación del cliente (tabla client_billing_profiles): datos
+ * fiscales AUTOSUFICIENTES del adquirente de una factura. Un cliente puede
+ * tener varios; uno es el predeterminado. */
+export interface ClientBillingProfile {
+  id: string
+  tenant_id: string
+  client_id: string
+  label: string
+  is_default: boolean
+  document_type_code: string | null
+  document_number: string | null
+  legal_name: string | null
+  email: string | null
+  phone: string | null
+  organization_type: '1' | '2'
+  tax_level_code: string
+  tax_scheme_code: '01' | '04' | 'ZA' | 'ZZ' | null
+  applies_withholding: boolean
+  delivery_method: 'email' | 'print'
+  address_line1: string | null
+  address_line2: string | null
+  country: string | null
+  state_code: string | null
+  city_code: string | null
+  state_province: string | null
+  city: string | null
+  deleted_at: string | null
+  deleted_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** Modalidad de entrega de un pedido/carrito. El POS siempre es 'on_site'. */
+export type FulfillmentMethod = 'delivery' | 'pickup' | 'on_site'
 
 export interface Client {
   id: string
@@ -307,7 +345,7 @@ export interface Client {
   document_type: TenantDocumentType | null
   document_number: string | null
   dian_document_type_code: string | null
-  billing_profile?: ClientBillingProfile
+  billing_profile?: LegacyClientBillingProfile
   applies_withholding: boolean
   country: string | null
   notes: string | null
@@ -671,7 +709,11 @@ export interface SalesOrder {
   notes: string | null
   valid_until: string | null
   shipping_address_id: string | null
+  /** @deprecated lo reemplaza billing_profile_id (se elimina en F5). */
   billing_address_id: string | null
+  fulfillment_method: FulfillmentMethod
+  billing_profile_id: string | null
+  shipping_snapshot: Record<string, unknown> | null
   created_by: string | null
   deleted_at: string | null
   deleted_by: string | null
@@ -684,7 +726,9 @@ export interface ContactAddress {
   tenant_id: string
   contact_id: string
   label: string | null
+  /** @deprecated las direcciones ya son solo de entrega (se eliminan en F5). */
   is_shipping: boolean
+  /** @deprecated los datos de facturación viven en client_billing_profiles. */
   is_billing: boolean
   recipient_name: string | null
   phone: string | null
@@ -705,6 +749,10 @@ export interface ContactAddress {
   created_at: string
   updated_at: string
 }
+
+/** Dirección de entrega del cliente. La tabla física sigue llamándose
+ * contact_addresses hasta F5 (renombre), por eso es un alias de tipo. */
+export type ClientDeliveryAddress = ContactAddress
 
 export interface SalesOrderItem {
   id: string
@@ -845,7 +893,12 @@ export interface Cart {
   notes: string | null
   valid_until: string | null
   shipping_address_id: string | null
+  /** @deprecated lo reemplaza billing_profile_id (se elimina en F5). */
   billing_address_id: string | null
+  fulfillment_method: FulfillmentMethod
+  billing_profile_id: string | null
+  /** Destino de un solo uso (one_off) del borrador; null si no hay. */
+  shipping_snapshot: Record<string, unknown> | null
   shipping: number
   origin: 'portal' | 'pos'
   status: 'open' | 'converted'

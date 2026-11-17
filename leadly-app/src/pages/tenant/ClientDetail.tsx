@@ -22,7 +22,7 @@ import { useOpportunityStageGate } from '../../lib/useOpportunityStageGate'
 import type {
   Appointment,
   Client,
-  ContactAddress,
+  ClientDeliveryAddress,
   CreditCharge,
   CreditPayment,
   Note,
@@ -44,6 +44,7 @@ import { useCreditPaymentReceiptPrinter } from '../../lib/useCreditPaymentReceip
 import { ContactDrawer } from './clients/ContactDrawer'
 import { AppointmentDrawer } from './clients/AppointmentDrawer'
 import { AddressDrawer } from './clients/AddressDrawer'
+import { ClientBillingProfilesPanel } from './clients/ClientBillingProfilesPanel'
 import { CreditPaymentDrawer } from './clients/CreditPaymentDrawer'
 import { CreditReceiptDialog } from './clients/CreditReceiptDialog'
 import { OpportunityPanel } from './opportunities/OpportunityPanel'
@@ -220,7 +221,8 @@ function ClientDetailContent({
   const [agents, setAgents] = useState<Profile[]>([])
   const [opportunities, setOpportunities] = useState<OpportunityWithRelations[] | null>(null)
   const [orders, setOrders] = useState<OrderWithRelations[] | null>(null)
-  const [addresses, setAddresses] = useState<ContactAddress[] | null>(null)
+  const [billingCount, setBillingCount] = useState<number | null>(null)
+  const [addresses, setAddresses] = useState<ClientDeliveryAddress[] | null>(null)
   const [tasks, setTasks] = useState<TaskWithRelations[] | null>(null)
   const [pipelines, setPipelines] = useState<Pipeline[]>([])
   const [customDefs, setCustomDefs] = useState<CustomFieldDefinition[]>([])
@@ -233,7 +235,7 @@ function ClientDetailContent({
     open: false,
     opportunity: null,
   })
-  const [addressDrawer, setAddressDrawer] = useState<{ open: boolean; address: ContactAddress | null }>({ open: false, address: null })
+  const [addressDrawer, setAddressDrawer] = useState<{ open: boolean; address: ClientDeliveryAddress | null }>({ open: false, address: null })
   const [deleteAddressId, setDeleteAddressId] = useState<string | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -555,6 +557,7 @@ function ClientDetailContent({
           <TabsTrigger value="ventas">{`${t('contacts.detail.tabs.sales')}${orders ? ` (${orders.length})` : ''}`}</TabsTrigger>
           <TabsTrigger value="conversaciones">{t('contacts.detail.tabs.conversations')}</TabsTrigger>
           <TabsTrigger value="direcciones">{`${t('contacts.detail.tabs.addresses')}${addresses ? ` (${addresses.length})` : ''}`}</TabsTrigger>
+          <TabsTrigger value="facturacion">{`${t('contacts.detail.tabs.billing')}${billingCount !== null ? ` (${billingCount})` : ''}`}</TabsTrigger>
           {contact.credit_enabled && <TabsTrigger value="credito">{t('contacts.detail.tabs.credit')}</TabsTrigger>}
         </TabsList>
 
@@ -739,16 +742,6 @@ function ClientDetailContent({
                             {t('contacts.detail.addresses.default')}
                           </Badge>
                         )}
-                        {a.is_shipping && (
-                          <Badge variant="outline" className="border-transparent bg-sky-100 text-sky-700">
-                            {t('contacts.detail.addresses.shipping')}
-                          </Badge>
-                        )}
-                        {a.is_billing && (
-                          <Badge variant="outline" className="border-transparent bg-violet-100 text-violet-700">
-                            {t('contacts.detail.addresses.billing')}
-                          </Badge>
-                        )}
                       </div>
                       <p className="mt-1 text-xs text-brand-700">
                         {a.line1}
@@ -776,6 +769,14 @@ function ClientDetailContent({
               </ul>
             )}
             <Pagination page={page} totalPages={addressesPage.totalPages} onChange={setPage} />
+          </Panel>
+        </TabsContent>
+
+        <TabsContent value="facturacion">
+          <Panel>
+            {profile?.tenant_id && (
+              <ClientBillingProfilesPanel tenantId={profile.tenant_id} clientId={contact.id} isWalkIn={contact.is_walk_in} onCountChange={setBillingCount} />
+            )}
           </Panel>
         </TabsContent>
 

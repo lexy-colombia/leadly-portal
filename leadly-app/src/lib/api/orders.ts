@@ -1,5 +1,6 @@
 import { supabase } from '../supabaseClient'
-import type { ContactAddress, SalesOrder, SalesOrderItem, OrderStatus, OrderPaymentMethod, DeliveryStatus } from '../../types/domain'
+import { getBillingProfile } from './billingProfiles'
+import type { ClientBillingProfile, ContactAddress, FulfillmentMethod, SalesOrder, SalesOrderItem, OrderStatus, OrderPaymentMethod, DeliveryStatus } from '../../types/domain'
 import type { TranslationKey } from '../../i18n/translations'
 
 // Shared between Orders.tsx and OrderDetail.tsx so the status wording
@@ -150,7 +151,8 @@ export interface OrderInput {
   notes?: string | null
   valid_until?: string | null
   shipping_address_id?: string | null
-  billing_address_id?: string | null
+  fulfillment_method?: FulfillmentMethod
+  billing_profile_id?: string | null
   created_by?: string | null
 }
 
@@ -158,7 +160,8 @@ export type OrderWithRelations = SalesOrder & {
   contact: { full_name: string; phone_prefix: string; phone: string } | null
   opportunity: { title: string } | null
   shipping_address: { label: string | null; line1: string; city: string | null; state_province: string | null } | null
-  billing_address: { label: string | null; line1: string; city: string | null } | null
+  // Resumen del perfil de facturación (lo agrega list-sales-orders).
+  billing_profile?: { id: string; label: string | null; legal_name: string | null; document_type_code: string | null; document_number: string | null; email: string | null } | null
   // Embedded PostgREST count aggregate (`sales_order_items(count)`) --
   // always a one-element array, never the actual item rows. Used by
   // Orders.tsx to show "N items" under the total without a second query
@@ -174,7 +177,7 @@ export type OrderWithRelations = SalesOrder & {
 }
 
 const ORDER_SELECT =
-  '*, contact:clients(full_name, phone_prefix, phone), opportunity:opportunities(title), shipping_address:contact_addresses!shipping_address_id(label, line1, city, state_province), billing_address:contact_addresses!billing_address_id(label, line1, city), items:sales_order_items(count)'
+  '*, contact:clients(full_name, phone_prefix, phone), opportunity:opportunities(title), shipping_address:contact_addresses!shipping_address_id(label, line1, city, state_province), items:sales_order_items(count)'
 
 export interface OrdersSummary {
   count: number
@@ -320,7 +323,9 @@ export type OrderDetail = SalesOrder & {
   contact: { id: string; full_name: string; phone_prefix: string; phone: string; document_number: string | null } | null
   opportunity: { title: string } | null
   shipping_address: ContactAddress | null
-  billing_address: ContactAddress | null
+  /** Perfil de facturación elegido (se carga aparte, no por embed: la FK es
+   * compuesta). null = ninguno elegido (rige el predeterminado del cliente). */
+  billing_profile: ClientBillingProfile | null
   created_by_profile: { full_name: string } | null
   // Reemplaza al viejo bloque de texto libre "Detalle del punto de venta"
   // (pos_table/pos_room/etc, migración de Fudo -- nunca se llegó a poblar,
@@ -336,13 +341,16 @@ export async function getOrder(id: string): Promise<OrderDetail | null> {
   const { data, error } = await supabase
     .from('sales_orders')
     .select(
-      '*, contact:clients(id, full_name, phone_prefix, phone, document_number), opportunity:opportunities(title), shipping_address:contact_addresses!shipping_address_id(*), billing_address:contact_addresses!billing_address_id(*), created_by_profile:profiles!created_by(full_name), pos_point:pos_points(name)',
+      '*, contact:clients(id, full_name, phone_prefix, phone, document_number), opportunity:opportunities(title), shipping_address:contact_addresses!shipping_address_id(*), created_by_profile:profiles!created_by(full_name), pos_point:pos_points(name)',
     )
     .eq('id', id)
     .is('deleted_at', null)
     .maybeSingle()
   if (error) throw error
-  return data as unknown as OrderDetail | null
+  if (!data) return null
+  const row = data as unknown as Omit<OrderDetail, 'billing_profile'>
+  const billing_profile = row.billing_profile_id ? await getBillingProfile(row.billing_profile_id) : null
+  return { ...row, billing_profile } as OrderDetail
 }
 
 /** Misma tabla que `getOrder`, sin ninguno de sus 5 joins (contacto,
@@ -392,7 +400,15 @@ export interface CalculateOrderInput {
   notes?: string | null
   valid_until?: string | null
   shipping_address_id?: string | null
-  billing_address_id?: string | null
+  /** Destino de un solo uso (no entra a la libreta). null lo descarta. No
+   * enviar junto a un `shipping_address_id` no nulo (400 conflict). */
+  shipping_destination?: Record<string, string> | null
+  fulfillment_method?: FulfillmentMethod
+  /** null = quitar el perfil elegido (rige el predeterminado del cliente). */
+  billing_profile_id?: string | null
+  /** Corrección de destino de un pedido YA confirmado: exige el permiso
+   * sales.correct_shipping y este motivo (lo valida el servidor). */
+  shipping_correction_reason?: string
   shipping: number
   items: OrderItemInput[]
 }

@@ -9,6 +9,7 @@ import { CREDIT_PAYMENT_METHOD_LABEL_KEY } from './api/credit'
 import { PAYMENT_METHOD_LABEL_KEY } from './api/orderPayments'
 import { formatDate, formatDateTime } from './dates'
 import { formatClientPhoneDisplay } from './phone'
+import { receiptBuyer } from './receiptBuyer'
 import type { TranslationKey, Language } from '../i18n/translations'
 
 type T = (key: TranslationKey, params?: Record<string, string | number>) => string
@@ -207,11 +208,11 @@ export async function buildChargedReceiptEscPos(data: PosReceiptData, t: T, lang
 
   if (order.contact) {
     b.rule()
-    b.row(t('pos.receipt.client'), order.contact.full_name)
-    if (order.contact.document_number) b.row(t('pos.receipt.document'), order.contact.document_number)
+    const buyer = receiptBuyer(order)
+    b.row(t('pos.receipt.client'), buyer?.name ?? order.contact.full_name)
+    if (buyer?.document) b.row(t('pos.receipt.document'), buyer.document)
     if (order.contact.phone) b.row(t('pos.receipt.phone'), formatClientPhoneDisplay(order.contact.phone_prefix, order.contact.phone))
-    const address = order.billing_address ?? order.shipping_address
-    if (address) b.row(t('pos.receipt.address'), [address.line1, address.city, address.country].filter(Boolean).join(', '))
+    if (buyer?.address) b.row(t('pos.receipt.address'), buyer.address)
   }
 
   b.rule()

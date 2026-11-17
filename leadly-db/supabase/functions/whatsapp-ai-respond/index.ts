@@ -17,6 +17,8 @@ import { requestsHumanHandoff, sendWhatsappText, toWhatsappMarkup } from "../_sh
 import { ADMINISTRATOR_ONLY, isAdministratorContact, toolsForSkills, type AiToolDefinition } from "../_shared/aiTools.ts";
 import { prepareImageHistory, openAiHistoryMessage, geminiHistoryMessage, type HistoryMessage } from "../_shared/aiMedia.ts";
 import { splitPhone } from "../_shared/phone.ts";
+import { buildSavedAddresses, buildSavedProfiles, describeProfile } from "../_shared/ai/deliveryBillingTools.ts";
+import { BILLING_PROFILE_COLUMNS } from "../_shared/invoicing/clientBillingProfile.ts";
 
 const CONTEXT_MESSAGE_LIMIT = 10;
 const HUMAN_HANDOFF_REPLY = "¡Listo! En un momento te atiende un miembro de nuestro equipo.";
@@ -406,27 +408,44 @@ async function buildCustomerContext(adminClient: any, tenantId: string, contactI
   lines.push(contact.document_number ? `Documento: ${[contact.document_type, contact.document_number].filter(Boolean).join(" ")}` : "Documento: no registrado todavía.");
   lines.push(contact.credit_enabled ? "Crédito: tiene crédito/fiado habilitado -- puede elegir pagar a crédito si esa habilidad está disponible." : "Crédito: no tiene crédito habilitado.");
 
-  const { data: addresses } = await adminClient
+  // Direcciones de ENTREGA (texto real, para qué sirven) y perfiles de
+  // facturación son dos cosas distintas (feature direcciones de entrega +
+  // perfiles de facturación). Sin flags de uso: una dirección es de entrega.
+  const { data: addressRows } = await adminClient
     .from("contact_addresses")
-    .select("line1, line2, city, is_billing, is_shipping, is_default")
+    .select("id, line1, line2, city")
+    .eq("tenant_id", tenantId)
     .eq("contact_id", contact.id)
+    .eq("is_shipping", true)
     .is("deleted_at", null)
     .order("is_default", { ascending: false })
     .order("created_at", { ascending: false })
-    .limit(3);
+    .limit(10);
   // El texto real de cada dirección, no solo su etiqueta (2026-09-14): con
   // "sin nombre (default)" el modelo no sabía qué dirección tenía el cliente
   // y se la volvía a pedir -- en vivo, un minuto después de que el cliente
   // la había dado.
+  const addresses = buildSavedAddresses(addressRows ?? []);
   lines.push(
-    addresses && addresses.length > 0
-      ? `Direcciones guardadas: ${addresses
-          .map((a: { line1: string | null; line2: string | null; city: string | null; is_billing: boolean; is_shipping: boolean }) => {
-            const uses = [a.is_billing ? "facturación" : null, a.is_shipping ? "envío" : null].filter(Boolean).join(" y ");
-            return `${[a.line1, a.line2, a.city].filter(Boolean).join(", ")}${uses ? ` (${uses})` : ""}`;
-          })
-          .join(" | ")}. Al armar un pedido, lístaselas al cliente y pregúntale si envías a alguna de ellas y si facturas con esos mismos datos -- nunca le pidas digitar de nuevo una dirección que ya está guardada.`
-      : "Direcciones guardadas: ninguna todavía.",
+    addresses.length > 0
+      ? `Direcciones de ENTREGA guardadas: ${addresses.map((a) => a.address).join(" | ")}. Solo se usan para enviar pedidos: al armar uno de entrega, lístaselas al cliente y pregúntale a cuál enviamos -- nunca le pidas digitar de nuevo una dirección que ya está guardada.`
+      : "Direcciones de ENTREGA guardadas: ninguna todavía.",
+  );
+
+  const { data: profileRows } = await adminClient
+    .from("client_billing_profiles")
+    .select(BILLING_PROFILE_COLUMNS)
+    .eq("tenant_id", tenantId)
+    .eq("client_id", contact.id)
+    .is("deleted_at", null)
+    .order("is_default", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(10);
+  const profiles = buildSavedProfiles(profileRows ?? []);
+  lines.push(
+    profiles.length > 0
+      ? `Perfiles de facturación guardados: ${profiles.map((p) => `${describeProfile(p)} -- ${p.complete ? "completo" : `incompleto (falta: ${p.missing.join(", ")})`}`).join(" | ")}. Los datos fiscales solo se tratan si el cliente PIDE factura; si no la pide, no se los menciones ni se los preguntes.`
+      : "Perfiles de facturación guardados: ninguno todavía. Solo si el cliente pide factura, pídele los datos de facturación.",
   );
 
   const { data: latestOrder } = await adminClient

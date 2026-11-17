@@ -49,6 +49,7 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { persistOrderItems, type ResolvedOrderItem } from "../_shared/orders/persistOrderItems.ts";
 import { confirmSalesOrder } from "../_shared/orders/confirmSalesOrder.ts";
 import { findStockShortfalls } from "../_shared/orders/stockAvailability.ts";
+import { BILLING_PROFILE_MISMATCH_CODE, BILLING_PROFILE_MISMATCH_MESSAGE, billingProfileMismatch, describeOrderLinkError, resolveFulfillmentAndBilling } from "../_shared/orders/fulfillmentAndBilling.ts";
 
 interface PosCheckoutItem {
   product_id: string;
@@ -77,6 +78,11 @@ interface PosCheckoutBody {
    * hacia atrás, se normaliza a `payments: [payment]` antes de validar. */
   payment?: PosCheckoutPayment;
   checkout_token?: string | null;
+  /** "Facturar a" de esta venta: perfil de facturación vivo del cliente de la
+   * venta (`contact_id`, o el Consumidor Final si no hay). Se fija SOLO al
+   * insertar el pedido: en un reintento por `checkout_token` el pedido
+   * existente se retoma sin reescribirlo. */
+  billing_profile_id?: string | null;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -202,15 +208,37 @@ Deno.serve(async (req) => {
   if (checkoutToken) {
     const { data: existingOrder, error: existingOrderError } = await adminClient
       .from("sales_orders")
-      .select("id, status")
+      .select("id, status, billing_profile_id")
       .eq("tenant_id", tenantId)
       .eq("checkout_token", checkoutToken)
       .maybeSingle();
     if (existingOrderError) return json({ error: existingOrderError.message }, 500);
     if (existingOrder) {
+      // Ver create-order: "Facturar a" no se reescribe en un reintento; un valor
+      // distinto al que quedó en el pedido se rechaza sin tocar nada.
+      if (billingProfileMismatch(body.billing_profile_id, existingOrder.billing_profile_id as string | null)) {
+        return json({ error: BILLING_PROFILE_MISMATCH_MESSAGE, code: BILLING_PROFILE_MISMATCH_CODE }, 409);
+      }
       orderId = existingOrder.id as string;
       alreadyConfirmed = existingOrder.status === "confirmada";
     }
+  }
+
+  // Venta de mostrador: SIEMPRE on_site (sin destino de entrega). "Facturar a"
+  // (perfil) se valida contra el cliente de la venta y el tenant antes de
+  // insertar; un perfil incompleto no bloquea el cobro, se informa.
+  let billingMissing: string[] = [];
+  const billingProfileId = body.billing_profile_id ?? null;
+  if (!orderId) {
+    const links = await resolveFulfillmentAndBilling(adminClient, {
+      tenantId,
+      contactId: contactId as string,
+      fulfillmentMethod: "on_site",
+      billingProfileId,
+      invoiceRequested: !!billingProfileId,
+    });
+    if (links.forbidden.length > 0) return json({ error: links.forbidden[0] }, 403);
+    billingMissing = links.missingBilling;
   }
 
   if (!orderId) {
@@ -238,6 +266,8 @@ Deno.serve(async (req) => {
         tenant_id: tenantId,
         contact_id: contactId,
         sales_channel: "pos",
+        fulfillment_method: "on_site",
+        billing_profile_id: billingProfileId,
         status: "cotizacion",
         subtotal: 0,
         discount_total: 0,
@@ -249,7 +279,10 @@ Deno.serve(async (req) => {
       })
       .select("id")
       .single();
-    if (insertError) return json({ error: insertError.message }, 500);
+    if (insertError) {
+      const linkErr = describeOrderLinkError(insertError);
+      return json({ error: linkErr?.message ?? insertError.message }, linkErr?.status ?? 500);
+    }
     orderId = newOrder.id as string;
 
     try {
@@ -330,5 +363,6 @@ Deno.serve(async (req) => {
 
   const { data: order } = await adminClient.from("sales_orders").select("id, number, subtotal, total, tax_total, currency").eq("id", resolvedOrderId).single();
 
-  return json({ order, invoice: invoice ?? null });
+  // billing_missing: informativo (vacío en un reintento por token).
+  return json({ order, invoice: invoice ?? null, billing_missing: billingMissing });
 });

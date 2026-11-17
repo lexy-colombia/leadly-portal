@@ -1142,19 +1142,18 @@ export function PosTabAccount({
           order={null}
           totals={pendingCharge.totals}
           pendingAmount={pendingCharge.totals.total}
-          createOrder={(buyerContactId) =>
+          createOrder={(billingProfileId) =>
             createOrderFromCart(cartId, pendingCharge.items, {
               keepCartOpen: true,
               confirm: true,
               checkoutToken: chargeTokenRef.current ?? undefined,
-              buyerContactId,
+              billingProfileId,
             })
           }
           creditEnabled={customer?.credit_enabled ?? false}
           storeCreditBalance={storeCreditBalance}
           dianConnected={dianConnected}
-          defaultBuyer={customer}
-          onSearchBuyers={(q) => searchPosClients(tenantId, q)}
+          buyerClient={customer}
           onSaved={(chargedOrder, einvoicing) => {
             if (einvoicing?.error) toast.error(einvoicing.error)
             // Una factura aceptada se imprime SIEMPRE, con o sin el flag de
@@ -1183,6 +1182,7 @@ export function PosTabAccount({
           creditEnabled={customer?.credit_enabled ?? false}
           storeCreditBalance={storeCreditBalance}
           dianConnected={dianConnected}
+          buyerClient={customer}
           onSaved={async (paidOrder, einvoicing) => {
             setPayingCharge(null)
             if (einvoicing?.error) toast.error(einvoicing.error)

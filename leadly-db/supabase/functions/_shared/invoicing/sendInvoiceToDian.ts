@@ -53,30 +53,11 @@ import { pollDianTrackStatus, parseOneStatus } from "./getDianStatus.ts";
 import { interpretDianStatus, applyInvoiceVerdict } from "./applyDianVerdict.ts";
 import { resolveTechnicalKey } from "./resolveTechnicalKey.ts";
 import { colombiaIssueMoment } from "./colombiaTime.ts";
+import { mapInvoiceBuyer, mapInvoiceDelivery, type InvoiceBuyerSnapshot } from "./invoiceInput.ts";
 import { storeSignedXml } from "./storeSignedXml.ts";
 
 const PROVIDER_KEY = "dian_directo";
 
-interface BuyerSnapshot {
-  client_id: string | null;
-  document_type_code: string | null;
-  document_number: string | null;
-  full_name: string | null;
-  applies_withholding: boolean;
-  email?: string | null;
-  organization_type?: "1" | "2" | null;
-  tax_level_code?: string | null;
-  tax_scheme_code?: "01" | "04" | "ZA" | "ZZ" | null;
-  address: {
-    line1: string | null;
-    line2: string | null;
-    city: string | null;
-    state_province: string | null;
-    country: string | null;
-    city_code?: string | null;
-    state_code?: string | null;
-  } | null;
-}
 interface SellerSnapshot {
   legal_name: string | null;
   document_number: string | null;
@@ -128,6 +109,9 @@ export interface SendInvoiceOptions {
    * exactos que se transmiten para compararlos contra una factura real ya
    * aceptada, sin quemar otro consecutivo. */
   dryRun?: boolean;
+  /** Correo del comprobante para Consumidor Final (walk-in sin perfil de
+   * facturación). Se congela solo en el buyer_snapshot de ESTA factura. */
+  invoiceEmail?: string | null;
 }
 
 /** Envía la factura `invoiceId` (fila de sales_invoices, status debe ser
@@ -208,7 +192,7 @@ async function doSendInvoiceToDian(adminClient: any, tenantId: string, invoiceId
   // viejo: corregir un precio entre "confirmar" y "enviar" transmitía los
   // valores anteriores. Después de esto el pedido queda bloqueado, así que lo
   // enviado y lo que se ve en pantalla ya no pueden divergir.
-  if (!dryRun) await refreshInvoiceSnapshot(adminClient, tenantId, invoiceId, invoicePre.order_id);
+  if (!dryRun) await refreshInvoiceSnapshot(adminClient, tenantId, invoiceId, invoicePre.order_id, { invoiceEmail: options.invoiceEmail ?? null });
 
   const { data: invoice, error: invoiceError } = await adminClient
     .from("sales_invoices")
@@ -257,7 +241,7 @@ async function doSendInvoiceToDian(adminClient: any, tenantId: string, invoiceId
 
   const cert = await loadTenantCertificate(adminClient, tenantId);
 
-  const buyer = invoice.buyer_snapshot as BuyerSnapshot;
+  const buyer = invoice.buyer_snapshot as InvoiceBuyerSnapshot;
   const seller = invoice.seller_snapshot as SellerSnapshot;
   if (!buyer.document_type_code || !buyer.document_number) throw new Error("El comprador no tiene documento fiscal completo.");
   if (!seller.legal_name || !seller.document_number) throw new Error("El vendedor (tenant) no tiene razón social/NIT completos.");
@@ -360,21 +344,9 @@ async function doSendInvoiceToDian(adminClient: any, tenantId: string, invoiceId
       taxLevelCode: seller.is_self_withholding_agent ? "O-15" : "R-99-PN",
       electronicMail: seller.contact_email ?? null,
     },
-    buyer: {
-      legalName: buyer.full_name ?? "N/A",
-      documentTypeCode: buyer.document_type_code,
-      documentNumber: buyer.document_number,
-      addressLine: buyer.address?.line1 ?? null,
-      city: buyer.address?.city ?? null,
-      stateProvince: buyer.address?.state_province ?? null,
-      countryCode: buyer.address?.country ?? "CO",
-      cityCode: buyer.address?.city_code ?? null,
-      stateCode: buyer.address?.state_code ?? null,
-      organizationType: buyer.organization_type ?? undefined,
-      taxLevelCode: buyer.tax_level_code ?? (buyer.applies_withholding ? "O-15" : "R-99-PN"),
-      taxSchemeCode: buyer.tax_scheme_code ?? undefined,
-      electronicMail: buyer.email ?? null,
-    },
+    buyer: mapInvoiceBuyer(buyer),
+    // Lugar de entrega (cac:Delivery): solo si el snapshot lo trae completo.
+    delivery: mapInvoiceDelivery(buyer),
     lines,
     withholdings: [], // el cálculo real de retenciones (tenant_withholding_configs + applies_withholding) es trabajo futuro, ver plan
     resolution: {

@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient'
-import type { Client, ClientBillingProfile, Note, TenantDocumentType } from '../../types/domain'
+import type { Client, Note, TenantDocumentType } from '../../types/domain'
 
 export interface ClientInput {
   tenant_id: string
@@ -11,8 +11,6 @@ export interface ClientInput {
   document_type?: TenantDocumentType | null
   document_number?: string | null
   dian_document_type_code?: string | null
-  billing_profile?: ClientBillingProfile
-  applies_withholding?: boolean
   country?: string | null
   notes?: string | null
   is_active?: boolean

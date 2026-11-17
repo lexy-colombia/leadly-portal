@@ -16,7 +16,9 @@
  *
  * Deliberadamente NO incluye (quedan para cuando haya un caso real que lo
  * necesite, no se inventan ahora): AllowanceCharge, PrepaidPayment,
- * BillingReference, Delivery/DeliveryTerms, multi-moneda.
+ * BillingReference, DeliveryTerms, multi-moneda. (`cac:Delivery` SÍ se emite
+ * desde 2026-11, solo con destino completo: ver `deliveryBlock` e
+ * invoiceDelivery.ts.)
  *
  * Este archivo construye el XML SIN FIRMAR, pero ya deja un
  * `<ext:UBLExtension><ext:ExtensionContent/></ext:UBLExtension>` VACÍO como
@@ -298,6 +300,23 @@ export interface InvoiceXmlParty {
   electronicMail?: string | null;
 }
 
+/** Dirección de entrega (`cac:Delivery/cac:DeliveryAddress`, FAM01-FAM14).
+ * Ya viene VALIDADA (invoiceDelivery.ts / mapInvoiceDelivery): municipio y
+ * departamento DIVIPOLA existentes, línea real, país presente. Si falta algo
+ * de eso el caller NO la pasa -- este archivo nunca emite el grupo a medias. */
+export interface InvoiceXmlDelivery {
+  /** FAM10: dirección sin ciudad ni departamento, 1-300. */
+  addressLine: string;
+  city: string;
+  stateProvince: string;
+  /** FAM05 (DIVIPOLA municipio). */
+  cityCode: string;
+  /** FAM08 (DIVIPOLA departamento). */
+  stateCode: string;
+  /** FAM12, ISO alfa-2. */
+  countryCode: string;
+}
+
 export interface InvoiceXmlLineTax {
   code: string; // "01" | "04" | "03"
   rate: number;
@@ -334,6 +353,9 @@ export interface BuildInvoiceXmlInput {
   environment: 1 | 2; // 1 producción, 2 habilitación
   seller: InvoiceXmlParty;
   buyer: InvoiceXmlParty;
+  /** Lugar de entrega (opcional, FAM01 0..1). Entre el adquirente y
+   * `cac:PaymentMeans`; no entra al CUFE ni a los totales. */
+  delivery?: InvoiceXmlDelivery | null;
   lines: InvoiceXmlLine[];
   withholdings: InvoiceXmlWithholding[];
   resolution: {
@@ -480,6 +502,33 @@ function partyBlock(
          </cac:PartyLegalEntity>${contactXml}
       </cac:Party>
    </${tag}>`;
+}
+
+/** `cac:Delivery` (FAM01) con solo `DeliveryAddress` (FAM04). Orden interno
+ * según la tabla del Anexo 1.9 y los ejemplos oficiales (Generica.xml:271-285):
+ * ID, CityName, CountrySubentity, CountrySubentityCode, AddressLine, Country.
+ * `PostalZone` (FAM68) NO se emite: es solo notificación y no hay en el repo la
+ * tabla de códigos postales contra la cual validarlo. Posición: justo después
+ * de `cac:AccountingCustomerParty` y antes de `cac:PaymentMeans`. */
+function deliveryBlock(delivery: InvoiceXmlDelivery | null | undefined): string {
+  if (!delivery) return "";
+  const countryCode = delivery.countryCode.toLowerCase() === "colombia" ? "CO" : delivery.countryCode;
+  return `
+   <cac:Delivery>
+      <cac:DeliveryAddress>
+         <cbc:ID>${esc(delivery.cityCode)}</cbc:ID>
+         <cbc:CityName>${esc(delivery.city)}</cbc:CityName>
+         <cbc:CountrySubentity>${esc(delivery.stateProvince)}</cbc:CountrySubentity>
+         <cbc:CountrySubentityCode>${esc(delivery.stateCode)}</cbc:CountrySubentityCode>
+         <cac:AddressLine>
+            <cbc:Line>${esc(delivery.addressLine)}</cbc:Line>
+         </cac:AddressLine>
+         <cac:Country>
+            <cbc:IdentificationCode>${esc(countryCode)}</cbc:IdentificationCode>
+            <cbc:Name languageID="es">${esc(countryName(countryCode))}</cbc:Name>
+         </cac:Country>
+      </cac:DeliveryAddress>
+   </cac:Delivery>`;
 }
 
 export async function buildInvoiceXml(input: BuildInvoiceXmlInput): Promise<{ xml: string; cufe: string }> {
@@ -774,7 +823,7 @@ export async function buildInvoiceXml(input: BuildInvoiceXmlInput): Promise<{ xm
    <cbc:IssueTime>${input.issueTime}</cbc:IssueTime>
    <cbc:InvoiceTypeCode>01</cbc:InvoiceTypeCode>
    <cbc:DocumentCurrencyCode listAgencyID="6" listAgencyName="United Nations Economic Commission for Europe" listID="ISO 4217 Alpha">${input.currency}</cbc:DocumentCurrencyCode>
-   <cbc:LineCountNumeric>${input.lines.length}</cbc:LineCountNumeric>${partyBlock("cac:AccountingSupplierParty", input.seller, sellerDv, input.resolution.prefix)}${partyBlock("cac:AccountingCustomerParty", input.buyer, buyerDv)}
+   <cbc:LineCountNumeric>${input.lines.length}</cbc:LineCountNumeric>${partyBlock("cac:AccountingSupplierParty", input.seller, sellerDv, input.resolution.prefix)}${partyBlock("cac:AccountingCustomerParty", input.buyer, buyerDv)}${deliveryBlock(input.delivery)}
    <cac:PaymentMeans>
       <cbc:ID>${esc(input.payment.meansId)}</cbc:ID>
       <cbc:PaymentMeansCode>${esc(input.payment.meansCode)}</cbc:PaymentMeansCode>

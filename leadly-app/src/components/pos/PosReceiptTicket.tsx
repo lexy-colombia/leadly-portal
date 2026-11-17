@@ -2,6 +2,7 @@ import type { PosReceiptData } from '../../lib/api/posReceipt'
 import { PAYMENT_METHOD_LABEL_KEY } from '../../lib/api/orderPayments'
 import { formatDate, formatDateTime } from '../../lib/dates'
 import { formatClientPhoneDisplay } from '../../lib/phone'
+import { receiptBuyer } from '../../lib/receiptBuyer'
 import { useLanguage } from '../../contexts/LanguageContext'
 
 export function formatMoney(value: number, currency: string): string {
@@ -38,6 +39,7 @@ export function PosReceiptTicket({ data }: { data: PosReceiptData }) {
   const { t, language } = useLanguage()
   const { tenant, order, items, payments, totals, fiscal, posPointName } = data
   const currency = order.currency
+  const buyer = receiptBuyer(order)
 
   return (
     <div className="pos-receipt-ticket">
@@ -104,21 +106,10 @@ export function PosReceiptTicket({ data }: { data: PosReceiptData }) {
         <>
           <div className="pos-receipt-rule" />
           <div className="pos-receipt-meta">
-            <MetaRow label={t('pos.receipt.client')} value={order.contact.full_name} />
-            {order.contact.document_number && <MetaRow label={t('pos.receipt.document')} value={order.contact.document_number} />}
+            <MetaRow label={t('pos.receipt.client')} value={buyer?.name ?? order.contact.full_name} />
+            {buyer?.document && <MetaRow label={t('pos.receipt.document')} value={buyer.document} />}
             {order.contact.phone && <MetaRow label={t('pos.receipt.phone')} value={formatClientPhoneDisplay(order.contact.phone_prefix, order.contact.phone)} />}
-            {(order.billing_address ?? order.shipping_address) && (
-              <MetaRow
-                label={t('pos.receipt.address')}
-                value={[
-                  (order.billing_address ?? order.shipping_address)!.line1,
-                  (order.billing_address ?? order.shipping_address)!.city,
-                  (order.billing_address ?? order.shipping_address)!.country,
-                ]
-                  .filter(Boolean)
-                  .join(', ')}
-              />
-            )}
+            {buyer?.address && <MetaRow label={t('pos.receipt.address')} value={buyer.address} />}
           </div>
         </>
       )}

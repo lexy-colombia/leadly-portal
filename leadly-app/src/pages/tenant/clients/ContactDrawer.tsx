@@ -3,11 +3,10 @@ import { createClient, updateClient, dianDocumentTypeCodeToGeneric } from '../..
 import { listProfilesByTenant } from '../../../lib/api/users'
 import { listCustomFieldDefinitions } from '../../../lib/api/customFields'
 import { inputToPayload, payloadToInput } from '../../../lib/customFieldValues'
-import { BillingProfileFields } from './BillingProfileFields'
 import { CustomFieldInput } from './CustomFieldInput'
-import type { Client, ClientBillingProfile, CustomFieldDefinition, Profile } from '../../../types/domain'
+import type { Client, CustomFieldDefinition, Profile } from '../../../types/domain'
 import { FieldError } from '@/components/atoms'
-import { ComboboxFilter, PhoneInput, TagInput } from '@/components/molecules'
+import { ComboboxFilter, CountrySelect, PhoneInput, TagInput } from '@/components/molecules'
 import { Drawer } from '@/components/organisms'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -17,6 +16,7 @@ import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { isNotBlank, isValidE164Phone, isValidEmail } from '../../../lib/validation'
 import { combinePhone, splitPhone } from '../../../lib/phone'
+import { normalizeCountryValue } from '../../../lib/countryValue'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import { listDianDocumentTypes } from '../../../lib/api/tenantDianProfile'
 import type { DianDocumentType } from '../../../types/domain'
@@ -52,7 +52,6 @@ export function ContactDrawer({
   onSaved: (contact: Client) => void
 }) {
   const { t } = useLanguage()
-  const [billingProfile, setBillingProfile] = useState<ClientBillingProfile>({})
   const [fullName, setFullName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
@@ -65,7 +64,6 @@ export function ContactDrawer({
   const [isActive, setIsActive] = useState(true)
   const [creditEnabled, setCreditEnabled] = useState(false)
   const [dianDocumentTypeCode, setDianDocumentTypeCode] = useState('')
-  const [appliesWithholding, setAppliesWithholding] = useState(false)
   const [dianDocumentTypes, setDianDocumentTypes] = useState<DianDocumentType[]>([])
   const [customDefs, setCustomDefs] = useState<CustomFieldDefinition[]>([])
   const [customValues, setCustomValues] = useState<Record<string, string | boolean | undefined>>({})
@@ -75,7 +73,6 @@ export function ContactDrawer({
 
   useEffect(() => {
     if (!open) return
-    setBillingProfile(contact?.billing_profile ?? {})
     setFullName(contact?.full_name ?? '')
     // clients.phone_prefix/phone quedaron separados en la base
     // (20260904000000_clients_phone_prefix_split.sql) -- PhoneInput sigue
@@ -88,12 +85,11 @@ export function ContactDrawer({
     setTags(contact?.tags ?? [])
     setAssignedTo(contact?.assigned_to ?? null)
     setDocumentNumber(contact?.document_number ?? '')
-    setCountry(contact?.billing_profile?.address?.country ?? contact?.country ?? '')
+    setCountry(normalizeCountryValue(contact?.country))
     setNotes(contact?.notes ?? '')
     setIsActive(contact?.is_active ?? true)
     setCreditEnabled(contact?.credit_enabled ?? false)
     setDianDocumentTypeCode(contact?.dian_document_type_code ?? '')
-    setAppliesWithholding(contact?.applies_withholding ?? false)
     setTouched(false)
     setFormError(null)
   }, [open, contact])
@@ -121,16 +117,9 @@ export function ContactDrawer({
   const documentOptions = dianDocumentTypes.map(({ code, name }) => ({
     code,
     label: name,
-    organizationType: code === '31' || code === '50' ? '1' as const : '2' as const,
   }))
   const selectedDocument = documentOptions.find((option) => option.code === dianDocumentTypeCode)
 
-  function selectDocument(code: string) {
-    const option = documentOptions.find((item) => item.code === code)
-    if (!option) return
-    setDianDocumentTypeCode(option.code)
-    setBillingProfile((profile) => ({ ...profile, organization_type: option.organizationType }))
-  }
 
   /** Devuelve el objeto a enviar, o null si NO debe enviarse la clave:
    * sin definiciones activas, o sin cambios respecto de lo guardado (en
@@ -155,11 +144,6 @@ export function ContactDrawer({
     setTouched(true)
     setFormError(null)
     if (!isNotBlank(fullName) || !isValidE164Phone(phone) || (isNotBlank(email) && !isValidEmail(email))) return
-
-    if (billingProfile.email?.trim() && !isValidEmail(billingProfile.email.trim())) {
-      setFormError(t('contacts.billing.invalidEmail'))
-      return
-    }
     setSubmitting(true)
     try {
       const { dialCode, localNumber } = splitPhone(phone)
@@ -185,19 +169,6 @@ export function ContactDrawer({
         is_active: isActive,
         credit_enabled: creditEnabled,
         dian_document_type_code: dianDocumentTypeCode || null,
-        applies_withholding: appliesWithholding,
-        ...(contact?.is_walk_in ? {} : {
-          billing_profile: {
-            organization_type: selectedDocument?.organizationType ?? billingProfile.organization_type ?? null,
-            tax_level_code: billingProfile.tax_level_code ?? null,
-            tax_scheme_code: billingProfile.tax_scheme_code ?? null,
-            legal_name: billingProfile.legal_name?.trim() || null,
-            email: billingProfile.email?.trim() || null,
-            address: billingProfile.address && (billingProfile.address.line1?.trim() || billingProfile.address.city || billingProfile.address.state_province)
-              ? { ...billingProfile.address, country: country || null, line1: billingProfile.address.line1?.trim() || null }
-              : null,
-          },
-        }),
         // Se parte de lo ya guardado (incluye valores de campos hoy
         // inactivos, que no se tocan) y se pisan solo los campos activos
         // del formulario; vacío = se quita la clave. La validación la hace
@@ -259,13 +230,13 @@ export function ContactDrawer({
           </div>
         </Section>
 
-        <Section title={t('contacts.drawer.sections.einvoicing')}>
-          {contact?.is_walk_in && <p className="text-xs text-muted-foreground">{t('contacts.billing.walkInHint')}</p>}
+        <Section title={t('contacts.drawer.sections.identification')}>
+          <p className="text-xs text-muted-foreground">{t('contacts.drawer.identificationHint')}</p>
           <fieldset disabled={contact?.is_walk_in} className="min-w-0 space-y-2.5">
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label htmlFor="contact-dian-document-type">{t('contacts.drawer.fields.dianDocumentType')}</Label>
-                <Select value={dianDocumentTypeCode} onValueChange={selectDocument} disabled={contact?.is_walk_in}>
+                <Select value={dianDocumentTypeCode} onValueChange={setDianDocumentTypeCode} disabled={contact?.is_walk_in}>
                   <SelectTrigger id="contact-dian-document-type" className={`mt-1 w-full ${FIELD_CLASS}`}>
                     <SelectValue placeholder={t('common.form.selectPlaceholder')}>
                       {selectedDocument?.label}
@@ -283,16 +254,7 @@ export function ContactDrawer({
                 <Input id="contact-document-number" value={documentNumber} onChange={(e) => setDocumentNumber(e.target.value)} className={`mt-1 ${FIELD_CLASS}`} />
               </div>
             </div>
-            <BillingProfileFields profile={billingProfile} onChange={setBillingProfile} country={country} onCountryChange={setCountry} disabled={contact?.is_walk_in} />
-            <div className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2.5">
-              <div>
-                <Label htmlFor="contact-withholding" className="font-normal text-brand-700">
-                  {t('contacts.drawer.fields.appliesWithholding')}
-                </Label>
-                <p className="mt-0.5 text-[11px] text-brand-400">{t('contacts.drawer.fields.appliesWithholdingHint')}</p>
-              </div>
-              <Switch id="contact-withholding" checked={appliesWithholding} onCheckedChange={setAppliesWithholding} disabled={contact?.is_walk_in} />
-            </div>
+            <CountrySelect idPrefix="contact" label={t('contacts.billing.country')} noneLabel={t('contacts.billing.noCountry')} value={country} onChange={setCountry} disabled={contact?.is_walk_in} />
           </fieldset>
         </Section>
 

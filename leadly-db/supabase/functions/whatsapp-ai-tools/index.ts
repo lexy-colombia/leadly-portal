@@ -12,6 +12,25 @@ import { updateClientProfile } from "../_shared/clientTags.ts";
 import { sendWhatsappImage } from "../_shared/whatsapp.ts";
 import { chargeSalesOrderToCredit, createSalesOrderPaymentLink } from "../_shared/payments/salesOrderPayments.ts";
 import { confirmSalesOrder, getStockTotals, isPlaceholderAddressText } from "../_shared/orders/confirmSalesOrder.ts";
+import {
+  buildSavedAddresses,
+  buildSavedProfiles,
+  describeProfile,
+  evaluateConfirmGate,
+  pickProfileFields,
+  profileMissing,
+  newProfileMissing,
+  captureEmailMissing,
+  EMAIL_HINT,
+  redactBillingParameters,
+  resolveDivipola,
+  resolveReference,
+  toIsoCountry,
+  unmatchedAddressMessage,
+  type SavedProfile,
+} from "../_shared/ai/deliveryBillingTools.ts";
+import { BILLING_PROFILE_COLUMNS, type BillingProfileRow } from "../_shared/invoicing/clientBillingProfile.ts";
+import { isFulfillmentMethod, resolveFulfillmentAndBilling, type FulfillmentMethod } from "../_shared/orders/fulfillmentAndBilling.ts";
 import { persistOrderItems, type ResolvedOrderItem } from "../_shared/orders/persistOrderItems.ts";
 import { findStockShortfalls, loadAvailabilitySummary, type StockCheckItem } from "../_shared/orders/stockAvailability.ts";
 import { makeIntegrationSecretGetter, resolveTenantIntegrationCredential } from "../_shared/integrations/credentials.ts";
@@ -99,7 +118,7 @@ Deno.serve(async (req: Request) => {
     tenant_id: tenantId,
     conversation_id: conversationId,
     function_name: functionName,
-    parameters,
+    parameters: redactBillingParameters(functionName, parameters),
     result: errorMessage ? null : result,
     error_message: errorMessage,
   });
@@ -1265,25 +1284,55 @@ async function executeTool(
         throw orderNotOpenError(latest, orderNumber, "confirmar");
       }
 
-      // Direcciones confirmadas con el cliente, nunca asignadas solas
-      // (pedido explícito del usuario 2026-09-14): el modelo le lista las
-      // guardadas, le pregunta si envía a esa y si factura con los mismos
-      // datos, y las aplica con save_contact_address. Mientras el pedido no
-      // tenga las dos aplicadas, no se confirma -- sin esto, el trigger de
-      // confirmación elegiría en silencio la dirección por defecto, que
-      // puede no ser la que el cliente quiere.
-      if (!order.shipping_address_id || !order.billing_address_id) {
+      // ENTREGA y FACTURACIÓN son dos flujos separados (feature
+      // direcciones de entrega + perfiles de facturación):
+      //  - Destino: solo si el pedido es de entrega. Confirmado con el cliente,
+      //    nunca asignado solo (pedido explícito 2026-09-14): sin esto el
+      //    trigger de confirmación elegiría en silencio la dirección por
+      //    defecto, que puede no ser la que el cliente quiere.
+      //  - Factura: solo si el cliente la pidió (wants_invoice, o el pedido ya
+      //    tiene un perfil elegido). Sin pedirla, nada fiscal se exige.
+      // La validación (pertenencia + lista de faltantes) es la del módulo
+      // compartido de servidor, la misma de calculate-order y la emisión.
+      const fulfillmentMethod: FulfillmentMethod = isFulfillmentMethod(order.fulfillment_method) ? order.fulfillment_method : "delivery";
+      const invoiceRequested = parameters.wants_invoice === true || !!order.billing_profile_id;
+      const evaluation = await resolveFulfillmentAndBilling(adminClient, {
+        tenantId,
+        contactId,
+        fulfillmentMethod,
+        shippingAddressId: order.shipping_address_id,
+        billingProfileId: order.billing_profile_id,
+        invoiceRequested,
+      });
+      if (evaluation.forbidden.length > 0) throw new Error(evaluation.forbidden.join(" "));
+      const gate = evaluateConfirmGate({
+        fulfillmentMethod,
+        shippingAddressId: evaluation.missingDestination.length > 0 ? null : order.shipping_address_id,
+        invoiceRequested,
+        billingProfileId: order.billing_profile_id,
+        billingMissing: evaluation.missingBilling,
+      });
+      if (gate?.reason === "address_confirmation_required") {
         return {
           order_number: order.number,
           order_code: formatOrderCode(order.number),
           blocked: true,
-          reason: "address_confirmation_required",
-          missing: [order.shipping_address_id ? null : "envío", order.billing_address_id ? null : "facturación"].filter(Boolean),
+          reason: gate.reason,
+          missing: gate.missing,
           saved_addresses: await listAddressesForConversation(adminClient, tenantId, contactId),
         };
       }
-      const shippingAddressId = order.shipping_address_id;
-      const billingAddressId = order.billing_address_id;
+      if (gate?.reason === "billing_profile_required") {
+        return {
+          order_number: order.number,
+          order_code: formatOrderCode(order.number),
+          blocked: true,
+          reason: gate.reason,
+          missing: gate.missing,
+          saved_profiles: await listBillingProfilesForConversation(adminClient, tenantId, contactId, order.billing_profile_id),
+        };
+      }
+      const shippingAddressId = fulfillmentMethod === "delivery" ? order.shipping_address_id : null;
 
       // Stock check, address gate, opportunity move, and invoice queueing
       // all live in DB triggers now (guard_sales_order_confirmation /
@@ -1316,7 +1365,10 @@ async function executeTool(
       // se acuerde de llamar una segunda tool.
       const paymentInfo = await resolvePaymentAfterConfirm(adminClient, tenantId, conversationId, contactId, result.order.id);
 
-      const [shippingAddress, billingAddress] = await Promise.all([describeAddress(adminClient, shippingAddressId), describeAddress(adminClient, billingAddressId)]);
+      const shippingAddress = shippingAddressId ? await describeAddress(adminClient, shippingAddressId) : null;
+      const billingProfileOnFile = order.billing_profile_id
+        ? (await listBillingProfilesForConversation(adminClient, tenantId, contactId, order.billing_profile_id)).find((p) => p.selected) ?? null
+        : null;
 
       return {
         order_number: result.order.number,
@@ -1324,7 +1376,8 @@ async function executeTool(
         status: "confirmada",
         status_label: statusLabel("confirmada"),
         ...(shippingAddress ? { shipping_address: shippingAddress } : {}),
-        ...(billingAddress ? { billing_address: billingAddress } : {}),
+        billing_profile_on_file: !!billingProfileOnFile,
+        ...(billingProfileOnFile ? { billing_profile: describeProfile(billingProfileOnFile) } : {}),
         ...paymentInfo,
       };
     }
@@ -1359,7 +1412,7 @@ async function executeTool(
       // despacho real con tracking) -- nunca la IA sola. Encontrado en vivo
       // el 2026-08-24: marcaba "entregado" apenas se guardaba la dirección,
       // sin que existiera ningún dispatches real detrás.
-      if (order.shipping_address_id) {
+      if (order.shipping_address_id || order.fulfillment_method === "delivery") {
         return {
           order_number: order.number,
           order_code: formatOrderCode(order.number),
@@ -1572,16 +1625,9 @@ async function executeTool(
 
     case "list_contact_addresses": {
       if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
-      const { data, error } = await adminClient
-        .from("contact_addresses")
-        .select("id, label, is_shipping, is_billing, is_default, line1, line2, city, state_province, postal_code, country")
-        .eq("tenant_id", tenantId)
-        .eq("contact_id", contactId)
-        .is("deleted_at", null)
-        .order("is_default", { ascending: false })
-        .order("created_at", { ascending: false });
-      if (error) throw new Error(error.message);
-      return { addresses: data ?? [] };
+      // Solo direcciones de ENTREGA, en texto y sin repetidas, con el mismo
+      // `option` que recibe el modelo en saved_addresses.
+      return { addresses: await listAddressesForConversation(adminClient, tenantId, contactId) };
     }
 
     case "save_contact_address": {
@@ -1589,15 +1635,14 @@ async function executeTool(
 
       // Only overwrites the fields the model actually sent -- lets "usá la
       // misma de siempre, aplicala a esta venta" be a single call
-      // (address_id + apply_as_* only) without touching the rest of an
-      // already-saved address.
+      // (address_id + apply_as_shipping only) without touching the rest of an
+      // already-saved address. Dirección de ENTREGA únicamente: los datos de
+      // facturación son un perfil aparte (save_billing_profile).
       const fields: Record<string, unknown> = {};
-      const stringFields = ["label", "recipient_name", "phone", "tax_id", "line1", "line2", "city", "state_province", "postal_code", "country", "notes"];
+      const stringFields = ["label", "recipient_name", "phone", "line1", "line2", "city", "state_province", "postal_code", "country", "notes"];
       for (const key of stringFields) {
         if (parameters[key] !== undefined) fields[key] = String(parameters[key]).trim() || null;
       }
-      if (typeof parameters.is_shipping === "boolean") fields.is_shipping = parameters.is_shipping;
-      if (typeof parameters.is_billing === "boolean") fields.is_billing = parameters.is_billing;
 
       // Nunca un valor inventado para completar el flujo -- si el cliente no
       // te dio todavía su dirección real, preguntale antes de llamar esta
@@ -1617,50 +1662,105 @@ async function executeTool(
       let savedAddressId = addressId;
 
       if (addressId) {
-        const { error } = await adminClient
-          .from("contact_addresses")
-          .update(fields)
-          .eq("id", addressId)
-          .eq("tenant_id", tenantId)
-          .eq("contact_id", contactId);
-        if (error) throw new Error(error.message);
+        if (Object.keys(fields).length > 0) {
+          const { error } = await adminClient
+            .from("contact_addresses")
+            .update(fields)
+            .eq("id", addressId)
+            .eq("tenant_id", tenantId)
+            .eq("contact_id", contactId);
+          if (error) {
+            if (isDuplicateAddressError(error)) throw new Error("Esa dirección ya está guardada para este cliente: úsala (address_id u option) en vez de repetirla.");
+            throw new Error(error.message);
+          }
+        }
       } else {
         if (!fields.line1) throw new Error("line1 es requerido para guardar una dirección nueva.");
         if (!fields.city) throw new Error("city es requerido para guardar una dirección nueva -- preguntale al cliente en qué ciudad, no lo dejes vacío.");
-        // Sin default a "es de envío" -- una dirección nueva en la etapa de
-        // cotización es de facturación, y en la etapa de confirmación es de
-        // envío; forzar cuál es evita que quede marcada como la que no es.
-        if (fields.is_shipping !== true && fields.is_billing !== true) {
-          throw new Error("Indicá is_shipping o is_billing (según en qué paso del flujo estás pidiendo esta dirección) al guardar una dirección nueva.");
-        }
         const { data: inserted, error } = await adminClient
           .from("contact_addresses")
-          .insert({ tenant_id: tenantId, contact_id: contactId, is_shipping: false, is_billing: false, ...fields, is_default: true })
+          .insert({ tenant_id: tenantId, contact_id: contactId, ...fields, is_default: true })
           .select("id")
           .single();
-        if (error) throw new Error(error.message);
-        savedAddressId = inserted.id;
+        if (error) {
+          // Dirección ya guardada del mismo cliente (índice
+          // contact_addresses_unique_address_per_client): se reutiliza la
+          // existente, sin duplicar y sin tocar su is_default.
+          if (!isDuplicateAddressError(error)) throw new Error(error.message);
+          const existingId = await findExistingAddressId(adminClient, tenantId, contactId, fields);
+          if (!existingId) throw new Error(error.message);
+          savedAddressId = existingId;
+        } else {
+          savedAddressId = inserted.id;
+        }
       }
 
       const applyAsShipping = parameters.apply_as_shipping === true;
-      const applyAsBilling = parameters.apply_as_billing === true;
       // Solo sobre el pedido en armado de esta conversación, o el que el
       // cliente nombró (resolveTargetOrder) -- nunca sobre un pedido
       // anterior por decisión propia del modelo (2026-09-14).
       let appliedToOrder: string | null = null;
-      if ((applyAsShipping || applyAsBilling) && savedAddressId) {
+      if (applyAsShipping && savedAddressId) {
         const { order } = await resolveTargetOrder(adminClient, tenantId, contactId, parseOrderNumber(parameters.order_number));
         if (order) {
-          const orderUpdate: Record<string, string> = {};
-          if (applyAsShipping) orderUpdate.shipping_address_id = savedAddressId;
-          if (applyAsBilling) orderUpdate.billing_address_id = savedAddressId;
-          const { error: applyError } = await adminClient.from("sales_orders").update(orderUpdate).eq("id", order.id).eq("tenant_id", tenantId);
+          // Pertenencia (tenant + cliente) y dirección real, con el módulo
+          // compartido del servidor, antes de escribir en el pedido.
+          const check = await resolveFulfillmentAndBilling(adminClient, {
+            tenantId,
+            contactId,
+            fulfillmentMethod: "delivery",
+            shippingAddressId: savedAddressId,
+          });
+          if (check.forbidden.length > 0) throw new Error(check.forbidden.join(" "));
+          if (check.missingDestination.length > 0) throw new Error("Esa dirección no es una dirección de entrega válida (falta la dirección real). Pídele los datos completos al cliente.");
+          const { error: applyError } = await adminClient.from("sales_orders").update({ shipping_address_id: savedAddressId }).eq("id", order.id).eq("tenant_id", tenantId);
           if (applyError) throw new Error(applyError.message);
           appliedToOrder = formatOrderCode(order.number);
         }
       }
 
       return { address_id: savedAddressId, saved: true, applied_to_order: appliedToOrder };
+    }
+
+    case "list_billing_profiles": {
+      if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
+      await assertNotWalkIn(adminClient, tenantId, contactId);
+      // Siempre el cliente de ESTA conversación (contactId lo inyecta el
+      // servidor); el modelo no puede pedir los perfiles de otro cliente.
+      const { order } = await resolveTargetOrder(adminClient, tenantId, contactId, null);
+      return { profiles: await listBillingProfilesForConversation(adminClient, tenantId, contactId, order?.billing_profile_id ?? null) };
+    }
+
+    case "select_billing_profile": {
+      if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
+      await assertNotWalkIn(adminClient, tenantId, contactId);
+      const profiles = await listBillingProfilesForConversation(adminClient, tenantId, contactId, null);
+      const ref = resolveReference(profiles.map((p) => ({ option: p.option, id: p.profile_id })), parameters.profile_id);
+      if (ref.kind === "none") throw new Error("profile_id es requerido: el profile_id o el número de opción de list_billing_profiles.");
+      if (ref.kind === "unmatched") throw new Error(unmatchedProfileMessage(ref.raw, profiles));
+      const orderNumber = parseOrderNumber(parameters.order_number);
+      const { order, latest } = await resolveTargetOrder(adminClient, tenantId, contactId, orderNumber);
+      if (!order) throw orderNotOpenError(latest, orderNumber, "asignarle la facturación");
+      const evaluation = await resolveFulfillmentAndBilling(adminClient, {
+        tenantId,
+        contactId,
+        fulfillmentMethod: isFulfillmentMethod(order.fulfillment_method) ? order.fulfillment_method : "delivery",
+        billingProfileId: ref.id,
+        invoiceRequested: true,
+      });
+      if (evaluation.forbidden.length > 0) throw new Error(evaluation.forbidden.join(" "));
+      if (evaluation.missingBilling.length > 0) {
+        return { selected: false, blocked: true, reason: "billing_profile_incomplete", profile_id: ref.id, missing: evaluation.missingBilling };
+      }
+      const { error } = await adminClient.from("sales_orders").update({ billing_profile_id: ref.id }).eq("id", order.id).eq("tenant_id", tenantId);
+      if (error) throw new Error(error.message);
+      return { selected: true, profile_id: ref.id, applied_to_order: formatOrderCode(order.number) };
+    }
+
+    case "save_billing_profile": {
+      if (!contactId) throw new Error("No hay un contacto vinculado a esta conversación.");
+      await assertNotWalkIn(adminClient, tenantId, contactId);
+      return await saveBillingProfileForConversation(adminClient, tenantId, contactId, parameters);
     }
 
     case "generate_payment_link": {
@@ -2096,7 +2196,8 @@ async function resolveLatestOrder(
   currency: string;
   notes: string | null;
   shipping_address_id: string | null;
-  billing_address_id: string | null;
+  fulfillment_method: string | null;
+  billing_profile_id: string | null;
   opportunity_id: string | null;
   updated_at: string;
 } | null> {
@@ -2104,7 +2205,7 @@ async function resolveLatestOrder(
 
   let query = adminClient
     .from("sales_orders")
-    .select("id, number, status, total, currency, notes, shipping_address_id, billing_address_id, opportunity_id, updated_at")
+    .select("id, number, status, total, currency, notes, shipping_address_id, fulfillment_method, billing_profile_id, opportunity_id, updated_at")
     .eq("tenant_id", tenantId)
     .eq("contact_id", contactId)
     .is("deleted_at", null)
@@ -2418,19 +2519,43 @@ async function resolveAddressReference(
   value: unknown,
 ): Promise<string | null> {
   if (value === undefined || value === null || String(value).trim() === "") return null;
-  const raw = String(value).trim();
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw)) return raw;
-
-  const option = parseOrderNumber(raw);
   const addresses = await listAddressesForConversation(adminClient, tenantId, contactId);
-  const match = option !== null ? addresses.find((a) => a.option === option) : undefined;
-  if (!match) {
-    const choices = addresses.map((a) => `${a.option}) ${a.address} [address_id ${a.address_id}]`).join("; ") || "ninguna";
-    throw new Error(
-      `"${raw}" no corresponde a ninguna dirección guardada. Opciones: ${choices}. Vuelve a llamar esta herramienta con una de ellas en este mismo turno, sin preguntarle de nuevo al cliente.`,
-    );
-  }
-  return match.address_id;
+  const ref = resolveReference(addresses.map((a) => ({ option: a.option, id: a.address_id })), value);
+  if (ref.kind === "none") return null;
+  if (ref.kind === "unmatched") throw new Error(unmatchedAddressMessage(ref.raw, addresses));
+  return ref.id;
+}
+
+function isDuplicateAddressError(error: { code?: string; message?: string }): boolean {
+  return error.code === "23505" && (error.message ?? "").includes("contact_addresses_unique_address_per_client");
+}
+
+/** La dirección ya guardada que choca con la que se intentó insertar
+ * (misma clave normalizada que calcula la base). */
+async function findExistingAddressId(
+  // deno-lint-ignore no-explicit-any
+  adminClient: any,
+  tenantId: string,
+  contactId: string,
+  fields: Record<string, unknown>,
+): Promise<string | null> {
+  const { data: key } = await adminClient.rpc("contact_address_dedupe_key", {
+    p_line1: fields.line1 ?? null,
+    p_line2: fields.line2 ?? null,
+    p_city: fields.city ?? null,
+    p_city_code: null,
+    p_country: fields.country ?? null,
+  });
+  if (!key) return null;
+  const { data: existing } = await adminClient
+    .from("contact_addresses")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("contact_id", contactId)
+    .eq("address_dedupe_key", key)
+    .is("deleted_at", null)
+    .maybeSingle();
+  return existing?.id ?? null;
 }
 
 type OrderRow = NonNullable<Awaited<ReturnType<typeof resolveLatestOrder>>>;
@@ -2491,54 +2616,330 @@ function orderNotOpenError(latest: OrderRow | null, orderNumber: number | null, 
   );
 }
 
-/** Direcciones guardadas del cliente, en texto y sin repetidas, para que el
- * modelo se las liste y le pregunte cuál usar (2026-09-14). */
+/** Direcciones de ENTREGA guardadas del cliente, en texto y sin repetidas, para
+ * que el modelo se las liste y le pregunte cuál usar (2026-09-14). Solo las
+ * marcadas para envío: una dirección que existe únicamente como domicilio
+ * fiscal (is_shipping=false) no es una opción de entrega. */
 async function listAddressesForConversation(
   // deno-lint-ignore no-explicit-any
   adminClient: any,
   tenantId: string,
   contactId: string,
-): Promise<{ option: number; address_id: string; address: string; used_for: string[] }[]> {
+): Promise<{ option: number; address_id: string; address: string }[]> {
   const { data, error } = await adminClient
     .from("contact_addresses")
-    .select("id, line1, line2, city, is_shipping, is_billing")
+    .select("id, line1, line2, city")
     .eq("tenant_id", tenantId)
     .eq("contact_id", contactId)
+    .eq("is_shipping", true)
     .is("deleted_at", null)
     .order("is_default", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(10);
   if (error) throw new Error(error.message);
-
-  const normalize = (value: string | null) => (value ?? "").toLowerCase().normalize("NFD").replace(/[^a-z0-9ñ]/g, "");
-  const byKey = new Map<string, { address_id: string; address: string; used_for: Set<string> }>();
-  for (const row of (data ?? []) as { id: string; line1: string | null; line2: string | null; city: string | null; is_shipping: boolean; is_billing: boolean }[]) {
-    if (!row.line1 || isPlaceholderAddressText(row.line1)) continue;
-    // "carrera 26 # 2i 24, Neiva" y "Carrera 26 # 2i 24 Neiva" son la misma
-    // dirección para el cliente: se lista una sola vez, juntando para qué
-    // se usa cada copia, y sin repetir la ciudad si ya viene en la línea.
-    const street = [row.line1, row.line2].filter(Boolean).join(" ");
-    const city = normalize(row.city);
-    const streetKey = normalize(street);
-    const key = city && streetKey.endsWith(city) ? streetKey.slice(0, -city.length) : streetKey;
-    const existing = byKey.get(key);
-    const entry = existing ?? {
-      address_id: row.id,
-      address: row.city && !(city && streetKey.endsWith(city)) ? `${street}, ${row.city}` : street,
-      used_for: new Set<string>(),
-    };
-    if (row.is_shipping) entry.used_for.add("envío");
-    if (row.is_billing) entry.used_for.add("facturación");
-    if (!existing) {
-      if (byKey.size === 3) continue;
-      byKey.set(key, entry);
-    }
-  }
   // `option` es el número con el que el modelo le lista cada dirección al
   // cliente -- save_contact_address lo acepta en address_id (ver
   // resolveAddressReference).
-  const addresses = [...byKey.values()].map((entry, index) => ({ option: index + 1, address_id: entry.address_id, address: entry.address, used_for: [...entry.used_for] }));
-  return addresses;
+  return buildSavedAddresses((data ?? []) as { id: string; line1: string | null; line2: string | null; city: string | null }[]);
+}
+
+/** Perfiles de facturación del cliente (documento enmascarado), con `option`.
+ * `selectedProfileId` marca el que ya tiene el pedido en armado. */
+async function listBillingProfilesForConversation(
+  // deno-lint-ignore no-explicit-any
+  adminClient: any,
+  tenantId: string,
+  contactId: string,
+  selectedProfileId: string | null,
+): Promise<SavedProfile[]> {
+  const rows = await loadBillingProfileRows(adminClient, tenantId, contactId);
+  return buildSavedProfiles(rows, selectedProfileId);
+}
+
+async function loadBillingProfileRows(
+  // deno-lint-ignore no-explicit-any
+  adminClient: any,
+  tenantId: string,
+  contactId: string,
+): Promise<(BillingProfileRow & { label: string | null })[]> {
+  const { data, error } = await adminClient
+    .from("client_billing_profiles")
+    .select(BILLING_PROFILE_COLUMNS)
+    .eq("tenant_id", tenantId)
+    .eq("client_id", contactId)
+    .is("deleted_at", null)
+    .order("is_default", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(10);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as (BillingProfileRow & { label: string | null })[];
+}
+
+/** El Consumidor Final (walk-in) no tiene perfiles de facturación: su correo
+ * para factura sale solo del comprobante (invoice_email). La IA nunca le crea
+ * ni le aplica uno. */
+async function assertNotWalkIn(
+  // deno-lint-ignore no-explicit-any
+  adminClient: any,
+  tenantId: string,
+  contactId: string,
+): Promise<void> {
+  const { data } = await adminClient.from("clients").select("is_walk_in").eq("id", contactId).eq("tenant_id", tenantId).maybeSingle();
+  if (data?.is_walk_in) throw new Error("Este contacto es el Consumidor Final: no tiene perfiles de facturación. Un asesor debe gestionar su factura.");
+}
+
+/** Catálogo COMPLETO de municipios (1122 filas > el tope de 1000 de PostgREST):
+ * dos páginas ordenadas por código, nunca truncado ni sin orden. */
+async function loadAllCities(
+  // deno-lint-ignore no-explicit-any
+  adminClient: any,
+): Promise<{ code: string; name: string; department_code: string }[]> {
+  const all: { code: string; name: string; department_code: string }[] = [];
+  for (let from = 0; from < 5000; from += 1000) {
+    const { data, error } = await adminClient.from("cities").select("code, name, department_code").order("code").range(from, from + 999);
+    if (error) throw new Error(error.message);
+    all.push(...((data ?? []) as { code: string; name: string; department_code: string }[]));
+    if (!data || data.length < 1000) break;
+  }
+  return all;
+}
+
+function unmatchedProfileMessage(raw: string, profiles: SavedProfile[]): string {
+  const choices = profiles.map((p) => `${p.option}) ${describeProfile(p)} [profile_id ${p.profile_id}]`).join("; ") || "ninguno";
+  return `"${raw}" no corresponde a ningún perfil de facturación guardado. Opciones: ${choices}. Vuelve a llamar esta herramienta con una de ellas en este mismo turno, sin preguntarle de nuevo al cliente.`;
+}
+
+/** País del domicilio fiscal -> código ISO-2 (catálogo `countries`). */
+async function resolveCountryCode(
+  // deno-lint-ignore no-explicit-any
+  adminClient: any,
+  value: unknown,
+): Promise<string> {
+  const iso = toIsoCountry(value);
+  if (iso) return iso;
+  const wanted = normalizeText(String(value));
+  const { data } = await adminClient.from("countries").select("code, name").ilike("name", `%${String(value).replace(/[%_\\,]/g, "").trim()}%`).limit(10);
+  const exact = ((data ?? []) as { code: string; name: string }[]).filter((c) => normalizeText(c.name) === wanted);
+  if (exact.length === 1) return exact[0].code;
+  throw new Error(`No reconozco el país "${String(value)}". Pídele al cliente que lo confirme.`);
+}
+
+/** save_billing_profile. Crea un perfil con los datos que dio el cliente, o
+ * completa uno existente (profile_id). Valida con la MISMA lista de faltantes
+ * que la emisión (billingProfileMissing): un perfil nuevo incompleto NO se
+ * guarda. El domicilio fiscal solo se copia de la dirección de entrega cuando
+ * el cliente confirmó que es la misma (fiscal_address_same_as_delivery). */
+async function saveBillingProfileForConversation(
+  // deno-lint-ignore no-explicit-any
+  adminClient: any,
+  tenantId: string,
+  contactId: string,
+  parameters: Record<string, unknown>,
+): Promise<unknown> {
+  const rows = await loadBillingProfileRows(adminClient, tenantId, contactId);
+  const saved = buildSavedProfiles(rows);
+  const ref = resolveReference(saved.map((p) => ({ option: p.option, id: p.profile_id })), parameters.profile_id);
+  if (ref.kind === "unmatched") throw new Error(unmatchedProfileMessage(ref.raw, saved));
+
+  let existing: (BillingProfileRow & { label: string | null }) | null = null;
+  if (ref.kind === "id" || ref.kind === "option") {
+    existing = rows.find((r) => r.id === ref.id) ?? null;
+    if (!existing) {
+      const { data } = await adminClient
+        .from("client_billing_profiles")
+        .select(BILLING_PROFILE_COLUMNS)
+        .eq("id", ref.id)
+        .eq("tenant_id", tenantId)
+        .eq("client_id", contactId)
+        .is("deleted_at", null)
+        .maybeSingle();
+      existing = (data as (BillingProfileRow & { label: string | null }) | null) ?? null;
+    }
+    if (!existing) throw new Error("Ese perfil de facturación no existe o no es de este cliente.");
+  }
+
+  const orderNumber = parseOrderNumber(parameters.order_number);
+  const { order } = await resolveTargetOrder(adminClient, tenantId, contactId, orderNumber);
+
+  // Lo que el cliente dio ahora (solo los campos presentes).
+  let fields = pickProfileFields({
+    label: parameters.label as string | undefined,
+    document_type: parameters.document_type,
+    document_number: parameters.document_number,
+    legal_name: parameters.legal_name,
+    email: parameters.email,
+    phone: parameters.phone,
+    address_line1: parameters.address_line1,
+    address_line2: parameters.address_line2,
+    city: parameters.city,
+    state_province: parameters.state_province,
+    country: parameters.country,
+  });
+
+  // Domicilio fiscal = dirección de entrega, SOLO si el cliente lo confirmó.
+  if (parameters.fiscal_address_same_as_delivery === true) {
+    if (!order?.shipping_address_id) {
+      throw new Error("El pedido todavía no tiene dirección de entrega aplicada: aplícala primero (save_contact_address con apply_as_shipping) o pídele al cliente el domicilio fiscal.");
+    }
+    const { data: addr } = await adminClient
+      .from("contact_addresses")
+      .select("line1, line2, city, state_province, country, city_code, state_code")
+      .eq("id", order.shipping_address_id)
+      .eq("tenant_id", tenantId)
+      .eq("contact_id", contactId)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (!addr) throw new Error("No encontré la dirección de entrega del pedido para copiarla.");
+    fields = {
+      address_line1: addr.line1, address_line2: addr.line2, city: addr.city, state_province: addr.state_province,
+      country: addr.country, city_code: addr.city_code, state_code: addr.state_code,
+      ...fields,
+    };
+  }
+
+  // País y municipio DIVIPOLA del domicilio fiscal (solo si cambió algo de él).
+  // El domicilio fiscal es OPCIONAL: si no se puede resolver por completo NO
+  // bloquea el perfil -- se descarta el domicilio, se guarda lo obligatorio y se
+  // avisa (hint) para que la IA lo pregunte UNA vez, sin bucles.
+  const ADDRESS_FIELDS = ["address_line1", "address_line2", "city", "state_province", "country", "state_code", "city_code"];
+  const touchesAddress = ADDRESS_FIELDS.some((k) => k in fields);
+  let geoHint: string | null = null;
+  let fiscalAddressSaved: boolean | null = null;
+  if (touchesAddress) {
+    try {
+      const countryInput = "country" in fields && fields.country ? fields.country : existing?.country ?? "Colombia";
+      const country = await resolveCountryCode(adminClient, countryInput);
+      fields.country = country;
+      if (country !== "CO") {
+        fields.state_code = null;
+        fields.city_code = null;
+      } else if (fields.city_code && fields.state_code) {
+        // ya vienen los dos códigos (copiados de la dirección de entrega)
+      } else if (typeof (fields.city ?? existing?.city) === "string" && (fields.city ?? existing?.city)) {
+        const cityName = String(fields.city ?? existing?.city);
+        const [cityRows, deptRows] = await Promise.all([loadAllCities(adminClient), adminClient.from("departments").select("code, name").order("code").then((r: { data: unknown }) => r.data)]);
+        const resolved = resolveDivipola(cityRows, (deptRows ?? []) as { code: string; name: string }[], cityName, (fields.state_province ?? existing?.state_province) as string | null);
+        if (resolved.kind === "resolved") {
+          fields.state_code = resolved.state_code;
+          fields.city_code = resolved.city_code;
+        } else {
+          fields.state_code = null;
+          fields.city_code = null;
+          geoHint = resolved.kind === "ambiguous"
+            ? `Hay más de un municipio llamado "${cityName}" (departamentos: ${resolved.options.join(", ")}).`
+            : `No encontré el municipio "${cityName}" en Colombia.`;
+        }
+      }
+    } catch (e) {
+      geoHint = e instanceof Error ? e.message : "No pude interpretar el domicilio fiscal.";
+    }
+    // ¿Quedó un domicilio utilizable? Misma lista de faltantes que la emisión.
+    const probe = profileMissing({ tax_level_code: "R-99-PN", ...(existing ?? {}), ...fields } as Partial<BillingProfileRow> & Record<string, unknown>);
+    const addressProblem = probe.some((m) => /dirección fiscal|país de la dirección fiscal|departamento y municipio/.test(m));
+    if (addressProblem || geoHint) {
+      for (const k of ADDRESS_FIELDS) delete fields[k];
+      fiscalAddressSaved = false;
+      geoHint = `${geoHint ?? "El domicilio fiscal quedó incompleto."} El perfil se guarda SIN domicilio fiscal (es opcional). Pregúntale al cliente UNA sola vez el dato que falta (departamento, o confirma la ciudad) y, si lo da, vuelve a llamar con profile_id; si no, sigue sin domicilio. No repitas la pregunta.`;
+    } else {
+      fiscalAddressSaved = true;
+    }
+  }
+
+  const merged = {
+    tax_level_code: "R-99-PN", organization_type: "2", applies_withholding: false, tax_scheme_code: null,
+    ...(existing ?? {}),
+    ...fields,
+  } as Partial<BillingProfileRow> & Record<string, unknown>;
+  // Perfil NUEVO: el correo es obligatorio (comprobación propia de la IA, canal de
+  // captura). Perfil EXISTENTE: no se exige si el cliente no lo toca; si manda un
+  // correo, tiene que ser válido.
+  const emailTouched = "email" in fields;
+  const missing = existing ? profileMissing(merged) : newProfileMissing(merged);
+  const emailProblem = existing && emailTouched ? captureEmailMissing(fields.email) : [];
+  if (emailProblem.length > 0) {
+    return { saved: false, missing: emailProblem, hint: EMAIL_HINT, message: "No se actualizó el perfil: el correo no es válido." };
+  }
+
+  if (!existing && missing.length > 0) {
+    const emailMissing = missing.some((m) => /^correo de facturación/.test(m));
+    return {
+      saved: false,
+      missing,
+      ...(emailMissing ? { hint: EMAIL_HINT } : {}),
+      ...(geoHint && !emailMissing ? { hint: geoHint } : {}),
+      message: "No se guardó el perfil: pídele al cliente lo que falta y vuelve a llamar esta herramienta con todos los datos.",
+    };
+  }
+
+  let profileId: string;
+  let updatedExisting = false;
+  const dbFields: Record<string, unknown> = { ...fields };
+  if ("label" in dbFields && !dbFields.label) delete dbFields.label;
+  if (existing) {
+    if (Object.keys(dbFields).length > 0) {
+      const { error } = await adminClient.from("client_billing_profiles").update(dbFields).eq("id", existing.id).eq("tenant_id", tenantId).eq("client_id", contactId);
+      if (error) throw new Error(error.message);
+    }
+    profileId = existing.id;
+    updatedExisting = true;
+  } else {
+    const { data: created, error } = await adminClient
+      .from("client_billing_profiles")
+      .insert({ tenant_id: tenantId, client_id: contactId, ...dbFields })
+      .select("id")
+      .single();
+    if (error) {
+      // Documento ya guardado para este cliente (índice
+      // client_billing_profiles_document_uidx): se completa ese perfil con lo
+      // que el cliente acaba de dar, sin duplicar.
+      if (error.code !== "23505" || !dbFields.document_number) throw new Error(error.message);
+      const { data: dup } = await adminClient
+        .from("client_billing_profiles")
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .eq("client_id", contactId)
+        .eq("document_number", dbFields.document_number)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (!dup) throw new Error(error.message);
+      const { error: updError } = await adminClient.from("client_billing_profiles").update(dbFields).eq("id", dup.id).eq("tenant_id", tenantId).eq("client_id", contactId);
+      if (updError) throw new Error(updError.message);
+      profileId = dup.id;
+      updatedExisting = true;
+    } else {
+      profileId = created.id;
+    }
+  }
+
+  const { data: finalRow } = await adminClient
+    .from("client_billing_profiles")
+    .select(BILLING_PROFILE_COLUMNS)
+    .eq("id", profileId)
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  const summary = finalRow ? buildSavedProfiles([finalRow as BillingProfileRow & { label: string | null }], profileId)[0] : null;
+  const finalMissing = summary?.missing ?? missing;
+
+  let appliedToOrder: string | null = null;
+  if (finalMissing.length === 0 && parameters.apply_to_order !== false && order) {
+    const { error } = await adminClient.from("sales_orders").update({ billing_profile_id: profileId }).eq("id", order.id).eq("tenant_id", tenantId);
+    if (error) throw new Error(error.message);
+    appliedToOrder = formatOrderCode(order.number);
+  }
+
+  return {
+    saved: true,
+    profile_id: profileId,
+    ...(updatedExisting ? { updated_existing: true } : {}),
+    complete: finalMissing.length === 0,
+    missing: finalMissing,
+    ...(geoHint ? { hint: geoHint } : {}),
+    ...(fiscalAddressSaved !== null ? { fiscal_address_saved: fiscalAddressSaved } : {}),
+    ...(!updatedExisting && merged.organization_type === "1"
+      ? { tax_regime_note: "El perfil de empresa se guardó con responsabilidad tributaria por defecto (no responsable, R-99-PN). Avísale al cliente que si su RUT indica otras responsabilidades (IVA, etc.) un asesor debe ajustarlo antes de emitir la factura. No inventes responsabilidades." } : {}),
+    ...(summary ? { profile: describeProfile(summary) } : {}),
+    applied_to_order: appliedToOrder,
+  };
 }
 
 /** "Carrera 26 # 2i 24, Neiva" -- para que el modelo le diga al cliente a

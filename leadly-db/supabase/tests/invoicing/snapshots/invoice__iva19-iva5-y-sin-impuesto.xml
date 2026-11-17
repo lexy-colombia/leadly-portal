@@ -154,6 +154,9 @@ URL=https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=d5d1af7dedc1
             <cbc:RegistrationName>COMPRADOR DE PRUEBA</cbc:RegistrationName>
             <cbc:CompanyID schemeAgencyID="195" schemeAgencyName="CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)" schemeID="9" schemeName="13">1000000001</cbc:CompanyID>
          </cac:PartyLegalEntity>
+         <cac:Contact>
+            <cbc:ElectronicMail>comprador@example.invalid</cbc:ElectronicMail>
+         </cac:Contact>
       </cac:Party>
    </cac:AccountingCustomerParty>
    <cac:PaymentMeans>

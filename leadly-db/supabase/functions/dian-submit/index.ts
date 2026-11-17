@@ -42,6 +42,7 @@ import { sendTestInvoiceToDian } from "../_shared/invoicing/sendToDian.ts";
 import { sendInvoiceToDian } from "../_shared/invoicing/sendInvoiceToDian.ts";
 import { sendCreditNoteToDian } from "../_shared/invoicing/sendCreditNoteToDian.ts";
 import { createInvoiceAttempt } from "../_shared/invoicing/queueInvoiceGeneration.ts";
+import { parseInvoiceEmail } from "../_shared/invoicing/invoiceEmail.ts";
 import { getTenantNumberingRangeFromDian } from "../_shared/invoicing/getNumberingRange.ts";
 import { loadTenantCertificate } from "../_shared/invoicing/dianClient.ts";
 import { buildInvoiceXml } from "../_shared/invoicing/buildInvoiceXml.ts";
@@ -70,11 +71,25 @@ Deno.serve(async (req) => {
     reason_description?: string;
     credit_note_id?: string;
     track_id?: string;
+    /** Correo del comprobante (Consumidor Final sin perfil de facturación). */
+    invoice_email?: string;
   };
   try {
     body = await req.json();
   } catch {
     return jsonResponse({ error: "invalid_json_body" }, 400);
+  }
+
+  // `invoice_email` (correo del comprobante de un Consumidor Final) se valida
+  // ANTES de usarlo: typeof string, sin espacios sobrantes, <= 254 caracteres
+  // y formato razonable. Un valor que no sea string haría lanzar `.trim()` y
+  // dejaría la factura en `error`.
+  if (body.action === "send_invoice" || body.action === "retry_invoice" || body.action === "send_pos_invoice") {
+    if (body.invoice_email !== undefined && body.invoice_email !== null) {
+      const email = parseInvoiceEmail(body.invoice_email);
+      if (!email) return jsonResponse({ error: "invalid_invoice_email" }, 400);
+      body.invoice_email = email;
+    }
   }
 
   if (body.action === "send_invoice" || body.action === "retry_invoice") {
@@ -147,7 +162,7 @@ async function handleSendTestInvoice(req: Request, body: { tenant_id?: string; a
   }
 }
 
-async function handleSendInvoice(req: Request, body: { invoice_id?: string }, isRetry = false): Promise<Response> {
+async function handleSendInvoice(req: Request, body: { invoice_id?: string; invoice_email?: string }, isRetry = false): Promise<Response> {
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) return jsonResponse({ error: "Missing Authorization header" }, 401);
   if (!body.invoice_id) return jsonResponse({ error: "expected_invoice_id" }, 400);
@@ -238,7 +253,7 @@ async function handleSendInvoice(req: Request, body: { invoice_id?: string }, is
     const nextAttempt = (attempts?.[0]?.attempt_number ?? invoiceRow.attempt_number) + 1;
 
     try {
-      const attempt = await createInvoiceAttempt(adminClient, invoiceRow.tenant_id, invoiceRow.order_id, nextAttempt);
+      const attempt = await createInvoiceAttempt(adminClient, invoiceRow.tenant_id, invoiceRow.order_id, nextAttempt, { invoiceEmail: body.invoice_email ?? null });
       // Si el intento nuevo nace bloqueado, el problema son los datos del
       // cliente, no la DIAN -- mandarlo igual sólo produciría otro rechazo.
       // La fila ya quedó creada con el detalle de qué falta, así que la card
@@ -253,7 +268,7 @@ async function handleSendInvoice(req: Request, body: { invoice_id?: string }, is
   }
 
   try {
-    const result = await sendInvoiceToDian(adminClient, invoiceRow.tenant_id, invoiceIdToSend);
+    const result = await sendInvoiceToDian(adminClient, invoiceRow.tenant_id, invoiceIdToSend, { invoiceEmail: body.invoice_email ?? null });
     return jsonResponse(result);
   } catch (err) {
     return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 500);
@@ -264,7 +279,7 @@ async function handleSendInvoice(req: Request, body: { invoice_id?: string }, is
  * aparte de send_invoice/retry_invoice. Nunca crea una fila de
  * sales_invoices -- solo envía la que el trigger de confirmación ya
  * reservó, y solo si el pedido es del POS y ya está pago del todo. */
-async function handleSendPosInvoice(req: Request, body: { order_id?: string }): Promise<Response> {
+async function handleSendPosInvoice(req: Request, body: { order_id?: string; invoice_email?: string }): Promise<Response> {
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) return jsonResponse({ error: "Missing Authorization header" }, 401);
   if (!body.order_id) return jsonResponse({ error: "expected_order_id" }, 400);
@@ -335,7 +350,7 @@ async function handleSendPosInvoice(req: Request, body: { order_id?: string }): 
   }
 
   try {
-    const result = await sendInvoiceToDian(adminClient, order.tenant_id, invoice.id);
+    const result = await sendInvoiceToDian(adminClient, order.tenant_id, invoice.id, { invoiceEmail: body.invoice_email ?? null });
     return jsonResponse(result);
   } catch (err) {
     return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 500);

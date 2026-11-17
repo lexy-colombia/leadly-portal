@@ -200,7 +200,7 @@ export const AI_TOOLS: AiToolDefinition[] = [
     name: "create_quote",
     skill: "ventas",
     description:
-      "Crea una cotización para este cliente con uno o más productos del catálogo. Cotización y venta son la misma entidad -- crearla acá la deja en estado \"cotizacion\", todavía sin tocar el inventario (eso pasa recién en confirm_quote). Si no sabés el nombre exacto de un producto o su precio, consultá list_catalog_products primero -- nunca inventes un producto ni un precio. Si un producto tiene variantes (list_product_variants con has_variants=true) y no pasás `variant`, la línea se rechaza -- consultá list_product_variants y confirmá con el cliente antes de llamar a esta herramienta. Si alguna línea pide más unidades de las que hay en stock, no se crea nada y la herramienta devuelve un error con la cantidad disponible: díselo al cliente antes de pedirle cualquier dato. Nunca toca pedidos anteriores del cliente. La respuesta trae `saved_addresses` (las direcciones guardadas, en texto): antes de confirmar, lístaselas al cliente y pregúntale en UN mensaje si le enviamos a esa dirección y si facturamos con esos mismos datos. Si no tiene ninguna o dice que no, pídele la dirección nueva y en ese mismo mensaje pregúntale si usamos esos mismos datos para facturación, para no hacerle digitarlos dos veces.",
+      "Crea una cotización para este cliente con uno o más productos del catálogo. Cotización y venta son la misma entidad -- crearla acá la deja en estado \"cotizacion\", todavía sin tocar el inventario (eso pasa recién en confirm_quote). Si no sabés el nombre exacto de un producto o su precio, consultá list_catalog_products primero -- nunca inventes un producto ni un precio. Si un producto tiene variantes (list_product_variants con has_variants=true) y no pasás `variant`, la línea se rechaza -- consultá list_product_variants y confirmá con el cliente antes de llamar a esta herramienta. Si alguna línea pide más unidades de las que hay en stock, no se crea nada y la herramienta devuelve un error con la cantidad disponible: díselo al cliente antes de pedirle cualquier dato. Nunca toca pedidos anteriores del cliente. La respuesta trae `saved_addresses` (las direcciones de ENTREGA guardadas, en texto, con `option`): antes de confirmar, lístaselas al cliente y pregúntale a cuál le enviamos; si no tiene ninguna o dice que no, pídele la dirección nueva. NO le preguntes por facturación: eso solo se trata si el cliente pide factura (ver list_billing_profiles / save_billing_profile).",
     parameters: {
       type: "object",
       properties: {
@@ -284,11 +284,12 @@ export const AI_TOOLS: AiToolDefinition[] = [
     name: "confirm_quote",
     skill: "ventas",
     description:
-      "Confirma el pedido que se está armando en esta conversación (o el que el cliente nombró, con `order_number`) como venta (pasa de \"cotizacion\" a \"confirmada\") -- solo cuando el cliente confirme explícitamente que quiere seguir adelante con la compra. El inventario real se descuenta ahí mismo. Exige que el pedido ya tenga aplicadas la dirección de envío y la de facturación, confirmadas con el cliente (save_contact_address con apply_as_shipping/apply_as_billing): si falta alguna, no confirma y devuelve { blocked: true, reason: \"address_confirmation_required\", missing, saved_addresses } -- lístale al cliente esas direcciones, pregúntale en un solo mensaje a cuál enviamos y si facturamos con los mismos datos, aplícalas y vuelve a llamar confirm_quote. Nunca elijas una dirección por tu cuenta. Al confirmar devuelve `shipping_address` y `billing_address` en texto. Si confirma con éxito, la respuesta trae `status_label: \"Pedido confirmado (venta en firme)\"` -- usá ese texto (o una paráfrasis que mantenga la idea de \"pedido/venta confirmada\") en tu mensaje al cliente. Una vez que esto se ejecutó, dejá de llamarlo \"cotización\": ya es una compra en firme, no una estimación de precio. Llámala una sola vez por pedido: si el cliente ya confirmó y está eligiendo cómo pagar, eso es charge_sale_to_credit o generate_payment_link, no esta herramienta.\n\nAl confirmar con éxito, la respuesta también resuelve el pago sola -- nunca llames generate_payment_link/charge_sale_to_credit por tu cuenta después de esto salvo en el caso que se explica abajo, ya se hizo o se te está pidiendo que preguntes: `payment_method: \"wompi\"` + `checkout_url` (ya se generó el link, compartíselo tal cual en tu misma respuesta), `payment_method: \"credito\"` + `payment_charged: true` (ya se cargó a la cuenta de crédito del cliente, solo confirmaselo), `payment_options: [\"credito\",\"wompi\"]` (hay más de una forma de cobrar disponible -- esta es la ÚNICA situación en la que preguntás al cliente cuál prefiere, y recién ahí llamás charge_sale_to_credit o generate_payment_link según lo que elija), o `payment_pending: true` (no hay ninguna forma de cobro automática disponible -- decile al cliente que el pago queda pendiente y que un agente se va a poner en contacto).",
+      "Confirma el pedido que se está armando en esta conversación (o el que el cliente nombró, con `order_number`) como venta (pasa de \"cotizacion\" a \"confirmada\") -- solo cuando el cliente confirme explícitamente que quiere seguir adelante con la compra. El inventario real se descuenta ahí mismo. Si el pedido es de ENTREGA exige que ya tenga aplicada la dirección de envío confirmada con el cliente (save_contact_address con apply_as_shipping): si falta, no confirma y devuelve { blocked: true, reason: \"address_confirmation_required\", missing, saved_addresses } -- lístale al cliente esas direcciones, pregúntale a cuál enviamos, aplícala y vuelve a llamar confirm_quote. Nunca elijas una dirección por tu cuenta. La factura NO se exige: solo si el cliente pidió factura pasa `wants_invoice: true`; entonces el pedido debe tener un perfil de facturación completo elegido con el cliente (select_billing_profile o save_billing_profile). Si falta, devuelve { blocked: true, reason: \"billing_profile_required\", missing, saved_profiles } -- resuélvelo con el cliente (ofrécele sus perfiles guardados o pídele los datos) y vuelve a llamar confirm_quote. Si el cliente no pidió factura, no le preguntes nada fiscal. Al confirmar devuelve `shipping_address` (si es de entrega) y `billing_profile_on_file` (si hay perfil de facturación en el pedido) en texto. Si confirma con éxito, la respuesta trae `status_label: \"Pedido confirmado (venta en firme)\"` -- usá ese texto (o una paráfrasis que mantenga la idea de \"pedido/venta confirmada\") en tu mensaje al cliente. Una vez que esto se ejecutó, dejá de llamarlo \"cotización\": ya es una compra en firme, no una estimación de precio. Llámala una sola vez por pedido: si el cliente ya confirmó y está eligiendo cómo pagar, eso es charge_sale_to_credit o generate_payment_link, no esta herramienta.\n\nAl confirmar con éxito, la respuesta también resuelve el pago sola -- nunca llames generate_payment_link/charge_sale_to_credit por tu cuenta después de esto salvo en el caso que se explica abajo, ya se hizo o se te está pidiendo que preguntes: `payment_method: \"wompi\"` + `checkout_url` (ya se generó el link, compartíselo tal cual en tu misma respuesta), `payment_method: \"credito\"` + `payment_charged: true` (ya se cargó a la cuenta de crédito del cliente, solo confirmaselo), `payment_options: [\"credito\",\"wompi\"]` (hay más de una forma de cobrar disponible -- esta es la ÚNICA situación en la que preguntás al cliente cuál prefiere, y recién ahí llamás charge_sale_to_credit o generate_payment_link según lo que elija), o `payment_pending: true` (no hay ninguna forma de cobro automática disponible -- decile al cliente que el pago queda pendiente y que un agente se va a poner en contacto).",
     parameters: {
       type: "object",
       properties: {
         order_number: { type: "string", description: "Solo si el cliente nombró un pedido puntual (ej. \"049\") y pidió consultarlo o modificarlo. Sin esto se usa el pedido que se está armando en esta conversación." },
+        wants_invoice: { type: "boolean", description: "true SOLO si el cliente pidió factura (electrónica) para este pedido. Con true, el pedido debe tener un perfil de facturación completo. Sin esto no se exige nada fiscal." },
       },
       required: [],
     },
@@ -368,7 +369,7 @@ export const AI_TOOLS: AiToolDefinition[] = [
     name: "update_client_profile",
     skill: "clientes",
     description:
-      "Guarda o actualiza datos del contacto de esta conversación -- nunca de otra persona. Actualiza solo los campos que recibe. Necesario antes de facturar una venta (documento de identidad) o para completar el nombre si el de WhatsApp no es el nombre real del cliente. Con do_not_contact=true (y sin ningún otro campo) marca al contacto como \"no contactar\" para excluirlo de futuras campañas; solo úsalo cuando el propio cliente pide expresamente no recibir más mensajes.",
+      "Guarda o actualiza datos del contacto de esta conversación -- nunca de otra persona. Actualiza solo los campos que recibe. Son los datos personales del contacto (no definen con qué datos se factura: eso es un perfil de facturación). Úsala para completar el nombre si el de WhatsApp no es el nombre real del cliente. Con do_not_contact=true (y sin ningún otro campo) marca al contacto como \"no contactar\" para excluirlo de futuras campañas; solo úsalo cuando el propio cliente pide expresamente no recibir más mensajes.",
     parameters: {
       type: "object",
       properties: {
@@ -384,24 +385,21 @@ export const AI_TOOLS: AiToolDefinition[] = [
   {
     name: "list_contact_addresses",
     skill: "clientes",
-    description: "Lista las direcciones guardadas de este cliente (envío y/o facturación), con su id. Consultala antes de pedir una dirección nueva -- si ya hay una marcada como predeterminada, confirmale al cliente si es la misma antes de pedirle que la repita.",
+    description: "Lista las direcciones de ENTREGA guardadas de este cliente, en texto y con su `option` (1, 2, 3) e id. Solo entrega: los datos de facturación son otra cosa (list_billing_profiles). Consúltala antes de pedir una dirección nueva -- si ya hay una, confírmale al cliente si es la misma antes de pedirle que la repita.",
     parameters: { type: "object", properties: {}, required: [] },
   },
   {
     name: "save_contact_address",
     skill: "clientes",
     description:
-      "Guarda o actualiza una dirección de este cliente, y opcionalmente la aplica al pedido que se está armando en esta conversación (o al que el cliente nombró, con `order_number`). Para reutilizar una dirección ya guardada (ej. el cliente dijo \"la misma de siempre\"), pasá su address_id junto con apply_as_shipping/apply_as_billing sin repetir el resto de los campos. Para una dirección NUEVA: pedile al cliente los datos reales completos -- nunca inventes ni completes una dirección a medias, ni con un valor de relleno tipo \"no registrada\" o \"pendiente\" solo para poder avanzar (la herramienta lo rechaza igual). line1 y city son obligatorios en una dirección nueva, y hay que indicar explícitamente is_shipping o is_billing (no hay un valor por defecto) según para qué la dio el cliente. Si dijo que se usen los mismos datos para envío y facturación, pasa los dos en true y aplícala como las dos (apply_as_shipping y apply_as_billing) en una sola llamada.",
+      "Guarda o actualiza una dirección de ENTREGA de este cliente, y opcionalmente la aplica como destino del pedido que se está armando en esta conversación (o del que el cliente nombró, con `order_number`). Para reutilizar una dirección ya guardada (ej. el cliente dijo \"la misma de siempre\"), pasa su address_id (o su número `option`) junto con apply_as_shipping, sin repetir el resto de los campos. Para una dirección NUEVA: pide al cliente los datos reales completos -- nunca inventes ni completes una dirección a medias, ni con un valor de relleno tipo \"no registrada\" o \"pendiente\" solo para poder avanzar (la herramienta lo rechaza igual). line1 y city son obligatorios en una dirección nueva. Si el cliente da una dirección que ya tenía guardada, se reutiliza la existente (no se duplica). Esta herramienta no sirve para datos de facturación: usa save_billing_profile.",
     parameters: {
       type: "object",
       properties: {
         address_id: { type: "string", description: "Dirección ya guardada a actualizar o reutilizar, en vez de crear una nueva: su address_id, o su número `option` de saved_addresses (ej. \"1\" si el cliente eligió la primera opción)." },
         label: { type: "string", description: "Nombre corto para identificarla (ej. \"Casa\", \"Oficina\"), opcional." },
-        is_shipping: { type: "boolean", description: "Si es una dirección de envío. Obligatorio (junto con is_billing) al crear una dirección nueva -- no tiene valor por defecto." },
-        is_billing: { type: "boolean", description: "Si es una dirección/datos de facturación. Obligatorio (junto con is_shipping) al crear una dirección nueva -- no tiene valor por defecto." },
-        recipient_name: { type: "string", description: "A nombre de quién se recibe o factura, si es distinto del contacto (opcional)." },
+        recipient_name: { type: "string", description: "Quién recibe, si es distinto del contacto (opcional)." },
         phone: { type: "string", description: "Teléfono de contacto para la entrega (opcional)." },
-        tax_id: { type: "string", description: "Documento/NIT para facturación, si aplica (opcional)." },
         line1: { type: "string", description: "Dirección real (calle, número, barrio) tal como te la dio el cliente. Requerida si es una dirección nueva -- nunca un valor inventado." },
         line2: { type: "string", description: "Complemento (apto, torre, indicaciones), opcional." },
         city: { type: "string", description: "Ciudad. Requerida si es una dirección nueva." },
@@ -409,9 +407,56 @@ export const AI_TOOLS: AiToolDefinition[] = [
         postal_code: { type: "string", description: "Código postal (opcional)." },
         country: { type: "string", description: "País (opcional, por defecto Colombia)." },
         notes: { type: "string", description: "Instrucciones adicionales de entrega (opcional)." },
-        apply_as_shipping: { type: "boolean", description: "Si aplicar esta dirección como la de envío del pedido en armado (o del de order_number)." },
+        apply_as_shipping: { type: "boolean", description: "true para aplicar esta dirección como destino de entrega del pedido en armado (o del de order_number). Hazlo solo después de que el cliente la confirmó." },
         order_number: { type: "string", description: "Solo si el cliente nombró un pedido puntual (ej. \"049\") y pidió consultarlo o modificarlo. Sin esto se usa el pedido que se está armando en esta conversación." },
-        apply_as_billing: { type: "boolean", description: "Si aplicar esta dirección como la de facturación del pedido en armado (o del de order_number)." },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "list_billing_profiles",
+    skill: "ventas",
+    description:
+      "Lista los perfiles de facturación guardados de ESTE cliente (el de la conversación, nunca otro): alias, razón social/nombre, tipo y documento enmascarado, si está completo y qué le falta, y cuál tiene ya el pedido en armado (`selected`), con su `option` (1, 2, 3) e id. Úsala SOLO cuando el cliente pide factura -- si no la pidió, no la llames ni le preguntes nada fiscal. Lístale los perfiles y pregúntale con cuál facturamos; si no tiene o quiere otro, usa save_billing_profile.",
+    parameters: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "select_billing_profile",
+    skill: "ventas",
+    description:
+      "Aplica un perfil de facturación guardado del cliente al pedido que se está armando en esta conversación (o al que el cliente nombró, con `order_number`). Solo cuando el cliente pidió factura y eligió ese perfil. Acepta el profile_id o su número `option` de list_billing_profiles. Si el perfil está incompleto no se aplica y devuelve { selected: false, missing }: pídele al cliente lo que falte y complétalo con save_billing_profile (con profile_id).",
+    parameters: {
+      type: "object",
+      properties: {
+        profile_id: { type: "string", description: "El profile_id del perfil, o su número `option` de list_billing_profiles (ej. \"1\")." },
+        order_number: { type: "string", description: "Solo si el cliente nombró un pedido puntual y pidió modificarlo. Sin esto se usa el pedido en armado." },
+      },
+      required: ["profile_id"],
+    },
+  },
+  {
+    name: "save_billing_profile",
+    skill: "ventas",
+    description:
+      "Crea un perfil de facturación para este cliente con los datos que él da, o completa uno existente (con profile_id). Solo cuando el cliente pidió factura. Datos obligatorios: tipo y número de documento, nombre completo o razón social, y CORREO de facturación -- pídelos al cliente, nunca los inventes ni los tomes de otra conversación. Si no están completos, no se guarda y devuelve { saved: false, missing } para que se los pidas. El domicilio fiscal es opcional; si el cliente lo da en Colombia, indica ciudad (y departamento si la ciudad existe en varios). Antes de usar la dirección de entrega como domicilio fiscal, PREGÚNTALE al cliente si es la misma, y solo si dice que sí pasa fiscal_address_same_as_delivery=true (se copia de la dirección de entrega ya aplicada al pedido). Al guardarlo completo se aplica al pedido en armado (apply_to_order, true por defecto).",
+    parameters: {
+      type: "object",
+      properties: {
+        profile_id: { type: "string", description: "Perfil existente a completar o corregir (su profile_id u `option`), en vez de crear uno nuevo. Solo se cambian los campos que envíes." },
+        label: { type: "string", description: "Alias corto (ej. \"Personal\", \"Mi empresa\"), opcional." },
+        document_type: { type: "string", enum: ["CC", "NIT", "CE", "PASAPORTE", "TI", "RC", "PEP", "PPT", "NUIP", "NIT_EXTRANJERO", "DOCUMENTO_EXTRANJERO", "TARJETA_EXTRANJERIA"], description: "Tipo de documento con el que se factura." },
+        document_number: { type: "string", description: "Número de documento (para NIT, con o sin dígito de verificación)." },
+        legal_name: { type: "string", description: "Nombre completo (persona natural) o razón social (empresa), tal como debe salir en la factura." },
+        email: { type: "string", description: "Correo al que se enviará la factura. Obligatorio." },
+        phone: { type: "string", description: "Teléfono del adquirente (opcional)." },
+        address_line1: { type: "string", description: "Dirección del domicilio fiscal (opcional)." },
+        address_line2: { type: "string", description: "Complemento del domicilio fiscal (opcional)." },
+        city: { type: "string", description: "Ciudad del domicilio fiscal (obligatoria si das address_line1)." },
+        state_province: { type: "string", description: "Departamento del domicilio fiscal (solo si la ciudad es ambigua o fuera de Colombia)." },
+        country: { type: "string", description: "País del domicilio fiscal (por defecto Colombia)." },
+        fiscal_address_same_as_delivery: { type: "boolean", description: "true SOLO si el cliente confirmó que el domicilio fiscal es la misma dirección de entrega del pedido. Se copia del destino ya aplicado al pedido." },
+        apply_to_order: { type: "boolean", description: "Por defecto true: si el perfil queda completo, se aplica al pedido en armado. false para solo guardarlo." },
+        order_number: { type: "string", description: "Solo si el cliente nombró un pedido puntual y pidió modificarlo. Sin esto se usa el pedido en armado." },
       },
       required: [],
     },
